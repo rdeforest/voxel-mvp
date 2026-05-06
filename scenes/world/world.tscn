@@ -1,0 +1,45 @@
+[gd_scene format=3 uid="uid://csqf8gxiq0ou4"]
+
+[ext_resource type="PackedScene" uid="uid://nqorq1p6ak5q" path="res://scenes/player/player.tscn" id="1_dphjl"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_4rhad"]
+
+[sub_resource type="Sky" id="Sky_dphjl"]
+sky_material = SubResource("ProceduralSkyMaterial_4rhad")
+
+[sub_resource type="Environment" id="Environment_sl2e5"]
+background_mode = 2
+sky = SubResource("Sky_dphjl")
+ambient_light_source = 3
+ambient_light_energy = 0.9
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_1fp7r"]
+seed = 1
+
+[sub_resource type="VoxelGeneratorNoise2D" id="VoxelGeneratorNoise2D_6m72w"]
+height_range = 100.0
+noise = SubResource("FastNoiseLite_1fp7r")
+
+[sub_resource type="VoxelMesherTransvoxel" id="VoxelMesherTransvoxel_v5dby"]
+mesh_optimization_enabled = true
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_t5ptc"]
+albedo_color = Color(0.659295, 0.91, 0.39130002, 1)
+
+[node name="World" type="Node3D" unique_id=99934390]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=979428692]
+transform = Transform3D(0.8660254037844387, 0.3535533905932737, 0.35355339059327373, 0, 0.7071067811865476, -0.7071067811865475, -0.49999999999999994, 0.6123724356957945, 0.6123724356957946, 0, 0, 0)
+top_level = true
+shadow_enabled = true
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1722445163]
+environment = SubResource("Environment_sl2e5")
+
+[node name="VoxelLodTerrain" type="VoxelLodTerrain" parent="." unique_id=1063642795]
+generator = SubResource("VoxelGeneratorNoise2D_6m72w")
+mesher = SubResource("VoxelMesherTransvoxel_v5dby")
+material = SubResource("StandardMaterial3D_t5ptc")
+
+[node name="Player" parent="." unique_id=1282768710 instance=ExtResource("1_dphjl")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 80, 0)
