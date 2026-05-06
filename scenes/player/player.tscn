@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://nqorq1p6ak5q"]
 
 [ext_resource type="Script" uid="uid://b6kxlomo38w56" path="res://scenes/player/player.gd" id="1_8afob"]
+[ext_resource type="PackedScene" uid="uid://cjruk3s4hmeta" path="res://scenes/ui/hud.tscn" id="2_dovo2"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_x7p2l"]
 
@@ -19,3 +20,5 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6000000000058208, 0)
 target_position = Vector3(0, -1, -10)
 
 [node name="VoxelViewer" type="VoxelViewer" parent="." unique_id=1607054635]
+
+[node name="HUD" parent="." unique_id=554026734 instance=ExtResource("2_dovo2")]
