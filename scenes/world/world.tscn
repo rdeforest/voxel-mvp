@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://csqf8gxiq0ou4"]
 
 [ext_resource type="PackedScene" uid="uid://nqorq1p6ak5q" path="res://scenes/player/player.tscn" id="1_dphjl"]
+[ext_resource type="Script" uid="uid://cel7053sndciw" path="res://scripts/structural_integrity.gd" id="2_sl2e5"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_4rhad"]
 
@@ -29,7 +30,7 @@ albedo_color = Color(0.659295, 0.91, 0.39130002, 1)
 [node name="World" type="Node3D" unique_id=99934390]
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=979428692]
-transform = Transform3D(1, 0, 0, 0, 0.3420201433256688, 0.9396926207859083, 0, -0.9396926207859083, 0.3420201433256688, 0, 0, 0)
+transform = Transform3D(1, 0, 0, 0, 0.3420201433256688, 0.9396926207859084, 0, -0.9396926207859084, 0.3420201433256688, 0, 0, 0)
 top_level = true
 light_color = Color(1, 1, 0.78431374, 1)
 shadow_enabled = true
@@ -44,3 +45,6 @@ material = SubResource("StandardMaterial3D_t5ptc")
 
 [node name="Player" parent="." unique_id=1282768710 instance=ExtResource("1_dphjl")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 80, 0)
+
+[node name="StructuralIntegrity" type="Node" parent="." unique_id=1884954326]
+script = ExtResource("2_sl2e5")
