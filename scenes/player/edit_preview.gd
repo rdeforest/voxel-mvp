@@ -23,7 +23,10 @@ func _process(_delta: float) -> void:
 	
 	# Align plane to surface normal for flatten
 	if mesh is PlaneMesh:
-		_align_to_normal(hit_normal)
+		var preview_normal: Vector3 = player._get_flatten_normal()
+		if preview_normal == Vector3.ZERO:
+			preview_normal = hit_normal
+		_align_to_normal(preview_normal)
 
 	else:
 		global_transform.basis = Basis.IDENTITY
