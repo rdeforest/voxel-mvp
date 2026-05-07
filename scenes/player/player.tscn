@@ -1,12 +1,13 @@
 [gd_scene format=3 uid="uid://nqorq1p6ak5q"]
 
-[ext_resource type="Script" uid="uid://b6kxlomo38w56" path="res://scenes/player/player.gd" id="1_8afob"]
+[ext_resource type="Script" uid="uid://b6kxlomo38w56" path="res://scenes/player/player.gd" id="1_gmlin"]
 [ext_resource type="PackedScene" uid="uid://cjruk3s4hmeta" path="res://scenes/ui/hud.tscn" id="2_dovo2"]
+[ext_resource type="Script" uid="uid://dal53i221chsj" path="res://scenes/player/edit_preview.gd" id="2_gmlin"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_x7p2l"]
 
 [node name="Player" type="CharacterBody3D" unique_id=1282768710]
-script = ExtResource("1_8afob")
+script = ExtResource("1_gmlin")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=43893491]
 shape = SubResource("CapsuleShape3D_x7p2l")
@@ -22,3 +23,6 @@ target_position = Vector3(0, -1, -10)
 [node name="VoxelViewer" type="VoxelViewer" parent="." unique_id=1607054635]
 
 [node name="HUD" parent="." unique_id=554026734 instance=ExtResource("2_dovo2")]
+
+[node name="EditPreview" type="MeshInstance3D" parent="." unique_id=665615609]
+script = ExtResource("2_gmlin")

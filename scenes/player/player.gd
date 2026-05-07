@@ -6,30 +6,79 @@ const JUMP_VELOCITY     = 6.0
 const MOUSE_SENSITIVITY = 0.002
 
 # Gravity (use Godot's built-in project gravity)
-var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
+var gravity:               float           = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 # Edit modes
-var edit_modes := [
-	{"name": "Dig",     "execute": _edit_dig},
-	{"name": "Fill",    "execute": _edit_fill},
-	{"name": "Flatten", "execute": _edit_flatten},
-]
-var edit_mode_index: int = 0
+var edit_modes:            Array[EditMode] = []
+var edit_mode_index:       int             = 0
 
 # Node references
-@onready var head:       Node3D   = $Head
-@onready var camera:     Camera3D = $Head/Camera3D
-@onready var mode_label: Label    = $HUD/CenterContainer/ModeLabel
+@onready var head:         Node3D          = $Head
+@onready var camera:       Camera3D        = $Head/Camera3D
+@onready var mode_label:   Label           = $HUD/CenterContainer/ModeLabel
+@onready var edit_preview: MeshInstance3D  = $EditPreview
 
 func _ready() -> void:
 	# Capture the mouse cursor for FPS controls
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
+	# shared resources for terrain edit previews
+	var sphere             := SphereMesh.new()
+	sphere.radius           = EDIT_RADIUS
+	sphere.height           = EDIT_RADIUS * 2.0
+	sphere.radial_segments  = 16
+	sphere.rings            = 8
+
+	var plane := PlaneMesh.new()
+	plane.size             = Vector2(EDIT_RADIUS * 2.0, EDIT_RADIUS * 2.0)
+		
+	var dig_mat     := _make_preview_material(Color(1.0, 0.2, 0.2, 0.3))
+	var fill_mat    := _make_preview_material(Color(0.2, 0.4, 1.0, 0.3))
+	var flatten_mat := _make_preview_material(Color(1.0, 0.9, 0.2, 0.4))
+
+	edit_modes = [
+		EditMode.new()                                            \
+			.named("Dig")                                         \
+			.on_execute(_edit_dig)                                \
+			.preview_mesh(    func(_hp, _hn): return sphere)      \
+			.preview_material(func(_hp, _hn): return dig_mat)     \
+			.preview_position(func( hp,  hn): return hp - hn * (EDIT_RADIUS * 0.5)),
+
+		EditMode.new()                                            \
+			.named("Fill")                                        \
+			.on_execute(_edit_fill)                               \
+			.preview_mesh(    func(_hp, _hn): return sphere)      \
+			.preview_material(func(_hp, _hn): return fill_mat)    \
+			.preview_position(func( hp,  hn): return hp + hn * (EDIT_RADIUS * 0.5)),
+
+		EditMode.new()                                            \
+			.named("Flatten")                                     \
+			.on_execute(_edit_flatten)                            \
+			.preview_mesh(    func(_hp, _hn): return plane)       \
+			.preview_material(func(_hp, _hn): return flatten_mat) \
+			.preview_position(func( hp, _hn): return hp),
+	]
+
+	edit_preview.player = self
+
+func _make_preview_material(color: Color) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = color
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode    = BaseMaterial3D.CULL_DISABLED
+
+	return mat
+
+func current_mode() -> EditMode:
+	return edit_modes[edit_mode_index]
+
 func _unhandled_input(event: InputEvent) -> void:
 	# Change edit mode
 	if event is InputEventKey and event.pressed and event.keycode == KEY_TAB:
 		edit_mode_index = (edit_mode_index + 1) % edit_modes.size()
-		mode_label.text = edit_modes[edit_mode_index].name
+		mode_label.text = edit_modes[edit_mode_index].mode_name
 
 	# Mouse look
 	if event is InputEventMouseMotion:
@@ -44,17 +93,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
-	# Click to recapture mouse
 	if event is InputEventMouseButton and event.pressed:
-		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-	
-	# Terrain editing with mouse buttons
-	if event is InputEventMouseButton and event.pressed:
+		# Terrain editing with mouse buttons
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			if event.button_index == MOUSE_BUTTON_LEFT:
 				_try_edit_terrain()
 				return
-		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+		else:
+			# Click to recapture mouse
+			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 		
 func _physics_process(delta: float) -> void:
 	# Gravity
@@ -87,11 +134,9 @@ const EDIT_STRENGTH = 5.0
 func _try_edit_terrain() -> void:
 	if not raycast.is_colliding():
 		return
-
 	var hit_pos := raycast.get_collision_point()
 	var hit_normal := raycast.get_collision_normal()
-
-	edit_modes[edit_mode_index].execute.call(hit_pos, hit_normal)
+	current_mode().execute.call(hit_pos, hit_normal)
 
 func _get_voxel_tool() -> VoxelTool:
 	var terrain := get_parent().get_node("VoxelLodTerrain") as VoxelLodTerrain
@@ -159,4 +204,4 @@ func _edit_flatten(hit_pos: Vector3, hit_normal: Vector3) -> void:
 
 				# Only modify voxels above the plane (remove them)
 				if plane_dist > 0.0:
-					voxel_tool.set_voxel_f(pos, plane_dist		)
+					voxel_tool.set_voxel_f(pos, plane_dist      )
