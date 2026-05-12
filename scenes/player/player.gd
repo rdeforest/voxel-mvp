@@ -14,6 +14,10 @@ var edit_mode_index:       int             = 0
 
 var wireframe_enabled := false
 
+var _named_actions:        Dictionary
+var _key_actions:          Dictionary
+var _mouse_button_actions: Dictionary
+
 # Node references
 @onready var head:         Node3D              = $Head
 @onready var camera:       Camera3D            = $Head/Camera3D
@@ -75,6 +79,15 @@ func _ready() -> void:
 
     edit_preview.player = self
     raycast.target_position = Vector3(0, 0, -EDIT_REACH) # negative Z is forward
+    _key_actions          = {
+        KEY_TAB: _cycle_edit_mode,
+        KEY_Q:   _quit_game,
+        KEY_F:   _toggle_wireframe,
+    }
+
+    _mouse_button_actions = {
+        MOUSE_BUTTON_LEFT: _try_edit_terrain,
+    }
 
 func _make_preview_material(color: Color) -> StandardMaterial3D:
     var mat := StandardMaterial3D.new()
@@ -90,44 +103,47 @@ func current_mode() -> EditMode:
     return edit_modes[edit_mode_index]
 
 func _unhandled_input(event: InputEvent) -> void:
-    # Change edit mode
-    if event is InputEventKey and event.pressed and event.keycode == KEY_TAB:
-        edit_mode_index = (edit_mode_index + 1) % edit_modes.size()
-        mode_label.text = edit_modes[edit_mode_index].mode_name
+    if event is InputEventKey and event.pressed:
+        _on_key_pressed(event)
+    elif event is InputEventMouseMotion:
+        _on_mouse_motion(event)
+    elif event is InputEventMouseButton:
+        _on_mouse_button_pressed(event)
 
-    # Mouse look
-    if event is InputEventMouseMotion:
-        # Rotate body left/right
-        rotate_y(-event.relative.x * MOUSE_SENSITIVITY)
+func _cycle_edit_mode():
+    edit_mode_index = (edit_mode_index + 1) % edit_modes.size()
+    mode_label.text = edit_modes[edit_mode_index].mode_name
 
-        # Rotate head up/down, clamped so you can't backflip
-        head.rotate_x(-event.relative.y * MOUSE_SENSITIVITY)
-        head.rotation.x = clampf(head.rotation.x, -PI / 2.0, PI / 2.0)
+func _on_mouse_motion(event: InputEventMouseMotion) -> void:
+    rotate_y(-event.relative.x * MOUSE_SENSITIVITY)
+    head.rotate_x(-event.relative.y * MOUSE_SENSITIVITY)
+    head.rotation.x = clampf(head.rotation.x, -PI * 0.5, PI * 0.5)
 
-    # Press Escape to free the mouse (useful for debugging)
+func _on_key_pressed(event: InputEventKey) -> void:
     if event.is_action_pressed("ui_cancel"):
         Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+        return
 
-    if event is InputEventKey and event.pressed and event.keycode == KEY_F:
-        wireframe_enabled = not wireframe_enabled
-        get_viewport().debug_draw = (
-            Viewport.DEBUG_DRAW_WIREFRAME
-            if wireframe_enabled
-            else Viewport.DEBUG_DRAW_DISABLED
-        )
+    if _key_actions.has(event.keycode):
+        _key_actions[event.keycode].call()
 
-    if event is InputEventMouseButton and event.pressed:
-        # Terrain editing with mouse buttons
-        if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
-            if event.button_index == MOUSE_BUTTON_LEFT:
-                _try_edit_terrain()
-                return
-        else:
-            # Click to recapture mouse
-            Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+func _toggle_wireframe():
+    wireframe_enabled = not wireframe_enabled
+    get_viewport().debug_draw = (
+        Viewport.DEBUG_DRAW_WIREFRAME
+        if wireframe_enabled
+        else Viewport.DEBUG_DRAW_DISABLED
+    )
 
-    if event is InputEventKey and event.pressed and event.keycode == KEY_Q:
-        get_tree().quit()
+func _on_mouse_button_pressed(event: InputEventMouseButton) -> void:
+    if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+        if _mouse_button_actions.has(event.button_index):
+            _mouse_button_actions[event.button_index].call()
+    else:
+        Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
+func _quit_game():
+    get_tree().quit()
 
 func _physics_process(delta: float) -> void:
     # Gravity
