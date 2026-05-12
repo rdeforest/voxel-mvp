@@ -283,7 +283,7 @@ func _get_flatten_normal() -> Vector3:
     if Input.is_key_pressed(KEY_CTRL):
         # Vertical: wall facing the direction you're looking
         # Get the camera's forward direction, flattened to horizontal
-        var forward := -camera.global_transform.basis.z
+        var forward := camera.global_transform.basis.z
         forward.y = 0.0
         return forward.normalized()
 
