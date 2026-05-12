@@ -2,7 +2,7 @@ extends CharacterBody3D
 
 # Movement
 const SPEED             = 8.0
-const JUMP_VELOCITY     = 6.0
+const JUMP_VELOCITY     = 9.0
 const MOUSE_SENSITIVITY = 0.002
 
 # Gravity (use Godot's built-in project gravity)
@@ -12,12 +12,21 @@ var gravity:               float           = ProjectSettings.get_setting("physic
 var edit_modes:            Array[EditMode] = []
 var edit_mode_index:       int             = 0
 
+var wireframe_enabled := false
+
 # Node references
 @onready var head:         Node3D              = $Head
 @onready var camera:       Camera3D            = $Head/Camera3D
 @onready var mode_label:   Label               = $HUD/CenterContainer/ModeLabel
 @onready var edit_preview: MeshInstance3D      = $EditPreview
 @onready var integrity:    StructuralIntegrity = get_parent().get_node("StructuralIntegrity")
+
+# Terrain editing
+const EDIT_RADIUS   = 3.0
+const EDIT_STRENGTH = 5.0
+const EDIT_REACH    = 20.0
+
+@onready var raycast: RayCast3D = $Head/RayCast3D
 
 func _ready() -> void:
     # Capture the mouse cursor for FPS controls
@@ -61,6 +70,7 @@ func _ready() -> void:
     ]
 
     edit_preview.player = self
+    raycast.target_position = Vector3(0, 0, -EDIT_REACH) # negative Z is forward
 
 func _make_preview_material(color: Color) -> StandardMaterial3D:
     var mat := StandardMaterial3D.new()
@@ -94,6 +104,14 @@ func _unhandled_input(event: InputEvent) -> void:
     if event.is_action_pressed("ui_cancel"):
         Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
+    if event is InputEventKey and event.pressed and event.keycode == KEY_F:
+        wireframe_enabled = not wireframe_enabled
+        get_viewport().debug_draw = (
+            Viewport.DEBUG_DRAW_WIREFRAME
+            if wireframe_enabled
+            else Viewport.DEBUG_DRAW_DISABLED
+        )
+    
     if event is InputEventMouseButton and event.pressed:
         # Terrain editing with mouse buttons
         if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
@@ -103,6 +121,9 @@ func _unhandled_input(event: InputEvent) -> void:
         else:
             # Click to recapture mouse
             Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+            
+    if event is InputEventKey and event.pressed and event.keycode == KEY_Q:
+        get_tree().quit()
 
 func _physics_process(delta: float) -> void:
     # Gravity
@@ -126,11 +147,6 @@ func _physics_process(delta: float) -> void:
 
     move_and_slide()
 
-# Terrain editing
-const EDIT_RADIUS   = 3.0
-const EDIT_STRENGTH = 5.0
-
-@onready var raycast: RayCast3D = $Head/RayCast3D
 
 func _try_edit_terrain() -> void:
     if not raycast.is_colliding():
@@ -190,10 +206,8 @@ func _edit_fill(hit_pos: Vector3, hit_normal: Vector3) -> void:
         origin,
         dimensions,
         func(pos: Vector3i) -> void:
-            var below     := pos + Vector3i(0, -1, 0)
-            var is_ground := integrity._is_terrain_solid(below)
-
-            integrity.register_voxel(pos, Materials.STONE, is_ground)
+            if Vector3(pos).distance_to(center) <= EDIT_RADIUS:
+                integrity.register_voxel(pos, Materials.STONE)
     )
 
     _push_player_above_terrain(voxel_tool)

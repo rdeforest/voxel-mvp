@@ -16,6 +16,7 @@ ambient_light_energy = 0.9
 
 [sub_resource type="FastNoiseLite" id="FastNoiseLite_1fp7r"]
 seed = 1
+fractal_lacunarity = 1.5
 
 [sub_resource type="VoxelGeneratorNoise2D" id="VoxelGeneratorNoise2D_6m72w"]
 height_range = 100.0

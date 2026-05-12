@@ -8,6 +8,8 @@ var voxel_data: Dictionary = {}
 # Queue of dirty voxels needing recalculation
 var dirty_queue: Array[Vector3i] = []
 
+var _collapse_detector: CollapseDetector
+
 # Budget: max voxels to process per frame
 const PROPAGATION_BUDGET := 200
 
@@ -16,19 +18,18 @@ var terrain: VoxelLodTerrain
 
 func _ready() -> void:
     terrain = get_parent().get_node("VoxelLodTerrain")
+    _collapse_detector = CollapseDetector.new(self)
 
 # --- Public API ---
 
-func register_voxel(pos: Vector3i, material: Materials, is_ground: bool = false) -> void:
-    var support := 1.0 if is_ground else 0.0
+func register_voxel(pos: Vector3i, material: Materials) -> void:
     voxel_data[pos] = {
-        "support":      support,
+        "support":      0.0,
         "material":     material,
-        "dirty":        not is_ground,
+        "dirty":        true,
         "structure_id": 0,
     }
-    if not is_ground:
-        dirty_queue.append(pos)
+    dirty_queue.append(pos)
 
 func remove_voxel(pos: Vector3i) -> void:
     voxel_data.erase(pos)
@@ -65,6 +66,7 @@ func get_support_color(support: float) -> Color:
 func _physics_process(_delta: float) -> void:
     if not dirty_queue.is_empty():
         var processed := 0
+
         while not dirty_queue.is_empty() and processed < PROPAGATION_BUDGET:
             var pos : Vector3i = dirty_queue.pop_front()
 
@@ -86,6 +88,9 @@ func _physics_process(_delta: float) -> void:
                         dirty_queue.append(neighbor)
 
             processed += 1
+    else:
+        # Propagation has settled. Check for collapses.
+        _collapse_detector.step()
 
     update_debug_visuals()
 
@@ -97,7 +102,7 @@ func _calculate_support(pos: Vector3i) -> float:
     # Check if this voxel is ground-contact
     # (has a solid untracked voxel below it, i.e. natural terrain)
     var below := pos + Vector3i(0, -1, 0)
-    if not voxel_data.has(below) and _is_terrain_solid(below):
+    if _is_natural_terrain(below):
         return 1.0
 
     # Find the best support from any neighbor
@@ -127,6 +132,11 @@ func _get_neighbors(pos: Vector3i) -> Array[Vector3i]:
         pos + Vector3i( 0,  0,  1),
         pos + Vector3i( 0,  0, -1),
     ]
+
+func _is_natural_terrain(pos: Vector3i) -> bool:
+    if voxel_data.has(pos):
+        return false # placed material
+    return _is_terrain_solid(pos)
 
 func _is_terrain_solid(pos: Vector3i) -> bool:
     if terrain == null:
@@ -167,6 +177,7 @@ func update_debug_visuals() -> void:
             mat.albedo_color = color
             mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
             mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+            mat.no_depth_test = true
             color.a = 0.6
             mat.albedo_color = color
             mi.material_override = mat
