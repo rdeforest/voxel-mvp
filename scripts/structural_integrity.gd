@@ -1,6 +1,9 @@
 class_name StructuralIntegrity
 extends Node
 
+const NO_SUPPORT   = 0.0
+const FULL_SUPPORT = 1.0
+
 # Per-voxel data for modified regions only
 # Key: Vector3i, Value: { support: float, material: String, dirty: bool, structure_id: int }
 var voxel_data: Dictionary = {}
@@ -9,9 +12,6 @@ var voxel_data: Dictionary = {}
 var dirty_queue: Array[Vector3i] = []
 
 var _collapse_detector: CollapseDetector
-
-# Budget: max voxels to process per frame
-const PROPAGATION_BUDGET := 200
 
 # Reference to terrain
 var terrain: VoxelLodTerrain
@@ -24,10 +24,10 @@ func _ready() -> void:
 
 func register_voxel(pos: Vector3i, material: Materials) -> void:
     voxel_data[pos] = {
-        "support":      0.0,
+        "support":      NO_SUPPORT,
         "material":     material,
         "dirty":        true,
-        "structure_id": 0,
+        "structure_id": 0, # XXX: not used yet
     }
     dirty_queue.append(pos)
 
@@ -44,7 +44,7 @@ func get_support(pos: Vector3i) -> float:
         return voxel_data[pos].support
     # Untracked voxels are either air (irrelevant) or
     # unmodified terrain (fully supported)
-    return 1.0
+    return FULL_SUPPORT
 
 func get_support_color(support: float) -> Color:
     # Blue (1.0) -> Green (0.75) -> Yellow (0.5) -> Orange (0.3) -> Red (0.1) -> Dark Red (0.0)
@@ -67,7 +67,7 @@ func _physics_process(_delta: float) -> void:
     if not dirty_queue.is_empty():
         var processed := 0
 
-        while not dirty_queue.is_empty() and processed < PROPAGATION_BUDGET:
+        while not dirty_queue.is_empty() and processed < VoxelConstants.PROPAGATION_BUDGET:
             var pos : Vector3i = dirty_queue.pop_front()
 
             if not voxel_data.has(pos):
@@ -81,7 +81,7 @@ func _physics_process(_delta: float) -> void:
             voxel_data[pos].dirty = false
 
             # If support changed significantly, dirty the neighbors
-            if absf(new_support - old_support) > 0.01:
+            if absf(new_support - old_support) > VoxelConstants.SUPPORT_EPSILON:
                 for neighbor in _get_neighbors(pos):
                     if voxel_data.has(neighbor) and not voxel_data[neighbor].dirty:
                         voxel_data[neighbor].dirty = true
@@ -103,23 +103,23 @@ func _calculate_support(pos: Vector3i) -> float:
     # (has a solid untracked voxel below it, i.e. natural terrain)
     var below := pos + Vector3i(0, -1, 0)
     if _is_natural_terrain(below):
-        return 1.0
+        return FULL_SUPPORT
 
     # Find the best support from any neighbor
-    var best_neighbor_support := 0.0
+    var best_neighbor_support := NO_SUPPORT
     for neighbor in _get_neighbors(pos):
         var neighbor_support: float
         if voxel_data.has(neighbor):
             neighbor_support = voxel_data[neighbor].support
         elif _is_terrain_solid(neighbor):
-            neighbor_support = 1.0
+            neighbor_support = FULL_SUPPORT
         else:
             continue
 
         best_neighbor_support = maxf(best_neighbor_support, neighbor_support)
 
     # Support = best neighbor's support minus our material's decay
-    return maxf(0.0, best_neighbor_support - decay)
+    return maxf(NO_SUPPORT, best_neighbor_support - decay)
 
 # --- Helpers ---
 
@@ -144,7 +144,7 @@ func _is_terrain_solid(pos: Vector3i) -> bool:
     var vt := terrain.get_voxel_tool()
     vt.channel = VoxelBuffer.CHANNEL_SDF
     var sdf := vt.get_voxel_f(pos)
-    return sdf < 0.0  # Negative SDF = inside solid terrain
+    return sdf < VoxelConstants.SDF_SOLID_THRESHOLD  # Negative SDF = inside solid terrain
 
 # Debug visualization
 var debug_meshes: Dictionary = {}  # Vector3i -> MeshInstance3D

@@ -26,7 +26,11 @@ const EDIT_RADIUS   = 3.0
 const EDIT_STRENGTH = 5.0
 const EDIT_REACH    = 20.0
 
+const SPHERE_RADIAL_SEGMENTS = 16
+const SPHERE_RINGS           =  8
+
 @onready var raycast: RayCast3D = $Head/RayCast3D
+
 
 func _ready() -> void:
     # Capture the mouse cursor for FPS controls
@@ -36,8 +40,8 @@ func _ready() -> void:
     var sphere             := SphereMesh.new()
     sphere.radius           = EDIT_RADIUS
     sphere.height           = EDIT_RADIUS * 2.0
-    sphere.radial_segments  = 16
-    sphere.rings            = 8
+    sphere.radial_segments  = SPHERE_RADIAL_SEGMENTS
+    sphere.rings            = SPHERE_RINGS
 
     var plane := PlaneMesh.new()
     plane.size             = Vector2(EDIT_RADIUS * 2.0, EDIT_RADIUS * 2.0)
@@ -111,7 +115,7 @@ func _unhandled_input(event: InputEvent) -> void:
             if wireframe_enabled
             else Viewport.DEBUG_DRAW_DISABLED
         )
-    
+
     if event is InputEventMouseButton and event.pressed:
         # Terrain editing with mouse buttons
         if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
@@ -121,7 +125,7 @@ func _unhandled_input(event: InputEvent) -> void:
         else:
             # Click to recapture mouse
             Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-            
+
     if event is InputEventKey and event.pressed and event.keycode == KEY_Q:
         get_tree().quit()
 
@@ -155,6 +159,7 @@ func _try_edit_terrain() -> void:
     var hit_normal := raycast.get_collision_normal()
     current_mode().execute.call(hit_pos, hit_normal)
 
+
 func _get_voxel_tool() -> VoxelTool:
     var terrain := get_parent().get_node("VoxelLodTerrain") as VoxelLodTerrain
 
@@ -165,6 +170,7 @@ func _get_voxel_tool() -> VoxelTool:
     vt.channel = VoxelBuffer.CHANNEL_SDF
 
     return vt
+
 
 func _edit_dig(hit_pos: Vector3, hit_normal: Vector3) -> void:
     var voxel_tool := _get_voxel_tool()
@@ -187,6 +193,7 @@ func _edit_dig(hit_pos: Vector3, hit_normal: Vector3) -> void:
             if VoxelUtils.is_in_sphere(Vector3(pos), center, EDIT_RADIUS):
                 integrity.remove_voxel(pos)
     )
+
 
 func _edit_fill(hit_pos: Vector3, hit_normal: Vector3) -> void:
     var voxel_tool := _get_voxel_tool()
@@ -211,6 +218,7 @@ func _edit_fill(hit_pos: Vector3, hit_normal: Vector3) -> void:
     )
 
     _push_player_above_terrain(voxel_tool)
+
 
 func _edit_flatten(hit_pos: Vector3, hit_normal: Vector3) -> void:
     var voxel_tool := _get_voxel_tool()
@@ -238,6 +246,7 @@ func _edit_flatten(hit_pos: Vector3, hit_normal: Vector3) -> void:
 
     _push_player_above_terrain(voxel_tool)
 
+
 func _push_player_above_terrain(voxel_tool: VoxelTool) -> void:
     var feet_pos := global_position
     var sdf := voxel_tool.get_voxel_f(Vector3i(
@@ -258,12 +267,13 @@ func _push_player_above_terrain(voxel_tool: VoxelTool) -> void:
             roundi(feet_pos.z)
         )
         var check_sdf := voxel_tool.get_voxel_f(check_pos)
-        if check_sdf >= 0.0:
-            global_position.y = feet_pos.y + float(i) + 0.5
+
+        if check_sdf >= VoxelConstants.SDF_SOLID_THRESHOLD:
+            global_position.y = feet_pos.y + float(i) + VoxelConstants.VOXEL_SIZE
             return
 
     # If we somehow can't find air in 20 voxels, just pop up a lot
-    global_position.y += 20.0
+    global_position.y += 30.0
 
 func _get_flatten_normal() -> Vector3:
     if Input.is_key_pressed(KEY_SHIFT):

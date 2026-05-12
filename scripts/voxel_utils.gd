@@ -29,4 +29,3 @@ static func for_each_in_bounding_box(
 
 static func is_in_sphere(pos: Vector3, center: Vector3, radius: float) -> bool:
     return pos.distance_to(center) <= radius
-

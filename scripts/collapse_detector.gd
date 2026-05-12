@@ -9,13 +9,6 @@ extends RefCounted
 # zero. We flood-fill across candidate voxels to find connected components,
 # extract each as a rigid body, and clear the source voxels from the terrain.
 
-# A voxel is considered a fall candidate when its support is at or below this.
-# Just above 0.0 so we don't get bit by floating-point dust.
-const FALL_THRESHOLD := 0.01
-
-# Per-frame BFS budget. Tune this once we see real cave collapses in motion.
-const DETECTION_BUDGET := 500
-
 # A single component-in-progress carried across frames if the flood
 # exceeds the budget.
 var _pending_floods: Array = []  # of { voxels: Array[Vector3i], frontier: Array[Vector3i], visited: Dictionary }
@@ -40,7 +33,7 @@ func step() -> bool:
     var progressed := false
     while not _pending_floods.is_empty():
         var flood: Dictionary = _pending_floods[0]
-        var finished := _advance_flood(flood, DETECTION_BUDGET)
+        var finished := _advance_flood(flood, VoxelConstants.DETECTION_BUDGET)
         if finished:
             _pending_floods.pop_front()
             if not flood.voxels.is_empty():
@@ -64,7 +57,7 @@ func step() -> bool:
         }
         _claimed[pos] = true
 
-        var finished := _advance_flood(flood, DETECTION_BUDGET)
+        var finished := _advance_flood(flood, VoxelConstants.DETECTION_BUDGET)
         if finished:
             if not flood.voxels.is_empty():
                 _materialize_collapse(flood.voxels)
@@ -114,7 +107,7 @@ func _is_fall_candidate(pos: Vector3i) -> bool:
     var data: Dictionary = _integrity.voxel_data[pos]
     if data.dirty:
         return false  # propagation isn't done with this voxel yet
-    return data.support <= FALL_THRESHOLD
+    return data.support <= VoxelConstants.FALL_THRESHOLD
 
 
 func _neighbors(pos: Vector3i) -> Array:
@@ -138,8 +131,8 @@ func _materialize_collapse(voxels: Array) -> void:
     for v in voxels:
         centroid += Vector3(v)
     centroid /= float(voxels.size())
-    # Voxel-grid cells are 1m; offset to cell center.
-    centroid += Vector3(0.5, 0.5, 0.5)
+    # Voxel-grid cells are VOXEL_SIZE meters; offset to cell center.
+    centroid += VoxelConstants.VOXEL_CENTER_OFFSET
 
     # Greedy merge into the minimum set of axis-aligned boxes.
     var voxel_set: Dictionary = {}
@@ -187,7 +180,7 @@ func _materialize_collapse(voxels: Array) -> void:
         # Set SDF positive (air) at each cell. do_sphere with radius < 1
         # would be approximate; set_voxel_f is exact.
         # We set the value to 5 to account for the interpolation of the SDF value.
-        voxel_tool.set_voxel_f(v, 5.0)
+        voxel_tool.set_voxel_f(v, VoxelConstants.SDF_AIR)
         _integrity.remove_voxel(v)
 
 
