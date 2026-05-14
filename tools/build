@@ -1,0 +1,32 @@
+#!/bin/bash
+
+GODOT_REF=4.6-stable
+VOXEL_REF=v1.6
+SCONS_ARGS=precision=double
+
+GODOT_PATH=../../godotengine/godot
+VOXEL_PATH=../../Zylann/godot_voxel
+
+OK=true
+
+checkout() {
+	project=$1
+	path=\$${project}_PATH
+	ref=\$${project}_REF
+
+	eval cd           \$${project}_PATH || OK=false
+	eval git checkout \$${project}_REF  || OK=false
+}
+
+
+checkout VOXEL
+checkout GODOT
+
+if ! $OK; then
+	echo "Something went wrong."
+	exit 1
+fi
+
+cd $GODOT_PATH
+
+scons $SCONS_ARGS
