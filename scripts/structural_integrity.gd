@@ -4,6 +4,15 @@ extends Node
 const NO_SUPPORT   = 0.0
 const FULL_SUPPORT = 1.0
 
+# Emitted from the propagation loop whenever a voxel's recalculated support is
+# meaningfully *higher* than its previous value. This is the "the player did
+# something that helped" signal. CollapseDetector listens for it to reset the
+# strain timer of any pending collapse the voxel belongs to.
+#
+# Emitted at the moment of evaluation, by the code that already holds both the
+# old and new values — no polling, no per-voxel history kept anywhere.
+signal voxel_support_increased(pos: Vector3i, old_support: float, new_support: float)
+
 # Per-voxel data for modified regions only
 # Key: Vector3i, Value: { support: float, material: String, dirty: bool, structure_id: int }
 var voxel_data: Dictionary = {}
@@ -63,7 +72,7 @@ func get_support_color(support: float) -> Color:
 
 # --- Propagation ---
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
     if not dirty_queue.is_empty():
         var processed := 0
 
@@ -87,10 +96,22 @@ func _physics_process(_delta: float) -> void:
                         voxel_data[neighbor].dirty = true
                         dirty_queue.append(neighbor)
 
+            # If support went *up* meaningfully, announce it. A pending
+            # collapse containing this voxel will reset its strain timer.
+            # Emitted here because this is the one place that holds both
+            # the old and new values; no history is kept anywhere.
+            if new_support - old_support > VoxelConstants.SUPPORT_EPSILON:
+                voxel_support_increased.emit(pos, old_support, new_support)
+
             processed += 1
     else:
-        # Propagation has settled. Check for collapses.
+        # Propagation has settled. Scan for new collapses.
         _collapse_detector.step()
+
+    # Pending collapses must age every frame regardless of dirty-queue state.
+    # If a steady drip of edits kept the queue non-empty, gating this behind
+    # "queue settled" would freeze every strain timer indefinitely.
+    _collapse_detector.tick_pending(delta)
 
     update_debug_visuals()
 
@@ -150,7 +171,24 @@ func _is_terrain_solid(pos: Vector3i) -> bool:
 var debug_meshes: Dictionary = {}  # Vector3i -> MeshInstance3D
 const DEBUG_VOXEL_SIZE := 0.3
 
+# Advancing phase for the strain pulse, in radians. Shared across all
+# straining voxels so they pulse in unison — a synchronized creak reads as
+# "this whole mass is in trouble" rather than visual noise.
+var _strain_pulse_phase := 0.0
+
 func update_debug_visuals() -> void:
+    # Advance the shared strain-pulse phase. get_physics_process_delta_time()
+    # is the fixed physics step; update_debug_visuals is only ever called from
+    # _physics_process so this is the correct delta.
+    _strain_pulse_phase += get_physics_process_delta_time() \
+        * VoxelConstants.STRAIN_PULSE_HZ * TAU
+    # Oscillates 0..1; multiplies into marker alpha for straining voxels.
+    var pulse := 0.5 + 0.5 * sin(_strain_pulse_phase)
+
+    # Which voxels are mid-strain right now. Pending-collapse voxels pulse;
+    # everything else uses steady alpha.
+    var straining: Dictionary = _collapse_detector.get_straining_voxels()
+
     # Remove markers for voxels that no longer exist
     for pos in debug_meshes.keys():
         if not voxel_data.has(pos):
@@ -161,6 +199,12 @@ func update_debug_visuals() -> void:
     for pos in voxel_data:
         var support: float = voxel_data[pos].support
         var color := get_support_color(support)
+
+        # Straining voxels pulse their alpha; steady voxels sit at 0.6.
+        if straining.has(pos):
+            color.a = lerpf(0.15, 0.9, pulse)
+        else:
+            color.a = 0.6
 
         if debug_meshes.has(pos):
             # Update existing marker color
@@ -174,11 +218,9 @@ func update_debug_visuals() -> void:
             mi.mesh = box
 
             var mat := StandardMaterial3D.new()
-            mat.albedo_color = color
             mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
             mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
             mat.no_depth_test = true
-            color.a = 0.6
             mat.albedo_color = color
             mi.material_override = mat
 

@@ -58,4 +58,43 @@ const FALL_THRESHOLD := 0.01
 
 # Minimum support change between propagation passes that re-dirties neighbors.
 # Below this, the change is treated as noise and propagation halts.
+# Also used as the threshold for "support meaningfully increased" when
+# deciding whether to reset a pending collapse's strain timer.
 const SUPPORT_EPSILON := 0.01
+
+
+# ============================================================================
+# Strain window (pending-collapse delay)
+# ============================================================================
+# When a connected component loses support, it does not collapse immediately.
+# It enters a "straining" state with a countdown. During the window the player
+# can add support (a pillar, a beam) to reset the timer and, if they add
+# enough, cancel the collapse entirely. This is the cave-reinforcement loop
+# in miniature: the structure creaks, you scramble, you either save it or you
+# don't.
+#
+# Full duration of the strain countdown, in seconds. A freshly detected
+# unsupported component gets this long before it falls.
+#
+# NOTE: flat constant for v0.0. The intended v0.1 design reads this from the
+# material (a stone fracture should groan longer than a dirt crumble) and
+# scales the reset amount by the *nature* of the support change. Both are
+# deferred to the in-game building feature work — see roadmap.
+const STRAIN_DURATION_SEC := 3.0
+
+# When support is added to a straining component, its timer is reset to the
+# *higher* of its current remaining time and this value. For v0.0 this is a
+# flat "90% restored" floor: any meaningful support addition buys back most
+# of the window, but can never shorten a timer that was already higher.
+#
+# Concretely: a 3.0s window, when supported, jumps to max(remaining, 2.7s).
+#
+# The v0.1 upgrade replaces this flat floor with a value proportional to how
+# much support the player's change actually contributed — a critical pillar
+# buys back lots of time, a token prop buys back little.
+const STRAIN_RESET_SEC := 2.7
+
+# Debug-visual pulse rate for straining voxels, in full pulses per second.
+# Straining voxels oscillate their debug-marker alpha so the strain window is
+# readable at a glance — distinct from a voxel that is merely unsupported.
+const STRAIN_PULSE_HZ := 2.5
