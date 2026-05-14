@@ -143,8 +143,11 @@ func _materialize_collapse(voxels: Array) -> void:
     # Build the rigid body.
     var body := RigidBody3D.new()
     body.global_position = centroid
+
     # Mass scales with voxel count (1kg per voxel for now; revisit per-material).
     body.mass = float(voxels.size())
+
+    body.can_sleep = false
 
     for box in boxes:
         # box is { min: Vector3i, size: Vector3i }

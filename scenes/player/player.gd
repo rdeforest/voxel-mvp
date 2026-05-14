@@ -21,7 +21,7 @@ var _mouse_button_actions: Dictionary
 # Node references
 @onready var head:         Node3D              = $Head
 @onready var camera:       Camera3D            = $Head/Camera3D
-@onready var mode_label:   Label               = $HUD/CenterContainer/ModeLabel
+@onready var mode_label:   Label               = $HUD/BoxContainer/ModeLabel
 @onready var edit_preview: MeshInstance3D      = $EditPreview
 @onready var integrity:    StructuralIntegrity = get_parent().get_node("StructuralIntegrity")
 
@@ -136,11 +136,13 @@ func _toggle_wireframe():
     )
 
 func _on_mouse_button_pressed(event: InputEventMouseButton) -> void:
-    if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
-        if _mouse_button_actions.has(event.button_index):
-            _mouse_button_actions[event.button_index].call()
-    else:
-        Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+    if event.pressed:
+        if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+            if _mouse_button_actions.has(event.button_index):
+                _mouse_button_actions[event.button_index].call()
+                return
+        else:
+            Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 func _quit_game():
     get_tree().quit()
