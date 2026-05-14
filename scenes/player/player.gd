@@ -265,33 +265,54 @@ func _edit_flatten(hit_pos: Vector3, hit_normal: Vector3) -> void:
     _push_player_above_terrain(voxel_tool)
 
 
+# How far above / below the player's current Y to search for the terrain
+# surface when correcting a fall-through. The window is centred generously on
+# the player rather than started at their feet: a flatten can drop the player
+# several voxels before this runs, and the old "march up 20 from current
+# position" approach failed once they'd fallen past its reach. Searching a
+# wide absolute window instead is robust regardless of how far they fell.
+const FALLTHROUGH_SEARCH_UP   := 8     # voxels above current Y to start scan
+const FALLTHROUGH_SEARCH_DOWN := 64    # voxels below current Y to give up at
+
+# Called after edits that can remove ground from under the player (fill can
+# bury them, flatten can delete their floor). Finds the terrain surface in
+# the player's column and places them on top of it.
+#
+# This is the "cheap fix" for the fall-through-world bug: it is edit-driven
+# (only runs when an edit happens) and column-based (only checks the player's
+# X/Z). The known triggers are all edit-driven, so that covers them. A
+# continuous per-tick check would catch fall-through from any cause, and a
+# respawn-anchor system would handle "no ground in the column at all"
+# properly — both deliberately deferred (see roadmap).
 func _push_player_above_terrain(voxel_tool: VoxelTool) -> void:
     var feet_pos := global_position
-    var sdf := voxel_tool.get_voxel_f(Vector3i(
-        roundi(feet_pos.x),
-        roundi(feet_pos.y),
-        roundi(feet_pos.z)
-    ))
+    var col_x := roundi(feet_pos.x)
+    var col_z := roundi(feet_pos.z)
+    var start_y := roundi(feet_pos.y) + FALLTHROUGH_SEARCH_UP
+    var stop_y  := roundi(feet_pos.y) - FALLTHROUGH_SEARCH_DOWN
 
-    # Negative SDF means we're inside terrain
-    if sdf >= 0.0:
-        return
-
-    # March upward until we find air
-    for i in range(1, 20):
-        var check_pos := Vector3i(
-            roundi(feet_pos.x),
-            roundi(feet_pos.y + float(i)),
-            roundi(feet_pos.z)
-        )
-        var check_sdf := voxel_tool.get_voxel_f(check_pos)
-
-        if check_sdf >= VoxelConstants.SDF_SOLID_THRESHOLD:
-            global_position.y = feet_pos.y + float(i) + VoxelConstants.VOXEL_SIZE
+    # Scan downward through the column looking for the first solid voxel.
+    # The voxel directly above it is the surface the player should stand on.
+    # We scan top-down so the FIRST solid we hit is the topmost one — i.e.
+    # the actual surface, not some buried layer.
+    var y := start_y
+    while y >= stop_y:
+        var sdf := voxel_tool.get_voxel_f(Vector3i(col_x, y, col_z))
+        # sdf < SDF_SOLID_THRESHOLD == inside solid terrain.
+        if sdf < VoxelConstants.SDF_SOLID_THRESHOLD:
+            # y is the topmost solid voxel. Stand the player one voxel above.
+            global_position.y = float(y) + VoxelConstants.VOXEL_SIZE
             return
+        y -= 1
 
-    # If we somehow can't find air in 20 voxels, just pop up a lot
-    global_position.y += 30.0
+    # No solid voxel found anywhere in the search window. The player is over
+    # a deep hole or out of bounds — there is no good answer here without a
+    # respawn-anchor system. Leave them where they are rather than blindly
+    # teleporting; if they were falling, gravity continues, and at worst they
+    # fall to wherever the terrain actually is. (Known-weak path; the real
+    # fix is the deferred respawn anchor.)
+    push_warning("_push_player_above_terrain: no terrain found in column "
+        + str(Vector2i(col_x, col_z)) + " within search window")
 
 func _get_flatten_normal() -> Vector3:
     if Input.is_key_pressed(KEY_SHIFT):
