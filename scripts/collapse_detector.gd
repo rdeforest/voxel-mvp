@@ -77,9 +77,9 @@ func _init(integrity: Node) -> void:
 # signal. If a caller ever needs that, give the phases progress tracking
 # then — don't thread an unused value through speculatively.)
 func step() -> void:
-    if _resume_unfinished_floods():
+    if not _resume_unfinished_floods():
         return  # budget exhausted; a flood resumes next frame
-    if _scan_for_new_collapses():
+    if not _scan_for_new_collapses():
         return  # budget exhausted mid-scan; resumes next frame
     _reset_claims_to_pending()
 
@@ -88,6 +88,16 @@ func step() -> void:
 # Returns false if budget ran out with a flood still in progress (step()
 # should bail and resume next frame); true if all carried-over floods are
 # now complete.
+#
+# KNOWN LIMIT (v0.1 perf-tuning): this advances each pending flood by exactly
+# one DETECTION_BUDGET slice per step(), and step() only runs on frames where
+# the propagation dirty_queue is empty. A single connected component larger
+# than DETECTION_BUDGET therefore takes multiple settled frames to fully
+# detect, and a continuous stream of edits that keeps the dirty_queue busy
+# can starve phase 1 entirely. Not a correctness bug — detection just lags.
+# The fix is budget profiling (how big is a realistic worst-case component?)
+# and possibly advancing multiple floods per step; deferred until there are
+# real numbers to tune against.
 func _resume_unfinished_floods() -> bool:
     while not _pending_floods.is_empty():
         var flood: Dictionary = _pending_floods[0]
@@ -109,7 +119,10 @@ func _scan_for_new_collapses() -> bool:
     for pos in _integrity.voxel_data.keys():
         if _claimed.has(pos):
             continue
-        if not _is_fall_candidate(pos):
+        # Seeding is conservative: only start a flood from a voxel whose
+        # support has settled (see _can_seed_collapse). Flood *expansion*,
+        # by contrast, is permissive — see _advance_flood.
+        if not _can_seed_collapse(pos):
             continue
 
         var flood := {
@@ -311,13 +324,41 @@ func _advance_flood(flood: Dictionary, budget: int) -> bool:
     return frontier.is_empty()
 
 
-func _is_fall_candidate(pos: Vector3i) -> bool:
+# Should a flood be SEEDED from this voxel? Conservative: requires that the
+# voxel's support has finished propagating. We won't *start* a collapse from
+# a support value that is still settling — it might be on its way back up.
+#
+# This is the strict half of what used to be a single _is_fall_candidate.
+# Used only by the phase-2 seed scan.
+func _can_seed_collapse(pos: Vector3i) -> bool:
     if not _integrity.voxel_data.has(pos):
         return false
     var data: Dictionary = _integrity.voxel_data[pos]
     if data.dirty:
-        return false  # propagation isn't done with this voxel yet
+        return false  # support not finalized; don't seed a flood from it
     return data.support <= VoxelConstants.FALL_THRESHOLD
+
+
+# Should a flood EXPAND into this voxel — and, separately, is this voxel still
+# falling when re-checked during the strain window?
+#
+# Permissive: a voxel whose support is at/below the threshold is part of the
+# unsupported component whether or not propagation has fully settled its
+# value. `dirty` here means only "this number will be refined," NOT "this
+# voxel might not belong." The earlier version excluded dirty voxels and that
+# artificially split components that were still cascading — a large structure
+# would flood only its already-settled part, strand its still-settling
+# (often most-unsupported) voxels, and those would never pulse or fall.
+#
+# Optimistically flooding a dirty voxel that later recovers is safe: the
+# strain window is the grace period. _component_still_falling re-checks every
+# voxel every tick through this same predicate, and tick_pending cancels the
+# whole pending collapse the moment the component is no longer falling. The
+# architecture already absorbs the "flooded in, then recovered" case.
+func _is_fall_candidate(pos: Vector3i) -> bool:
+    if not _integrity.voxel_data.has(pos):
+        return false
+    return _integrity.voxel_data[pos].support <= VoxelConstants.FALL_THRESHOLD
 
 
 func _neighbors(pos: Vector3i) -> Array:

@@ -91,6 +91,16 @@ func _physics_process(delta: float) -> void:
 # each one's support. A meaningful *change* re-dirties neighbours so the
 # wave propagates; a meaningful *increase* additionally emits
 # voxel_support_increased so a pending collapse can rewind its strain.
+#
+# This is a worklist fixpoint algorithm — the same shape compilers use for
+# dataflow analysis. The support values form a lattice (floats in [0,1]),
+# _calculate_support is the transfer function, _get_neighbors defines the
+# dependency edges, and dirty_queue is the worklist. We iterate until the
+# queue drains (the fixpoint). If propagation, fatigue, fluid, or temperature
+# ever share enough of this machinery, the extract-worthy core is: queue,
+# pop, recompute, "did it change", push dependents — with the transfer and
+# dependency functions passed in. Not extracted yet: one customer, no second
+# use case to generalise against.
 func _process_dirty_queue() -> void:
     var processed := 0
 
