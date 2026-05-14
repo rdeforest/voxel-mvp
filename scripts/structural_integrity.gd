@@ -74,46 +74,54 @@ func get_support_color(support: float) -> Color:
 
 func _physics_process(delta: float) -> void:
     if not dirty_queue.is_empty():
-        var processed := 0
-
-        while not dirty_queue.is_empty() and processed < VoxelConstants.PROPAGATION_BUDGET:
-            var pos : Vector3i = dirty_queue.pop_front()
-
-            if not voxel_data.has(pos):
-                continue
-            if not voxel_data[pos].dirty:
-                continue
-
-            var old_support: float = voxel_data[pos].support
-            var new_support := _calculate_support(pos)
-            voxel_data[pos].support = new_support
-            voxel_data[pos].dirty = false
-
-            # If support changed significantly, dirty the neighbors
-            if absf(new_support - old_support) > VoxelConstants.SUPPORT_EPSILON:
-                for neighbor in _get_neighbors(pos):
-                    if voxel_data.has(neighbor) and not voxel_data[neighbor].dirty:
-                        voxel_data[neighbor].dirty = true
-                        dirty_queue.append(neighbor)
-
-            # If support went *up* meaningfully, announce it. A pending
-            # collapse containing this voxel will reset its strain timer.
-            # Emitted here because this is the one place that holds both
-            # the old and new values; no history is kept anywhere.
-            if new_support - old_support > VoxelConstants.SUPPORT_EPSILON:
-                voxel_support_increased.emit(pos, old_support, new_support)
-
-            processed += 1
+        _process_dirty_queue()
     else:
         # Propagation has settled. Scan for new collapses.
         _collapse_detector.step()
 
-    # Pending collapses must age every frame regardless of dirty-queue state.
+    # Strain must accumulate every frame regardless of dirty-queue state.
     # If a steady drip of edits kept the queue non-empty, gating this behind
-    # "queue settled" would freeze every strain timer indefinitely.
+    # "queue settled" would freeze every strain window indefinitely.
     _collapse_detector.tick_pending(delta)
 
     update_debug_visuals()
+
+
+# Drain up to PROPAGATION_BUDGET voxels from the dirty queue, recalculating
+# each one's support. A meaningful *change* re-dirties neighbours so the
+# wave propagates; a meaningful *increase* additionally emits
+# voxel_support_increased so a pending collapse can rewind its strain.
+func _process_dirty_queue() -> void:
+    var processed := 0
+
+    while not dirty_queue.is_empty() and processed < VoxelConstants.PROPAGATION_BUDGET:
+        var pos : Vector3i = dirty_queue.pop_front()
+
+        if not voxel_data.has(pos):
+            continue
+        if not voxel_data[pos].dirty:
+            continue
+
+        var old_support: float = voxel_data[pos].support
+        var new_support := _calculate_support(pos)
+        voxel_data[pos].support = new_support
+        voxel_data[pos].dirty = false
+
+        # If support changed significantly, dirty the neighbors
+        if absf(new_support - old_support) > VoxelConstants.SUPPORT_EPSILON:
+            for neighbor in _get_neighbors(pos):
+                if voxel_data.has(neighbor) and not voxel_data[neighbor].dirty:
+                    voxel_data[neighbor].dirty = true
+                    dirty_queue.append(neighbor)
+
+        # If support went *up* meaningfully, announce it. A pending
+        # collapse containing this voxel will rewind its strain.
+        # Emitted here because this is the one place that holds both
+        # the old and new values; no history is kept anywhere.
+        if new_support - old_support > VoxelConstants.SUPPORT_EPSILON:
+            voxel_support_increased.emit(pos, old_support, new_support)
+
+        processed += 1
 
 func _calculate_support(pos: Vector3i) -> float:
     var data:     Dictionary = voxel_data[pos]
@@ -171,12 +179,48 @@ func _is_terrain_solid(pos: Vector3i) -> bool:
 var debug_meshes: Dictionary = {}  # Vector3i -> MeshInstance3D
 const DEBUG_VOXEL_SIZE := 0.3
 
+# Master switch for the debug voxel markers. Exported so it can be flipped in
+# the inspector; also toggleable at runtime via set_debug_visuals_enabled()
+# (wire that to a key in the player controller).
+#
+# These coloured cubes are a v0.0 development aid, not a real game visual —
+# the roadmap's intent is for strain feedback to eventually live on the
+# terrain surface geometry itself. Until then, this lets you get them out of
+# the way when they're more clutter than signal.
+@export var debug_visuals_enabled: bool = true
+
 # Advancing phase for the strain pulse, in radians. Shared across all
 # straining voxels so they pulse in unison — a synchronized creak reads as
 # "this whole mass is in trouble" rather than visual noise.
 var _strain_pulse_phase := 0.0
 
+
+# Runtime toggle. When turned off, existing markers are torn down immediately
+# so nothing is left floating; when turned back on, update_debug_visuals()
+# rebuilds them on the next frame from current voxel_data.
+func set_debug_visuals_enabled(enabled: bool) -> void:
+    if enabled == debug_visuals_enabled:
+        return
+    debug_visuals_enabled = enabled
+    if not enabled:
+        _clear_debug_meshes()
+
+
+# Tear down every debug marker and forget them. Used when debug visuals are
+# switched off; the markers are rebuilt from scratch if switched back on.
+func _clear_debug_meshes() -> void:
+    for pos in debug_meshes:
+        debug_meshes[pos].queue_free()
+    debug_meshes.clear()
+
+
 func update_debug_visuals() -> void:
+    # When disabled, do no per-voxel work at all. Markers (if any) were already
+    # torn down by set_debug_visuals_enabled(); this just makes the disabled
+    # state cost nothing per frame.
+    if not debug_visuals_enabled:
+        return
+
     # Advance the shared strain-pulse phase. get_physics_process_delta_time()
     # is the fixed physics step; update_debug_visuals is only ever called from
     # _physics_process so this is the correct delta.

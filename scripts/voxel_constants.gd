@@ -82,16 +82,18 @@ const SUPPORT_EPSILON := 0.01
 # deferred to the in-game building feature work — see roadmap.
 const STRAIN_DURATION_SEC := 3.0
 
-# When support is added to a straining component, its timer is reset to the
-# *higher* of its current remaining time and this value. For v0.0 this is a
-# flat "90% restored" floor: any meaningful support addition buys back most
-# of the window, but can never shorten a timer that was already higher.
+# When support is added to a straining component, its accumulated strain is
+# rewound so that at least this much of the window remains. For v0.0 this is
+# a flat "90% restored" floor: any meaningful support addition buys back most
+# of the window, but can never make a fresher component worse.
 #
-# Concretely: a 3.0s window, when supported, jumps to max(remaining, 2.7s).
+# Concretely: a 3.0s window with this at 2.7s means a component that has
+# strained 2.5s is rewound to 0.3s strained (2.7s remaining); a component
+# that has only strained 0.1s is left untouched.
 #
-# The v0.1 upgrade replaces this flat floor with a value proportional to how
+# The v0.1 upgrade replaces this flat floor with a rewind proportional to how
 # much support the player's change actually contributed — a critical pillar
-# buys back lots of time, a token prop buys back little.
+# buys back lots of window, a token prop buys back little.
 const STRAIN_RESET_SEC := 2.7
 
 # Debug-visual pulse rate for straining voxels, in full pulses per second.

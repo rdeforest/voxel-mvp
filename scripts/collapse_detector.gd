@@ -37,8 +37,15 @@ var _claimed: Dictionary = {}
 #   {
 #     voxels:        Array[Vector3i],  # the connected component
 #     voxel_set:     Dictionary,       # Vector3i -> true, for O(1) membership
-#     timer:         float,            # seconds remaining in the strain window
+#     strained:      float,            # seconds of strain accumulated so far
 #   }
+#
+# `strained` counts UP from 0 toward STRAIN_DURATION_SEC, accumulated against
+# the physics `delta`. It deliberately does NOT use Time.get_ticks_msec():
+# wall-clock time keeps running while the game is paused, which would expire
+# strain windows during a pause. Accumulating `delta` inside _physics_process
+# is automatically pause-correct (physics processing stops when the tree is
+# paused) and frame-hitch-correct (delta is the true step length).
 var _pending_collapses: Array = []
 
 # Flat index: Vector3i -> the pending-collapse dict that contains it.
@@ -60,24 +67,45 @@ func _init(integrity: Node) -> void:
 
 # Called by StructuralIntegrity once the propagation dirty_queue is empty.
 # Detects new unsupported components and files them as pending collapses.
-# Returns true if any new pending collapse was created this call.
-func step() -> bool:
-    var progressed := false
+#
+# The work is three ordered phases. The first two can run out of detection
+# budget mid-phase; when that happens they return false and step() bails,
+# resuming next frame. Only if both phases complete do we recycle the
+# per-pass claim set.
+#
+# (No return value: nothing currently consumes a "did anything happen?"
+# signal. If a caller ever needs that, give the phases progress tracking
+# then — don't thread an unused value through speculatively.)
+func step() -> void:
+    if _resume_unfinished_floods():
+        return  # budget exhausted; a flood resumes next frame
+    if _scan_for_new_collapses():
+        return  # budget exhausted mid-scan; resumes next frame
+    _reset_claims_to_pending()
 
-    # 1. Continue any flood that didn't finish last frame.
+
+# Phase 1: continue any flood that didn't finish in a previous frame.
+# Returns false if budget ran out with a flood still in progress (step()
+# should bail and resume next frame); true if all carried-over floods are
+# now complete.
+func _resume_unfinished_floods() -> bool:
     while not _pending_floods.is_empty():
         var flood: Dictionary = _pending_floods[0]
         var finished := _advance_flood(flood, VoxelConstants.DETECTION_BUDGET)
-        if finished:
-            _pending_floods.pop_front()
-            if not flood.voxels.is_empty():
-                _begin_pending_collapse(flood.voxels)
-                progressed = true
-        else:
-            # Budget exhausted this frame; resume next frame.
-            return progressed
+        if not finished:
+            return false  # budget exhausted; resume this same flood next frame
+        _pending_floods.pop_front()
+        if not flood.voxels.is_empty():
+            _begin_pending_collapse(flood.voxels)
 
-    # 2. Scan for new fall candidates and start new floods.
+    return true
+
+
+# Phase 2: scan tracked voxels for new fall candidates and flood each into a
+# connected component. Returns false if a fresh flood ran out of budget (it
+# has been parked in _pending_floods and step() should bail); true if the
+# whole scan completed.
+func _scan_for_new_collapses() -> bool:
     for pos in _integrity.voxel_data.keys():
         if _claimed.has(pos):
             continue
@@ -92,28 +120,25 @@ func step() -> bool:
         _claimed[pos] = true
 
         var finished := _advance_flood(flood, VoxelConstants.DETECTION_BUDGET)
-        if finished:
-            if not flood.voxels.is_empty():
-                _begin_pending_collapse(flood.voxels)
-                progressed = true
-        else:
+        if not finished:
             _pending_floods.append(flood)
-            return progressed  # ran out of budget; pick up next frame
+            return false  # ran out of budget; pick up next frame
 
-    # 3. Clear *per-pass* claims, but keep claims held by live pending
-    #    collapses so nothing re-floods a mass that is already straining.
-    _reset_claims_to_pending()
-    return progressed
+        if not flood.voxels.is_empty():
+            _begin_pending_collapse(flood.voxels)
+
+    return true
 
 
-# Ages every pending collapse by `delta`. Called every frame by
-# StructuralIntegrity, unconditionally — strain timers must advance even
-# while the dirty queue is busy.
+# Accumulates strain on every pending collapse by `delta`. Called every frame
+# by StructuralIntegrity, unconditionally — strain must accumulate even while
+# the dirty queue is busy.
 #
 # Per pending collapse, each tick:
 #   - if it is no longer a fall candidate at all -> cancel (voxels recovered);
-#   - else if its timer has expired -> materialize the collapse;
-#   - else -> just keep counting down.
+#   - else accumulate `delta` of strain, and if it has reached the full
+#     duration -> materialize the collapse;
+#   - else -> keep straining.
 func tick_pending(delta: float) -> void:
     if _pending_collapses.is_empty():
         return
@@ -127,8 +152,8 @@ func tick_pending(delta: float) -> void:
             _cancel_pending_collapse(i)
             continue
 
-        pc.timer -= delta
-        if pc.timer <= 0.0:
+        pc.strained += delta
+        if pc.strained >= VoxelConstants.STRAIN_DURATION_SEC:
             # Strain window elapsed with the mass still unsupported. It falls.
             _materialize_pending_collapse(i)
 
@@ -143,7 +168,7 @@ func get_straining_voxels() -> Dictionary:
 
 # Fired (synchronously) by StructuralIntegrity when a voxel's support is
 # recalculated meaningfully higher than before. If that voxel belongs to a
-# pending collapse, the player has propped it up — reset the strain timer.
+# pending collapse, the player has propped it up — rewind its strain.
 func _on_voxel_support_increased(
         pos: Vector3i, _old_support: float, _new_support: float) -> void:
     # No-op if the voxel isn't part of any pending collapse. This is the
@@ -153,10 +178,17 @@ func _on_voxel_support_increased(
         return
 
     var pc: Dictionary = _voxel_to_pending[pos]
-    # Reset toward full: take the higher of the current remaining time and
-    # the reset floor, so adding support can only ever *help*, never shorten
-    # a timer that was already above the floor.
-    pc.timer = maxf(pc.timer, VoxelConstants.STRAIN_RESET_SEC)
+    # Rewind accumulated strain so that at least STRAIN_RESET_SEC of the
+    # window remains. min() means adding support can only ever *help* — it
+    # never advances strain on a component that was already fresher than the
+    # reset point.
+    #
+    # Concretely with a 3.0s window and 2.7s reset: a component that has
+    # strained 2.5s gets rewound to 0.3s (2.7s left). One that has only
+    # strained 0.1s is left alone (it already has 2.9s left).
+    var reset_floor := VoxelConstants.STRAIN_DURATION_SEC \
+        - VoxelConstants.STRAIN_RESET_SEC
+    pc.strained = minf(pc.strained, reset_floor)
 
 
 # --- Pending-collapse lifecycle -------------------------------------------
@@ -172,7 +204,7 @@ func _begin_pending_collapse(voxels: Array) -> void:
     var pc := {
         "voxels":    voxels,
         "voxel_set": voxel_set,
-        "timer":     VoxelConstants.STRAIN_DURATION_SEC,
+        "strained":  0.0,
     }
     _pending_collapses.append(pc)
 
