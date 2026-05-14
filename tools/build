@@ -1,32 +1,338 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#
+# tools/build — bring this machine's engine up to date with the pinned refs.
+#
+# Design goals (from the design discussion):
+#   - Idempotent. Safe to run any time. Re-running when nothing changed is a
+#     near-instant no-op (stamp file check).
+#   - `git pull && tools/build` is the ENTIRE update ritual, on either machine.
+#   - "In sync" is a definable state: both repos at the refs in versions.env.
+#   - RAM-aware -j so a build can't thrash a machine into swap-death.
+#   - godot_voxel is wired in via a symlink at godot/modules/voxel — its docs
+#     REQUIRE the module folder be named exactly `voxel` (custom_modules= does
+#     not work; it derives the module name from the dir name `godot_voxel`,
+#     which mismatches the name the module's own code hardcodes). The symlink
+#     is the officially documented build path. We keep `git status` clean in
+#     the Godot checkout via .git/info/exclude instead.
+#
+# Exit 0 only when everything is coherent and the binary is current.
 
-GODOT_REF=4.6-stable
-VOXEL_REF=v1.6
-SCONS_ARGS=precision=double
+set -euo pipefail
 
-GODOT_PATH=../../godotengine/godot
-VOXEL_PATH=../../Zylann/godot_voxel
+# --- locate ourselves -------------------------------------------------------
 
-OK=true
+TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-checkout() {
-	project=$1
-	path=\$${project}_PATH
-	ref=\$${project}_REF
+# shellcheck source=/dev/null
+source "${TOOLS_DIR}/versions.env"
+# shellcheck source=/dev/null
+source "${TOOLS_DIR}/lib.sh"   # provides VOXMVP_ROOT, platform_binary_*, scons_platform
 
-	eval cd           \$${project}_PATH || OK=false
-	eval git checkout \$${project}_REF  || OK=false
+GODOT_DIR="$(cd "${VOXMVP_ROOT}/${GODOT_DIR_REL}" 2>/dev/null && pwd || true)"
+GODOT_VOXEL_DIR="$(cd "${VOXMVP_ROOT}/${GODOT_VOXEL_DIR_REL}" 2>/dev/null && pwd || true)"
+
+# --- pretty output ----------------------------------------------------------
+
+info()  { printf '  %s\n' "$*"; }
+step()  { printf '\n==> %s\n' "$*"; }
+die()   { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
+
+# --- 0. prerequisites -------------------------------------------------------
+# A fresh clone on a new machine fails confusingly without these. Check up
+# front with actionable messages instead of letting SCons explode 200 lines in.
+
+step "Checking prerequisites"
+
+need() {
+	command -v "$1" >/dev/null 2>&1 || die "missing required tool: '$1' — $2"
 }
 
+need git    "install git"
+need scons  "install scons (pip install scons, or your package manager)"
+need python3 "install Python 3"
 
-checkout VOXEL
-checkout GODOT
+case "$(uname -s)" in
+	Linux)
+		# build-essential equivalent
+		need cc "install a C compiler (build-essential / base-devel)"
+		need c++ "install a C++ compiler (build-essential / base-devel)"
+		;;
+	Darwin)
+		xcode-select -p >/dev/null 2>&1 \
+			|| die "Xcode command-line tools not installed — run: xcode-select --install"
+		;;
+esac
 
-if ! $OK; then
-	echo "Something went wrong."
-	exit 1
+info "all prerequisites present"
+
+# --- 1. repos exist ---------------------------------------------------------
+
+step "Checking source repositories"
+
+if [[ -z "${GODOT_DIR}" || ! -d "${GODOT_DIR}/.git" ]]; then
+	die "Godot repo not found at ${VOXMVP_ROOT}/${GODOT_DIR_REL}
+       Clone it with:
+         mkdir -p \"$(dirname "${VOXMVP_ROOT}/${GODOT_DIR_REL}")\"
+         git clone https://github.com/godotengine/godot.git \"${VOXMVP_ROOT}/${GODOT_DIR_REL}\""
 fi
 
-cd $GODOT_PATH
+if [[ -z "${GODOT_VOXEL_DIR}" || ! -d "${GODOT_VOXEL_DIR}/.git" ]]; then
+	die "godot_voxel repo not found at ${VOXMVP_ROOT}/${GODOT_VOXEL_DIR_REL}
+       Clone it with:
+         mkdir -p \"$(dirname "${VOXMVP_ROOT}/${GODOT_VOXEL_DIR_REL}")\"
+         git clone https://github.com/Zylann/godot_voxel.git \"${VOXMVP_ROOT}/${GODOT_VOXEL_DIR_REL}\""
+fi
 
-scons $SCONS_ARGS
+info "godot:       ${GODOT_DIR}"
+info "godot_voxel: ${GODOT_VOXEL_DIR}"
+
+# --- 2. check out the pinned refs ------------------------------------------
+# "Up to date" is the wrong concept (it's a moving target). "At the pinned
+# ref" is checkable and reproducible. We fetch, then checkout the exact ref.
+
+checkout_ref() {
+	local dir="$1" ref="$2" name="$3"
+	(
+		cd "$dir"
+
+		# Refuse to clobber uncommitted work — that's the user's, not ours.
+		if ! git diff --quiet || ! git diff --cached --quiet; then
+			die "${name} has uncommitted changes in ${dir}
+       Resolve them before building (this script won't touch your work)."
+		fi
+
+		# Fetch refs + tags so the pin is resolvable even if it's new.
+		git fetch --quiet --tags origin
+
+		# Resolve the pin to a concrete commit.
+		local target
+		target="$(git rev-parse --verify --quiet "${ref}^{commit}" || true)"
+		[[ -n "$target" ]] || die "${name}: pinned ref '${ref}' not found in ${dir}"
+
+		local current
+		current="$(git rev-parse HEAD)"
+
+		if [[ "$current" == "$target" ]]; then
+			info "${name}: already at ${ref} (${target:0:9})"
+		else
+			info "${name}: checking out ${ref} (${target:0:9})"
+			# Detached HEAD at the pin is the CORRECT state for a build pin.
+			git checkout --quiet --detach "$target"
+		fi
+	)
+}
+
+step "Pinning ${GODOT_DIR_REL} -> ${GODOT_REF}"
+checkout_ref "${GODOT_DIR}" "${GODOT_REF}" "godot"
+
+step "Pinning ${GODOT_VOXEL_DIR_REL} -> ${GODOT_VOXEL_REF}"
+checkout_ref "${GODOT_VOXEL_DIR}" "${GODOT_VOXEL_REF}" "godot_voxel"
+
+# --- 2b. wire godot_voxel into the Godot tree ------------------------------
+# godot_voxel MUST live at godot/modules/voxel — folder named exactly `voxel`.
+# We satisfy that with a symlink: godot/modules/voxel -> the godot_voxel repo.
+#
+# Three cases:
+#   missing            -> create it
+#   present & correct  -> no-op
+#   present & WRONG    -> fail loudly (don't silently clobber — a wrong link
+#                         here means someone's local layout differs, and we
+#                         want to know, not paper over it)
+#
+# A leftover symlink from an earlier (pre-rename) attempt is the "wrong"
+# case and will be reported with both paths.
+
+step "Wiring godot_voxel into godot/modules/voxel"
+
+VOXEL_LINK="$(voxel_module_link)"           # .../godot/modules/voxel
+VOXEL_TARGET="$(godot_voxel_dir)"           # .../Zylann/godot_voxel (resolved)
+
+if [[ -L "${VOXEL_LINK}" ]]; then
+	# It's a symlink — check where it actually points (resolved).
+	LINK_DEST="$(cd "$(dirname "${VOXEL_LINK}")" && cd "$(readlink "${VOXEL_LINK}")" 2>/dev/null && pwd || true)"
+	if [[ "${LINK_DEST}" == "${VOXEL_TARGET}" ]]; then
+		info "symlink already correct: modules/voxel -> ${VOXEL_TARGET}"
+	else
+		die "modules/voxel symlink points somewhere unexpected:
+       link:     ${VOXEL_LINK}
+       points to: ${LINK_DEST:-<unresolvable>}
+       expected:  ${VOXEL_TARGET}
+       Remove the link and re-run, or fix it by hand:
+         rm \"${VOXEL_LINK}\""
+	fi
+elif [[ -e "${VOXEL_LINK}" ]]; then
+	# Exists but is NOT a symlink — a real dir or file. Refuse to touch it.
+	die "modules/voxel exists but is not a symlink: ${VOXEL_LINK}
+       It may be a real copy of the module from an earlier attempt.
+       Inspect it, and if it's redundant, remove it and re-run:
+         rm -rf \"${VOXEL_LINK}\""
+else
+	info "creating symlink: modules/voxel -> ${VOXEL_TARGET}"
+	ln -s "${VOXEL_TARGET}" "${VOXEL_LINK}"
+fi
+
+# Keep `git status` in the Godot checkout clean. The symlink is local build
+# wiring, not something to commit (it's not our repo anyway). A local-only
+# exclude entry hides it without touching upstream's tracked .gitignore, so
+# a genuinely unexpected change in the Godot tree still stands out.
+GODOT_EXCLUDE="${GODOT_DIR}/.git/info/exclude"
+if [[ -f "${GODOT_EXCLUDE}" ]] && ! grep -qxF "modules/voxel" "${GODOT_EXCLUDE}"; then
+	echo "modules/voxel" >> "${GODOT_EXCLUDE}"
+	info "added modules/voxel to godot/.git/info/exclude"
+fi
+
+# --- 3. work out a safe job count ------------------------------------------
+# Godot's compile is memory-bound, not CPU-bound. Rule of thumb: ~1 job per
+# 2 GB RAM, capped at core count, floor of 2 so a small machine still moves.
+# This is what stops "built fine on the laptop, swap-killed the desktop".
+
+step "Computing parallel job count"
+
+detect_cores() {
+	if command -v nproc >/dev/null 2>&1; then
+		nproc
+	else
+		sysctl -n hw.ncpu 2>/dev/null || echo 4
+	fi
+}
+
+detect_ram_gb() {
+	case "$(uname -s)" in
+		Linux)
+			# MemTotal is in kB.
+			awk '/MemTotal/ { printf "%d", $2 / 1024 / 1024 }' /proc/meminfo
+			;;
+		Darwin)
+			# hw.memsize is in bytes.
+			local bytes
+			bytes="$(sysctl -n hw.memsize)"
+			echo $(( bytes / 1024 / 1024 / 1024 ))
+			;;
+		*)
+			echo 8
+			;;
+	esac
+}
+
+CORES="$(detect_cores)"
+RAM_GB="$(detect_ram_gb)"
+RAM_JOBS=$(( RAM_GB / 2 ))
+
+JOBS="$CORES"
+(( RAM_JOBS < JOBS )) && JOBS="$RAM_JOBS"
+(( JOBS < 2 ))        && JOBS=2
+
+info "cores: ${CORES}   ram: ${RAM_GB}GB   ->   -j${JOBS}"
+
+# --- 4. stamp check: skip the build if nothing changed ---------------------
+# Stamp = hash of (godot commit + voxel commit + scons args + platform).
+# Same trick make/ninja use, just coarser. If the stamp matches and the
+# binary exists, there's nothing to do.
+
+step "Checking build stamp"
+
+GODOT_COMMIT="$(cd "${GODOT_DIR}" && git rev-parse HEAD)"
+VOXEL_COMMIT="$(cd "${GODOT_VOXEL_DIR}" && git rev-parse HEAD)"
+BINARY_PATH="$(platform_binary_path)"
+STAMP_FILE="${GODOT_DIR}/bin/.voxmvp-build-stamp"
+
+stamp_content() {
+	printf '%s\n' \
+		"godot=${GODOT_COMMIT}" \
+		"voxel=${VOXEL_COMMIT}" \
+		"args=${SCONS_EXTRA_ARGS}" \
+		"platform=$(scons_platform)" \
+		"binary=$(platform_binary_name)"
+}
+
+WANT_STAMP="$(stamp_content | shasum -a 256 2>/dev/null | cut -d' ' -f1 \
+	|| stamp_content | sha256sum | cut -d' ' -f1)"
+
+if [[ -f "${STAMP_FILE}" && -x "${BINARY_PATH}" ]]; then
+	HAVE_STAMP="$(cat "${STAMP_FILE}")"
+	if [[ "${HAVE_STAMP}" == "${WANT_STAMP}" ]]; then
+		info "stamp matches and binary exists — nothing to build"
+		BUILD_NEEDED=0
+		STAMP_MISMATCH=0
+	else
+		info "stamp mismatch — clean rebuild required"
+		BUILD_NEEDED=1
+		# A mismatched stamp means something structural changed (a ref bump,
+		# a precision/arg change, a platform change). Incremental builds don't
+		# reliably survive that — SCons can leave stale .gen.cpp files that
+		# reference the old config. So a mismatch forces `scons --clean` first.
+		STAMP_MISMATCH=1
+	fi
+else
+	info "no stamp or no binary — build required"
+	BUILD_NEEDED=1
+	# No prior stamp -> nothing to clean. (Fresh tree, or first run.)
+	STAMP_MISMATCH=0
+fi
+
+# --- 5. build ---------------------------------------------------------------
+# godot_voxel is found because modules/voxel (the symlink from step 2b) is
+# physically inside the Godot tree. No custom_modules= — that's the thing
+# that produced the initialize_godot_voxel_module mismatch.
+
+if [[ "${BUILD_NEEDED}" -eq 1 ]]; then
+	step "Building Godot + godot_voxel"
+
+	SCONS_PLATFORM="$(scons_platform)" || die "unsupported platform for SCons"
+
+	# On a stamp mismatch, clean first. SCons --clean with the SAME args as
+	# the real build removes everything that build would produce, including
+	# the generated .gen.cpp/.gen.h files that go stale across config changes.
+	if [[ "${STAMP_MISMATCH}" -eq 1 ]]; then
+		info "stamp mismatch — running scons --clean before rebuild"
+		(
+			cd "${GODOT_DIR}"
+			# shellcheck disable=SC2086
+			scons --clean \
+				platform="${SCONS_PLATFORM}" \
+				target=editor \
+				${SCONS_EXTRA_ARGS}
+		)
+	fi
+
+	info "platform=${SCONS_PLATFORM} target=editor -j${JOBS} ${SCONS_EXTRA_ARGS}"
+	info "module: modules/voxel -> ${VOXEL_TARGET}"
+
+	(
+		cd "${GODOT_DIR}"
+		# shellcheck disable=SC2086
+		scons \
+			platform="${SCONS_PLATFORM}" \
+			target=editor \
+			-j"${JOBS}" \
+			${SCONS_EXTRA_ARGS}
+	)
+
+	# Build succeeded — verify the binary actually landed where we expect,
+	# then write the stamp. (If the name is wrong, better to fail here than
+	# silently in bin/godot later.)
+	[[ -x "${BINARY_PATH}" ]] || die "build reported success but no binary at:
+       ${BINARY_PATH}
+       The platform_binary_name() mapping in tools/lib.sh may be wrong for
+       this machine. Check what landed in ${GODOT_DIR}/bin/ and fix lib.sh."
+
+	echo "${WANT_STAMP}" > "${STAMP_FILE}"
+	info "build complete, stamp written"
+else
+	step "Build up to date — skipping"
+fi
+
+# --- 6. bin/godot is handled by its own committed wrapper script -----------
+# Nothing to generate: bin/godot is a platform-dispatching wrapper checked
+# into the repo. We just confirm the binary it will look for is present.
+
+step "Verifying bin/godot target"
+
+if [[ -x "${BINARY_PATH}" ]]; then
+	info "bin/godot will exec: ${BINARY_PATH}"
+else
+	die "expected binary missing: ${BINARY_PATH}"
+fi
+
+step "Done — this machine is in sync with the pinned refs"
+printf '\n'

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+#
+# bin/godot — platform-dispatching wrapper for the locally-built engine.
+#
+# Why a script and not a symlink: a symlink can't branch on platform, and a
+# committed symlink pointing at the Linux binary is a dangling link on the
+# Mac. This script is shared; the symlink couldn't be.
+#
+# It sources tools/lib.sh so the platform -> binary-name mapping lives in
+# exactly ONE place, shared with tools/build. The thing that builds the
+# binary and the thing that runs it can never disagree about its name.
+#
+# exec (not plain invocation) so signals and exit codes pass straight
+# through — matters if launched from another script, or for Ctrl-C.
+
+set -euo pipefail
+
+# bin/ is a sibling of tools/ under the project root.
+BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${BIN_DIR}/.." && pwd)"
+
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/tools/versions.env"   # GODOT_DIR_REL
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/tools/lib.sh"         # platform_binary_path, VOXMVP_ROOT
+
+BINARY="$(platform_binary_path)" || {
+	echo "bin/godot: could not determine binary path for this platform" >&2
+	exit 1
+}
+
+if [[ ! -x "${BINARY}" ]]; then
+	cat >&2 <<-EOF
+	bin/godot: no Godot binary at
+	  ${BINARY}
+
+	The engine hasn't been built on this machine yet, or the build is stale.
+	Run:
+	  tools/build
+	EOF
+	exit 1
+fi
+
+exec "${BINARY}" "$@"
