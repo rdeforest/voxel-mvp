@@ -24,6 +24,7 @@ var _mouse_button_actions: Dictionary
 @onready var mode_label:   Label               = $HUD/BoxContainer/ModeLabel
 @onready var edit_preview: MeshInstance3D      = $EditPreview
 @onready var integrity:    StructuralIntegrity = get_parent().get_node("StructuralIntegrity")
+@onready var terrain:      VoxelLodTerrain     = get_parent().get_node("VoxelLodTerrain")
 
 # Terrain editing
 const EDIT_RADIUS   = 3.0
@@ -57,21 +58,21 @@ func _ready() -> void:
     edit_modes = [
         EditMode.new()                                            \
             .named("Dig")                                         \
-            .on_execute(_edit_dig)                                \
+            .on_make_action(_make_dig_action)                     \
             .preview_mesh(    func(_hp, _hn): return sphere)      \
             .preview_material(func(_hp, _hn): return dig_mat)     \
             .preview_position(func( hp,  hn): return hp - hn * (EDIT_RADIUS * 0.5)),
 
         EditMode.new()                                            \
             .named("Fill")                                        \
-            .on_execute(_edit_fill)                               \
+            .on_make_action(_make_fill_action)                    \
             .preview_mesh(    func(_hp, _hn): return sphere)      \
             .preview_material(func(_hp, _hn): return fill_mat)    \
             .preview_position(func( hp,  hn): return hp + hn * (EDIT_RADIUS * 0.5)),
 
         EditMode.new()                                            \
             .named("Flatten")                                     \
-            .on_execute(_edit_flatten)                            \
+            .on_make_action(_make_flatten_action)                 \
             .preview_mesh(    func(_hp, _hn): return plane)       \
             .preview_material(func(_hp, _hn): return flatten_mat) \
             .preview_position(func( hp, _hn): return hp),
@@ -173,146 +174,33 @@ func _physics_process(delta: float) -> void:
 func _try_edit_terrain() -> void:
     if not raycast.is_colliding():
         return
-    var hit_pos := raycast.get_collision_point()
+    var hit_pos    := raycast.get_collision_point()
     var hit_normal := raycast.get_collision_normal()
-    current_mode().execute.call(hit_pos, hit_normal)
-
-
-func _get_voxel_tool() -> VoxelTool:
-    var terrain := get_parent().get_node("VoxelLodTerrain") as VoxelLodTerrain
-
-    if terrain == null:
-        return null
-
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-
-    return vt
-
-
-func _edit_dig(hit_pos: Vector3, hit_normal: Vector3) -> void:
-    var voxel_tool := _get_voxel_tool()
-    if voxel_tool == null:
+    var action: Action = current_mode().make_action.call(hit_pos, hit_normal)
+    if action == null:
         return
+    if action.validate():
+        action.execute()
+    # else: refused. Feedback mechanism comes later.
 
+
+# --- Action factories (the "targeting" layer for each mode) ---
+
+func _make_dig_action(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var center := hit_pos - hit_normal * (EDIT_RADIUS * 0.5)
+    return DigAction.new(center, EDIT_RADIUS, terrain, integrity)
 
-    voxel_tool.mode = VoxelTool.MODE_REMOVE
-    voxel_tool.do_sphere(center, EDIT_RADIUS)
-
-    var origin     := center - Vector3.ONE *  EDIT_RADIUS
-    var dimensions :=          Vector3.ONE * (EDIT_RADIUS * 2)
-
-    # Notify integrity manager of removed voxels
-    VoxelUtils.for_each_in_bounding_box(
-        origin,
-        dimensions,
-        func(pos: Vector3i):
-            if VoxelUtils.is_in_sphere(Vector3(pos), center, EDIT_RADIUS):
-                integrity.remove_voxel(pos)
-    )
-
-
-func _edit_fill(hit_pos: Vector3, hit_normal: Vector3) -> void:
-    var voxel_tool := _get_voxel_tool()
-    if voxel_tool == null:
-        return
-
+func _make_fill_action(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var center := hit_pos + hit_normal * (EDIT_RADIUS * 0.5)
+    return FillAction.new(center, EDIT_RADIUS, terrain, integrity, self)
 
-    voxel_tool.mode = VoxelTool.MODE_ADD
-    voxel_tool.do_sphere(center, EDIT_RADIUS)
-
-    var origin     := center - Vector3.ONE *  EDIT_RADIUS
-    var dimensions :=          Vector3.ONE * (EDIT_RADIUS * 2)
-
-    # Notify integrity manager of placed voxels
-    VoxelUtils.for_each_in_bounding_box(
-        origin,
-        dimensions,
-        func(pos: Vector3i) -> void:
-            if Vector3(pos).distance_to(center) <= EDIT_RADIUS:
-                integrity.register_voxel(pos, Materials.STONE)
-    )
-
-    _push_player_above_terrain(voxel_tool)
-
-
-func _edit_flatten(hit_pos: Vector3, hit_normal: Vector3) -> void:
-    var voxel_tool := _get_voxel_tool()
-    if voxel_tool == null:
-        return
-
-    # Determine which normal to flatten against
+func _make_flatten_action(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var flatten_normal := _get_flatten_normal()
     if flatten_normal == Vector3.ZERO:
         flatten_normal = hit_normal
+    var center := hit_pos - hit_normal * (EDIT_RADIUS * 0.5)
+    return FlattenAction.new(center, hit_pos, flatten_normal, EDIT_RADIUS, terrain, self)
 
-    var center     := hit_pos - hit_normal * (EDIT_RADIUS * 0.5)
-
-    var origin     := center - Vector3.ONE *  EDIT_RADIUS
-    var dimensions :=          Vector3.ONE * (EDIT_RADIUS * 2)
-
-    VoxelUtils.for_each_in_bounding_box(
-        origin,
-        dimensions,
-        func(pos: Vector3i) -> void:
-            var plane_dist: float = flatten_normal.dot(Vector3(pos) - hit_pos)
-
-            voxel_tool.set_voxel_f(pos, plane_dist)
-    )
-
-    _push_player_above_terrain(voxel_tool)
-
-
-# How far above / below the player's current Y to search for the terrain
-# surface when correcting a fall-through. The window is centred generously on
-# the player rather than started at their feet: a flatten can drop the player
-# several voxels before this runs, and the old "march up 20 from current
-# position" approach failed once they'd fallen past its reach. Searching a
-# wide absolute window instead is robust regardless of how far they fell.
-const FALLTHROUGH_SEARCH_UP   := 8     # voxels above current Y to start scan
-const FALLTHROUGH_SEARCH_DOWN := 64    # voxels below current Y to give up at
-
-# Called after edits that can remove ground from under the player (fill can
-# bury them, flatten can delete their floor). Finds the terrain surface in
-# the player's column and places them on top of it.
-#
-# This is the "cheap fix" for the fall-through-world bug: it is edit-driven
-# (only runs when an edit happens) and column-based (only checks the player's
-# X/Z). The known triggers are all edit-driven, so that covers them. A
-# continuous per-tick check would catch fall-through from any cause, and a
-# respawn-anchor system would handle "no ground in the column at all"
-# properly — both deliberately deferred (see roadmap).
-func _push_player_above_terrain(voxel_tool: VoxelTool) -> void:
-    var feet_pos := global_position
-    var col_x := roundi(feet_pos.x)
-    var col_z := roundi(feet_pos.z)
-    var start_y := roundi(feet_pos.y) + FALLTHROUGH_SEARCH_UP
-    var stop_y  := roundi(feet_pos.y) - FALLTHROUGH_SEARCH_DOWN
-
-    # Scan downward through the column looking for the first solid voxel.
-    # The voxel directly above it is the surface the player should stand on.
-    # We scan top-down so the FIRST solid we hit is the topmost one — i.e.
-    # the actual surface, not some buried layer.
-    var y := start_y
-    while y >= stop_y:
-        var sdf := voxel_tool.get_voxel_f(Vector3i(col_x, y, col_z))
-        # sdf < SDF_SOLID_THRESHOLD == inside solid terrain.
-        if sdf < VoxelConstants.SDF_SOLID_THRESHOLD:
-            # y is the topmost solid voxel. Stand the player one voxel above.
-            global_position.y = float(y) + VoxelConstants.VOXEL_SIZE
-            return
-        y -= 1
-
-    # No solid voxel found anywhere in the search window. The player is over
-    # a deep hole or out of bounds — there is no good answer here without a
-    # respawn-anchor system. Leave them where they are rather than blindly
-    # teleporting; if they were falling, gravity continues, and at worst they
-    # fall to wherever the terrain actually is. (Known-weak path; the real
-    # fix is the deferred respawn anchor.)
-    push_warning("_push_player_above_terrain: no terrain found in column "
-        + str(Vector2i(col_x, col_z)) + " within search window")
 
 func _get_flatten_normal() -> Vector3:
     if Input.is_key_pressed(KEY_SHIFT):

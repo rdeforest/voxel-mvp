@@ -5,3 +5,6 @@
 # Vim
 .*.sw?
 .sw?
+
+# MacOS
+.DS_Store
