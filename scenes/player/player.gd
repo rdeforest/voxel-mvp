@@ -14,7 +14,6 @@ var edit_mode_index:       int             = 0
 
 var wireframe_enabled := false
 
-var _named_actions:        Dictionary
 var _key_actions:          Dictionary
 var _mouse_button_actions: Dictionary
 
