@@ -27,3 +27,13 @@ static var SAND    := Materials.new("Sand",    0.25, 1.0, 30.0,  "crumble")
 static var STONE   := Materials.new("Stone",   0.05, 1.0, 90.0,  "fracture")
 static var WOOD    := Materials.new("Wood",    0.10, 1.0, -1.0,  "snap")
 static var METAL   := Materials.new("Metal",   0.03, 1.0, -1.0,  "bend")
+
+static var _by_name: Dictionary = {}
+
+static func from_name(n: StringName) -> Materials:
+    if _by_name.is_empty():
+        _by_name = {
+            &"Terrain": TERRAIN, &"Dirt": DIRT,  &"Sand":  SAND,
+            &"Stone":   STONE,   &"Wood": WOOD,   &"Metal": METAL,
+        }
+    return _by_name.get(n, STONE)

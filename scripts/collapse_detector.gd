@@ -276,7 +276,7 @@ func _component_still_falling(pc: Dictionary) -> bool:
 
 # Re-dirty a voxel's tracked neighbours so propagation re-evaluates them.
 func _redirty_neighbors(pos: Vector3i) -> void:
-    for neighbor in _neighbors(pos):
+    for neighbor in VoxelUtils.neighbors(pos):
         if _integrity.voxel_data.has(neighbor) \
                 and not _integrity.voxel_data[neighbor].dirty:
             _integrity.voxel_data[neighbor].dirty = true
@@ -308,7 +308,7 @@ func _advance_flood(flood: Dictionary, budget: int) -> bool:
         _claimed[pos] = true
         processed += 1
 
-        for neighbor in _neighbors(pos):
+        for neighbor in VoxelUtils.neighbors(pos):
             if visited.has(neighbor):
                 continue
             # We only flood across other fall candidates. Boundaries
@@ -361,81 +361,55 @@ func _is_fall_candidate(pos: Vector3i) -> bool:
     return _integrity.voxel_data[pos].support <= VoxelConstants.FALL_THRESHOLD
 
 
-func _neighbors(pos: Vector3i) -> Array:
-    return [
-        pos + Vector3i( 1,  0,  0),
-        pos + Vector3i(-1,  0,  0),
-        pos + Vector3i( 0,  1,  0),
-        pos + Vector3i( 0, -1,  0),
-        pos + Vector3i( 0,  0,  1),
-        pos + Vector3i( 0,  0, -1),
-    ]
 
 
-# --- Materialization (unchanged) ------------------------------------------
+# --- Materialization -------------------------------------------------------
 
-# Take a connected component of unsupported voxels and turn it into a falling
-# rigid body. For v0.0 we use greedy axis-aligned box merge for collision and
-# a simple BoxMesh-per-merged-box for visuals. (We can switch to slicing the
-# existing voxel mesh later; that's a polish pass.)
+# Greedy-box merge the unsupported terrain component into a falling RigidBody3D,
+# then carve those cells out of the SDF.
 func _materialize_collapse(voxels: Array) -> void:
-    # Compute centroid (used to position the rigid body's origin).
     var centroid := Vector3.ZERO
     for v in voxels:
         centroid += Vector3(v)
     centroid /= float(voxels.size())
-    # Voxel-grid cells are VOXEL_SIZE meters; offset to cell center.
     centroid += VoxelConstants.VOXEL_CENTER_OFFSET
 
-    # Greedy merge into the minimum set of axis-aligned boxes.
     var voxel_set: Dictionary = {}
     for v in voxels:
         voxel_set[v] = true
     var boxes := _greedy_merge_boxes(voxel_set)
 
-    # Build the rigid body.
     var body := RigidBody3D.new()
     body.global_position = centroid
-
-    # Mass scales with voxel count (1kg per voxel for now; revisit per-material).
-    body.mass = float(voxels.size())
-
-    body.can_sleep = false
+    body.mass            = float(voxels.size())
+    body.can_sleep       = false
 
     for box in boxes:
-        # box is { min: Vector3i, size: Vector3i }
         var box_center_local := Vector3(box.min) + Vector3(box.size) * 0.5 - centroid
 
         var shape := BoxShape3D.new()
         shape.size = Vector3(box.size)
         var collider := CollisionShape3D.new()
-        collider.shape = shape
+        collider.shape    = shape
         collider.position = box_center_local
         body.add_child(collider)
 
         var mesh := BoxMesh.new()
         mesh.size = Vector3(box.size)
         var mi := MeshInstance3D.new()
-        mi.mesh = mesh
+        mi.mesh     = mesh
         mi.position = box_center_local
-        # Visual: brown-ish so we can see it falling. Real material color TBD.
         var mat := StandardMaterial3D.new()
         mat.albedo_color = Color(0.45, 0.30, 0.18)
         mi.material_override = mat
         body.add_child(mi)
 
-    # Parent into the world (sibling of the terrain).
     _integrity.get_parent().add_child(body)
 
-    # Clear the source voxels from the SDF terrain and the integrity tracker.
-    # This will dirty neighbors and may trigger cascading collapses next pass.
     var voxel_tool: VoxelTool = _integrity.terrain.get_voxel_tool()
     voxel_tool.channel = VoxelBuffer.CHANNEL_SDF
-    voxel_tool.mode = VoxelTool.MODE_REMOVE
+    voxel_tool.mode    = VoxelTool.MODE_REMOVE
     for v in voxels:
-        # Set SDF positive (air) at each cell. do_sphere with radius < 1
-        # would be approximate; set_voxel_f is exact.
-        # We set the value to 5 to account for the interpolation of the SDF value.
         voxel_tool.set_voxel_f(v, VoxelConstants.SDF_AIR)
         _integrity.remove_voxel(v)
 

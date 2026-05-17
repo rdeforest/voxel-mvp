@@ -6,6 +6,7 @@ var make_action:          Callable  # (hit_pos, hit_normal) -> Action
 var get_preview_mesh:     Callable
 var get_preview_material: Callable
 var get_preview_position: Callable
+var get_preview_basis:    Callable  # optional; (hit_pos, hit_normal) -> Basis
 
 func named(                p_name: String)   -> EditMode:
     mode_name            = p_name
@@ -25,4 +26,8 @@ func preview_material(     fn:     Callable) -> EditMode:
 
 func preview_position(     fn:     Callable) -> EditMode:
     get_preview_position = fn
+    return self
+
+func preview_basis(        fn:     Callable) -> EditMode:
+    get_preview_basis    = fn
     return self

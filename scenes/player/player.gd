@@ -12,7 +12,8 @@ var gravity:               float           = ProjectSettings.get_setting("physic
 var edit_modes:            Array[EditMode] = []
 var edit_mode_index:       int             = 0
 
-var wireframe_enabled := false
+var wireframe_enabled  := false
+var _build_rotation:   int = 0
 
 var _key_actions:          Dictionary
 var _mouse_button_actions: Dictionary
@@ -32,6 +33,8 @@ const EDIT_REACH    = 20.0
 
 const SPHERE_RADIAL_SEGMENTS = 16
 const SPHERE_RINGS           =  8
+
+const BOARD_PART := preload("res://assets/parts/board/board.tres")
 
 @onready var raycast: RayCast3D = $Head/RayCast3D
 
@@ -53,6 +56,10 @@ func _ready() -> void:
     var dig_mat     := _make_preview_material(Color(1.0, 0.2, 0.2, 0.3))
     var fill_mat    := _make_preview_material(Color(0.2, 0.4, 1.0, 0.3))
     var flatten_mat := _make_preview_material(Color(1.0, 0.9, 0.2, 0.4))
+    var build_mat   := _make_preview_material(Color(1.0, 1.0, 0.5, 0.4))
+
+    var build_mesh      := BoxMesh.new()
+    build_mesh.size      = Vector3(2.0, 0.1, 0.012)
 
     edit_modes = [
         EditMode.new()                                            \
@@ -74,6 +81,30 @@ func _ready() -> void:
             .on_make_action(_make_flatten_action)                 \
             .preview_mesh(    func(_hp, _hn): return plane)       \
             .preview_material(func(_hp, _hn): return flatten_mat) \
+            .preview_position(func( hp, _hn): return hp)          \
+            .preview_basis(   func(_hp,  hn):
+                var n := _get_flatten_normal()
+                if n == Vector3.ZERO: n = hn
+                if n.is_equal_approx(Vector3.UP):   return Basis.IDENTITY
+                if n.is_equal_approx(Vector3.DOWN): return Basis(Vector3.RIGHT, Vector3.DOWN, Vector3.FORWARD)
+                var up      := n
+                var right   := up.cross(Vector3.UP).normalized()
+                var forward := right.cross(up).normalized()
+                return Basis(right, up, forward)),
+
+        EditMode.new()                                                                                         \
+            .named("Build")                                                                                    \
+            .on_make_action(_make_construction_action)                                                         \
+            .preview_mesh(    func(_hp, _hn): return build_mesh)                                              \
+            .preview_material(func(_hp, _hn): return build_mat)                                               \
+            .preview_position(func( hp, _hn): return Vector3(roundi(hp.x), hp.y + 0.05, roundi(hp.z)))        \
+            .preview_basis(   func(_hp, _hn): return Basis.from_euler(Vector3(0, _build_rotation * PI * 0.5, 0))),
+
+        EditMode.new()                                          \
+            .named("Remove")                                    \
+            .on_make_action(_make_removal_action)               \
+            .preview_mesh(    func(_hp, _hn): return null)      \
+            .preview_material(func(_hp, _hn): return null)      \
             .preview_position(func( hp, _hn): return hp),
     ]
 
@@ -83,6 +114,7 @@ func _ready() -> void:
         KEY_TAB: _cycle_edit_mode,
         KEY_Q:   _quit_game,
         KEY_F:   _toggle_wireframe,
+        KEY_R:   _rotate_build,
     }
 
     _mouse_button_actions = {
@@ -198,7 +230,7 @@ func _make_flatten_action(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     if flatten_normal == Vector3.ZERO:
         flatten_normal = hit_normal
     var center := hit_pos - hit_normal * (EDIT_RADIUS * 0.5)
-    return FlattenAction.new(center, hit_pos, flatten_normal, EDIT_RADIUS, terrain, self)
+    return FlattenAction.new(center, hit_pos, flatten_normal, EDIT_RADIUS, terrain, self, integrity)
 
 
 func _get_flatten_normal() -> Vector3:
@@ -215,3 +247,18 @@ func _get_flatten_normal() -> Vector3:
 
     # Default: use the surface normal
     return Vector3.ZERO  # sentinel meaning "use hit normal"
+
+
+func _rotate_build() -> void:
+    _build_rotation = (_build_rotation + 1) % 4
+
+func _make_removal_action(_hit_pos: Vector3, _hit_normal: Vector3) -> Action:
+    var collider := raycast.get_collider()
+    if collider == null or not integrity.part_registry.has(collider):
+        return null
+    return RemovalAction.new(collider, integrity)
+
+func _make_construction_action(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
+    var placement_pos := Vector3(roundi(hit_pos.x), hit_pos.y,        roundi(hit_pos.z))
+    var anchor        := Vector3i(roundi(hit_pos.x), floori(hit_pos.y), roundi(hit_pos.z))
+    return ConstructionAction.new(BOARD_PART, placement_pos, anchor, _build_rotation, terrain, integrity, self)

@@ -62,3 +62,5 @@ func execute() -> void:
             if VoxelUtils.is_in_sphere(Vector3(pos), position, radius):
                 integrity.register_voxel(pos, Materials.STONE)
     )
+
+    integrity.notify_terrain_changed(position, radius)

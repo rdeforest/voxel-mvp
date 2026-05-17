@@ -12,6 +12,7 @@ var normal:      Vector3   # normal of the flatten plane
 var radius:      float
 
 var terrain:     VoxelLodTerrain
+var integrity:   StructuralIntegrity
 var player:      CharacterBody3D  # for fall-through prevention
 
 # Clearance below the plane within which the action is refused if the
@@ -25,6 +26,7 @@ func _init(
     p_radius:      float,
     p_terrain:     VoxelLodTerrain,
     p_player:      CharacterBody3D,
+    p_integrity:   StructuralIntegrity = null,
 ) -> void:
     center      = p_center
     plane_point = p_plane_point
@@ -32,6 +34,7 @@ func _init(
     radius      = p_radius
     terrain     = p_terrain
     player      = p_player
+    integrity   = p_integrity
 
 func validate() -> bool:
     # Refuse-don't-deform: if flattening would bury the player, refuse.
@@ -68,3 +71,6 @@ func execute() -> void:
             var plane_dist: float = normal.dot(Vector3(pos) - plane_point)
             voxel_tool.set_voxel_f(pos, plane_dist)
     )
+
+    if integrity != null:
+        integrity.notify_terrain_changed(center, radius)

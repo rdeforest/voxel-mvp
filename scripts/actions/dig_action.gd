@@ -49,3 +49,5 @@ func execute() -> void:
             if VoxelUtils.is_in_sphere(Vector3(pos), position, radius):
                 integrity.remove_voxel(pos)
     )
+
+    integrity.notify_terrain_changed(position, radius)
