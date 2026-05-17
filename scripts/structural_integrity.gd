@@ -64,6 +64,7 @@ func notify_terrain_changed(center: Vector3, radius: float) -> void:
         if Vector3(pos).distance_to(center) <= expanded and not voxel_data[pos].dirty:
             voxel_data[pos].dirty = true
             dirty_queue.append(pos)
+    _wake_falling_bodies()
 
 func register_part(node: Node3D, cells: Array[Vector3i], material: Materials) -> void:
     part_registry[node] = PartData.new(cells, material)
@@ -82,6 +83,7 @@ func remove_part(node: Node3D) -> void:
                 dirty_queue.append(neighbor)
     part_registry.erase(node)
     _part_strain.erase(node)
+    _wake_falling_bodies()
 
 func has_part_cell(pos: Vector3i) -> bool:
     return _cell_to_part.has(pos)
@@ -107,6 +109,8 @@ func _physics_process(delta: float) -> void:
         _process_dirty_queue()
     else:
         _collapse_detector.step()
+
+    _strain_pulse_phase += delta * VoxelConstants.STRAIN_PULSE_HZ * TAU
 
     _collapse_detector.tick_pending(delta)
     _tick_part_strain(delta)
@@ -182,24 +186,52 @@ func _is_part_supported(node: Node3D) -> bool:
     return false
 
 func _tick_part_strain(delta: float) -> void:
-    var to_collapse: Array = []
+    var pulse                 := 0.5 + 0.5 * sin(_strain_pulse_phase)
+    var to_collapse: Array     = []
     for node in part_registry:
         if _is_part_supported(node):
-            _part_strain.erase(node)
+            if _part_strain.has(node):
+                _part_strain.erase(node)
+                _apply_part_strain_visual(node, 0.0, 0.0)
         else:
-            _part_strain[node] = _part_strain.get(node, 0.0) + delta
+            _part_strain[node]   = _part_strain.get(node, 0.0) + delta
+            var progress: float  = _part_strain[node] / VoxelConstants.STRAIN_DURATION_SEC
+            _apply_part_strain_visual(node, progress, pulse)
             if _part_strain[node] >= VoxelConstants.STRAIN_DURATION_SEC:
                 to_collapse.append(node)
     for node in to_collapse:
         _collapse_part(node)
+
+func _apply_part_strain_visual(node: Node3D, progress: float, pulse: float) -> void:
+    for child in node.get_children():
+        var mi := child as MeshInstance3D
+        if mi == null:
+            continue
+        if progress <= 0.0:
+            mi.material_override = null
+            continue
+        var mat := mi.material_override as StandardMaterial3D
+        if mat == null:
+            mat = StandardMaterial3D.new()
+            mi.material_override = mat
+        mat.albedo_color               = get_support_color(1.0 - progress)
+        mat.emission_enabled           = true
+        mat.emission                   = Color(1.0, 0.0, 0.0)
+        mat.emission_energy_multiplier = progress * pulse * 2.0
+
+func _wake_falling_bodies() -> void:
+    for child in get_parent().get_children():
+        var body := child as RigidBody3D
+        if body != null and body.sleeping:
+            body.sleeping = false
 
 func _collapse_part(node: Node3D) -> void:
     var data := part_registry[node] as PartData
     var mass := float(data.cells.size())
 
     var body := RigidBody3D.new()
-    body.can_sleep    = false
-    body.mass         = mass
+    body.mass          = mass
+    body.continuous_cd = true
     node.get_parent().add_child(body)
     body.global_transform = node.global_transform
     for child in node.get_children():
@@ -249,7 +281,6 @@ func update_debug_visuals() -> void:
     if not debug_visuals_enabled:
         return
 
-    _strain_pulse_phase += get_physics_process_delta_time() * VoxelConstants.STRAIN_PULSE_HZ * TAU
     var pulse := 0.5 + 0.5 * sin(_strain_pulse_phase)
 
     var straining: Dictionary = _collapse_detector.get_straining_voxels()
