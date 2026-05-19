@@ -189,6 +189,14 @@ func _calculate_support(pos: Vector3i) -> float:
         if voxel_data.has(neighbor):
             s = voxel_data[neighbor].support
         elif _is_terrain_solid(neighbor):
+            # Untracked solid (natural terrain). Only counts as a supporter
+            # if it's below or beside us — gravity flows down. The mass of
+            # rock ABOVE a cave doesn't hold the ceiling up; it pushes down.
+            # Without this gate, every ceiling cell sees the untracked solid
+            # directly above it and short-circuits to FULL_SUPPORT, defeating
+            # the entire cave-integrity gradient.
+            if neighbor.y > pos.y:
+                continue
             s = FULL_SUPPORT
         elif _cell_to_part.has(neighbor):
             # A placed Part occupies this neighbour cell. Take the best
