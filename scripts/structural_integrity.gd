@@ -142,6 +142,14 @@ func register_part(node: Node3D, cells: Array[Vector3i], material: Materials, pl
         if not _cell_to_part.has(cell):
             _cell_to_part[cell] = []
         _cell_to_part[cell].append(node)
+        # Dirty any tracked terrain neighbours so they pick up this part as a
+        # supporter on the next propagation pass. Without this, a pillar placed
+        # under a strained ceiling never propagates its support upward — the
+        # ceiling sits on stale values until something else dirties it.
+        for neighbor in VoxelUtils.neighbors(cell):
+            if voxel_data.has(neighbor) and not voxel_data[neighbor].dirty:
+                voxel_data[neighbor].dirty = true
+                dirty_queue.append(neighbor)
 
 func remove_part(node: Node3D) -> void:
     if not part_registry.has(node):
@@ -340,7 +348,7 @@ func _calculate_part_support(node: Node3D, data: PartData) -> float:
             found_full = true
             continue
         if voxel_data.has(support_cell):
-            var rec := voxel_data[support_cell]
+            var rec: Dictionary = voxel_data[support_cell]
             best          = maxf(best, rec.support)
             has_supporter = true
             if rec.dirty:

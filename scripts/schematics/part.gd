@@ -14,13 +14,14 @@ extends Schematic
 @export var scene:         PackedScene
 
 
-func instantiate() -> Node3D:
+func instantiate(material_override: StringName = &"") -> Node3D:
     if scene != null:
         return scene.instantiate()
-    return _build_procedural()
+    var name: StringName = material_override if material_override != &"" else material_name
+    return _build_procedural(name)
 
 
-func _build_procedural() -> StaticBody3D:
+func _build_procedural(name: StringName) -> StaticBody3D:
     var body := StaticBody3D.new()
     var mid  := Vector3(0.0, dimensions.y * 0.5, 0.0)
 
@@ -28,7 +29,7 @@ func _build_procedural() -> StaticBody3D:
     box.size = dimensions
 
     var mat := StandardMaterial3D.new()
-    mat.albedo_color = Materials.from_name(material_name).albedo
+    mat.albedo_color = Materials.from_name(name).albedo
     mat.roughness    = 0.85
 
     var mi := MeshInstance3D.new()

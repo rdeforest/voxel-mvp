@@ -5,6 +5,7 @@ var part:          Part
 var placement_pos: Vector3    # world position for the rotated bottom-center
 var world_anchor:  Vector3i   # voxel-grid cell for the click point
 var rotation:      Vector3i   # 0-3 per axis (X, Y, Z), each step = 90°
+var material_name: StringName # overrides part.material_name when non-empty
 var terrain:       VoxelLodTerrain
 var integrity:     StructuralIntegrity
 var player:        CharacterBody3D
@@ -17,6 +18,7 @@ func _init(
     p_pos:      Vector3,
     p_anchor:   Vector3i,
     p_rotation: Vector3i,
+    p_material: StringName,
     p_terrain:  VoxelLodTerrain,
     p_integ:    StructuralIntegrity,
     p_player:   CharacterBody3D,
@@ -25,6 +27,7 @@ func _init(
     placement_pos = p_pos
     world_anchor  = p_anchor
     rotation      = p_rotation
+    material_name = p_material
     terrain       = p_terrain
     integrity     = p_integ
     player        = p_player
@@ -49,7 +52,7 @@ func validate() -> bool:
     return false
 
 func execute() -> void:
-    var instance := part.instantiate()
+    var instance := part.instantiate(material_name)
     # The procedural body's local origin is the unrotated bottom-center. After
     # rotation, the new bottom and horizontal centroid no longer sit on that
     # origin — shift the instance so the rotated bottom lands at
@@ -63,7 +66,7 @@ func execute() -> void:
     instance.transform = Transform3D(_basis(), placement_pos + shift)
     terrain.get_parent().add_child(instance)
 
-    integrity.register_part(instance, _footprint(), Materials.from_name(part.material_name), placement_pos.y)
+    integrity.register_part(instance, _footprint(), Materials.from_name(material_name), placement_pos.y)
 
 # --- internals ---
 

@@ -43,6 +43,9 @@ var _parts: Array[Part] = [
 var _part_index:    int             = 0
 var _build_meshes:  Array[BoxMesh]  = []
 
+var _materials:      Array[StringName] = [&"Wood", &"Stone", &"Metal", &"Dirt", &"Sand"]
+var _material_index: int               = 0
+
 @onready var raycast: RayCast3D = $Head/RayCast3D
 
 
@@ -123,6 +126,8 @@ func _ready() -> void:
         KEY_TAB:          _cycle_edit_mode,
         KEY_Q:            _quit_game,
         KEY_F:            _toggle_wireframe,
+        KEY_V:            _toggle_debug_visuals,
+        KEY_M:            _cycle_material,
         KEY_R:            _rotate_build_y,
         KEY_T:            _rotate_build_x,
         KEY_Y:            _rotate_build_z,
@@ -168,10 +173,17 @@ func _next_part() -> void:
     _part_index = (_part_index + 1) % _parts.size()
     _update_mode_label()
 
+func _cycle_material() -> void:
+    _material_index = (_material_index + 1) % _materials.size()
+    _update_mode_label()
+
+func _toggle_debug_visuals() -> void:
+    integrity.set_debug_visuals_enabled(not integrity.debug_visuals_enabled)
+
 func _update_mode_label() -> void:
     var mode := current_mode()
     if mode.mode_name == "Build":
-        mode_label.text = "%s: %s" % [mode.mode_name, _part_name(_parts[_part_index])]
+        mode_label.text = "%s: %s (%s)" % [mode.mode_name, _part_name(_parts[_part_index]), _materials[_material_index]]
     else:
         mode_label.text = mode.mode_name
 
@@ -324,4 +336,4 @@ func _make_removal_action(_hit_pos: Vector3, _hit_normal: Vector3) -> Action:
 func _make_construction_action(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
     var placement_pos := Vector3(roundi(hit_pos.x), hit_pos.y,         roundi(hit_pos.z))
     var anchor        := Vector3i(roundi(hit_pos.x), floori(hit_pos.y), roundi(hit_pos.z))
-    return ConstructionAction.new(_parts[_part_index], placement_pos, anchor, _build_rotation, terrain, integrity, self)
+    return ConstructionAction.new(_parts[_part_index], placement_pos, anchor, _build_rotation, _materials[_material_index], terrain, integrity, self)
