@@ -157,6 +157,16 @@ propagation.
 
 ### Known limits (recorded, not fixed)
 
+- **Digging strained ceiling resets the gradient.** Newly-exposed cells from a
+  fresh dig see their immediate untracked-solid lateral neighbours as
+  FULL_SUPPORT (the cliff mass beside the dig is bedrock, structurally), so the
+  strain that had developed in the original ceiling doesn't propagate into the
+  newly-revealed cells. The shell registration is 1 cell thick — to make
+  "digging into orange reveals more orange" work, we'd need either a much
+  thicker shell (~20 cells for STONE's decay budget) or a "shallow vs deep"
+  detection that distinguishes suspended mass from real bedrock. Both are
+  architecturally meaningful. For the v0.0 demo, build wide caves fresh; don't
+  iteratively dig the strained area.
 - **`_resume_unfinished_floods` budget starvation:** components larger than
   `DETECTION_BUDGET` (500 voxels) take multiple settled frames to fully detect.
 - **`PLAYER_CLEARANCE = 1.0m`** in Fill/Flatten is a guess; tune if needed.

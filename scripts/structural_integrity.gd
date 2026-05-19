@@ -84,6 +84,30 @@ func notify_terrain_changed(center: Vector3, radius: float) -> void:
             dirty_queue.append(pos)
     _wake_falling_bodies()
 
+# Walk an axis-aligned box, registering any untracked-solid cell that has at
+# least one air neighbour. Called by DigAction after a sphere modification
+# and by CollapseDetector after a terrain collapse — both events change the
+# SDF surface and expose previously-buried cells that need to enter the
+# structural integrity system.
+func register_exposed_cells(box_origin: Vector3, box_size: Vector3) -> void:
+    if terrain == null:
+        return
+    var vt := terrain.get_voxel_tool()
+    vt.channel = VoxelBuffer.CHANNEL_SDF
+    VoxelUtils.for_each_in_bounding_box(
+        box_origin,
+        box_size,
+        func(pos: Vector3i) -> void:
+            if voxel_data.has(pos):
+                return
+            if vt.get_voxel_f(pos) >= VoxelConstants.SDF_SOLID_THRESHOLD:
+                return
+            for neighbor in VoxelUtils.neighbors(pos):
+                if vt.get_voxel_f(neighbor) >= VoxelConstants.SDF_SOLID_THRESHOLD:
+                    register_voxel(pos, Materials.STONE)
+                    return
+    )
+
 func register_part(node: Node3D, cells: Array[Vector3i], material: Materials, placement_y: float) -> void:
     part_registry[node] = PartData.new(cells, material, placement_y)
     for cell in cells:

@@ -50,28 +50,11 @@ func execute() -> void:
                 integrity.remove_voxel(pos)
     )
 
-    # Register newly-exposed cave walls/ceiling: solid cells just outside the
-    # dig sphere that now have at least one air neighbour. Without this, the
-    # geometry of the cave is invisible to the structural integrity system —
-    # the Phase 5 killer demo (wide cave → strain → reinforce with pillars)
-    # depends on this registration.
-    _register_exposed_cells(voxel_tool)
+    # Register newly-exposed cave walls/ceiling. Without this, the geometry
+    # of the cave is invisible to the structural integrity system.
+    integrity.register_exposed_cells(
+        position - Vector3.ONE * (radius + 1.0),
+        Vector3.ONE * ((radius + 1.0) * 2.0)
+    )
 
     integrity.notify_terrain_changed(position, radius)
-
-func _register_exposed_cells(vt: VoxelTool) -> void:
-    var expanded_origin     := position - Vector3.ONE * (radius + 1.0)
-    var expanded_dimensions := Vector3.ONE * ((radius + 1.0) * 2.0)
-    VoxelUtils.for_each_in_bounding_box(
-        expanded_origin,
-        expanded_dimensions,
-        func(pos: Vector3i):
-            if integrity.voxel_data.has(pos):
-                return
-            if vt.get_voxel_f(pos) >= VoxelConstants.SDF_SOLID_THRESHOLD:
-                return
-            for neighbor in VoxelUtils.neighbors(pos):
-                if vt.get_voxel_f(neighbor) >= VoxelConstants.SDF_SOLID_THRESHOLD:
-                    integrity.register_voxel(pos, Materials.STONE)
-                    return
-    )
