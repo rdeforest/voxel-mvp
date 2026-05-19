@@ -190,6 +190,13 @@ func _calculate_support(pos: Vector3i) -> float:
             s = voxel_data[neighbor].support
         elif _is_terrain_solid(neighbor):
             s = FULL_SUPPORT
+        elif _cell_to_part.has(neighbor):
+            # A placed Part occupies this neighbour cell. Take the best
+            # support across the stack — this is what lets a wood pillar
+            # hold up a stone ceiling.
+            s = NO_SUPPORT
+            for part_node in _cell_to_part[neighbor]:
+                s = maxf(s, part_registry[part_node].support)
         else:
             continue
         best = maxf(best, s)
