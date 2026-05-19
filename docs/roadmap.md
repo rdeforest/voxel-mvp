@@ -178,6 +178,16 @@ vertical face in a rock wall.
   surface continuous with surrounding terrain.
 
 ### Deferred to v0.1 (not required for the thesis defense)
+- **SDF seam matching (Option A2)** — originally listed as a Phase 5 task; deferred
+  after the v0.0 build hit a resolution mismatch. Our parts are sub-cell (thinnest
+  axes 0.012–0.15m, voxel cells 1m), so writing per-cell SDF samples can't represent
+  a thin board accurately — the visible "seam" between part mesh and Transvoxel
+  terrain mesh is a rendering-resolution problem, not an integrity-system problem.
+  The right v0.1 answer is probably **physics-driven part-vs-terrain interaction**:
+  a buried beam either breaks under load or pushes the dirt aside, depending on
+  relative material strength. That pairs naturally with the load-propagation pass
+  and falling-damage work, all of which want the same "parts and terrain are
+  governed by one physical-strength model" thinking.
 - **Sub-assemblies and planning mode** — Dwarf-Fortress-style selection of existing
   structures into reusable assemblies, plus a planning mode where build orders queue
   and are executed step-by-step (with physics tested at each step). Needs UI work.
@@ -246,10 +256,16 @@ decay budget. Before the strain timer expires, you place wooden beams as pillars
 watch the ceiling's support recover, and continue digging. If you fail to reinforce,
 the unsupported section flood-fills into a falling RigidBody3D.
 
+**Distribution:** v0.0 ships as published source (CC BY-SA 4.0) plus Linux, macOS,
+and Windows playtester binaries. The thesis defense is *the working code itself* —
+no recorded demo, no trailer; the project's open-source release is the artifact
+that lets people verify the claim independently.
+
 The "house carved into hillside" framing from earlier drafts is descriptive of the
 *aesthetic* but isn't the thesis-defense demo. The cave-integrity loop is. A clean
-voxel-to-prefab visual seam (SDF matching) is the polish that makes the carved-into-hillside
-shot photogenic — load-bearing for a trailer, optional for answering the v0.0 question.
+voxel-to-prefab visual seam was once on this phase; it moved to v0.1+ once sub-cell
+parts revealed that SDF samples-per-cell can't represent thin features. See the
+deferred list above.
 
 ---
 

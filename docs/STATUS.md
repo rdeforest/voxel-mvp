@@ -8,78 +8,60 @@
 
 ## Resumption Brief
 
-*Last updated: end of multi-axis rotation + part decay propagation session;
-scope review for v0.0 close-out*
+*Last updated: v0.0 close-out — Phase 5 functionally complete, release
+plumbing in place, awaiting playtester reality-check before scoping v0.1.*
 
-**Where you are:** the building system is functionally complete. Parts are
-parametric (`dimensions: Vector3` drives mesh, collision, and footprint), come
-in four flavours (board, plank, stud, beam), rotate around all three axes in
-90° steps (KEY_R/T/Y), and propagate support through stacked chains with
-material decay. The strain visualisation reads the support gradient on the
-part's surface via emission (so future textures stay legible). Removing a part
-from under a stack correctly re-evaluates the upper parts; thin stacked parts
-within a single voxel cell are disambiguated by `placement_y` ordering.
+**Where you are:** v0.0 is done. The thesis demo works end-to-end: dig a wide
+cave, ceiling cells develop a strain gradient that depends on material decay,
+the centre of a too-wide span fails into a falling RigidBody3D after the
+3-second strain window, and placing a wood beam under the strained ceiling
+repairs the gradient outward from the pillar. The structural integrity
+algorithm is unified across natural terrain and player-placed parts (same
+support propagation, same fall threshold, same strain timer, same flood-fill
+into a falling body) — that's the architectural payoff and it's defensible.
 
-**Cave integrity is in place.** Phase 5's killer demo from the roadmap —
-"dig a wide cave, watch the ceiling strain, place pillars to hold it" —
-works via two cooperating mechanisms:
-
-1. **Initial registration.** `DigAction` registers cells with at least one
-   air neighbour as the dig's 1-cell-thick shell. Same path used by fresh
-   digs and collapse cavities.
-
-2. **Lazy expansion driven by bedrock semantics.** A per-column index
-   (`_lowest_registered_y`) distinguishes real bedrock (untracked solid in a
-   column with nothing tracked below) from suspended mass (untracked solid
-   above registered cells). In `_calculate_support`, lateral untracked
-   neighbours grant FULL_SUPPORT only when bedrock; non-bedrock cells get
-   lazy-registered into the integrity system and propagation extends the
-   tracked region. Cascade depth is bounded by material decay (cells stop
-   triggering lazy registration once their own support drops to or below
-   FALL_THRESHOLD), so a STONE chain reaches ~20 cells before saturating.
-
-Parts whose support depends on still-dirty terrain voxels (or other
-in-limbo Parts) are flagged `in_limbo` and pause their strain timer until
-dependencies settle — avoids a transient zero from triggering a spurious
-3-second countdown.
+Release plumbing in place: top-level `README.md`, `LICENSE` (CC BY-SA 4.0),
+build/run instructions, controls reference, license clarity on Godot and
+godot_voxel dependencies.
 
 **Pick up here:**
 
-1. **Test the cave demo end-to-end.** Dig a wide cave, watch the gradient
-   settle (a few frames of propagation), see colour develop from blue at the
-   walls toward red at the centre. Verify that digging further into the
-   strained region doesn't reset the gradient (the lazy expansion should keep
-   the strain). Verify that placing wood beams under the ceiling recovers
-   support.
+1. **Dink around with the build to validate the v0.0 thesis question.** The
+   purpose of v0.0 was always to answer "is this as good of an idea as I
+   think it is?" — Robert's call to make. The infrastructure is in place; the
+   question is now about *feel*, not implementation.
 
-2. **SDF seam matching (Option A2).** After cave integrity is validated, the
-   remaining architectural item: placed Parts should write matching SDF
-   samples into the cells they occupy so the Transvoxel mesher produces a
-   clean visual seam at the part-terrain boundary. Makes the
-   carved-into-hillside aesthetic land. Optional for v0.0 thesis defense;
-   required for a photogenic trailer.
+2. **Playtester binaries.** Linux + macOS + Windows binaries via GitHub
+   Actions (cross-compile from a Linux runner with MinGW for Windows, native
+   on macos-latest). Not yet started. The artifact-on-tag workflow is the
+   standard pattern; tag `v0.0` already exists once committed.
 
-3. **Wrap v0.0.** Record the cave reinforcement demo. Write the v0.1 scope
-   doc. Everything from the "deferred" list (planning mode, sub-assemblies,
-   free-form physics placement, snap-point UI, hinge collapse, falling damage,
-   fallen-dirt-as-terrain, terrain shader strain, KSP-style dimension UI,
-   more dig/fill shapes) belongs to v0.1's question: "can I make it fun?"
+3. **v0.1 scoping.** When the v0.0 answer comes back "yes," the v0.1
+   question is "can I make it fun/performant?" — see `roadmap.md` Phases 1,
+   3, 4 and the deferred list below for the candidate scope.
 
-**Active mental state to preserve:**
+**Architectural status — what's solid, what's known-imperfect:**
 
-- `voxel_data: Dictionary` is terrain-only. `part_registry: Dictionary[Node3D, PartData]`
-  is parts. Both live on `StructuralIntegrity`.
-- `_cell_to_part: Dictionary[Vector3i, Array[Node3D]]` is a per-cell *stack*
-  of parts — multiple thin parts in one voxel cell is normal, ordering is by
-  `placement_y`.
-- Terrain support uses a worklist fixpoint (dirty queue, `PROPAGATION_BUDGET`).
-  Part support is recomputed fresh each frame via `_recompute_part_support()`
-  bottom-up by `placement_y`, then strain accumulates against `delta`.
-- Part collapse lives in SI (`_collapse_part`), not in `CollapseDetector`.
-  CollapseDetector is terrain-only.
-- Strain visual: emission tracks `get_support_color(support)`. Pulse only
-  during strain window. `_apply_part_visual` keeps original albedo so the
-  surface stays legible (matters when textures arrive).
+- Structural integrity is the load-bearing thesis claim. It works. The
+  lazy-expansion model handles both fresh digs and post-collapse exposure;
+  per-column bedrock detection distinguishes real bedrock from suspended
+  mass; lazy registration is bounded by material decay so the cascade
+  terminates naturally.
+- Parts are parametric (one-line `.tres` files for new shapes), multi-axis
+  rotation works (Vector3i state, computed Basis applied to a shifted
+  instance), material is independently selectable at build time.
+- Physics integration handles the cases we hit: thin parts use `continuous_cd`
+  to avoid tunnelling, fills refuse on top of RigidBody3Ds, terrain edits
+  wake sleeping bodies.
+- SDF seam matching (Option A2) is **deferred** to v0.1+. The realization
+  during scoping: our parts are sub-cell (0.012–0.15m thin axes, 1m cells),
+  so writing SDF samples per cell can't represent the parts at the right
+  resolution. The v0.0 thesis stands without it; v0.1+ can revisit either
+  with smaller voxels or — Robert's framing — with physics-driven part-vs-
+  terrain interaction where a buried beam either breaks under load or pushes
+  the dirt aside, depending on relative material strength. That's the more
+  interesting design direction and it pairs naturally with the falling-damage
+  and load-propagation work also in the deferred list.
 
 ---
 
@@ -89,14 +71,16 @@ dependencies settle — avoids a transient zero from triggering a spurious
 
 | Phase | State | Notes |
 |-------|-------|-------|
-| 5 — Building System | Functional; cave integrity remains | Parts (parametric, multi-axis rotation, decay propagation) + part-level structural integrity done; cave integrity + SDF seam matching outstanding |
+| 0 — Foundation | Complete | godot + godot_voxel build chain, walking-around prototype |
+| 2 — Terrain Modification | Complete | dig, fill, flatten with refuse-don't-deform |
+| 5 — Building System | Functionally complete for v0.0 | Parts, structural integrity, cave integrity, pillar reinforcement all working; SDF seam matching deferred to v0.1+ |
 
 ### Bugs
 
 | ID | State | Notes |
 |----|-------|-------|
 | 2c | Closed | Player fall-through fixed via `Action.validate()` refusal |
-| 2a | Deferred | Flatten clears only one sheet above — cosmetic; deferred until building replaces flatten |
+| 2a | Deferred | Flatten clears only one sheet above — cosmetic; deferred until building system replaces flatten |
 
 ### Architectural commitments worth not re-litigating
 
@@ -106,95 +90,91 @@ dependencies settle — avoids a transient zero from triggering a spurious
 - **`godot/modules/voxel` symlink, not `custom_modules`.**
 - **Worklist-fixpoint propagation for terrain support.** Not generalised
   until a second customer (fatigue/fluid/temperature) appears.
-- **Part support computed fresh per frame, sorted bottom-up by `placement_y`.**
-  No dirty queue. Reasoning: parts depend only on strictly-lower parts, so
-  sorting eliminates the fixpoint problem; recompute is cheap (one decay-minus-max
-  pass per part).
-- **Per-cell *stack* of parts (`Array[Node3D]`), not single-cell-per-part.**
-  Multiple thin parts share a voxel cell when stacked vertically; `placement_y`
-  disambiguates which is below which.
-- **Signals for support changes** (`voxel_support_increased`). No event bus
-  until three unrelated listeners demand it.
-- **Strain timer accumulated against physics `delta`,** not wall-clock —
-  pause-correct.
+- **Per-column bedrock detection (`_lowest_registered_y`).** Distinguishes
+  real bedrock from suspended mass without per-cell `column_below_me_is_clear`
+  bookkeeping.
+- **Lazy expansion bounded by material decay.** Cascade stops where support
+  reaches `FALL_THRESHOLD`; for STONE that's ~20 cells per chain.
+- **Part support recomputed fresh per frame, sorted bottom-up by `placement_y`.**
+- **Per-cell *stack* of parts (`Array[Node3D]`).** Disambiguated by `placement_y`.
+- **In-limbo semantics.** Parts with dirty dependencies don't accumulate
+  strain — avoids transient zeros triggering 3-second countdowns that would
+  resolve before expiry.
 - **Action-as-data; targeting at the call site.** Actions take final
   computed parameters, not raw input.
-- **Refuse-don't-deform.** Actions refuse via `validate()` rather than
-  silently adjusting state. Extended to physics state via FillAction's
-  `intersect_shape` check before filling on a RigidBody3D.
+- **Refuse-don't-deform extended to physics state.** FillAction refuses on
+  top of RigidBody3D via `intersect_shape`.
+- **FIFO dirty queue.** BFS is the right shape for support propagation; the
+  shift cost on typical queue sizes isn't where the time goes.
 
-### Done this v0.0 cycle (recent)
+### Done this v0.0 cycle (chronological-ish)
 
-- Multi-axis Part rotation (`Vector3i` rotation, KEY_R/T/Y bindings,
-  rotated-AABB-based footprint + visual placement shift).
-- Part support propagation with material decay (was binary; now [0,1]
-  with `support - decay` per hop). Direct-supporter selection avoids
-  parts "seeing through" other parts to terrain.
-- Per-cell stack semantics: thin parts stacked in one cell are
-  ordered by `placement_y`; removing a lower part correctly orphans
-  the upper.
-- Strain visual via emission on original albedo (textures will stay
-  legible when added).
-- Hover tint: raycast-hit Part shows its current support color.
-- Bug fixes: red-after-fall, fill-on-rigid-body tunneling, terrain
-  edits not waking sleeping rigid bodies, beam-on-beam stacking
-  detection.
-- Parametric Parts (`Part.dimensions: Vector3` drives procedural
-  mesh/collision/footprint); board.tscn deleted in favour of procedural
-  build, four `.tres` files now define the catalog.
-- 14-item code review cleanup pass: removed dead fields, deduplicated
-  `_neighbors`, `dirty_queue.pop_back()`, unified EditPreview's Flatten
-  basis through `preview_basis` callable.
+- Action infrastructure (`scripts/actions/`), refuse-don't-deform principle.
+- Part/Schematic resource hierarchy, parametric dimensions, procedural build.
+- Part-level structural integrity (separate from terrain `voxel_data`),
+  per-cell stack semantics, direct-supporter selection, material decay
+  propagation.
+- Multi-axis 90° rotation with Vector3i state, AABB-driven instance shift.
+- Strain visualisation: emission tracking support color, hover tint,
+  in-limbo pause.
+- Falling-part physics: `continuous_cd`, sleep-wake on terrain change,
+  fill-refuses-on-RigidBody3D.
+- Cave integrity: dig-time registration of exposed cells.
+- Lazy-expansion model with per-column bedrock detection — fixes
+  "digging strained reveals blue" and "collapse leaves untracked cells"
+  in one architectural pass.
+- Register-part dirties terrain neighbours so pillars actually support
+  ceilings.
+- Material override at construction time (M key cycles wood / stone /
+  metal / dirt / sand).
+- Debug-cube toggle wired to V key.
+- README + LICENSE + dependency-licensing notes.
 
-### Deferred to v0.1 (the "can I make it fun?" question)
+### Deferred to v0.1+ (the "can I make it fun?" question)
 
 | Item | Why deferred |
 |------|--------------|
-| Sub-assemblies + planning mode (Dwarf-Fortress queue) | Significant UI work; v0.0 question is about thesis, not workflow |
-| Autonomous helpers / tameable fauna executing plans | Same as above; far-future |
-| Free-form placement with physics settle-to-construction | Architectural change (RigidBody3D → settle → register as Part); current grid-aligned demo carries thesis |
+| SDF seam matching (Option A2) | Sub-cell parts can't be represented at 1m voxel resolution; better answered by physics-driven part-vs-terrain interaction (load propagation + falling damage + material relative strength) |
+| Load propagation (top-down weight pass) | Pairs with falling damage and SDF-seam-as-physics; not needed for v0.0 thesis |
+| Falling damage (impact breaks parts, crumbles dirt) | Needs a damage model; v0.1 polish |
+| Hinge-at-boundary collapse | Polish on falling drama |
+| Fallen-dirt-as-terrain | RigidBody3D rejoining SDF when at rest — needs settle detection + SDF write path |
+| Sub-assemblies + planning mode (Dwarf-Fortress queue) | Significant UI work; not a thesis question |
+| Free-form placement with physics settle-to-construction | Architectural change; current grid-aligned demo carries thesis |
 | Snap point authoring UI | Data structure exists; UI is v0.1 |
-| Specialised joinery pieces (door frames, stairs, mating constraints) | Rectangular Parts demonstrate the system |
-| Workbench radius | Valheim survival-loop mechanic; doesn't validate voxel-first design |
-| Hinge-at-boundary collapse (towers tip rather than lift off) | Polish on falling drama |
-| Falling damage (impact → break/crumble) | Needs damage model; v0.1 polish |
-| Fallen-dirt-as-terrain (RigidBody3D rejoins SDF when at rest) | Needs settle-detection + SDF rewrite path |
-| Partial-dirt-cover support of fallen parts | Needs free-form placement first |
+| Specialised joinery pieces (doors, stairs, mating constraints) | Rectangular parts demonstrate the system |
 | Terrain strain on mesh surface (replace debug cubes) | Real shader work |
 | Highlight parts depending on about-to-fall things | Dependency-graph walk; nice-to-have |
+| Budget-consumption telemetry | Dynamic budget adjustment depends on this |
 | Player-controlled dig/fill shapes & sizes | UX polish |
 | KSP-style parametric Part dimensions in-game | Tooling polish |
 | Per-material strain duration; nature-of-change reset scaling | Tuning pass |
-| Gap-between-layered-parts (parts can't "see through" missing intermediate parts) | Needs PartData.dimensions; punted |
+| Gap-between-layered-parts | Needs `PartData.dimensions`; punted |
 | Mid-break Part destruction | Whole-part destruction is enough for v0.0 |
 | Non-adjacent linkages (ropes, cables) | New data structure required |
-| Load propagation (top-down) | Mirror of support propagation; revisit |
 | Material fatigue (cumulative strain history) | Only meaningful with mobs (v0.9) |
 | In-game Schematic editor | Hand-authored `.tres` is fine; v0.9+ |
+| Workbench radius | Valheim survival-loop mechanic; v0.9+ if at all |
+| Cross-platform binary builds (Windows via MinGW from Linux, macOS native, Linux native) | Release plumbing; GitHub Actions pattern |
 
 ### Known limits (recorded, not fixed)
 
+- **Flatten preview Z-fights with the surface it's matching.** The preview
+  plane is positioned at the hit point, which is exactly where the surface
+  is, so the GPU can't decide which to draw in front. Cosmetic; cleanest
+  fix is a small forward offset on the preview plane normal.
 - **`_resume_unfinished_floods` budget starvation:** components larger than
   `DETECTION_BUDGET` (500 voxels) take multiple settled frames to fully detect.
 - **`PLAYER_CLEARANCE = 1.0m`** in Fill/Flatten is a guess; tune if needed.
 - **Lazy-expansion cascade per dig is bounded by material decay budget.** For
   STONE (decay 0.05), the cascade reaches ~20 cells before support hits zero
-  and lazy registration stops. For a very wide cave under a tall cliff, this
-  means structural mass beyond ~20 cells above the ceiling isn't tracked —
-  fine for support computation (the chain is already zero there) but means
-  the load propagation that v0.1 will add will need its own cascade rules.
+  and lazy registration stops. Fine for support computation (the chain is
+  already zero there) but the future load-propagation pass will need its own
+  cascade rules.
 - **`_recompute_column_low` scans `voxel_data`.** When removing the lowest
-  cell in a column, we re-scan the entire `voxel_data` dictionary. For up to
-  ~10k tracked cells this is fast; if the tracked set grows large, replace
-  with a per-column ordered set.
-- **Part scene layout assumes flat children.** `_collapse_part` reparents direct
-  children only; nested scenes would silently break.
-- **Hand-authored `Schematic.footprint` is not rotated** by ConstructionAction.
-  None currently use it.
-- **`FlattenAction` center/plane-point asymmetry** — explicit constructor
-  params with a comment; easy to revisit.
-- **Terrain debug visuals are cubes that draw through walls** (`no_depth_test`).
-  Replacing with surface-shader strain is v0.2.
+  cell in a column, we re-scan the entire `voxel_data` dictionary. Fast for
+  ~10k tracked cells; replace with per-column ordered set if tracked count
+  grows large.
 
 ---
 
