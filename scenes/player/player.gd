@@ -13,7 +13,7 @@ var edit_modes:            Array[EditMode] = []
 var edit_mode_index:       int             = 0
 
 var wireframe_enabled  := false
-var _build_rotation:   int = 0
+var _build_rotation:   Vector3i = Vector3i.ZERO  # 0-3 steps of 90° per axis (X, Y, Z)
 
 var _key_actions:          Dictionary
 var _mouse_button_actions: Dictionary
@@ -34,7 +34,14 @@ const EDIT_REACH    = 20.0
 const SPHERE_RADIAL_SEGMENTS = 16
 const SPHERE_RINGS           =  8
 
-const BOARD_PART := preload("res://assets/parts/board/board.tres")
+var _parts: Array[Part] = [
+    preload("res://assets/parts/board/board.tres"),
+    preload("res://assets/parts/plank/plank.tres"),
+    preload("res://assets/parts/stud/stud.tres"),
+    preload("res://assets/parts/beam/beam.tres"),
+]
+var _part_index:    int             = 0
+var _build_meshes:  Array[BoxMesh]  = []
 
 @onready var raycast: RayCast3D = $Head/RayCast3D
 
@@ -58,8 +65,10 @@ func _ready() -> void:
     var flatten_mat := _make_preview_material(Color(1.0, 0.9, 0.2, 0.4))
     var build_mat   := _make_preview_material(Color(1.0, 1.0, 0.5, 0.4))
 
-    var build_mesh      := BoxMesh.new()
-    build_mesh.size      = Vector3(2.0, 0.1, 0.012)
+    for p in _parts:
+        var box := BoxMesh.new()
+        box.size = p.dimensions
+        _build_meshes.append(box)
 
     edit_modes = [
         EditMode.new()                                            \
@@ -92,13 +101,13 @@ func _ready() -> void:
                 var forward := right.cross(up).normalized()
                 return Basis(right, up, forward)),
 
-        EditMode.new()                                                                                         \
-            .named("Build")                                                                                    \
-            .on_make_action(_make_construction_action)                                                         \
-            .preview_mesh(    func(_hp, _hn): return build_mesh)                                              \
-            .preview_material(func(_hp, _hn): return build_mat)                                               \
-            .preview_position(func( hp, _hn): return Vector3(roundi(hp.x), hp.y + 0.05, roundi(hp.z)))        \
-            .preview_basis(   func(_hp, _hn): return Basis.from_euler(Vector3(0, _build_rotation * PI * 0.5, 0))),
+        EditMode.new()                                                                  \
+            .named("Build")                                                             \
+            .on_make_action(_make_construction_action)                                  \
+            .preview_mesh(    func(_hp, _hn): return _build_meshes[_part_index])        \
+            .preview_material(func(_hp, _hn): return build_mat)                         \
+            .preview_position(_build_preview_position)                                  \
+            .preview_basis(   func(_hp, _hn): return _build_rotation_basis()),
 
         EditMode.new()                                          \
             .named("Remove")                                    \
@@ -111,11 +120,16 @@ func _ready() -> void:
     edit_preview.player = self
     raycast.target_position = Vector3(0, 0, -EDIT_REACH) # negative Z is forward
     _key_actions          = {
-        KEY_TAB: _cycle_edit_mode,
-        KEY_Q:   _quit_game,
-        KEY_F:   _toggle_wireframe,
-        KEY_R:   _rotate_build,
+        KEY_TAB:          _cycle_edit_mode,
+        KEY_Q:            _quit_game,
+        KEY_F:            _toggle_wireframe,
+        KEY_R:            _rotate_build_y,
+        KEY_T:            _rotate_build_x,
+        KEY_Y:            _rotate_build_z,
+        KEY_BRACKETLEFT:  _prev_part,
+        KEY_BRACKETRIGHT: _next_part,
     }
+    _update_mode_label()
 
     _mouse_button_actions = {
         MOUSE_BUTTON_LEFT: _try_edit_terrain,
@@ -144,7 +158,25 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _cycle_edit_mode():
     edit_mode_index = (edit_mode_index + 1) % edit_modes.size()
-    mode_label.text = edit_modes[edit_mode_index].mode_name
+    _update_mode_label()
+
+func _prev_part() -> void:
+    _part_index = (_part_index - 1 + _parts.size()) % _parts.size()
+    _update_mode_label()
+
+func _next_part() -> void:
+    _part_index = (_part_index + 1) % _parts.size()
+    _update_mode_label()
+
+func _update_mode_label() -> void:
+    var mode := current_mode()
+    if mode.mode_name == "Build":
+        mode_label.text = "%s: %s" % [mode.mode_name, _part_name(_parts[_part_index])]
+    else:
+        mode_label.text = mode.mode_name
+
+func _part_name(part: Part) -> String:
+    return part.resource_path.get_file().get_basename()
 
 func _on_mouse_motion(event: InputEventMouseMotion) -> void:
     rotate_y(-event.relative.x * MOUSE_SENSITIVITY)
@@ -178,6 +210,14 @@ func _on_mouse_button_pressed(event: InputEventMouseButton) -> void:
 
 func _quit_game():
     get_tree().quit()
+
+func _process(_delta: float) -> void:
+    var hovered: Node3D = null
+    if raycast.is_colliding():
+        var collider := raycast.get_collider() as Node3D
+        if collider != null and integrity.part_registry.has(collider):
+            hovered = collider
+    integrity.set_hovered_part(hovered)
 
 func _physics_process(delta: float) -> void:
     # Gravity
@@ -249,8 +289,31 @@ func _get_flatten_normal() -> Vector3:
     return Vector3.ZERO  # sentinel meaning "use hit normal"
 
 
-func _rotate_build() -> void:
-    _build_rotation = (_build_rotation + 1) % 4
+func _rotate_build_y() -> void:
+    _build_rotation.y = (_build_rotation.y + 1) % 4
+
+func _rotate_build_x() -> void:
+    _build_rotation.x = (_build_rotation.x + 1) % 4
+
+func _rotate_build_z() -> void:
+    _build_rotation.z = (_build_rotation.z + 1) % 4
+
+func _build_rotation_basis() -> Basis:
+    var b := Basis.IDENTITY
+    b = b.rotated(Vector3.RIGHT,   _build_rotation.x * PI * 0.5)
+    b = b.rotated(Vector3.UP,      _build_rotation.y * PI * 0.5)
+    b = b.rotated(Vector3.FORWARD, _build_rotation.z * PI * 0.5)
+    return b
+
+# Preview is a centered BoxMesh on a MeshInstance3D — the rotated mesh's
+# Y centroid is at the MeshInstance3D's global_position.y. Lift it so the
+# rotated bottom face lands at the hit point.
+func _build_preview_position(hp: Vector3, _hn: Vector3) -> Vector3:
+    var part := _parts[_part_index]
+    var basis := _build_rotation_basis()
+    var aabb := AABB(-part.dimensions * 0.5, part.dimensions)
+    var rotated := Transform3D(basis, Vector3.ZERO) * aabb
+    return Vector3(roundi(hp.x), hp.y + rotated.size.y * 0.5, roundi(hp.z))
 
 func _make_removal_action(_hit_pos: Vector3, _hit_normal: Vector3) -> Action:
     var collider := raycast.get_collider()
@@ -259,6 +322,6 @@ func _make_removal_action(_hit_pos: Vector3, _hit_normal: Vector3) -> Action:
     return RemovalAction.new(collider, integrity)
 
 func _make_construction_action(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
-    var placement_pos := Vector3(roundi(hit_pos.x), hit_pos.y,        roundi(hit_pos.z))
+    var placement_pos := Vector3(roundi(hit_pos.x), hit_pos.y,         roundi(hit_pos.z))
     var anchor        := Vector3i(roundi(hit_pos.x), floori(hit_pos.y), roundi(hit_pos.z))
-    return ConstructionAction.new(BOARD_PART, placement_pos, anchor, _build_rotation, terrain, integrity, self)
+    return ConstructionAction.new(_parts[_part_index], placement_pos, anchor, _build_rotation, terrain, integrity, self)

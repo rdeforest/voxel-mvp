@@ -1,8 +1,8 @@
 # Voxel Valheim MVP — Project Roadmap v2
 
-**Engine:** Godot 4.6.x stable + Zylann's godot_voxel  
-**Assets:** Creative Commons / open-source  
-**AI Assist:** Claude Code for boilerplate, systems scaffolding, iteration  
+**Engine:** Godot 4.6.x stable + Zylann's godot_voxel
+**Assets:** Creative Commons / open-source
+**AI Assist:** Claude Code for boilerplate, systems scaffolding, iteration
 **Working Title:** TBD (not Norse mythology — see Post-MVP Vision)
 
 ---
@@ -161,21 +161,38 @@ vertical face in a rock wall.
 ### Tasks
 - **Hybrid building approach:**
   - Voxel building: place/remove material voxels (walls, floors from terrain material)
-  - Prefab building: snap-together pieces for doors, roofs, stairs
-- Building piece catalog (MVP): wall, floor, roof (45°), stairs, door frame
-- Snap point system: pieces detect and align to adjacent pieces
+  - Prefab building: parametric rectangular Parts (board, plank, stud, beam) with
+    multi-axis 90° rotation
 - Ghost preview showing placement before confirming
 - **Structural integrity system (the killer feature):**
   - Every voxel and prefab piece has a support value
-  - Support propagates from ground contact upward, weakening with distance
+  - Support propagates from ground contact upward, weakening with material decay
   - Material-dependent: stone supports more than wood, wood more than dirt
-  - Color-coded visual feedback (green → yellow → red → collapse), same system for
-    terrain AND player structures
-  - Cave ceilings follow the same rules: unsupported spans collapse over time
-  - Player can reinforce caves with wooden beams or stone pillars
-- Voxel-to-prefab interface: prefab pieces anchor to voxel terrain seamlessly
-- Foundation carving: building foundations carve into terrain voxels automatically
-- Workbench radius requirement for building
+  - Color-coded visual feedback (blue → green → yellow → orange → red → collapse),
+    same system for terrain AND player structures
+  - **Cave ceilings follow the same rules:** when terrain is dug, the exposed cells
+    register with the integrity system; unsupported spans show strain colors and
+    eventually collapse. Reinforcing with pillars (Parts) restores support.
+- Voxel-to-prefab interface (SDF seam matching, Option A2): Parts write matching SDF
+  samples into their footprint cells so the Transvoxel mesher produces a clean
+  surface continuous with surrounding terrain.
+
+### Deferred to v0.1 (not required for the thesis defense)
+- **Sub-assemblies and planning mode** — Dwarf-Fortress-style selection of existing
+  structures into reusable assemblies, plus a planning mode where build orders queue
+  and are executed step-by-step (with physics tested at each step). Needs UI work.
+  Autonomous helpers to execute plans come later still.
+- **Free-form placement physics** — placing a Part at an arbitrary position/rotation
+  and letting physics determine whether it settles into construction or falls. The
+  honest "drop a board, it falls if unsupported" model. Current grid-aligned +
+  validate-and-commit placement is enough to demonstrate the thesis.
+- **Snap point UI** — `Schematic.snap_points` data structure exists; the
+  selection/preview UI for hand-authoring and connecting via Joints is v0.1.
+- **Building piece catalog with joinery** — door frames, stairs, roof angles, etc.
+  Current rectangular Parts (board/plank/stud/beam) are enough for the cave
+  reinforcement demo. Specialised pieces with mate-only-with constraints are v0.1.
+- **Workbench radius** — Valheim convention for gating progression; doesn't
+  validate voxel-first design. Belongs to the survival loop (v0.9).
 
 ### Claude Code leverage: Moderate
 Snap logic and ghost preview are well-patterned. Structural integrity is algorithmic
@@ -223,9 +240,16 @@ in a voxel wall that merges with the hillside) is genuinely novel. Budget the fu
 and be prepared to simplify. Fallback: prefab-only building (like Valheim) still works.
 
 ### Done when
-You can build a house partially carved into a hillside, with voxel stone walls that blend
-into the rock face, a door, a roof, and visual feedback showing structural integrity. You
-can dig a wide cave and watch the ceiling turn yellow, then place pillars to stabilize it.
+**The killer demo:** you can dig a wide cave into a hillside and watch the ceiling cells
+shift from blue through yellow toward red as unsupported span exceeds the material's
+decay budget. Before the strain timer expires, you place wooden beams as pillars,
+watch the ceiling's support recover, and continue digging. If you fail to reinforce,
+the unsupported section flood-fills into a falling RigidBody3D.
+
+The "house carved into hillside" framing from earlier drafts is descriptive of the
+*aesthetic* but isn't the thesis-defense demo. The cave-integrity loop is. A clean
+voxel-to-prefab visual seam (SDF matching) is the polish that makes the carved-into-hillside
+shot photogenic — load-bearing for a trailer, optional for answering the v0.0 question.
 
 ---
 

@@ -8,39 +8,61 @@
 
 ## Resumption Brief
 
-*Last updated: end of building system + Part registry refactor session*
+*Last updated: end of multi-axis rotation + part decay propagation session;
+scope review for v0.0 close-out*
 
-**Where you are:** Phase 5 building system is partially implemented and the
-codebase has had a full cleanup pass. The wooden board Part exists and can be
-placed, rotated (KEY_R), and removed (TAB to Remove mode). A thorough code
-review found 14 issues; all were addressed. The structural integrity system was
-then refactored to track Parts separately from terrain voxels (`part_registry`
-with `PartData` inner class, `_cell_to_part` reverse map, `_tick_part_strain`
-per-frame collapse check).
+**Where you are:** the building system is functionally complete. Parts are
+parametric (`dimensions: Vector3` drives mesh, collision, and footprint), come
+in four flavours (board, plank, stud, beam), rotate around all three axes in
+90° steps (KEY_R/T/Y), and propagate support through stacked chains with
+material decay. The strain visualisation reads the support gradient on the
+part's surface via emission (so future textures stay legible). Removing a part
+from under a stack correctly re-evaluates the upper parts; thin stacked parts
+within a single voxel cell are disambiguated by `placement_y` ordering.
 
-**Pick up here, in this order:**
+**The one missing v0.0 piece is cave integrity.** Phase 5's killer demo from
+the roadmap — "dig a wide cave, watch the ceiling strain, place pillars to
+hold it" — currently doesn't work because `DigAction` modifies the SDF without
+registering the newly-exposed wall/ceiling cells with `StructuralIntegrity`.
+Without those registrations, the cave's geometry is invisible to support
+propagation.
 
-1. **Test board collapse and removal after the part_registry refactor.** Both
-   were buggy before; the refactor was the principled fix. Dig terrain from
-   under a board and wait 3 seconds — it should fall as a RigidBody3D. Remove
-   mode should work on all boards now (no more "stuck" boards from overlapping
-   footprints).
+**Pick up here:**
 
-2. **If those work, next building milestone:** decide whether to add more Part
-   types, add SDF seam matching (Option A2 — boards write SDF into their cells
-   so terrain mesh blends cleanly), or tackle snap points. The design for all
-   three exists; nothing is started.
+1. **Cave integrity.** In `DigAction.execute()`, after the SDF modification,
+   walk the dig sphere's surface and `register_voxel` any still-solid cell
+   adjacent to a newly-air cell. Default material STONE for v0.0. Also extend
+   `_calculate_support` for terrain voxels to recognise Parts as supporters
+   (currently checks natural terrain + other terrain voxels only) — this makes
+   "wooden pillar supports stone ceiling" work without a special case.
 
-3. **Debug visuals for Parts are unimplemented.** Currently only terrain voxels
-   get colored cubes. Part strain (the 3-second window) is invisible. Low
-   priority but useful for testing.
+2. **SDF seam matching (Option A2).** After cave integrity, the remaining
+   architectural item: placed Parts should write matching SDF samples into the
+   cells they occupy so the Transvoxel mesher produces a clean visual seam at
+   the part-terrain boundary. Makes the carved-into-hillside aesthetic land.
+   Optional for v0.0 thesis defense; required for a photogenic trailer.
 
-**Active mental state to preserve:** The Part registry split means `voxel_data`
-is now terrain-only. Parts have `PartData` (typed inner class on
-`StructuralIntegrity`) with `cells: Array[Vector3i]` and `material: Materials`.
-Part support is checked fresh every frame in `_tick_part_strain` — no dirty
-queue for Parts. Part collapse materializes as a RigidBody3D in `_collapse_part`
-(inside SI, not CollapseDetector). CollapseDetector now handles terrain only.
+3. **Wrap v0.0.** Record the cave reinforcement demo. Write the v0.1 scope
+   doc. Everything from the "deferred" list (planning mode, sub-assemblies,
+   free-form physics placement, snap-point UI, hinge collapse, falling damage,
+   fallen-dirt-as-terrain, terrain shader strain, KSP-style dimension UI,
+   more dig/fill shapes) belongs to v0.1's question: "can I make it fun?"
+
+**Active mental state to preserve:**
+
+- `voxel_data: Dictionary` is terrain-only. `part_registry: Dictionary[Node3D, PartData]`
+  is parts. Both live on `StructuralIntegrity`.
+- `_cell_to_part: Dictionary[Vector3i, Array[Node3D]]` is a per-cell *stack*
+  of parts — multiple thin parts in one voxel cell is normal, ordering is by
+  `placement_y`.
+- Terrain support uses a worklist fixpoint (dirty queue, `PROPAGATION_BUDGET`).
+  Part support is recomputed fresh each frame via `_recompute_part_support()`
+  bottom-up by `placement_y`, then strain accumulates against `delta`.
+- Part collapse lives in SI (`_collapse_part`), not in `CollapseDetector`.
+  CollapseDetector is terrain-only.
+- Strain visual: emission tracks `get_support_color(support)`. Pulse only
+  during strain window. `_apply_part_visual` keeps original albedo so the
+  surface stays legible (matters when textures arrive).
 
 ---
 
@@ -50,86 +72,102 @@ queue for Parts. Part collapse materializes as a RigidBody3D in `_collapse_part`
 
 | Phase | State | Notes |
 |-------|-------|-------|
-| 5 — Building System | In progress | Board Part works (place/rotate/remove); collapse needs post-refactor test; SDF seam, snap points, more Parts unstarted |
+| 5 — Building System | Functional; cave integrity remains | Parts (parametric, multi-axis rotation, decay propagation) + part-level structural integrity done; cave integrity + SDF seam matching outstanding |
 
 ### Bugs
 
 | ID | State | Notes |
 |----|-------|-------|
-| 2c | Closed | Player fall-through fixed via `Action.validate()` refusal in Fill/Flatten |
+| 2c | Closed | Player fall-through fixed via `Action.validate()` refusal |
 | 2a | Deferred | Flatten clears only one sheet above — cosmetic; deferred until building replaces flatten |
 
-### Phase 5 design decisions worth not re-litigating
+### Architectural commitments worth not re-litigating
 
-- **Hybrid prefab approach (Option A2).** Prefabs occupy voxel cells via
-  metadata; they write matching SDF samples into their cells so the
-  Transvoxel mesher produces a clean surface continuous with surrounding
-  terrain, while the prefab's static mesh renders the engineered geometry.
-  Costs are paid at placement / chunk-remesh time, not per-frame.
-- **Axis-aligned footprints, 90° rotation.** Rotated prefabs are a v0.9+
-  problem; the axis-aligned restriction keeps SDF-matching tractable.
-- **Refuse-don't-deform.** Both terrain ops and prefab placements refuse
-  when constraints can't be satisfied, rather than silently adjusting.
-- **Action-as-data.** Every world-modifying op routes through `Action`.
-- **Targeting lives at the call site (the EditMode `make_action` callable),
-  not inside the Action.** Actions take final, computed parameters.
-- **Schematic format: `.tres` resource, optional `.tscn` for scene-graph
-  content.** Editor-friendly, serializable, diff-able.
-- **Cell footprint authoring: computed from mesh bounds by default, with
-  optional hand-override.**
-- **Snap points are per-Schematic metadata, hand-authored.** Match-time
-  Joint creation is a v0.1 follow-on; data structure present, UI deferred.
-- **Parts tracked at Part level, not voxel level.** `part_registry`
-  (Node3D → PartData) separate from `voxel_data` (terrain only). Part
-  support checked fresh each frame; no dirty queue for Parts.
+- **Track Godot 4.6-stable + godot_voxel v1.6.** Pinned in `tools/versions.env`.
+- **Double-precision godot_voxel build from day one.** Non-retrofittable.
+- **No engine forks.** Pull upstream directly.
+- **`godot/modules/voxel` symlink, not `custom_modules`.**
+- **Worklist-fixpoint propagation for terrain support.** Not generalised
+  until a second customer (fatigue/fluid/temperature) appears.
+- **Part support computed fresh per frame, sorted bottom-up by `placement_y`.**
+  No dirty queue. Reasoning: parts depend only on strictly-lower parts, so
+  sorting eliminates the fixpoint problem; recompute is cheap (one decay-minus-max
+  pass per part).
+- **Per-cell *stack* of parts (`Array[Node3D]`), not single-cell-per-part.**
+  Multiple thin parts share a voxel cell when stacked vertically; `placement_y`
+  disambiguates which is below which.
+- **Signals for support changes** (`voxel_support_increased`). No event bus
+  until three unrelated listeners demand it.
+- **Strain timer accumulated against physics `delta`,** not wall-clock —
+  pause-correct.
+- **Action-as-data; targeting at the call site.** Actions take final
+  computed parameters, not raw input.
+- **Refuse-don't-deform.** Actions refuse via `validate()` rather than
+  silently adjusting state. Extended to physics state via FillAction's
+  `intersect_shape` check before filling on a RigidBody3D.
 
-### Deferred but tracked
+### Done this v0.0 cycle (recent)
 
-| Item | Where it goes | Why deferred |
-|------|---------------|--------------|
-| Per-material strain duration (`STRAIN_DURATION_SEC` reads from `Materials`) | v0.1 polish | Flat 3.0s is fine for v0.0 |
-| Nature-of-change reset scaling | v0.1 polish | Flat `STRAIN_RESET_SEC = 2.7` works |
-| Surface-geometry pulse (strain feedback on terrain mesh, not debug cubes) | v0.2 art pass | Real shader work |
-| Part strain debug visualization | Soon | Part strain window currently invisible; useful for testing |
-| Material fatigue (cumulative strain history) | v0.9 survival | Only meaningful once mobs exist |
-| Hinge-at-boundary collapse (towers tip rather than lift off) | v0.1 polish | Wait for real scenarios to tune against |
-| Generic `Propagator` extraction | When second use case appears | One customer isn't enough to generalize |
-| Mid-break prefab destruction | v0.1 polish | Whole-prefab destruction works for Phase 5 |
-| Non-adjacent linkages (ropes, cables) | Late Phase 5 or v0.1 | Adjacency-based support is free; cross-space needs new data structure |
-| Load propagation (top-down paired with support) | v0.1 | Same algorithm reversed |
-| SDF seam matching (Option A2) | Phase 5 ongoing | Boards write SDF into their cells; design done, implementation unstarted |
-| Snap points UI | Phase 5 ongoing | Data structure present, UI deferred |
-| In-game Schematic editor | v0.9+ | Hand-author Schematics for Phase 5 |
-| `WorldContext` parameter object | When 5+ Actions share same refs | Verbose-but-explicit constructors until then |
-| `VoxelRecord` typed class for `voxel_data` | When part_registry pattern proves itself | Same inner-class approach as PartData |
+- Multi-axis Part rotation (`Vector3i` rotation, KEY_R/T/Y bindings,
+  rotated-AABB-based footprint + visual placement shift).
+- Part support propagation with material decay (was binary; now [0,1]
+  with `support - decay` per hop). Direct-supporter selection avoids
+  parts "seeing through" other parts to terrain.
+- Per-cell stack semantics: thin parts stacked in one cell are
+  ordered by `placement_y`; removing a lower part correctly orphans
+  the upper.
+- Strain visual via emission on original albedo (textures will stay
+  legible when added).
+- Hover tint: raycast-hit Part shows its current support color.
+- Bug fixes: red-after-fall, fill-on-rigid-body tunneling, terrain
+  edits not waking sleeping rigid bodies, beam-on-beam stacking
+  detection.
+- Parametric Parts (`Part.dimensions: Vector3` drives procedural
+  mesh/collision/footprint); board.tscn deleted in favour of procedural
+  build, four `.tres` files now define the catalog.
+- 14-item code review cleanup pass: removed dead fields, deduplicated
+  `_neighbors`, `dirty_queue.pop_back()`, unified EditPreview's Flatten
+  basis through `preview_basis` callable.
+
+### Deferred to v0.1 (the "can I make it fun?" question)
+
+| Item | Why deferred |
+|------|--------------|
+| Sub-assemblies + planning mode (Dwarf-Fortress queue) | Significant UI work; v0.0 question is about thesis, not workflow |
+| Autonomous helpers / tameable fauna executing plans | Same as above; far-future |
+| Free-form placement with physics settle-to-construction | Architectural change (RigidBody3D → settle → register as Part); current grid-aligned demo carries thesis |
+| Snap point authoring UI | Data structure exists; UI is v0.1 |
+| Specialised joinery pieces (door frames, stairs, mating constraints) | Rectangular Parts demonstrate the system |
+| Workbench radius | Valheim survival-loop mechanic; doesn't validate voxel-first design |
+| Hinge-at-boundary collapse (towers tip rather than lift off) | Polish on falling drama |
+| Falling damage (impact → break/crumble) | Needs damage model; v0.1 polish |
+| Fallen-dirt-as-terrain (RigidBody3D rejoins SDF when at rest) | Needs settle-detection + SDF rewrite path |
+| Partial-dirt-cover support of fallen parts | Needs free-form placement first |
+| Terrain strain on mesh surface (replace debug cubes) | Real shader work |
+| Highlight parts depending on about-to-fall things | Dependency-graph walk; nice-to-have |
+| Player-controlled dig/fill shapes & sizes | UX polish |
+| KSP-style parametric Part dimensions in-game | Tooling polish |
+| Per-material strain duration; nature-of-change reset scaling | Tuning pass |
+| Gap-between-layered-parts (parts can't "see through" missing intermediate parts) | Needs PartData.dimensions; punted |
+| Mid-break Part destruction | Whole-part destruction is enough for v0.0 |
+| Non-adjacent linkages (ropes, cables) | New data structure required |
+| Load propagation (top-down) | Mirror of support propagation; revisit |
+| Material fatigue (cumulative strain history) | Only meaningful with mobs (v0.9) |
+| In-game Schematic editor | Hand-authored `.tres` is fine; v0.9+ |
 
 ### Known limits (recorded, not fixed)
 
 - **`_resume_unfinished_floods` budget starvation:** components larger than
-  `DETECTION_BUDGET` (500 voxels) take multiple settled frames to fully
-  detect. Not a correctness bug, just lag. Fix is budget profiling, deferred.
-- **`PLAYER_CLEARANCE` in Fill/Flatten is a guess (1.0m).** Tune if refusals
-  fire too eagerly or fall-through reappears.
-- **Part scene layout is assumed (flat children).** `_collapse_part` calls
-  `get_children()` expecting a flat list of MeshInstance3D + CollisionShape3D.
-  Works for board.tscn; will break silently for nested scenes. Not enforced
-  anywhere in `Part` or `Schematic`. Document or validate before adding new
-  Part types.
-- **`FlattenAction` center/plane-point asymmetry.** Bounding box is offset
-  inward but the plane runs through the surface hit. Both are explicit
-  constructor parameters with a comment; easy to change if it becomes a bug.
-
-### Architectural decisions worth not re-litigating
-
-- **Track Godot stable, not master.** Pin to `4.6-stable` (`89cea1439`).
-- **Double-precision godot_voxel build from day one.**
-- **No engine forks.**
-- **`godot/modules/voxel` symlink, not `custom_modules`.**
-- **Worklist-fixpoint propagation is one customer, not generalized.**
-- **Signals (not a custom event bus) for `voxel_support_increased`.**
-- **Strain timer accumulated against physics `delta`, not wall-clock.**
-- **Action-as-data. Targeting at the call site.**
-- **Parts separate from terrain voxels in SI. Part support checked per-frame.**
+  `DETECTION_BUDGET` (500 voxels) take multiple settled frames to fully detect.
+- **`PLAYER_CLEARANCE = 1.0m`** in Fill/Flatten is a guess; tune if needed.
+- **Part scene layout assumes flat children.** `_collapse_part` reparents direct
+  children only; nested scenes would silently break.
+- **Hand-authored `Schematic.footprint` is not rotated** by ConstructionAction.
+  None currently use it.
+- **`FlattenAction` center/plane-point asymmetry** — explicit constructor
+  params with a comment; easy to revisit.
+- **Terrain debug visuals are cubes that draw through walls** (`no_depth_test`).
+  Replacing with surface-shader strain is v0.2.
 
 ---
 

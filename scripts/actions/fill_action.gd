@@ -32,12 +32,27 @@ func _init(
 
 func validate() -> bool:
     # Refuse-don't-deform: if filling would bury the player, refuse.
-    # This is the principled fix for bug2c on the fill path; it replaces
-    # the old _push_player_above_terrain scaffolding.
     if player != null:
         var dist := player.global_position.distance_to(position)
         if dist <= radius + PLAYER_CLEARANCE:
             return false
+
+    # Refuse-don't-deform: if a RigidBody3D occupies the fill volume, refuse.
+    # Filling SDF terrain into a body's space lets physics resolve the overlap
+    # by squirting the body in an arbitrary direction — usually through the
+    # world. Make the player dig the body out or move it first.
+    if terrain != null:
+        var space := terrain.get_world_3d().direct_space_state
+        var query := PhysicsShapeQueryParameters3D.new()
+        var sphere := SphereShape3D.new()
+        sphere.radius           = radius
+        query.shape             = sphere
+        query.transform         = Transform3D(Basis(), position)
+        query.collide_with_areas = false
+        for hit in space.intersect_shape(query, 8):
+            if hit.collider is RigidBody3D:
+                return false
+
     return true
 
 func execute() -> void:

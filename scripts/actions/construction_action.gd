@@ -2,9 +2,9 @@ class_name ConstructionAction
 extends Action
 
 var part:          Part
-var placement_pos: Vector3    # world position for the scene instance (float Y = SDF surface)
-var world_anchor:  Vector3i   # voxel-grid cell for footprint origin
-var rotation:      int        # 0-3, each step = 90° around Y
+var placement_pos: Vector3    # world position for the rotated bottom-center
+var world_anchor:  Vector3i   # voxel-grid cell for the click point
+var rotation:      Vector3i   # 0-3 per axis (X, Y, Z), each step = 90°
 var terrain:       VoxelLodTerrain
 var integrity:     StructuralIntegrity
 var player:        CharacterBody3D
@@ -16,7 +16,7 @@ func _init(
     p_part:     Part,
     p_pos:      Vector3,
     p_anchor:   Vector3i,
-    p_rotation: int,
+    p_rotation: Vector3i,
     p_terrain:  VoxelLodTerrain,
     p_integ:    StructuralIntegrity,
     p_player:   CharacterBody3D,
@@ -49,50 +49,62 @@ func validate() -> bool:
     return false
 
 func execute() -> void:
-    if part.scene == null:
-        push_error("ConstructionAction.execute(): part.scene is null")
-        return
-
-    var instance: Node3D = part.scene.instantiate()
-    instance.global_position  = placement_pos
-    instance.rotation_degrees = Vector3(0.0, 90.0 * rotation, 0.0)
+    var instance := part.instantiate()
+    # The procedural body's local origin is the unrotated bottom-center. After
+    # rotation, the new bottom and horizontal centroid no longer sit on that
+    # origin — shift the instance so the rotated bottom lands at
+    # placement_pos.y and the rotated centroid is over placement_pos.x/.z.
+    var rotated := _rotated_local_aabb()
+    var shift   := Vector3(
+        -(rotated.position.x + rotated.size.x * 0.5),
+         -rotated.position.y,
+        -(rotated.position.z + rotated.size.z * 0.5)
+    )
+    instance.transform = Transform3D(_basis(), placement_pos + shift)
     terrain.get_parent().add_child(instance)
 
-    integrity.register_part(instance, _footprint(), Materials.from_name(part.material_name))
+    integrity.register_part(instance, _footprint(), Materials.from_name(part.material_name), placement_pos.y)
 
 # --- internals ---
+
+func _basis() -> Basis:
+    var b := Basis.IDENTITY
+    b = b.rotated(Vector3.RIGHT,   rotation.x * PI * 0.5)
+    b = b.rotated(Vector3.UP,      rotation.y * PI * 0.5)
+    b = b.rotated(Vector3.FORWARD, rotation.z * PI * 0.5)
+    return b
+
+# AABB of the part in local space (bottom-anchored at Y=0, centered in X/Z),
+# rotated around the local origin. The result generally has negative Y and
+# off-center X/Z — the execute() shift compensates.
+func _rotated_local_aabb() -> AABB:
+    var dims     := part.dimensions
+    var unrot    := AABB(Vector3(-dims.x * 0.5, 0.0, -dims.z * 0.5), dims)
+    return Transform3D(_basis(), Vector3.ZERO) * unrot
 
 func _footprint() -> Array[Vector3i]:
     if _fp_computed:
         return _cached_fp
-    var local_fp := part.footprint if not part.footprint.is_empty() \
-        else _local_footprint_from_scene()
-    for cell in local_fp:
-        _cached_fp.append(cell + world_anchor)
+    if not part.footprint.is_empty():
+        # Hand-authored footprints are not rotated for now — no Schematic
+        # currently uses them.
+        for cell in part.footprint:
+            _cached_fp.append(cell + world_anchor)
+    else:
+        var rotated := _rotated_local_aabb()
+        # World AABB: rotated extents anchored so the bottom is at
+        # placement_pos.y and the rotated centroid sits over placement_pos.x/.z.
+        var world := AABB(
+            Vector3(
+                placement_pos.x - rotated.size.x * 0.5,
+                placement_pos.y,
+                placement_pos.z - rotated.size.z * 0.5
+            ),
+            rotated.size
+        )
+        _cached_fp = VoxelUtils.footprint_from_aabb(world)
     _fp_computed = true
     return _cached_fp
-
-func _local_footprint_from_scene() -> Array[Vector3i]:
-    if part.scene == null:
-        return []
-    var instance := part.scene.instantiate()
-    var aabb     := _union_mesh_aabbs(instance)
-    instance.free()
-    if rotation != 0:
-        var rot := Transform3D(Basis.from_euler(Vector3.UP * deg_to_rad(90.0 * rotation)), Vector3.ZERO)
-        aabb     = rot * aabb
-    return VoxelUtils.footprint_from_aabb(aabb)
-
-func _union_mesh_aabbs(node: Node) -> AABB:
-    var result := AABB()
-    var found  := false
-    for child in node.get_children():
-        if not child is MeshInstance3D:
-            continue
-        var child_aabb: AABB = child.transform * child.get_aabb()
-        result = result.merge(child_aabb) if found else child_aabb
-        found  = true
-    return result
 
 func _footprint_aabb(fp: Array[Vector3i]) -> AABB:
     var lo := Vector3(fp[0])

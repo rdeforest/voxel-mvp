@@ -61,13 +61,31 @@ New Actions: extend `Action`, implement `validate()` and `execute()`, add a fact
 
 ### Structural integrity system
 
-**`StructuralIntegrity`** (`scripts/structural_integrity.gd`): tracks only *modified* voxels in a `voxel_data` dictionary. Untracked voxels are assumed fully supported (they're natural terrain). A worklist fixpoint propagation drains `dirty_queue` at `PROPAGATION_BUDGET` (200) voxels per physics frame. When a voxel's support increases meaningfully, it emits `voxel_support_increased`.
+**`StructuralIntegrity`** (`scripts/structural_integrity.gd`) runs two parallel support systems:
 
-**`CollapseDetector`** (`scripts/collapse_detector.gd`): runs after the dirty queue settles. Flood-fills connected components of unsupported voxels into *pending collapses* with a strain countdown (`STRAIN_DURATION_SEC = 3.0s`). During the window the player can add support to reset the timer. On expiry, the component is extracted from the SDF terrain and materialized as a falling `RigidBody3D` (greedy box merge for collision).
+**Terrain voxels** live in `voxel_data: Dictionary`. Untracked voxels are assumed fully supported (natural terrain). FillAction registers placed voxels; DigAction will register newly-exposed cells (cave integrity, in progress). A worklist fixpoint drains `dirty_queue` at `PROPAGATION_BUDGET` (200) cells per physics frame. When a voxel's support increases meaningfully, it emits `voxel_support_increased` so CollapseDetector can rewind any pending strain timer.
+
+**Placed Parts** live in `part_registry: Dictionary[Node3D, PartData]`. `PartData` (inner class) holds `cells: Array[Vector3i]`, `material: Materials`, `placement_y: float` (world Y of the bottom face), and a recomputed `support: float`. A reverse map `_cell_to_part: Dictionary[Vector3i, Array[Node3D]]` is a per-cell **stack** — multiple thin parts can share one voxel cell when stacked vertically, ordered by `placement_y`.
+
+Part support is recomputed fresh each frame by `_recompute_part_support()`: sort parts ascending by `placement_y`, then for each part find its **direct supporter** (the part with the highest `placement_y < mine` in the part's own cell or the cell below). Support value = `max(supporter_support) - material.decay`. Direct terrain contact short-circuits to `FULL_SUPPORT`. Tall parts (multi-cell Y span from non-Y rotation) only check support from the bottom row of footprint cells.
+
+Strain accumulates against physics `delta` when `support <= FALL_THRESHOLD`. On expiry, `_collapse_part` reparents the part's children to a new `RigidBody3D` with `continuous_cd = true` (so thin boards don't tunnel through terrain). Visual: `_apply_part_visual` puts the strain color on `emission` rather than replacing the albedo, so the part's natural surface color (and future textures) stays visible.
+
+**`CollapseDetector`** (`scripts/collapse_detector.gd`) handles *terrain* collapses only. Flood-fills connected components of unsupported terrain voxels into pending collapses, runs the same strain timer, then on expiry extracts the cells from the SDF and materialises them as a falling RigidBody3D (greedy box merge for collision).
+
+### Parts (`scripts/schematics/`, `assets/parts/`)
+
+`Schematic` (base, `Resource`) carries an optional hand-authored footprint and snap_points (UI deferred). `Part` extends it with `dimensions: Vector3`, `material_name: StringName`, and an optional `scene: PackedScene` override. `Part.instantiate()` returns a Node3D — either the scene if set, or a procedural `StaticBody3D` with MeshInstance3D + CollisionShape3D sized by `dimensions`, albedo from `Materials.from_name(material_name).albedo`. Bottom-anchored at local Y=0.
+
+Current catalog (`assets/parts/<name>/<name>.tres`): board, plank, stud, beam — all parametric rectangular Parts that differ only in `dimensions`. Adding a new wood Part is a one-line `.tres`.
+
+Multi-axis rotation: `ConstructionAction.rotation: Vector3i` (0–3 per axis). Rotation is around the body's local origin (the unrotated bottom-center); after rotation, the instance is shifted so the rotated bottom lands at `placement_pos.y` and the rotated horizontal centroid sits over `placement_pos.x/.z`. Use `Transform3D(basis, Vector3.ZERO) * aabb` for AABB rotation (Godot doesn't define `Basis * AABB`).
+
+Player controls in Build mode: `[`/`]` cycle parts, `R` rotates around Y, `T` rotates around X, `Y` rotates around Z.
 
 ### Materials
 
-`Materials` (`scripts/materials.gd`) is a class with static singleton instances (`Materials.STONE`, `Materials.WOOD`, etc.). Each carries `decay` (support loss per step of distance from ground) and `failure_mode`. Currently STONE is used for all player-placed voxels.
+`Materials` (`scripts/materials.gd`) is a class with static singleton instances (`Materials.STONE`, `Materials.WOOD`, etc.). Each carries `decay` (support loss per hop), `albedo: Color` (used by the procedural Part build), `angle_of_repose`, and `failure_mode`. `Materials.from_name(StringName)` resolves a Part's `material_name` to the singleton.
 
 ### SDF conventions
 
@@ -78,11 +96,13 @@ New Actions: extend `Action`, implement `validate()` and `execute()`, add a fact
 
 ### Key conventions
 
-- **Refuse-don't-deform.** Actions refuse via `validate()` when constraints can't be met rather than silently adjusting.
+- **Refuse-don't-deform.** Actions refuse via `validate()` when constraints can't be met rather than silently adjusting. Extended to physics state via `FillAction`'s `direct_space_state.intersect_shape` check — fills that would overlap a `RigidBody3D` are refused (otherwise the body squirts through the world).
 - **Input dispatch via dictionary lookup.** `player.gd` maps keycodes and mouse buttons to callables; no if-chains.
 - **`PLAYER_CLEARANCE = 1.0m`** in `FillAction` and `FlattenAction` prevents filling the player's occupied space. Tune if the player `CapsuleShape3D` dimensions change.
 - Signals (not an event bus) connect `StructuralIntegrity` → `CollapseDetector` for `voxel_support_increased`.
 - Strain timer accumulates against physics `delta` (not wall-clock), so it pauses correctly when the game tree is paused.
+- **`_wake_falling_bodies()`** on every `notify_terrain_changed` and `remove_part` — SDF terrain edits don't signal contact-change to the physics engine, so resting RigidBody3Ds need an explicit nudge when the ground under them changes.
+- **Typed dicts (`Dictionary[K, V]`, Godot 4.4+)** for `part_registry`. Plain `Dictionary` poisons inferred types from iteration (`for x in dict` makes `x` Variant, breaking `==` inference). Use typed dicts when iteration variable types matter.
 
 ## Project State
 

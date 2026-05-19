@@ -1,8 +1,7 @@
 [gd_resource type="Resource" script_class="Part" format=3 uid="uid://botdc6sloyj1e"]
 
 [ext_resource type="Script" uid="uid://bjij25oiltyca" path="res://scripts/schematics/part.gd" id="1_6wk47"]
-[ext_resource type="PackedScene" uid="uid://ddhkn88uhojlx" path="res://assets/parts/board/board.tscn" id="1_d7t01"]
 
 [resource]
 script = ExtResource("1_6wk47")
-scene = ExtResource("1_d7t01")
+dimensions = Vector3(2, 0.1, 0.012)
