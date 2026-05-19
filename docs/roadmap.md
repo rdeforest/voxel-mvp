@@ -36,6 +36,7 @@ choosing voxel over heightmap:
 | Version | Question it answers | Roughly maps to |
 |---------|-------------------|-----------------|
 | 0.0 | Is this as good of an idea as I think it is? | Phases 0, 2, 5 (fast path) |
+| 0.0.1 | Can I save, load, and replay the world? | Persistence + history-as-journal (see below) |
 | 0.1 | Can I make it fun/performant? | Phases 1, 3, 4 (filling in the gameplay) |
 | 0.2 | Can I make it pretty? | Art pass, shader work, audio, polish |
 | 0.9 | Can I make it into a real product? | Multiplayer, content depth, settings, QA |
@@ -282,10 +283,96 @@ At this point (~5 weeks part-time), you have:
 deliberately a tech demo, not a game. But it answers the fundamental question: does the
 voxel approach deliver on its architectural promises?
 
-If yes → proceed to v0.1.
+If yes → proceed to v0.0.1, then v0.1.
 If the structural integrity is too computationally expensive, or the voxel-prefab seam
 looks bad, or the terrain modification feels worse than Valheim's → you've spent 5 weeks
 instead of 5 months finding out.
+
+---
+
+## v0.0.1: Persistence as Replayable History
+**Goal:** Save and load world state — and the operations that produced it.
+**Version target:** 0.0.1
+
+### Why this is interesting, not just necessary
+
+A naive save system serializes the current state and reloads it. That's fine for shipping
+a game, but it's a missed opportunity for a project whose thesis is *the world is honest
+geometry produced by honest operations*. If every terrain edit and part placement is
+already a discrete `Action` (validated, then executed), the save file can be the
+**journal of actions that produced the current world** — not just a snapshot of the
+result.
+
+This is the Quake `.dem` model: a demo file is just the sequence of inputs the engine
+replays to reproduce the game state. Same idea here, scaled to world-mutating operations
+instead of input events. The save file is both:
+
+- A **state restore** mechanism for normal save/load (replay all actions, or restore
+  from a periodic snapshot + tail of actions since the snapshot)
+- A **bug reproduction** artifact: a player files a bug, attaches the save, you replay
+  it step-by-step and watch the failure happen. No "can you remember what you did?"
+- A **debugging tool**: step forward and backward through the action history with the
+  integrity system computing live. Watch the strain gradient develop, see exactly which
+  action caused a collapse, identify off-by-one or propagation bugs by their visual
+  signature.
+- A **test harness foundation**: replay a known sequence as a regression test. If the
+  cave-integrity demo ever stops behaving correctly, the failing replay is the bug
+  report.
+
+The thesis-consistency argument: the world is geometry produced by operations on
+geometry. Saving the operations rather than just the result is more honest. It also
+means a save file is portable across builds in a way a state snapshot isn't — as long
+as the action semantics stay stable, a save from yesterday's build replays correctly
+on today's.
+
+### Tasks
+
+- Serialise the `Action` history: every executed action records its type and parameters
+  in an append-only journal
+- Periodic state snapshots (every N actions or M seconds) so replay-from-zero isn't
+  required on every load
+- Save format: snapshot + journal tail since snapshot. Versioned, with an action-schema
+  version number so old saves can be detected and either replayed under their original
+  semantics or rejected cleanly
+- Load: restore from snapshot, then replay journal tail with the integrity system
+  computing live (or fast-forwarded if the integrity state is part of the snapshot)
+- Debug controls: pause replay, step forward/back one action at a time, scrub to a
+  timestamp
+- godot_voxel chunk persistence integration: the SDF state is part of the snapshot,
+  not the journal (journal records the action that mutated SDF, snapshot records the
+  SDF result)
+- Save UI: at minimum a hotkey for quicksave/quickload; full UI deferred to v0.9
+
+### Key decisions
+
+- **Action serialisation format.** Each Action class knows how to serialise itself. The
+  `Action` base class grows `serialise() -> Dictionary` and a static `deserialise(d) ->
+  Action`. Keep it simple — strings for action type, primitive values for parameters.
+- **Snapshot cadence.** Tunable. Probably every 30 seconds or every 50 actions for v0.0.1,
+  optimise later if load times are bad.
+- **Action schema versioning is non-negotiable.** Once people start saving worlds, an
+  action-semantics change is a save-format break. Version the schema from day one;
+  refuse to load saves with unknown schemas; provide a migration path or an honest
+  "this save predates the current build, sorry" message. This is the cheapest place
+  to put forward-compatibility work and it pays off forever.
+- **Determinism.** Replay must be deterministic for the bug-reproduction case to work.
+  This means seeded RNG for anything stochastic (collapse direction tie-breaking,
+  particle effects if any). Treat non-determinism as a bug from v0.0.1 onward.
+
+### Claude Code leverage: High
+Serialisation boilerplate, format versioning, snapshot/journal coordination are
+pattern-heavy. The deterministic-replay discipline needs human attention.
+
+### Risk
+Determinism is the gotcha. Anything that reads wall-clock time, system RNG, or unordered
+dictionary iteration can break replay. Catching these requires a CI test that replays a
+known journal and checks the final state matches a recorded hash.
+
+### Done when
+You can dig a cave, place beams, watch a collapse, save, quit, reload, and the world is
+exactly as you left it — including the in-progress strain timers. You can also replay
+the save from zero and watch your session happen in fast-forward, step through one
+action at a time, and produce a deterministic state hash.
 
 ---
 
@@ -402,6 +489,24 @@ loop. No enemies or survival pressure yet, but it's a playable sandbox.
 reduction to simulate lower-end hardware. Key metrics: chunk meshing time, frame budget
 at various draw distances, structural integrity computation cost.
 
+### Forward-looking design direction for v0.1: honest physics interaction
+
+The v0.0 deferred list (see Phase 5) clustered several items — SDF seam matching,
+load propagation, falling damage, fallen-dirt-as-terrain — that initially looked
+like separate features but resolve to a single design statement:
+
+> Transient physics state and persistent terrain state should be able to become
+> each other, governed by relative material strength.
+
+A falling RigidBody3D of dirt that comes to rest should be able to rejoin the SDF
+as terrain. A beam under enough load should snap. A buried beam, depending on
+relative strength, should either break under the dirt or displace the dirt aside.
+The SDF seam between part and terrain isn't a rendering problem to be hidden —
+it's a contact between two materials with strength properties, and what happens
+at that contact is part of the physics. This is the natural extension of
+"material physics matter" from the Design Principles, and it's the v0.1 design
+direction that ties the deferred items together.
+
 ---
 
 ## Phases Beyond v0.1 (Scoped But Not Scheduled)
@@ -426,7 +531,6 @@ at various draw distances, structural integrity computation cost.
 - Procedural dungeons (generated cave complexes — no loading screens)
 - Building material tiers (wood → stone → iron-reinforced)
 - Death, respawn, bed placement
-- Save system (player state + modified chunks + structures)
 - Settings menu, keybinding, accessibility
 
 ### v1.0: "Will People Pay For It On Steam?"
@@ -481,6 +585,51 @@ significant time for feel-testing.
 **The "does it look right" problem** is real and can't be automated. Record video of enemy
 movement, watch at 0.5x speed, identify what looks wrong. Common issues: path oscillation,
 inability to handle ledges, getting stuck on terrain features, unnatural turning.
+
+### CPU-Bound Architecture and GPU Offload
+
+The current architecture runs all the interesting work — structural integrity
+propagation, part support recomputation, collapse detection — on the main thread.
+godot_voxel meshes on background threads, so chunk meshing isn't the bottleneck, but
+our systems are. Heavy digging already produces observable frame drops in v0.0,
+and the load gets worse as the tracked region grows.
+
+**Two open questions, ordered by likelihood of being the right move:**
+
+1. **More threads first.** Structural integrity propagation is a fixpoint over a
+   dirty queue. The natural parallel structure is "work-steal from the queue,"
+   with care taken around the shared `voxel_data` dictionary. Part recomputation
+   is a topological sort followed by an embarrassingly parallel pass within each
+   level. Both are tractable on CPU threads and probably enough for v0.1's
+   performance target.
+
+2. **GPU offload via compute shaders or OpenCL.** Tempting because the integrity
+   field is structurally a 3D scalar field with local update rules — the kind of
+   thing GPUs eat for breakfast. The catch is that the current algorithm has
+   *non-local* dependencies (lazy expansion can chain through ~20 cells of
+   untracked terrain), and the part recomputation has explicit ordering (sort
+   parts by `placement_y`, then resolve direct supporters). Both could plausibly
+   be reformulated to flatten dependencies into independent passes — e.g.,
+   pre-expand the tracked region before each propagation step, then run a fixed
+   number of Jacobi-style iterations until convergence — but that's a real
+   redesign, not a port.
+
+**Recommendation:** Don't pursue GPU offload until threading is exhausted and a
+profile points unambiguously at structural integrity as the bottleneck. The
+threading path is incremental and reversible; the GPU path is a structural
+redesign that fights the algorithm's natural shape. If the GPU path *is* the
+right answer, the redesign work (flattening dependencies into independent passes)
+is also what makes the threaded version faster, so the threading work isn't
+wasted.
+
+**The lurking architectural question:** if and when GPU offload happens, does the
+integrity field live on the GPU full-time with periodic CPU readback for game
+logic, or does it ping-pong per frame? The answer depends on whether anything
+other than the integrity system reads the integrity field. If only the renderer
+(via strain-color shaders) and the collapse detector need it, GPU-resident is
+fine. If gameplay systems start querying support values, ping-pong gets
+expensive. Worth flagging now so we don't accidentally design ourselves into a
+ping-pong corner.
 
 ### Planet-Scale World (Post-MVP)
 
@@ -561,6 +710,72 @@ The click-spam replacement for mining and logging:
 
 ## Architecture Notes
 
+### Architectural Commitments
+
+These patterns emerged during v0.0 implementation and are now load-bearing across the
+codebase. They're documented here as design commitments, not just code conventions,
+because changing them would mean rewriting most of the world-mutating code. `CLAUDE.md`
+documents how to *use* them; this section documents *why they exist*.
+
+**Action-as-data with `validate()` then `execute()`.** Every world-mutating operation
+— dig, fill, flatten, place-part — is a `RefCounted` subclass of `Action` carrying its
+final computed parameters (not raw input). `validate()` returns true only if the
+operation can be performed with truthful semantics; `execute()` then performs it.
+Targeting logic (raycasting, computing sphere centres) lives at the call site, not
+inside the Action. This shape is what makes v0.0.1's history-as-journal feasible: an
+Action with a deserialisable parameter set is replayable.
+
+**Refuse-don't-deform.** Actions refuse via `validate()` when constraints can't be met,
+rather than silently adjusting to produce *some* result. Extended to physics state via
+FillAction's `intersect_shape` check (fills that would overlap a RigidBody3D are
+refused, otherwise the body squirts through the world). This is the operational
+expression of the thesis-defence design stance: a terrain op that can't cleanly do the
+intended thing should produce honest data — even if that means opening a void or
+returning failure — rather than faking a result. The Valheim flatten fakes things;
+ours doesn't.
+
+**Worklist-fixpoint propagation for terrain support.** `StructuralIntegrity` drains a
+FIFO dirty queue at a bounded budget per physics frame. BFS-order is the right shape for
+support propagation (changes spread outward from their origin); the shift cost on
+typical queue sizes isn't where the time goes. The fixpoint is reached when no
+additional dirty cells are produced by recomputation — budget exhaustion just stretches
+the fixpoint across multiple frames, it doesn't change the result.
+
+**Per-column bedrock detection.** `_lowest_registered_y: Dictionary[Vector2i, int]`
+indexes the lowest registered Y per `(x, z)` column; `_is_bedrock(pos)` returns true
+when the column has nothing registered below `pos.y`. Combined with untracked-solid
+status, this is what distinguishes *real* bedrock (which grants full support to its
+neighbours) from *suspended mass* (which doesn't, even though it's solid in the SDF).
+Necessary to prevent floating chunks from blessing the cells above them as supported
+after a collapse.
+
+**Lazy expansion bounded by material decay.** When propagation reaches an
+untracked-solid neighbour that isn't bedrock, it gets lazy-registered with material
+STONE so the algorithm can compute its actual support. Lazy registration is gated on
+the current cell's support being above `FALL_THRESHOLD` — cells already at zero won't
+seed a chain worth extending. The cascade depth is therefore bounded by the material's
+decay budget (~20 cells for STONE), which is the same bound that makes the support
+values meaningful.
+
+**Per-cell stack of parts.** Multi-cell rotation can place multiple thin parts in the
+same voxel cell. `_cell_to_part: Dictionary[Vector3i, Array[Node3D]]` is therefore a
+stack ordered by `placement_y`, and direct-supporter lookup walks the stack to find the
+part with the highest `placement_y` below the queried part. Single-part-per-cell would
+have been simpler but couldn't represent stacked boards.
+
+**In-limbo semantics for parts.** A part is `in_limbo` when any of its support
+dependencies (a supporter Part still in-limbo, or a terrain voxel still dirty) hasn't
+settled. Strain accumulation skips while in-limbo, so a transient zero during
+propagation doesn't trigger a 3-second countdown that would resolve before expiry.
+Without this, every dig near a part triggers spurious collapse timers.
+
+**Data-driven definitions via `.tres`.** Parts (`assets/parts/*.tres`) and Materials
+(`assets/materials/*.tres`) live in resource files, not in code. Adding a wood Part or
+a new material is a file copy and a parameter tweak. The roadmap originally specified
+JSON for this; `.tres` is strictly better in this codebase — it's Godot-native,
+editor-discoverable, and avoids a parse step at startup. Anyone who wants JSON can
+export from `.tres` as easily as the reverse.
+
 ### Why godot_voxel
 
 This is the single most important dependency. Without it, the voxel engine alone is 6–12
@@ -590,52 +805,9 @@ with your experience if necessary.
 
 ### Folder Structure
 
-```
-project/
-├── addons/
-│   └── zylann.voxel/          # godot_voxel module
-├── assets/
-│   ├── models/                # CC0 models (Kenney, Quaternius)
-│   ├── textures/              # terrain materials, UI
-│   ├── sounds/                # CC0 audio
-│   └── fonts/
-├── scenes/
-│   ├── world/
-│   │   ├── terrain_generator.gd
-│   │   ├── biome_manager.gd
-│   │   ├── structural_integrity.gd
-│   │   └── world.tscn
-│   ├── player/
-│   │   ├── player.tscn
-│   │   ├── player_controller.gd
-│   │   ├── work_action_manager.gd  # continuous mining/logging
-│   │   ├── inventory.gd
-│   │   └── stats.gd
-│   ├── building/
-│   │   ├── build_system.gd
-│   │   ├── snap_manager.gd
-│   │   └── pieces/
-│   ├── enemies/
-│   │   ├── enemy_base.gd
-│   │   ├── pathfinding/
-│   │   │   ├── raycast_steering.gd
-│   │   │   └── nav_grid_3d.gd
-│   │   └── types/
-│   └── ui/
-│       ├── hud.tscn
-│       ├── inventory_ui.tscn
-│       ├── crafting_ui.tscn
-│       └── work_progress_ui.tscn
-├── data/
-│   ├── items.json
-│   ├── recipes.json
-│   ├── materials.json         # structural properties per material
-│   └── biomes.json
-└── scripts/
-    ├── voxel_editor.gd
-    ├── resource_node.gd
-    └── save_manager.gd
-```
+See `CLAUDE.md` for the current scene graph, script organisation, and architectural
+conventions. That doc is maintained as the authoritative description of where code
+lives and how it's structured; duplicating it here would just create drift.
 
 ---
 

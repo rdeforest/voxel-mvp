@@ -1,42 +1,52 @@
 class_name Materials
+extends Resource
 
-var name:            String
-var decay:           float
-var max_support:     float
-var albedo:          Color
-var angle_of_repose: float  # degrees, -1 for rigid materials
-var failure_mode:    String # "crumble", "fracture", "snap", "bend"
+# Material data driven by .tres resource files in assets/materials/. Each
+# material's properties (decay, albedo, etc.) live in its .tres file; this
+# class is the thin loader plus singleton accessors for ergonomics. Adding
+# a new material is a file copy in assets/materials/ and a getter here.
+#
+# Why .tres and not JSON: editor-discoverable, Godot-native, no parse step
+# at startup. Anyone who wants JSON can export from .tres trivially.
 
-func _init(
-    p_name:        String,
-    p_decay:       float,
-    p_max_support: float,
-    p_albedo:      Color  = Color(0.5, 0.5, 0.5),
-    p_angle:       float  = -1.0,
-    p_failure:     String = "fracture",
-) -> void:
-    name            = p_name
-    decay           = p_decay
-    max_support     = p_max_support
-    albedo          = p_albedo
-    angle_of_repose = p_angle
-    failure_mode    = p_failure
+@export var name:            String = ""
+@export var decay:           float  = 0.0
+@export var max_support:     float  = 1.0
+@export var albedo:          Color  = Color(0.5, 0.5, 0.5)
+@export var angle_of_repose: float  = -1.0  # degrees, -1 for rigid materials
+@export var failure_mode:    String = "fracture"  # "crumble", "fracture", "snap", "bend"
 
-# --- Singleton instances ---
 
-static var TERRAIN := Materials.new("Terrain", 0.0,  1.0, Color(0.45, 0.30, 0.18))
-static var DIRT    := Materials.new("Dirt",    0.20, 1.0, Color(0.40, 0.26, 0.16), 35.0, "crumble")
-static var SAND    := Materials.new("Sand",    0.25, 1.0, Color(0.85, 0.75, 0.55), 30.0, "crumble")
-static var STONE   := Materials.new("Stone",   0.05, 1.0, Color(0.55, 0.55, 0.55), 90.0, "fracture")
-static var WOOD    := Materials.new("Wood",    0.10, 1.0, Color(0.51, 0.32, 0.20), -1.0, "snap")
-static var METAL   := Materials.new("Metal",   0.03, 1.0, Color(0.65, 0.65, 0.70), -1.0, "bend")
+# --- Singleton accessors ---
+#
+# Static vars initialise lazily on first access to the class. Using load()
+# rather than preload() avoids a parse-time circular reference: the .tres
+# files reference this script, so preload at script scope would try to
+# resolve them while this script is still being parsed. load() defers to
+# runtime, by which time the script is fully defined and the .tres can
+# bind to it cleanly.
+
+static var TERRAIN: Materials = load("res://assets/materials/terrain.tres") as Materials
+static var DIRT:    Materials = load("res://assets/materials/dirt.tres")    as Materials
+static var SAND:    Materials = load("res://assets/materials/sand.tres")    as Materials
+static var STONE:   Materials = load("res://assets/materials/stone.tres")   as Materials
+static var WOOD:    Materials = load("res://assets/materials/wood.tres")    as Materials
+static var METAL:   Materials = load("res://assets/materials/metal.tres")   as Materials
 
 static var _by_name: Dictionary = {}
 
+
+# Resolve a material by its `name` field (StringName for cheap comparison at
+# call sites). Falls back to STONE if the name is unknown — matches the old
+# behaviour and keeps callers from having to null-check.
 static func from_name(n: StringName) -> Materials:
     if _by_name.is_empty():
         _by_name = {
-            &"Terrain": TERRAIN, &"Dirt": DIRT,  &"Sand":  SAND,
-            &"Stone":   STONE,   &"Wood": WOOD,   &"Metal": METAL,
+            &"Terrain": TERRAIN,
+            &"Dirt":    DIRT,
+            &"Sand":    SAND,
+            &"Stone":   STONE,
+            &"Wood":    WOOD,
+            &"Metal":   METAL,
         }
     return _by_name.get(n, STONE)

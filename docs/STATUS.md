@@ -8,8 +8,9 @@
 
 ## Resumption Brief
 
-*Last updated: v0.0 close-out — Phase 5 functionally complete, release
-plumbing in place, awaiting playtester reality-check before scoping v0.1.*
+*Last updated: v0.0 close-out — Phase 5 functionally complete, release plumbing
+in place, planning v0.0.1 (persistence-as-replay) and a materials-as-`.tres`
+refactor while playtesting v0.0.*
 
 **Where you are:** v0.0 is done. The thesis demo works end-to-end: dig a wide
 cave, ceiling cells develop a strain gradient that depends on material decay,
@@ -31,14 +32,35 @@ godot_voxel dependencies.
    think it is?" — Robert's call to make. The infrastructure is in place; the
    question is now about *feel*, not implementation.
 
-2. **Playtester binaries.** Linux + macOS + Windows binaries via GitHub
-   Actions (cross-compile from a Linux runner with MinGW for Windows, native
-   on macos-latest). Not yet started. The artifact-on-tag workflow is the
-   standard pattern; tag `v0.0` already exists once committed.
+2. **Materials → `.tres` refactor (in flight).** Move `Materials` data out of
+   `scripts/materials.gd` into `assets/materials/<name>.tres` resources,
+   mirroring the Parts pattern. The class stays as a thin loader plus the
+   singleton accessors for ergonomics; the *data* lives in resource files.
+   The roadmap's original commitment to data-driven definitions was JSON;
+   `.tres` is strictly better here (Godot-native, editor-discoverable, no
+   parse step), and the roadmap has been updated to reflect that.
 
-3. **v0.1 scoping.** When the v0.0 answer comes back "yes," the v0.1
-   question is "can I make it fun/performant?" — see `roadmap.md` Phases 1,
-   3, 4 and the deferred list below for the candidate scope.
+3. **v0.0.1: persistence as replayable history.** Save/load is now scoped as
+   v0.0.1 with a sharper framing than "add a save system." The save file is
+   the journal of actions that produced the world — snapshot plus action
+   tail — which doubles as a bug-reproduction artifact, a step-debugging
+   tool, and a regression-test harness. The Action pattern already makes
+   this feasible; the work is serialisation, snapshot cadence, schema
+   versioning, and determinism discipline. See `roadmap.md` for the full
+   design.
+
+4. **Playtester binaries.** Linux + macOS + Windows binaries via GitHub
+   Actions (cross-compile from a Linux runner with MinGW for Windows, native
+   on macos-latest). Not yet started. Robert wants to play with v0.0
+   locally first to decide it's not embarrassing before distributing.
+
+5. **v0.1 scoping.** When the v0.0 (and v0.0.1) answers come back "yes," the
+   v0.1 question is "can I make it fun/performant?" — see `roadmap.md`
+   Phases 1, 3, 4, the deferred list below, and the new "honest physics
+   interaction" design direction (SDF seam + load propagation + falling
+   damage + fallen-dirt-as-terrain, unified under the principle that
+   transient physics state and persistent terrain state should be able to
+   become each other).
 
 **Architectural status — what's solid, what's known-imperfect:**
 
@@ -53,15 +75,18 @@ godot_voxel dependencies.
 - Physics integration handles the cases we hit: thin parts use `continuous_cd`
   to avoid tunnelling, fills refuse on top of RigidBody3Ds, terrain edits
   wake sleeping bodies.
-- SDF seam matching (Option A2) is **deferred** to v0.1+. The realization
+- **Performance is CPU-bound** and observably degrades under heavy digging.
+  Threading is the right next move if it bites; GPU offload is a known-hard
+  problem documented in the roadmap. Budget-consumption telemetry deferred
+  to v0.1.
+- SDF seam matching (Option A2) is **deferred to v0.1+**. The realisation
   during scoping: our parts are sub-cell (0.012–0.15m thin axes, 1m cells),
   so writing SDF samples per cell can't represent the parts at the right
-  resolution. The v0.0 thesis stands without it; v0.1+ can revisit either
-  with smaller voxels or — Robert's framing — with physics-driven part-vs-
-  terrain interaction where a buried beam either breaks under load or pushes
-  the dirt aside, depending on relative material strength. That's the more
-  interesting design direction and it pairs naturally with the falling-damage
-  and load-propagation work also in the deferred list.
+  resolution. The v0.0 thesis stands without it; v0.1+ revisits this under
+  the "honest physics interaction" design direction — where a buried beam
+  either breaks under load or pushes the dirt aside depending on relative
+  material strength, pairing naturally with load propagation and falling
+  damage.
 
 ---
 
@@ -74,6 +99,19 @@ godot_voxel dependencies.
 | 0 — Foundation | Complete | godot + godot_voxel build chain, walking-around prototype |
 | 2 — Terrain Modification | Complete | dig, fill, flatten with refuse-don't-deform |
 | 5 — Building System | Functionally complete for v0.0 | Parts, structural integrity, cave integrity, pillar reinforcement all working; SDF seam matching deferred to v0.1+ |
+
+### v0.0.1 — Scope
+
+Full design in `roadmap.md`. Summary: serialise `Action` history as an
+append-only journal, periodic state snapshots, versioned save format with
+action-schema versioning, deterministic replay (seeded RNG, no wall-clock
+reads), debug controls for stepping through history. Not started.
+
+### In flight
+
+| Item | State |
+|------|-------|
+| Materials → `.tres` refactor | Underway — see Resumption Brief |
 
 ### Bugs
 
