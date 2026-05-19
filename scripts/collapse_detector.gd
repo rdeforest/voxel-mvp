@@ -409,19 +409,11 @@ func _materialize_collapse(voxels: Array) -> void:
     var voxel_tool: VoxelTool = _integrity.terrain.get_voxel_tool()
     voxel_tool.channel = VoxelBuffer.CHANNEL_SDF
     voxel_tool.mode    = VoxelTool.MODE_REMOVE
-    var lo := Vector3.INF
-    var hi := -Vector3.INF
     for v in voxels:
         voxel_tool.set_voxel_f(v, VoxelConstants.SDF_AIR)
         _integrity.remove_voxel(v)
-        var vv := Vector3(v)
-        lo = lo.min(vv)
-        hi = hi.max(vv + Vector3.ONE)
-
-    # Register the new exposed surface left behind by the collapse. Without
-    # this, the cells around the freshly-opened cavity sit untracked and the
-    # support gradient doesn't update to reflect the new geometry.
-    _integrity.register_exposed_cells(lo - Vector3.ONE, (hi - lo) + Vector3.ONE * 2.0)
+    # remove_voxel dirties tracked neighbours; their recomputation will
+    # lazy-register any newly-exposed untracked solids via _calculate_support.
 
 
 # Greedy axis-aligned box merge. Walks voxels in scan order, grows each

@@ -63,11 +63,17 @@ New Actions: extend `Action`, implement `validate()` and `execute()`, add a fact
 
 **`StructuralIntegrity`** (`scripts/structural_integrity.gd`) runs two parallel support systems:
 
-**Terrain voxels** live in `voxel_data: Dictionary`. Untracked voxels are assumed fully supported (natural terrain). FillAction registers placed voxels; DigAction will register newly-exposed cells (cave integrity, in progress). A worklist fixpoint drains `dirty_queue` at `PROPAGATION_BUDGET` (200) cells per physics frame. When a voxel's support increases meaningfully, it emits `voxel_support_increased` so CollapseDetector can rewind any pending strain timer.
+**Terrain voxels** live in `voxel_data: Dictionary`. A worklist fixpoint drains `dirty_queue` (FIFO via `pop_front`, BFS-order) at `PROPAGATION_BUDGET` (200) cells per physics frame. `_lowest_registered_y: Dictionary[Vector2i, int]` indexes the lowest registered Y per `(x, z)` column; `_is_bedrock(pos)` returns true when the column has nothing registered below `pos.y`. `_is_natural_terrain` requires both untracked-solid AND bedrock — the combination is what grants FULL_SUPPORT to neighbours.
+
+**Lazy expansion.** `_calculate_support` only blesses an untracked-solid neighbour as FULL_SUPPORT if it's bedrock; non-bedrock untracked solid gets lazy-registered with material STONE so propagation can compute its actual support. Lazy registration only fires when the current cell's support is itself above `FALL_THRESHOLD` — cells already at zero won't seed a chain worth extending. The result: every dig creates an initial 1-cell shell, then propagation extends the tracked region outward through structurally-relevant rock until support saturates to zero. Cascade depth = material decay budget (~20 cells for STONE).
+
+When a voxel's support increases meaningfully, it emits `voxel_support_increased` so CollapseDetector can rewind any pending strain timer.
 
 **Placed Parts** live in `part_registry: Dictionary[Node3D, PartData]`. `PartData` (inner class) holds `cells: Array[Vector3i]`, `material: Materials`, `placement_y: float` (world Y of the bottom face), and a recomputed `support: float`. A reverse map `_cell_to_part: Dictionary[Vector3i, Array[Node3D]]` is a per-cell **stack** — multiple thin parts can share one voxel cell when stacked vertically, ordered by `placement_y`.
 
 Part support is recomputed fresh each frame by `_recompute_part_support()`: sort parts ascending by `placement_y`, then for each part find its **direct supporter** (the part with the highest `placement_y < mine` in the part's own cell or the cell below). Support value = `max(supporter_support) - material.decay`. Direct terrain contact short-circuits to `FULL_SUPPORT`. Tall parts (multi-cell Y span from non-Y rotation) only check support from the bottom row of footprint cells.
+
+`PartData.in_limbo` is true when any of the part's support dependencies — a supporter Part still in-limbo or a terrain voxel still dirty — hasn't settled. `_tick_part_strain` skips strain accumulation while in_limbo, so a transient zero during propagation doesn't trigger a 3-second countdown.
 
 Strain accumulates against physics `delta` when `support <= FALL_THRESHOLD`. On expiry, `_collapse_part` reparents the part's children to a new `RigidBody3D` with `continuous_cd = true` (so thin boards don't tunnel through terrain). Visual: `_apply_part_visual` puts the strain color on `emission` rather than replacing the albedo, so the part's natural surface color (and future textures) stays visible.
 

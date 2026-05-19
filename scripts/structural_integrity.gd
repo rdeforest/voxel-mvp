@@ -13,6 +13,11 @@ class PartData:
     # at each hop. When this drops at or below FALL_THRESHOLD the part starts
     # straining.
     var support:     float = 0.0
+    # True when any of this part's support dependencies (a supporter Part or
+    # a terrain voxel) is still dirty / settling. Strain accumulation pauses
+    # while in_limbo so we don't start a 3-second countdown on a transient
+    # zero that the propagation is about to resolve.
+    var in_limbo:    bool  = false
     func _init(p_cells: Array[Vector3i], p_mat: Materials, p_y: float) -> void:
         cells       = p_cells
         material    = p_mat
@@ -43,6 +48,12 @@ var part_registry: Dictionary[Node3D, PartData] = {}
 # Key: Vector3i, Value: Array[Node3D]
 var _cell_to_part: Dictionary = {}
 
+# Per-column lowest-registered-Y index. Used by _is_bedrock() to decide
+# whether an untracked solid neighbour represents real bedrock (continuous
+# down to the world floor) or suspended mass (some registered cell exists
+# below it in the same column). Keyed by Vector2i(x, z) → lowest Y.
+var _lowest_registered_y: Dictionary = {}
+
 # Accumulated unsupported seconds per Part; drives the Part strain window.
 var _part_strain: Dictionary = {}  # Node3D → float
 
@@ -68,13 +79,30 @@ func register_voxel(pos: Vector3i, material: Materials) -> void:
         "dirty":    true,
     }
     dirty_queue.append(pos)
+    var col := Vector2i(pos.x, pos.z)
+    if not _lowest_registered_y.has(col) or _lowest_registered_y[col] > pos.y:
+        _lowest_registered_y[col] = pos.y
 
 func remove_voxel(pos: Vector3i) -> void:
     voxel_data.erase(pos)
+    var col := Vector2i(pos.x, pos.z)
+    if _lowest_registered_y.has(col) and _lowest_registered_y[col] == pos.y:
+        _recompute_column_low(col)
     for neighbor in VoxelUtils.neighbors(pos):
         if voxel_data.has(neighbor) and not voxel_data[neighbor].dirty:
             voxel_data[neighbor].dirty = true
             dirty_queue.append(neighbor)
+
+func _recompute_column_low(col: Vector2i) -> void:
+    _lowest_registered_y.erase(col)
+    for p: Vector3i in voxel_data:
+        if p.x == col.x and p.z == col.y:
+            if not _lowest_registered_y.has(col) or _lowest_registered_y[col] > p.y:
+                _lowest_registered_y[col] = p.y
+
+func _is_bedrock(pos: Vector3i) -> bool:
+    var col := Vector2i(pos.x, pos.z)
+    return not _lowest_registered_y.has(col) or _lowest_registered_y[col] > pos.y
 
 func notify_terrain_changed(center: Vector3, radius: float) -> void:
     var expanded := radius + 1.0
@@ -177,7 +205,7 @@ func _process_dirty_queue() -> void:
     var processed := 0
 
     while not dirty_queue.is_empty() and processed < VoxelConstants.PROPAGATION_BUDGET:
-        var pos: Vector3i = dirty_queue.pop_back()
+        var pos: Vector3i = dirty_queue.pop_front()
 
         if not voxel_data.has(pos):
             continue
@@ -207,21 +235,28 @@ func _calculate_support(pos: Vector3i) -> float:
     if _is_natural_terrain(pos + Vector3i(0, -1, 0)):
         return FULL_SUPPORT
 
-    var best := NO_SUPPORT
+    var best            := NO_SUPPORT
+    var current_support := voxel_data[pos].support as float
     for neighbor in VoxelUtils.neighbors(pos):
         var s: float
         if voxel_data.has(neighbor):
             s = voxel_data[neighbor].support
         elif _is_terrain_solid(neighbor):
-            # Untracked solid (natural terrain). Only counts as a supporter
-            # if it's below or beside us — gravity flows down. The mass of
-            # rock ABOVE a cave doesn't hold the ceiling up; it pushes down.
-            # Without this gate, every ceiling cell sees the untracked solid
-            # directly above it and short-circuits to FULL_SUPPORT, defeating
-            # the entire cave-integrity gradient.
+            # Untracked solid. Gravity flows down: solid above can't hold us up,
+            # only below and lateral neighbours participate.
             if neighbor.y > pos.y:
                 continue
-            s = FULL_SUPPORT
+            if _is_bedrock(neighbor):
+                # Real bedrock — continuous to the world floor. Full support.
+                s = FULL_SUPPORT
+            else:
+                # Suspended mass — needs to be in the integrity system so its
+                # support can be computed via propagation. Only seed the lazy
+                # registration if we have support to pass on; cells already at
+                # zero won't extend a meaningful chain.
+                if current_support > VoxelConstants.FALL_THRESHOLD:
+                    register_voxel(neighbor, Materials.STONE)
+                continue
         elif _cell_to_part.has(neighbor):
             # A placed Part occupies this neighbour cell. Take the best
             # support across the stack — this is what lets a wood pillar
@@ -249,6 +284,10 @@ func _tick_part_strain(delta: float) -> void:
         if data.support > VoxelConstants.FALL_THRESHOLD:
             _part_strain.erase(node)
             _apply_part_visual(node, data.support, 0.0, 0.0, hovered)
+        elif data.in_limbo:
+            # Dependencies still settling — don't start a strain timer on a
+            # transient zero. Show the current support color but no pulse.
+            _apply_part_visual(node, data.support, 0.0, 0.0, hovered)
         else:
             _part_strain[node]   = _part_strain.get(node, 0.0) + delta
             var progress: float  = _part_strain[node] / VoxelConstants.STRAIN_DURATION_SEC
@@ -273,6 +312,8 @@ func _recompute_part_support() -> void:
 func _calculate_part_support(node: Node3D, data: PartData) -> float:
     var best          := NO_SUPPORT
     var has_supporter := false
+    var any_dirty     := false
+    var found_full    := false
     var support_y     := floori(data.placement_y - 0.001)
 
     # For tall parts (rotated onto their end, spanning multiple Y cells), only
@@ -288,15 +329,27 @@ func _calculate_part_support(node: Node3D, data: PartData) -> float:
             continue
         var supporter := _direct_part_supporter(node, cell, data.placement_y)
         if supporter != null:
-            best          = maxf(best, part_registry[supporter].support)
+            var other := part_registry[supporter]
+            best          = maxf(best, other.support)
             has_supporter = true
+            if other.in_limbo:
+                any_dirty = true
             continue
         var support_cell := Vector3i(cell.x, support_y, cell.z)
         if _is_natural_terrain(support_cell):
-            return FULL_SUPPORT
+            found_full = true
+            continue
         if voxel_data.has(support_cell):
-            best          = maxf(best, voxel_data[support_cell].support)
+            var rec := voxel_data[support_cell]
+            best          = maxf(best, rec.support)
             has_supporter = true
+            if rec.dirty:
+                any_dirty = true
+
+    data.in_limbo = any_dirty
+
+    if found_full:
+        return FULL_SUPPORT
     if not has_supporter:
         return NO_SUPPORT
     return maxf(NO_SUPPORT, best - data.material.decay)
@@ -370,9 +423,15 @@ func _collapse_part(node: Node3D) -> void:
 # --- Helpers ---
 
 func _is_natural_terrain(pos: Vector3i) -> bool:
+    # Natural terrain = solid SDF cell that's both untracked AND bedrock-by-
+    # column-definition. The bedrock check is what stops a cell directly below
+    # a cave from claiming FULL_SUPPORT just because its SDF is negative —
+    # suspended mass isn't bedrock no matter how solid it looks locally.
     if voxel_data.has(pos):
         return false
-    return _is_terrain_solid(pos)
+    if not _is_terrain_solid(pos):
+        return false
+    return _is_bedrock(pos)
 
 func _is_terrain_solid(pos: Vector3i) -> bool:
     if terrain == null:

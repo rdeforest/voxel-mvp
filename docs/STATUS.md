@@ -20,27 +20,44 @@ part's surface via emission (so future textures stay legible). Removing a part
 from under a stack correctly re-evaluates the upper parts; thin stacked parts
 within a single voxel cell are disambiguated by `placement_y` ordering.
 
-**The one missing v0.0 piece is cave integrity.** Phase 5's killer demo from
-the roadmap — "dig a wide cave, watch the ceiling strain, place pillars to
-hold it" — currently doesn't work because `DigAction` modifies the SDF without
-registering the newly-exposed wall/ceiling cells with `StructuralIntegrity`.
-Without those registrations, the cave's geometry is invisible to support
-propagation.
+**Cave integrity is in place.** Phase 5's killer demo from the roadmap —
+"dig a wide cave, watch the ceiling strain, place pillars to hold it" —
+works via two cooperating mechanisms:
+
+1. **Initial registration.** `DigAction` registers cells with at least one
+   air neighbour as the dig's 1-cell-thick shell. Same path used by fresh
+   digs and collapse cavities.
+
+2. **Lazy expansion driven by bedrock semantics.** A per-column index
+   (`_lowest_registered_y`) distinguishes real bedrock (untracked solid in a
+   column with nothing tracked below) from suspended mass (untracked solid
+   above registered cells). In `_calculate_support`, lateral untracked
+   neighbours grant FULL_SUPPORT only when bedrock; non-bedrock cells get
+   lazy-registered into the integrity system and propagation extends the
+   tracked region. Cascade depth is bounded by material decay (cells stop
+   triggering lazy registration once their own support drops to or below
+   FALL_THRESHOLD), so a STONE chain reaches ~20 cells before saturating.
+
+Parts whose support depends on still-dirty terrain voxels (or other
+in-limbo Parts) are flagged `in_limbo` and pause their strain timer until
+dependencies settle — avoids a transient zero from triggering a spurious
+3-second countdown.
 
 **Pick up here:**
 
-1. **Cave integrity.** In `DigAction.execute()`, after the SDF modification,
-   walk the dig sphere's surface and `register_voxel` any still-solid cell
-   adjacent to a newly-air cell. Default material STONE for v0.0. Also extend
-   `_calculate_support` for terrain voxels to recognise Parts as supporters
-   (currently checks natural terrain + other terrain voxels only) — this makes
-   "wooden pillar supports stone ceiling" work without a special case.
+1. **Test the cave demo end-to-end.** Dig a wide cave, watch the gradient
+   settle (a few frames of propagation), see colour develop from blue at the
+   walls toward red at the centre. Verify that digging further into the
+   strained region doesn't reset the gradient (the lazy expansion should keep
+   the strain). Verify that placing wood beams under the ceiling recovers
+   support.
 
-2. **SDF seam matching (Option A2).** After cave integrity, the remaining
-   architectural item: placed Parts should write matching SDF samples into the
-   cells they occupy so the Transvoxel mesher produces a clean visual seam at
-   the part-terrain boundary. Makes the carved-into-hillside aesthetic land.
-   Optional for v0.0 thesis defense; required for a photogenic trailer.
+2. **SDF seam matching (Option A2).** After cave integrity is validated, the
+   remaining architectural item: placed Parts should write matching SDF
+   samples into the cells they occupy so the Transvoxel mesher produces a
+   clean visual seam at the part-terrain boundary. Makes the
+   carved-into-hillside aesthetic land. Optional for v0.0 thesis defense;
+   required for a photogenic trailer.
 
 3. **Wrap v0.0.** Record the cave reinforcement demo. Write the v0.1 scope
    doc. Everything from the "deferred" list (planning mode, sub-assemblies,
@@ -157,19 +174,19 @@ propagation.
 
 ### Known limits (recorded, not fixed)
 
-- **Digging strained ceiling resets the gradient.** Newly-exposed cells from a
-  fresh dig see their immediate untracked-solid lateral neighbours as
-  FULL_SUPPORT (the cliff mass beside the dig is bedrock, structurally), so the
-  strain that had developed in the original ceiling doesn't propagate into the
-  newly-revealed cells. The shell registration is 1 cell thick — to make
-  "digging into orange reveals more orange" work, we'd need either a much
-  thicker shell (~20 cells for STONE's decay budget) or a "shallow vs deep"
-  detection that distinguishes suspended mass from real bedrock. Both are
-  architecturally meaningful. For the v0.0 demo, build wide caves fresh; don't
-  iteratively dig the strained area.
 - **`_resume_unfinished_floods` budget starvation:** components larger than
   `DETECTION_BUDGET` (500 voxels) take multiple settled frames to fully detect.
 - **`PLAYER_CLEARANCE = 1.0m`** in Fill/Flatten is a guess; tune if needed.
+- **Lazy-expansion cascade per dig is bounded by material decay budget.** For
+  STONE (decay 0.05), the cascade reaches ~20 cells before support hits zero
+  and lazy registration stops. For a very wide cave under a tall cliff, this
+  means structural mass beyond ~20 cells above the ceiling isn't tracked —
+  fine for support computation (the chain is already zero there) but means
+  the load propagation that v0.1 will add will need its own cascade rules.
+- **`_recompute_column_low` scans `voxel_data`.** When removing the lowest
+  cell in a column, we re-scan the entire `voxel_data` dictionary. For up to
+  ~10k tracked cells this is fast; if the tracked set grows large, replace
+  with a per-column ordered set.
 - **Part scene layout assumes flat children.** `_collapse_part` reparents direct
   children only; nested scenes would silently break.
 - **Hand-authored `Schematic.footprint` is not rotated** by ConstructionAction.
