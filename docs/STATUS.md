@@ -9,8 +9,8 @@
 ## Resumption Brief
 
 *Last updated: v0.0 close-out — Phase 5 functionally complete, release plumbing
-in place, planning v0.0.1 (persistence-as-replay) and a materials-as-`.tres`
-refactor while playtesting v0.0.*
+in place, materials-as-`.tres` refactor landed (commit e00513b), planning
+v0.0.1 (persistence-as-replay) while playtesting v0.0.*
 
 **Where you are:** v0.0 is done. The thesis demo works end-to-end: dig a wide
 cave, ceiling cells develop a strain gradient that depends on material decay,
@@ -32,15 +32,7 @@ godot_voxel dependencies.
    think it is?" — Robert's call to make. The infrastructure is in place; the
    question is now about *feel*, not implementation.
 
-2. **Materials → `.tres` refactor (in flight).** Move `Materials` data out of
-   `scripts/materials.gd` into `assets/materials/<name>.tres` resources,
-   mirroring the Parts pattern. The class stays as a thin loader plus the
-   singleton accessors for ergonomics; the *data* lives in resource files.
-   The roadmap's original commitment to data-driven definitions was JSON;
-   `.tres` is strictly better here (Godot-native, editor-discoverable, no
-   parse step), and the roadmap has been updated to reflect that.
-
-3. **v0.0.1: persistence as replayable history.** Save/load is now scoped as
+2. **v0.0.1: persistence as replayable history.** Save/load is now scoped as
    v0.0.1 with a sharper framing than "add a save system." The save file is
    the journal of actions that produced the world — snapshot plus action
    tail — which doubles as a bug-reproduction artifact, a step-debugging
@@ -49,12 +41,12 @@ godot_voxel dependencies.
    versioning, and determinism discipline. See `roadmap.md` for the full
    design.
 
-4. **Playtester binaries.** Linux + macOS + Windows binaries via GitHub
+3. **Playtester binaries.** Linux + macOS + Windows binaries via GitHub
    Actions (cross-compile from a Linux runner with MinGW for Windows, native
    on macos-latest). Not yet started. Robert wants to play with v0.0
    locally first to decide it's not embarrassing before distributing.
 
-5. **v0.1 scoping.** When the v0.0 (and v0.0.1) answers come back "yes," the
+4. **v0.1 scoping.** When the v0.0 (and v0.0.1) answers come back "yes," the
    v0.1 question is "can I make it fun/performant?" — see `roadmap.md`
    Phases 1, 3, 4, the deferred list below, and the new "honest physics
    interaction" design direction (SDF seam + load propagation + falling
@@ -109,9 +101,7 @@ reads), debug controls for stepping through history. Not started.
 
 ### In flight
 
-| Item | State |
-|------|-------|
-| Materials → `.tres` refactor | Underway — see Resumption Brief |
+*(nothing in flight — playtesting v0.0 to answer the thesis question)*
 
 ### Bugs
 
@@ -167,6 +157,9 @@ reads), debug controls for stepping through history. Not started.
   metal / dirt / sand).
 - Debug-cube toggle wired to V key.
 - README + LICENSE + dependency-licensing notes.
+- Materials → `.tres` refactor: `Materials` is now a `Resource` subclass
+  with `@export` fields; six singletons load from `assets/materials/*.tres`;
+  `from_name()` lookup lazily built. Mirrors the Parts pattern.
 
 ### Deferred to v0.1+ (the "can I make it fun?" question)
 
