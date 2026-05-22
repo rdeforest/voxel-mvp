@@ -1,8 +1,7 @@
 extends CharacterBody3D
 
-const MOUSE_SENSITIVITY = 0.002
-
-var _movement: PlayerMovement
+var _movement:   PlayerMovement
+var _camera_rig: CameraRig
 
 # Edit modes
 var edit_modes:            Array[EditMode] = []
@@ -46,7 +45,8 @@ var _material_index: int               = 0
 
 
 func _ready() -> void:
-    _movement = PlayerMovement.new(self)
+    _movement   = PlayerMovement.new(self)
+    _camera_rig = CameraRig.new(self, $Head)
     # Capture the mouse cursor for FPS controls
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
@@ -188,9 +188,7 @@ func _part_name(part: Part) -> String:
     return part.resource_path.get_file().get_basename()
 
 func _on_mouse_motion(event: InputEventMouseMotion) -> void:
-    rotate_y(-event.relative.x * MOUSE_SENSITIVITY)
-    head.rotate_x(-event.relative.y * MOUSE_SENSITIVITY)
-    head.rotation.x = clampf(head.rotation.x, -PI * 0.5, PI * 0.5)
+    _camera_rig.handle_mouse_motion(event)
 
 func _on_key_pressed(event: InputEventKey) -> void:
     if event.is_action_pressed("ui_cancel"):
