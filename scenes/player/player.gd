@@ -1,8 +1,9 @@
 extends CharacterBody3D
 
-var _movement:   PlayerMovement
-var _camera_rig: CameraRig
-var build_state: BuildState
+var _movement:        PlayerMovement
+var _camera_rig:      CameraRig
+var build_state:      BuildState
+var action_factories: ActionFactories
 
 # Edit modes
 var edit_modes:            Array[EditMode] = []
@@ -22,9 +23,7 @@ var _mouse_button_actions: Dictionary
 @onready var terrain:      VoxelLodTerrain     = get_parent().get_node("VoxelLodTerrain")
 
 # Terrain editing
-const EDIT_RADIUS   = 3.0
-const EDIT_STRENGTH = 5.0
-const EDIT_REACH    = 20.0
+const EDIT_REACH := 20.0
 
 const SPHERE_RADIAL_SEGMENTS = 16
 const SPHERE_RINGS           =  8
@@ -33,9 +32,10 @@ const SPHERE_RINGS           =  8
 
 
 func _ready() -> void:
-    _movement   = PlayerMovement.new(self)
-    _camera_rig = CameraRig.new(self, $Head)
-    build_state = BuildState.new()
+    _movement        = PlayerMovement.new(self)
+    _camera_rig      = CameraRig.new(self, $Head)
+    build_state      = BuildState.new()
+    action_factories = ActionFactories.new(self, terrain, integrity, camera, raycast, build_state)
     build_state.changed.connect(_update_mode_label)
 
     # Capture the mouse cursor for FPS controls
@@ -43,13 +43,13 @@ func _ready() -> void:
 
     # shared resources for terrain edit previews
     var sphere             := SphereMesh.new()
-    sphere.radius           = EDIT_RADIUS
-    sphere.height           = EDIT_RADIUS * 2.0
+    sphere.radius           = ActionFactories.EDIT_RADIUS
+    sphere.height           = ActionFactories.EDIT_RADIUS * 2.0
     sphere.radial_segments  = SPHERE_RADIAL_SEGMENTS
     sphere.rings            = SPHERE_RINGS
 
     var plane := PlaneMesh.new()
-    plane.size             = Vector2(EDIT_RADIUS * 2.0, EDIT_RADIUS * 2.0)
+    plane.size             = Vector2(ActionFactories.EDIT_RADIUS * 2.0, ActionFactories.EDIT_RADIUS * 2.0)
 
     var dig_mat     := _make_preview_material(Color(1.0, 0.2, 0.2, 0.3))
     var fill_mat    := _make_preview_material(Color(0.2, 0.4, 1.0, 0.3))
@@ -59,26 +59,26 @@ func _ready() -> void:
     edit_modes = [
         EditMode.new()                                            \
             .named("Dig")                                         \
-            .on_make_action(_make_dig_action)                     \
+            .on_make_action(action_factories.make_dig)            \
             .preview_mesh(    func(_hp, _hn): return sphere)      \
             .preview_material(func(_hp, _hn): return dig_mat)     \
-            .preview_position(func( hp,  hn): return hp - hn * (EDIT_RADIUS * 0.5)),
+            .preview_position(func( hp,  hn): return hp - hn * (ActionFactories.EDIT_RADIUS * 0.5)),
 
         EditMode.new()                                            \
             .named("Fill")                                        \
-            .on_make_action(_make_fill_action)                    \
+            .on_make_action(action_factories.make_fill)           \
             .preview_mesh(    func(_hp, _hn): return sphere)      \
             .preview_material(func(_hp, _hn): return fill_mat)    \
-            .preview_position(func( hp,  hn): return hp + hn * (EDIT_RADIUS * 0.5)),
+            .preview_position(func( hp,  hn): return hp + hn * (ActionFactories.EDIT_RADIUS * 0.5)),
 
         EditMode.new()                                            \
             .named("Flatten")                                     \
-            .on_make_action(_make_flatten_action)                 \
+            .on_make_action(action_factories.make_flatten)        \
             .preview_mesh(    func(_hp, _hn): return plane)       \
             .preview_material(func(_hp, _hn): return flatten_mat) \
             .preview_position(func( hp, _hn): return hp)          \
             .preview_basis(   func(_hp,  hn):
-                var n := _get_flatten_normal()
+                var n := action_factories.get_flatten_normal()
                 if n == Vector3.ZERO: n = hn
                 if n.is_equal_approx(Vector3.UP):   return Basis.IDENTITY
                 if n.is_equal_approx(Vector3.DOWN): return Basis(Vector3.RIGHT, Vector3.DOWN, Vector3.FORWARD)
@@ -89,7 +89,7 @@ func _ready() -> void:
 
         EditMode.new()                                                                  \
             .named("Build")                                                             \
-            .on_make_action(_make_construction_action)                                  \
+            .on_make_action(action_factories.make_construction)                         \
             .preview_mesh(    func(_hp, _hn): return build_state.current_mesh())        \
             .preview_material(func(_hp, _hn): return build_mat)                         \
             .preview_position(_build_preview_position)                                  \
@@ -97,7 +97,7 @@ func _ready() -> void:
 
         EditMode.new()                                          \
             .named("Remove")                                    \
-            .on_make_action(_make_removal_action)               \
+            .on_make_action(action_factories.make_removal)      \
             .preview_mesh(    func(_hp, _hn): return null)      \
             .preview_material(func(_hp, _hn): return null)      \
             .preview_position(func( hp, _hn): return hp),
@@ -214,40 +214,6 @@ func _try_edit_terrain() -> void:
     # else: refused. Feedback mechanism comes later.
 
 
-# --- Action factories (the "targeting" layer for each mode) ---
-
-func _make_dig_action(hit_pos: Vector3, hit_normal: Vector3) -> Action:
-    var center := hit_pos - hit_normal * (EDIT_RADIUS * 0.5)
-    return DigAction.new(center, EDIT_RADIUS, terrain, integrity)
-
-func _make_fill_action(hit_pos: Vector3, hit_normal: Vector3) -> Action:
-    var center := hit_pos + hit_normal * (EDIT_RADIUS * 0.5)
-    return FillAction.new(center, EDIT_RADIUS, terrain, integrity, self)
-
-func _make_flatten_action(hit_pos: Vector3, hit_normal: Vector3) -> Action:
-    var flatten_normal := _get_flatten_normal()
-    if flatten_normal == Vector3.ZERO:
-        flatten_normal = hit_normal
-    var center := hit_pos - hit_normal * (EDIT_RADIUS * 0.5)
-    return FlattenAction.new(center, hit_pos, flatten_normal, EDIT_RADIUS, terrain, self, integrity)
-
-
-func _get_flatten_normal() -> Vector3:
-    if Input.is_key_pressed(KEY_SHIFT):
-        # Horizontal: always flatten level
-        return Vector3.UP
-
-    if Input.is_key_pressed(KEY_CTRL):
-        # Vertical: wall facing the direction you're looking
-        # Get the camera's forward direction, flattened to horizontal
-        var forward := camera.global_transform.basis.z
-        forward.y = 0.0
-        return forward.normalized()
-
-    # Default: use the surface normal
-    return Vector3.ZERO  # sentinel meaning "use hit normal"
-
-
 # Preview is a centered BoxMesh on a MeshInstance3D — the rotated mesh's
 # Y centroid is at the MeshInstance3D's global_position.y. Lift it so the
 # rotated bottom face lands at the hit point.
@@ -257,14 +223,3 @@ func _build_preview_position(hp: Vector3, _hn: Vector3) -> Vector3:
     var aabb      := AABB(-part.dimensions * 0.5, part.dimensions)
     var rotated   := Transform3D(rot_basis, Vector3.ZERO) * aabb
     return Vector3(roundi(hp.x), hp.y + rotated.size.y * 0.5, roundi(hp.z))
-
-func _make_removal_action(_hit_pos: Vector3, _hit_normal: Vector3) -> Action:
-    var collider := raycast.get_collider()
-    if collider == null or not integrity.has_part(collider):
-        return null
-    return RemovalAction.new(collider, integrity)
-
-func _make_construction_action(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
-    var placement_pos := Vector3(roundi(hit_pos.x), floor(hit_pos.y), roundi(hit_pos.z))
-    var anchor        := Vector3i(roundi(hit_pos.x), floori(hit_pos.y), roundi(hit_pos.z))
-    return ConstructionAction.new(build_state.current_part(), placement_pos, anchor, build_state.rotation, build_state.current_material(), terrain, integrity, self)
