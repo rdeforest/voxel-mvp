@@ -1,12 +1,8 @@
 extends CharacterBody3D
 
-# Movement
-const SPEED             = 8.0
-const JUMP_VELOCITY     = 9.0
 const MOUSE_SENSITIVITY = 0.002
 
-# Gravity (use Godot's built-in project gravity)
-var gravity:               float           = ProjectSettings.get_setting("physics/3d/default_gravity")
+var _movement: PlayerMovement
 
 # Edit modes
 var edit_modes:            Array[EditMode] = []
@@ -50,6 +46,7 @@ var _material_index: int               = 0
 
 
 func _ready() -> void:
+    _movement = PlayerMovement.new(self)
     # Capture the mouse cursor for FPS controls
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
@@ -232,26 +229,7 @@ func _process(_delta: float) -> void:
     integrity.set_hovered_part(hovered)
 
 func _physics_process(delta: float) -> void:
-    # Gravity
-    if not is_on_floor():
-        velocity.y -= gravity * delta
-
-    # Jump
-    if Input.is_action_just_pressed("ui_accept") and is_on_floor():
-        velocity.y = JUMP_VELOCITY
-
-    # Movement direction relative to where we're facing
-    var input_dir := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
-    var direction := (transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
-
-    if direction:
-        velocity.x = direction.x * SPEED
-        velocity.z = direction.z * SPEED
-    else:
-        velocity.x = move_toward(velocity.x, 0, SPEED)
-        velocity.z = move_toward(velocity.z, 0, SPEED)
-
-    move_and_slide()
+    _movement.tick(delta)
 
 
 func _try_edit_terrain() -> void:
