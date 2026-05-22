@@ -227,7 +227,7 @@ func _process(_delta: float) -> void:
     var hovered: Node3D = null
     if raycast.is_colliding():
         var collider := raycast.get_collider() as Node3D
-        if collider != null and integrity.part_registry.has(collider):
+        if collider != null and integrity.has_part(collider):
             hovered = collider
     integrity.set_hovered_part(hovered)
 
@@ -321,19 +321,19 @@ func _build_rotation_basis() -> Basis:
 # Y centroid is at the MeshInstance3D's global_position.y. Lift it so the
 # rotated bottom face lands at the hit point.
 func _build_preview_position(hp: Vector3, _hn: Vector3) -> Vector3:
-    var part := _parts[_part_index]
-    var basis := _build_rotation_basis()
-    var aabb := AABB(-part.dimensions * 0.5, part.dimensions)
-    var rotated := Transform3D(basis, Vector3.ZERO) * aabb
+    var part      := _parts[_part_index]
+    var rot_basis := _build_rotation_basis()
+    var aabb      := AABB(-part.dimensions * 0.5, part.dimensions)
+    var rotated   := Transform3D(rot_basis, Vector3.ZERO) * aabb
     return Vector3(roundi(hp.x), hp.y + rotated.size.y * 0.5, roundi(hp.z))
 
 func _make_removal_action(_hit_pos: Vector3, _hit_normal: Vector3) -> Action:
     var collider := raycast.get_collider()
-    if collider == null or not integrity.part_registry.has(collider):
+    if collider == null or not integrity.has_part(collider):
         return null
     return RemovalAction.new(collider, integrity)
 
 func _make_construction_action(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
-    var placement_pos := Vector3(roundi(hit_pos.x), hit_pos.y,         roundi(hit_pos.z))
+    var placement_pos := Vector3(roundi(hit_pos.x), floor(hit_pos.y), roundi(hit_pos.z))
     var anchor        := Vector3i(roundi(hit_pos.x), floori(hit_pos.y), roundi(hit_pos.z))
     return ConstructionAction.new(_parts[_part_index], placement_pos, anchor, _build_rotation, _materials[_material_index], terrain, integrity, self)

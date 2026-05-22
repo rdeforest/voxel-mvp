@@ -6,12 +6,14 @@ var _pending_collapses: Array[PendingCollapse]                    = []
 var _voxel_to_pending:  Dictionary[Vector3i, PendingCollapse]     = {}
 var _claimed:           Dictionary                                = {}
 
-var _integrity:         Node
+var _terrain_support:   TerrainSupport
+var _facade:            Node
 
 
-func _init(integrity: Node) -> void:
-    _integrity = integrity
-    _integrity.voxel_support_increased.connect(_on_voxel_support_increased)
+func _init(terrain_support: TerrainSupport, facade: Node) -> void:
+    _terrain_support = terrain_support
+    _facade          = facade
+    _terrain_support.voxel_support_increased.connect(_on_voxel_support_increased)
 
 
 # --- Phases (called by StructuralIntegrity once dirty_queue settles) ---
@@ -32,7 +34,7 @@ func _resume_unfinished_floods() -> bool:
     return true
 
 func _scan_for_new_collapses() -> bool:
-    for pos in _integrity.voxel_data.keys():
+    for pos in _terrain_support.voxel_data.keys():
         if _claimed.has(pos):
             continue
         if not _can_seed_collapse(pos):
@@ -113,18 +115,14 @@ func _component_still_falling(pc: PendingCollapse) -> bool:
     for v in pc.voxels:
         # A voxel removed from the world (e.g. dug out) is no longer this
         # component's problem, but the rest may still be falling — skip, don't bail.
-        if not _integrity.voxel_data.has(v):
+        if not _terrain_support.voxel_data.has(v):
             continue
         if _is_fall_candidate(v):
             return true
     return false
 
 func _redirty_neighbors(pos: Vector3i) -> void:
-    for neighbor in VoxelUtils.neighbors(pos):
-        if _integrity.voxel_data.has(neighbor) \
-                and not _integrity.voxel_data[neighbor].dirty:
-            _integrity.voxel_data[neighbor].dirty = true
-            _integrity.dirty_queue.append(neighbor)
+    _terrain_support.dirty_neighbors_of(pos)
 
 func _reset_claims_to_pending() -> void:
     _claimed.clear()
@@ -150,7 +148,7 @@ func _advance_flood(flood: PendingFlood, budget: int) -> bool:
         for neighbor in VoxelUtils.neighbors(pos):
             if visited.has(neighbor):
                 continue
-            if not _integrity.voxel_data.has(neighbor):
+            if not _terrain_support.voxel_data.has(neighbor):
                 continue
             if not _is_fall_candidate(neighbor):
                 continue
@@ -161,9 +159,9 @@ func _advance_flood(flood: PendingFlood, budget: int) -> bool:
 
 # Strict: requires support has settled. Used only to SEED a flood.
 func _can_seed_collapse(pos: Vector3i) -> bool:
-    if not _integrity.voxel_data.has(pos):
+    if not _terrain_support.voxel_data.has(pos):
         return false
-    var data: VoxelRecord = _integrity.voxel_data[pos]
+    var data: VoxelRecord = _terrain_support.voxel_data[pos]
     if data.dirty:
         return false
     return data.support <= VoxelConstants.FALL_THRESHOLD
@@ -171,20 +169,20 @@ func _can_seed_collapse(pos: Vector3i) -> bool:
 # Permissive: a dirty voxel at/below threshold still belongs to the component.
 # See docs/architecture.md → "Seed-conservative, expand-permissive".
 func _is_fall_candidate(pos: Vector3i) -> bool:
-    if not _integrity.voxel_data.has(pos):
+    if not _terrain_support.voxel_data.has(pos):
         return false
-    return _integrity.voxel_data[pos].support <= VoxelConstants.FALL_THRESHOLD
+    return _terrain_support.voxel_data[pos].support <= VoxelConstants.FALL_THRESHOLD
 
 
 # --- Materialization ---
 
 func _materialize_collapse(voxels: Array[Vector3i]) -> void:
     var body := FallingBodyFactory.from_voxels(voxels)
-    _integrity.get_parent().add_child(body)
+    _facade.get_parent().add_child(body)
 
-    var voxel_tool: VoxelTool = _integrity.terrain.get_voxel_tool()
+    var voxel_tool: VoxelTool = _terrain_support.terrain.get_voxel_tool()
     voxel_tool.channel = VoxelBuffer.CHANNEL_SDF
     voxel_tool.mode    = VoxelTool.MODE_REMOVE
     for v in voxels:
         voxel_tool.set_voxel_f(v, VoxelConstants.SDF_AIR)
-        _integrity.remove_voxel(v)
+        _terrain_support.remove_voxel(v)

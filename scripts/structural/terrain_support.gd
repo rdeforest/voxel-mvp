@@ -1,0 +1,162 @@
+class_name TerrainSupport
+extends RefCounted
+
+const NO_SUPPORT   = 0.0
+const FULL_SUPPORT = 1.0
+
+signal voxel_support_increased(pos: Vector3i, old_support: float, new_support: float)
+
+var voxel_data:           Dictionary[Vector3i, VoxelRecord] = {}
+var dirty_queue:          Array[Vector3i]                   = []
+var _lowest_registered_y: Dictionary                        = {}
+
+var terrain:              VoxelLodTerrain
+var _part_support:        PartSupport
+
+
+func _init(p_terrain: VoxelLodTerrain) -> void:
+    terrain = p_terrain
+
+func bind_part_support(ps) -> void:
+    _part_support = ps
+
+
+# --- Registration ---
+
+func register_voxel(pos: Vector3i, material: Materials) -> void:
+    voxel_data[pos] = VoxelRecord.new(material)
+    dirty_queue.append(pos)
+    var col := Vector2i(pos.x, pos.z)
+    if not _lowest_registered_y.has(col) or _lowest_registered_y[col] > pos.y:
+        _lowest_registered_y[col] = pos.y
+
+func remove_voxel(pos: Vector3i) -> void:
+    voxel_data.erase(pos)
+    var col := Vector2i(pos.x, pos.z)
+    if _lowest_registered_y.has(col) and _lowest_registered_y[col] == pos.y:
+        _recompute_column_low(col)
+    dirty_neighbors_of(pos)
+
+func notify_terrain_changed(center: Vector3, radius: float) -> void:
+    var expanded := radius + 1.0
+    for pos in voxel_data:
+        if Vector3(pos).distance_to(center) <= expanded and not voxel_data[pos].dirty:
+            voxel_data[pos].dirty = true
+            dirty_queue.append(pos)
+
+func register_exposed_cells(box_origin: Vector3, box_size: Vector3) -> void:
+    if terrain == null:
+        return
+    var vt := terrain.get_voxel_tool()
+    vt.channel = VoxelBuffer.CHANNEL_SDF
+    VoxelUtils.for_each_in_bounding_box(
+        box_origin,
+        box_size,
+        func(pos: Vector3i) -> void:
+            if voxel_data.has(pos):
+                return
+            if vt.get_voxel_f(pos) >= VoxelConstants.SDF_SOLID_THRESHOLD:
+                return
+            for neighbor in VoxelUtils.neighbors(pos):
+                if vt.get_voxel_f(neighbor) >= VoxelConstants.SDF_SOLID_THRESHOLD:
+                    register_voxel(pos, Materials.STONE)
+                    return
+    )
+
+func dirty_neighbors_of(cell: Vector3i) -> void:
+    for neighbor in VoxelUtils.neighbors(cell):
+        if voxel_data.has(neighbor) and not voxel_data[neighbor].dirty:
+            voxel_data[neighbor].dirty = true
+            dirty_queue.append(neighbor)
+
+
+# --- Queries ---
+
+func get_support(pos: Vector3i) -> float:
+    if voxel_data.has(pos):
+        return voxel_data[pos].support
+    return FULL_SUPPORT
+
+func is_natural_terrain(pos: Vector3i) -> bool:
+    if voxel_data.has(pos):
+        return false
+    if not _is_terrain_solid(pos):
+        return false
+    return _is_bedrock(pos)
+
+
+# --- Propagation ---
+
+func process_dirty_queue() -> void:
+    var processed := 0
+    while not dirty_queue.is_empty() and processed < VoxelConstants.PROPAGATION_BUDGET:
+        var pos: Vector3i = dirty_queue.pop_front()
+
+        if not voxel_data.has(pos):
+            continue
+        if not voxel_data[pos].dirty:
+            continue
+
+        var old_support: float = voxel_data[pos].support
+        var new_support := _calculate_support(pos)
+        voxel_data[pos].support = new_support
+        voxel_data[pos].dirty   = false
+
+        if absf(new_support - old_support) > VoxelConstants.SUPPORT_EPSILON:
+            dirty_neighbors_of(pos)
+
+        if new_support - old_support > VoxelConstants.SUPPORT_EPSILON:
+            voxel_support_increased.emit(pos, old_support, new_support)
+
+        processed += 1
+
+func _calculate_support(pos: Vector3i) -> float:
+    var material: Materials = voxel_data[pos].material
+    var decay:    float     = material.decay
+
+    if is_natural_terrain(pos + Vector3i(0, -1, 0)):
+        return FULL_SUPPORT
+
+    var best            := NO_SUPPORT
+    var current_support := voxel_data[pos].support as float
+    for neighbor in VoxelUtils.neighbors(pos):
+        var s: float
+        if voxel_data.has(neighbor):
+            s = voxel_data[neighbor].support
+        elif _is_terrain_solid(neighbor):
+            if neighbor.y > pos.y:
+                continue
+            if _is_bedrock(neighbor):
+                s = FULL_SUPPORT
+            else:
+                if current_support > VoxelConstants.FALL_THRESHOLD:
+                    register_voxel(neighbor, Materials.STONE)
+                continue
+        elif _part_support != null and _part_support.has_cell(neighbor):
+            s = _part_support.best_support_at(neighbor)
+        else:
+            continue
+        best = maxf(best, s)
+
+    return maxf(NO_SUPPORT, best - decay)
+
+
+# --- Internals ---
+
+func _recompute_column_low(col: Vector2i) -> void:
+    _lowest_registered_y.erase(col)
+    for p: Vector3i in voxel_data:
+        if p.x == col.x and p.z == col.y:
+            if not _lowest_registered_y.has(col) or _lowest_registered_y[col] > p.y:
+                _lowest_registered_y[col] = p.y
+
+func _is_bedrock(pos: Vector3i) -> bool:
+    var col := Vector2i(pos.x, pos.z)
+    return not _lowest_registered_y.has(col) or _lowest_registered_y[col] > pos.y
+
+func _is_terrain_solid(pos: Vector3i) -> bool:
+    if terrain == null:
+        return false
+    var vt := terrain.get_voxel_tool()
+    vt.channel = VoxelBuffer.CHANNEL_SDF
+    return vt.get_voxel_f(pos) < VoxelConstants.SDF_SOLID_THRESHOLD

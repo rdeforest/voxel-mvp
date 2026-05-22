@@ -4,413 +4,111 @@ extends Node
 const NO_SUPPORT   = 0.0
 const FULL_SUPPORT = 1.0
 
-signal voxel_support_increased(pos: Vector3i, old_support: float, new_support: float)
+var terrain:            VoxelLodTerrain
 
-var voxel_data:           Dictionary[Vector3i, VoxelRecord] = {}
-var dirty_queue:          Array[Vector3i]                   = []
-var part_registry:        Dictionary[Node3D, PartData]      = {}
+var terrain_support:    TerrainSupport
+var part_support:       PartSupport
+var debug:              IntegrityDebug
 
-var _cell_to_part:        Dictionary = {}
-var _lowest_registered_y: Dictionary = {}
-var _part_strain:         Dictionary = {}
-
-var _hovered_part:        Node3D     = null
-
-var _collapse_detector:   CollapseDetector
-var terrain:              VoxelLodTerrain
+var _collapse_detector: CollapseDetector
+var _strain_pulse_phase := 0.0
 
 
 func _ready() -> void:
-    terrain = get_parent().get_node("VoxelLodTerrain")
-    _collapse_detector = CollapseDetector.new(self)
+    terrain          = get_parent().get_node("VoxelLodTerrain")
+    terrain_support  = TerrainSupport.new(terrain)
+    part_support     = PartSupport.new(terrain_support, self)
+    terrain_support.bind_part_support(part_support)
+    debug            = IntegrityDebug.new(terrain_support, self)
+    _collapse_detector = CollapseDetector.new(terrain_support, self)
 
+func _exit_tree() -> void:
+    # Break the TerrainSupport ↔ PartSupport reference cycle so the
+    # RefCounted components can free cleanly.
+    if terrain_support != null:
+        terrain_support.bind_part_support(null)
 
-# --- Public API ---
-
-func register_voxel(pos: Vector3i, material: Materials) -> void:
-    voxel_data[pos] = VoxelRecord.new(material)
-    dirty_queue.append(pos)
-    var col := Vector2i(pos.x, pos.z)
-    if not _lowest_registered_y.has(col) or _lowest_registered_y[col] > pos.y:
-        _lowest_registered_y[col] = pos.y
-
-func remove_voxel(pos: Vector3i) -> void:
-    voxel_data.erase(pos)
-    var col := Vector2i(pos.x, pos.z)
-    if _lowest_registered_y.has(col) and _lowest_registered_y[col] == pos.y:
-        _recompute_column_low(col)
-    for neighbor in VoxelUtils.neighbors(pos):
-        if voxel_data.has(neighbor) and not voxel_data[neighbor].dirty:
-            voxel_data[neighbor].dirty = true
-            dirty_queue.append(neighbor)
-
-func _recompute_column_low(col: Vector2i) -> void:
-    _lowest_registered_y.erase(col)
-    for p: Vector3i in voxel_data:
-        if p.x == col.x and p.z == col.y:
-            if not _lowest_registered_y.has(col) or _lowest_registered_y[col] > p.y:
-                _lowest_registered_y[col] = p.y
-
-func _is_bedrock(pos: Vector3i) -> bool:
-    var col := Vector2i(pos.x, pos.z)
-    return not _lowest_registered_y.has(col) or _lowest_registered_y[col] > pos.y
-
-func notify_terrain_changed(center: Vector3, radius: float) -> void:
-    var expanded := radius + 1.0
-    for pos in voxel_data:
-        if Vector3(pos).distance_to(center) <= expanded and not voxel_data[pos].dirty:
-            voxel_data[pos].dirty = true
-            dirty_queue.append(pos)
-    _wake_falling_bodies()
-
-func register_exposed_cells(box_origin: Vector3, box_size: Vector3) -> void:
-    if terrain == null:
-        return
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-    VoxelUtils.for_each_in_bounding_box(
-        box_origin,
-        box_size,
-        func(pos: Vector3i) -> void:
-            if voxel_data.has(pos):
-                return
-            if vt.get_voxel_f(pos) >= VoxelConstants.SDF_SOLID_THRESHOLD:
-                return
-            for neighbor in VoxelUtils.neighbors(pos):
-                if vt.get_voxel_f(neighbor) >= VoxelConstants.SDF_SOLID_THRESHOLD:
-                    register_voxel(pos, Materials.STONE)
-                    return
-    )
-
-func register_part(node: Node3D, cells: Array[Vector3i], material: Materials, placement_y: float) -> void:
-    part_registry[node] = PartData.new(cells, material, placement_y)
-    for cell in cells:
-        if not _cell_to_part.has(cell):
-            _cell_to_part[cell] = []
-        _cell_to_part[cell].append(node)
-        for neighbor in VoxelUtils.neighbors(cell):
-            if voxel_data.has(neighbor) and not voxel_data[neighbor].dirty:
-                voxel_data[neighbor].dirty = true
-                dirty_queue.append(neighbor)
-
-func remove_part(node: Node3D) -> void:
-    if not part_registry.has(node):
-        return
-    var data := part_registry[node]
-    for cell in data.cells:
-        if _cell_to_part.has(cell):
-            _cell_to_part[cell].erase(node)
-            if _cell_to_part[cell].is_empty():
-                _cell_to_part.erase(cell)
-        for neighbor in VoxelUtils.neighbors(cell):
-            if voxel_data.has(neighbor) and not voxel_data[neighbor].dirty:
-                voxel_data[neighbor].dirty = true
-                dirty_queue.append(neighbor)
-    part_registry.erase(node)
-    _part_strain.erase(node)
-    _wake_falling_bodies()
-
-func has_part_cell(pos: Vector3i) -> bool:
-    return _cell_to_part.has(pos)
-
-func set_hovered_part(node: Node3D) -> void:
-    _hovered_part = node
-
-func get_support(pos: Vector3i) -> float:
-    if voxel_data.has(pos):
-        return voxel_data[pos].support
-    return FULL_SUPPORT
-
-func get_support_color(support: float) -> Color:
-    if support > 0.75: return Color(0.0, 0.3, 1.0)
-    if support > 0.50: return Color(0.0, 0.9, 0.2)
-    if support > 0.30: return Color(1.0, 0.9, 0.0)
-    if support > 0.10: return Color(1.0, 0.5, 0.0)
-    if support > 0.00: return Color(1.0, 0.1, 0.0)
-    return                     Color(0.5, 0.0, 0.0)
-
-
-# --- Per-frame update ---
 
 func _physics_process(delta: float) -> void:
-    if not dirty_queue.is_empty():
-        _process_dirty_queue()
+    if not terrain_support.dirty_queue.is_empty():
+        terrain_support.process_dirty_queue()
     else:
         _collapse_detector.step()
 
     _strain_pulse_phase += delta * VoxelConstants.STRAIN_PULSE_HZ * TAU
+    var pulse := 0.5 + 0.5 * sin(_strain_pulse_phase)
 
     _collapse_detector.tick_pending(delta)
-    _tick_part_strain(delta)
-    update_debug_visuals()
+    part_support.tick_strain(delta, pulse)
+    debug.update(pulse, _collapse_detector.get_straining_voxels())
 
 
-# --- Terrain propagation ---
+# --- Public API (delegating) ---
 
-func _process_dirty_queue() -> void:
-    var processed := 0
+func register_voxel(pos: Vector3i, material: Materials) -> void:
+    terrain_support.register_voxel(pos, material)
 
-    while not dirty_queue.is_empty() and processed < VoxelConstants.PROPAGATION_BUDGET:
-        var pos: Vector3i = dirty_queue.pop_front()
+func remove_voxel(pos: Vector3i) -> void:
+    terrain_support.remove_voxel(pos)
 
-        if not voxel_data.has(pos):
-            continue
-        if not voxel_data[pos].dirty:
-            continue
+func notify_terrain_changed(center: Vector3, radius: float) -> void:
+    terrain_support.notify_terrain_changed(center, radius)
+    wake_falling_bodies()
 
-        var old_support: float = voxel_data[pos].support
-        var new_support := _calculate_support(pos)
-        voxel_data[pos].support = new_support
-        voxel_data[pos].dirty   = false
+func register_exposed_cells(box_origin: Vector3, box_size: Vector3) -> void:
+    terrain_support.register_exposed_cells(box_origin, box_size)
 
-        if absf(new_support - old_support) > VoxelConstants.SUPPORT_EPSILON:
-            for neighbor in VoxelUtils.neighbors(pos):
-                if voxel_data.has(neighbor) and not voxel_data[neighbor].dirty:
-                    voxel_data[neighbor].dirty = true
-                    dirty_queue.append(neighbor)
+func get_support(pos: Vector3i) -> float:
+    return terrain_support.get_support(pos)
 
-        if new_support - old_support > VoxelConstants.SUPPORT_EPSILON:
-            voxel_support_increased.emit(pos, old_support, new_support)
+func register_part(node: Node3D, cells: Array[Vector3i], material: Materials, placement_y: float) -> void:
+    part_support.register_part(node, cells, material, placement_y)
 
-        processed += 1
+func remove_part(node: Node3D) -> void:
+    part_support.remove_part(node)
+    wake_falling_bodies()
 
-func _calculate_support(pos: Vector3i) -> float:
-    var material: Materials = voxel_data[pos].material
-    var decay:    float     = material.decay
+func has_part(node: Node3D) -> bool:
+    return part_support.has_part(node)
 
-    if _is_natural_terrain(pos + Vector3i(0, -1, 0)):
-        return FULL_SUPPORT
+func has_part_cell(pos: Vector3i) -> bool:
+    return part_support.has_part_cell(pos)
 
-    var best            := NO_SUPPORT
-    var current_support := voxel_data[pos].support as float
-    for neighbor in VoxelUtils.neighbors(pos):
-        var s: float
-        if voxel_data.has(neighbor):
-            s = voxel_data[neighbor].support
-        elif _is_terrain_solid(neighbor):
-            if neighbor.y > pos.y:
-                continue
-            if _is_bedrock(neighbor):
-                s = FULL_SUPPORT
-            else:
-                if current_support > VoxelConstants.FALL_THRESHOLD:
-                    register_voxel(neighbor, Materials.STONE)
-                continue
-        elif _cell_to_part.has(neighbor):
-            s = NO_SUPPORT
-            for part_node in _cell_to_part[neighbor]:
-                s = maxf(s, part_registry[part_node].support)
-        else:
-            continue
-        best = maxf(best, s)
-
-    return maxf(NO_SUPPORT, best - decay)
+func set_hovered_part(node: Node3D) -> void:
+    part_support.set_hovered_part(node)
 
 
-# --- Part support + collapse ---
+# --- Debug ---
 
-func _tick_part_strain(delta: float) -> void:
-    _recompute_part_support()
+var debug_visuals_enabled: bool:
+    get: return debug.enabled if debug != null else true
+    set(value):
+        if debug != null:
+            debug.set_enabled(value)
 
-    var pulse              := 0.5 + 0.5 * sin(_strain_pulse_phase)
-    var to_collapse: Array  = []
-    for node in part_registry:
-        var data    := part_registry[node]
-        var hovered := node == _hovered_part
-        if data.support > VoxelConstants.FALL_THRESHOLD:
-            _part_strain.erase(node)
-            _apply_part_visual(node, data.support, 0.0, 0.0, hovered)
-        elif data.in_limbo:
-            _apply_part_visual(node, data.support, 0.0, 0.0, hovered)
-        else:
-            _part_strain[node]   = _part_strain.get(node, 0.0) + delta
-            var progress: float  = _part_strain[node] / VoxelConstants.STRAIN_DURATION_SEC
-            _apply_part_visual(node, data.support, progress, pulse, hovered)
-            if _part_strain[node] >= VoxelConstants.STRAIN_DURATION_SEC:
-                to_collapse.append(node)
-    for node in to_collapse:
-        _collapse_part(node)
+func set_debug_visuals_enabled(value: bool) -> void:
+    debug.set_enabled(value)
 
-func _recompute_part_support() -> void:
-    var nodes := part_registry.keys()
-    nodes.sort_custom(func(a: Node3D, b: Node3D) -> bool:
-        return part_registry[a].placement_y < part_registry[b].placement_y)
-    for node in nodes:
-        var data := part_registry[node]
-        data.support = _calculate_part_support(node, data)
 
-func _calculate_part_support(node: Node3D, data: PartData) -> float:
-    var best          := NO_SUPPORT
-    var has_supporter := false
-    var any_dirty     := false
-    var found_full    := false
-    var support_y     := floori(data.placement_y - 0.001)
+# --- Helpers ---
 
-    var min_cell_y := data.cells[0].y
-    for cell in data.cells:
-        if cell.y < min_cell_y:
-            min_cell_y = cell.y
-
-    for cell in data.cells:
-        if cell.y != min_cell_y:
-            continue
-        var supporter := _direct_part_supporter(node, cell, data.placement_y)
-        if supporter != null:
-            var other := part_registry[supporter]
-            best          = maxf(best, other.support)
-            has_supporter = true
-            if other.in_limbo:
-                any_dirty = true
-            continue
-        var support_cell := Vector3i(cell.x, support_y, cell.z)
-        if _is_natural_terrain(support_cell):
-            found_full = true
-            continue
-        if voxel_data.has(support_cell):
-            var rec: VoxelRecord = voxel_data[support_cell]
-            best          = maxf(best, rec.support)
-            has_supporter = true
-            if rec.dirty:
-                any_dirty = true
-
-    data.in_limbo = any_dirty
-
-    if found_full:
-        return FULL_SUPPORT
-    if not has_supporter:
-        return NO_SUPPORT
-    return maxf(NO_SUPPORT, best - data.material.decay)
-
-func _direct_part_supporter(self_node: Node3D, my_cell: Vector3i, my_y: float) -> Node3D:
-    var best_y    := -INF
-    var best_node: Node3D = null
-    for cell in [my_cell, my_cell + Vector3i(0, -1, 0)]:
-        if not _cell_to_part.has(cell):
-            continue
-        for other in _cell_to_part[cell]:
-            if other == self_node:
-                continue
-            var other_y := part_registry[other].placement_y
-            if other_y < my_y and other_y > best_y:
-                best_y    = other_y
-                best_node = other
-    return best_node
-
-func _apply_part_visual(node: Node3D, support: float, strain_progress: float, pulse: float, hovered: bool) -> void:
-    var data := part_registry[node]
-    for child in node.get_children():
-        var mi := child as MeshInstance3D
-        if mi == null:
-            continue
-        var degraded := support < FULL_SUPPORT - VoxelConstants.SUPPORT_EPSILON
-        if not (degraded or strain_progress > 0.0 or hovered):
-            mi.material_override = null
-            continue
-        var mat := mi.material_override as StandardMaterial3D
-        if mat == null:
-            mat = StandardMaterial3D.new()
-            mi.material_override = mat
-        mat.albedo_color               = data.material.albedo
-        mat.roughness                  = 0.85
-        mat.emission_enabled           = true
-        mat.emission                   = get_support_color(support)
-        mat.emission_energy_multiplier = 0.5 + strain_progress * pulse * 0.6
-
-func _wake_falling_bodies() -> void:
+func wake_falling_bodies() -> void:
     for child in get_parent().get_children():
         var body := child as RigidBody3D
         if body != null and body.sleeping:
             body.sleeping = false
 
-func _collapse_part(node: Node3D) -> void:
-    _apply_part_visual(node, FULL_SUPPORT, 0.0, 0.0, false)
+const SUPPORT_COLOR_TIERS := [
+    [0.75, Color(0.0, 0.3, 1.0)],
+    [0.50, Color(0.0, 0.9, 0.2)],
+    [0.30, Color(1.0, 0.9, 0.0)],
+    [0.10, Color(1.0, 0.5, 0.0)],
+    [0.00, Color(1.0, 0.1, 0.0)],
+]
+const SUPPORT_COLOR_FAILED := Color(0.5, 0.0, 0.0)
 
-    var data := part_registry[node]
-    var mass := float(data.cells.size())
-
-    var body := RigidBody3D.new()
-    body.mass          = mass
-    body.continuous_cd = true
-    node.get_parent().add_child(body)
-    body.global_transform = node.global_transform
-    for child in node.get_children():
-        child.reparent(body)
-    node.queue_free()
-
-    remove_part(node)
-
-
-# --- Helpers ---
-
-func _is_natural_terrain(pos: Vector3i) -> bool:
-    if voxel_data.has(pos):
-        return false
-    if not _is_terrain_solid(pos):
-        return false
-    return _is_bedrock(pos)
-
-func _is_terrain_solid(pos: Vector3i) -> bool:
-    if terrain == null:
-        return false
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-    return vt.get_voxel_f(pos) < VoxelConstants.SDF_SOLID_THRESHOLD
-
-
-# --- Debug visualization ---
-
-var debug_meshes: Dictionary = {}
-const DEBUG_VOXEL_SIZE := 0.3
-
-@export var debug_visuals_enabled: bool = true
-
-var _strain_pulse_phase := 0.0
-
-func set_debug_visuals_enabled(enabled: bool) -> void:
-    if enabled == debug_visuals_enabled:
-        return
-    debug_visuals_enabled = enabled
-    if not enabled:
-        _clear_debug_meshes()
-
-func _clear_debug_meshes() -> void:
-    for pos in debug_meshes:
-        debug_meshes[pos].queue_free()
-    debug_meshes.clear()
-
-func update_debug_visuals() -> void:
-    if not debug_visuals_enabled:
-        return
-
-    var pulse := 0.5 + 0.5 * sin(_strain_pulse_phase)
-
-    var straining: Dictionary = _collapse_detector.get_straining_voxels()
-
-    for pos in debug_meshes.keys():
-        if not voxel_data.has(pos):
-            debug_meshes[pos].queue_free()
-            debug_meshes.erase(pos)
-
-    for pos in voxel_data:
-        var support: float = voxel_data[pos].support
-        var color          := get_support_color(support)
-        color.a = lerpf(0.15, 0.9, pulse) if straining.has(pos) else 0.6
-
-        if debug_meshes.has(pos):
-            (debug_meshes[pos].material_override as StandardMaterial3D).albedo_color = color
-        else:
-            var box := BoxMesh.new()
-            box.size = Vector3.ONE * DEBUG_VOXEL_SIZE
-
-            var mat := StandardMaterial3D.new()
-            mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-            mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-            mat.no_depth_test = true
-            mat.albedo_color  = color
-
-            var mi := MeshInstance3D.new()
-            mi.mesh              = box
-            mi.material_override = mat
-            mi.global_position   = Vector3(pos) + Vector3.ONE * 0.5
-            add_child(mi)
-            debug_meshes[pos] = mi
+static func get_support_color(support: float) -> Color:
+    for tier in SUPPORT_COLOR_TIERS:
+        if support > tier[0]:
+            return tier[1]
+    return SUPPORT_COLOR_FAILED

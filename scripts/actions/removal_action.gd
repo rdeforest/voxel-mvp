@@ -9,7 +9,7 @@ func _init(p_node: Node3D, p_integrity: StructuralIntegrity) -> void:
     integrity   = p_integrity
 
 func validate() -> bool:
-    return integrity.part_registry.has(target_node)
+    return integrity.has_part(target_node)
 
 func execute() -> void:
     integrity.remove_part(target_node)
