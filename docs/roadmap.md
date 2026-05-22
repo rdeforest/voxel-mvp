@@ -715,7 +715,9 @@ The click-spam replacement for mining and logging:
 These patterns emerged during v0.0 implementation and are now load-bearing across the
 codebase. They're documented here as design commitments, not just code conventions,
 because changing them would mean rewriting most of the world-mutating code. `CLAUDE.md`
-documents how to *use* them; this section documents *why they exist*.
+documents how to *use* them; this section documents *why they exist*. For mechanism
+rationale (in-limbo semantics, pause-correct strain accumulation, seed-vs-expand
+asymmetry, etc.), see `docs/architecture.md`.
 
 **Action-as-data with `validate()` then `execute()`.** Every world-mutating operation
 — dig, fill, flatten, place-part — is a `RefCounted` subclass of `Action` carrying its
@@ -775,6 +777,42 @@ a new material is a file copy and a parameter tweak. The roadmap originally spec
 JSON for this; `.tres` is strictly better in this codebase — it's Godot-native,
 editor-discoverable, and avoids a parse step at startup. Anyone who wants JSON can
 export from `.tres` as easily as the reverse.
+
+**Facade composition for the structural subsystem.** `StructuralIntegrity` is a thin
+`Node` facade composing three `RefCounted` components — `TerrainSupport` (voxel
+propagation), `PartSupport` (part recomputation + strain + collapse), `IntegrityDebug`
+(debug cubes) — plus `CollapseDetector` as a peer of `TerrainSupport`. Components hold
+typed back-references to each other for cross-state lookups (terrain reading parts'
+`best_support_at`, parts reading terrain's `voxel_data`); the facade breaks the
+`TerrainSupport ↔ PartSupport` cycle in `_exit_tree` so RefCounteds free cleanly.
+The split exists because each component owns a chunk of state that maps directly to
+"what to save/restore" for v0.0.1 persistence, and because the previous single
+500-line script no longer fit a working-memory budget.
+
+**Player composes RefCounted helpers.** The player Node (`scenes/player/player.gd`)
+composes five helpers — `PlayerMovement`, `CameraRig`, `BuildState`, `ActionFactories`,
+`EditModeCatalog` — each owning one concern. The player keeps input dispatch dicts,
+the per-frame orchestration glue, and the `@onready` references that nodes need.
+Same pattern as the structural facade and same justification: each file owns one job,
+no file blows the size budget, and each helper is independently testable.
+
+**Helper lambdas capture local refs, not `self`.** When a RefCounted class holds an
+`Array[Callable]` (e.g. `EditModeCatalog.modes` holding `EditMode` instances whose
+make-action and preview lambdas reference instance fields), the implicit `self` capture
+forms a cycle: catalog → modes → EditMode → Callable → catalog. The cycle prevents
+the RefCounted catalog from freeing on exit and leaks Mesh resources. The fix is to
+pass dependencies as parameters into the builder function and let lambdas close over
+the locals. See `EditModeCatalog._build_catalog` for the pattern. This is general
+across the codebase: when a helper stashes lambdas in a long-lived collection,
+prefer local-capture over self-capture.
+
+**Typed records over dict-as-struct.** `VoxelRecord`, `PartData`, `PendingCollapse`,
+`PendingFlood` are RefCounted classes with named fields rather than string-keyed
+dictionaries. Field access has the same syntax (`rec.support`); the wins are
+editor-discoverable types, no string-key duplication, and correctly-typed iteration
+variables (a `for x in voxel_data` loop's `x` is `Vector3i`, not `Variant`). Same
+reason to convert Materials from a code-defined class to `.tres` files: structured
+data beats stringy data when the IDE can help.
 
 ### Why godot_voxel
 
