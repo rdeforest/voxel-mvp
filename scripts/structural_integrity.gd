@@ -1,69 +1,24 @@
 class_name StructuralIntegrity
 extends Node
 
-class PartData:
-    var cells:       Array[Vector3i]
-    var material:    Materials
-    # World-space Y of the part's bottom face. Lets thin parts stack within a
-    # single voxel cell — support detection uses this to order parts within a
-    # shared cell, so removing a lower part correctly orphans the upper one.
-    var placement_y: float
-    # Current support value in [0.0, 1.0], recomputed each physics frame.
-    # Propagates from terrain through supporter parts, losing material.decay
-    # at each hop. When this drops at or below FALL_THRESHOLD the part starts
-    # straining.
-    var support:     float = 0.0
-    # True when any of this part's support dependencies (a supporter Part or
-    # a terrain voxel) is still dirty / settling. Strain accumulation pauses
-    # while in_limbo so we don't start a 3-second countdown on a transient
-    # zero that the propagation is about to resolve.
-    var in_limbo:    bool  = false
-    func _init(p_cells: Array[Vector3i], p_mat: Materials, p_y: float) -> void:
-        cells       = p_cells
-        material    = p_mat
-        placement_y = p_y
-
 const NO_SUPPORT   = 0.0
 const FULL_SUPPORT = 1.0
 
-# Emitted from the propagation loop whenever a voxel's recalculated support is
-# meaningfully *higher* than its previous value. CollapseDetector listens for
-# it to reset the strain timer of any pending terrain collapse the voxel belongs to.
 signal voxel_support_increased(pos: Vector3i, old_support: float, new_support: float)
 
-# Terrain voxels modified by the player (filled or affected by collapse).
-# Key: Vector3i, Value: { support: float, material: Materials, dirty: bool }
-var voxel_data: Dictionary = {}
+var voxel_data:           Dictionary[Vector3i, VoxelRecord] = {}
+var dirty_queue:          Array[Vector3i]                   = []
+var part_registry:        Dictionary[Node3D, PartData]      = {}
 
-# Queue of dirty terrain voxels needing support recalculation.
-var dirty_queue: Array[Vector3i] = []
-
-# Placed scene-based parts. Key: Node3D (the scene root), Value: PartData
-var part_registry: Dictionary[Node3D, PartData] = {}
-
-# Reverse map for cell → parts. A cell can hold multiple parts when thin
-# parts are stacked vertically (a 0.15m beam on top of a 0.012m board both
-# occupy the same voxel cell). The Array preserves placement order; ordering
-# by placement_y is the support-detection invariant.
-# Key: Vector3i, Value: Array[Node3D]
-var _cell_to_part: Dictionary = {}
-
-# Per-column lowest-registered-Y index. Used by _is_bedrock() to decide
-# whether an untracked solid neighbour represents real bedrock (continuous
-# down to the world floor) or suspended mass (some registered cell exists
-# below it in the same column). Keyed by Vector2i(x, z) → lowest Y.
+var _cell_to_part:        Dictionary = {}
 var _lowest_registered_y: Dictionary = {}
+var _part_strain:         Dictionary = {}
 
-# Accumulated unsupported seconds per Part; drives the Part strain window.
-var _part_strain: Dictionary = {}  # Node3D → float
+var _hovered_part:        Node3D     = null
 
-# The Part currently under the player's raycast, if any. Used to surface a
-# soft support-color tint on Parts that aren't otherwise straining, so the
-# player can see why a structure is or isn't safe before it actually fails.
-var _hovered_part: Node3D = null
+var _collapse_detector:   CollapseDetector
+var terrain:              VoxelLodTerrain
 
-var _collapse_detector: CollapseDetector
-var terrain:            VoxelLodTerrain
 
 func _ready() -> void:
     terrain = get_parent().get_node("VoxelLodTerrain")
@@ -73,11 +28,7 @@ func _ready() -> void:
 # --- Public API ---
 
 func register_voxel(pos: Vector3i, material: Materials) -> void:
-    voxel_data[pos] = {
-        "support":  NO_SUPPORT,
-        "material": material,
-        "dirty":    true,
-    }
+    voxel_data[pos] = VoxelRecord.new(material)
     dirty_queue.append(pos)
     var col := Vector2i(pos.x, pos.z)
     if not _lowest_registered_y.has(col) or _lowest_registered_y[col] > pos.y:
@@ -112,11 +63,6 @@ func notify_terrain_changed(center: Vector3, radius: float) -> void:
             dirty_queue.append(pos)
     _wake_falling_bodies()
 
-# Walk an axis-aligned box, registering any untracked-solid cell that has at
-# least one air neighbour. Called by DigAction after a sphere modification
-# and by CollapseDetector after a terrain collapse — both events change the
-# SDF surface and expose previously-buried cells that need to enter the
-# structural integrity system.
 func register_exposed_cells(box_origin: Vector3, box_size: Vector3) -> void:
     if terrain == null:
         return
@@ -142,10 +88,6 @@ func register_part(node: Node3D, cells: Array[Vector3i], material: Materials, pl
         if not _cell_to_part.has(cell):
             _cell_to_part[cell] = []
         _cell_to_part[cell].append(node)
-        # Dirty any tracked terrain neighbours so they pick up this part as a
-        # supporter on the next propagation pass. Without this, a pillar placed
-        # under a strained ceiling never propagates its support upward — the
-        # ceiling sits on stale values until something else dirties it.
         for neighbor in VoxelUtils.neighbors(cell):
             if voxel_data.has(neighbor) and not voxel_data[neighbor].dirty:
                 voxel_data[neighbor].dirty = true
@@ -205,10 +147,6 @@ func _physics_process(delta: float) -> void:
 
 # --- Terrain propagation ---
 
-# Worklist fixpoint: drain up to PROPAGATION_BUDGET voxels from dirty_queue,
-# recalculating each one's support. A meaningful change re-dirties neighbours
-# so the wave propagates; a meaningful increase emits voxel_support_increased
-# so a pending terrain collapse can rewind its strain.
 func _process_dirty_queue() -> void:
     var processed := 0
 
@@ -250,25 +188,15 @@ func _calculate_support(pos: Vector3i) -> float:
         if voxel_data.has(neighbor):
             s = voxel_data[neighbor].support
         elif _is_terrain_solid(neighbor):
-            # Untracked solid. Gravity flows down: solid above can't hold us up,
-            # only below and lateral neighbours participate.
             if neighbor.y > pos.y:
                 continue
             if _is_bedrock(neighbor):
-                # Real bedrock — continuous to the world floor. Full support.
                 s = FULL_SUPPORT
             else:
-                # Suspended mass — needs to be in the integrity system so its
-                # support can be computed via propagation. Only seed the lazy
-                # registration if we have support to pass on; cells already at
-                # zero won't extend a meaningful chain.
                 if current_support > VoxelConstants.FALL_THRESHOLD:
                     register_voxel(neighbor, Materials.STONE)
                 continue
         elif _cell_to_part.has(neighbor):
-            # A placed Part occupies this neighbour cell. Take the best
-            # support across the stack — this is what lets a wood pillar
-            # hold up a stone ceiling.
             s = NO_SUPPORT
             for part_node in _cell_to_part[neighbor]:
                 s = maxf(s, part_registry[part_node].support)
@@ -293,8 +221,6 @@ func _tick_part_strain(delta: float) -> void:
             _part_strain.erase(node)
             _apply_part_visual(node, data.support, 0.0, 0.0, hovered)
         elif data.in_limbo:
-            # Dependencies still settling — don't start a strain timer on a
-            # transient zero. Show the current support color but no pulse.
             _apply_part_visual(node, data.support, 0.0, 0.0, hovered)
         else:
             _part_strain[node]   = _part_strain.get(node, 0.0) + delta
@@ -305,10 +231,6 @@ func _tick_part_strain(delta: float) -> void:
     for node in to_collapse:
         _collapse_part(node)
 
-# Walk parts bottom-up by placement_y so each supportee sees its supporter's
-# freshly-computed value. Same shape as terrain propagation but cheap because
-# we sort instead of needing a fixpoint — parts only depend on parts strictly
-# below themselves.
 func _recompute_part_support() -> void:
     var nodes := part_registry.keys()
     nodes.sort_custom(func(a: Node3D, b: Node3D) -> bool:
@@ -324,9 +246,6 @@ func _calculate_part_support(node: Node3D, data: PartData) -> float:
     var found_full    := false
     var support_y     := floori(data.placement_y - 0.001)
 
-    # For tall parts (rotated onto their end, spanning multiple Y cells), only
-    # the bottom row of footprint cells looks for support — the upper rows are
-    # part of the part's own body, not supported surfaces.
     var min_cell_y := data.cells[0].y
     for cell in data.cells:
         if cell.y < min_cell_y:
@@ -348,7 +267,7 @@ func _calculate_part_support(node: Node3D, data: PartData) -> float:
             found_full = true
             continue
         if voxel_data.has(support_cell):
-            var rec: Dictionary = voxel_data[support_cell]
+            var rec: VoxelRecord = voxel_data[support_cell]
             best          = maxf(best, rec.support)
             has_supporter = true
             if rec.dirty:
@@ -362,10 +281,6 @@ func _calculate_part_support(node: Node3D, data: PartData) -> float:
         return NO_SUPPORT
     return maxf(NO_SUPPORT, best - data.material.decay)
 
-# Returns the part with the highest placement_y strictly less than my_y,
-# searched across my own cell (for thin stacks within one cell) and the
-# cell directly below (for stacks that cross a voxel boundary). Returns
-# null if no such part exists.
 func _direct_part_supporter(self_node: Node3D, my_cell: Vector3i, my_y: float) -> Node3D:
     var best_y    := -INF
     var best_node: Node3D = null
@@ -395,9 +310,6 @@ func _apply_part_visual(node: Node3D, support: float, strain_progress: float, pu
         if mat == null:
             mat = StandardMaterial3D.new()
             mi.material_override = mat
-        # Albedo keeps the part's natural surface color (and, eventually, its
-        # texture) visible. Strain feedback rides entirely on emission, which
-        # adds colored light without replacing the surface.
         mat.albedo_color               = data.material.albedo
         mat.roughness                  = 0.85
         mat.emission_enabled           = true
@@ -431,10 +343,6 @@ func _collapse_part(node: Node3D) -> void:
 # --- Helpers ---
 
 func _is_natural_terrain(pos: Vector3i) -> bool:
-    # Natural terrain = solid SDF cell that's both untracked AND bedrock-by-
-    # column-definition. The bedrock check is what stops a cell directly below
-    # a cave from claiming FULL_SUPPORT just because its SDF is negative —
-    # suspended mass isn't bedrock no matter how solid it looks locally.
     if voxel_data.has(pos):
         return false
     if not _is_terrain_solid(pos):
