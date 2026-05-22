@@ -43,6 +43,8 @@ func validate() -> bool:
     var vt := terrain.get_voxel_tool()
     vt.channel = VoxelBuffer.CHANNEL_SDF
     for cell in fp:
+        if integrity.has_part_cell(cell):
+            return true
         var below := cell + Vector3i(0, -1, 0)
         if vt.get_voxel_f(below) < VoxelConstants.SDF_SOLID_THRESHOLD:
             return true
