@@ -111,34 +111,38 @@ func process_dirty_queue() -> void:
         processed += 1
 
 func _calculate_support(pos: Vector3i) -> float:
-    var material: Materials = voxel_data[pos].material
-    var decay:    float     = material.decay
-
     if is_natural_terrain(pos + Vector3i(0, -1, 0)):
         return FULL_SUPPORT
 
-    var best            := NO_SUPPORT
     var current_support := voxel_data[pos].support as float
+    var best            := NO_SUPPORT
     for neighbor in VoxelUtils.neighbors(pos):
-        var s: float
-        if voxel_data.has(neighbor):
-            s = voxel_data[neighbor].support
-        elif _is_terrain_solid(neighbor):
-            if neighbor.y > pos.y:
-                continue
-            if _is_bedrock(neighbor):
-                s = FULL_SUPPORT
-            else:
-                if current_support > VoxelConstants.FALL_THRESHOLD:
-                    register_voxel(neighbor, Materials.STONE)
-                continue
-        elif _part_support != null and _part_support.has_cell(neighbor):
-            s = _part_support.best_support_at(neighbor)
-        else:
-            continue
-        best = maxf(best, s)
+        best = maxf(best, _support_from_neighbor(neighbor, pos, current_support))
 
-    return maxf(NO_SUPPORT, best - decay)
+    return maxf(NO_SUPPORT, best - voxel_data[pos].material.decay)
+
+
+# Classification cascade, priority order:
+#   tracked voxel  → its support
+#   part-occupied  → best support across the stacked parts
+#   solid above    → skip (gravity flows down)
+#   solid bedrock  → FULL_SUPPORT
+#   suspended mass → lazy-register, then skip
+#   air            → skip
+func _support_from_neighbor(neighbor: Vector3i, self_pos: Vector3i, self_support: float) -> float:
+    if voxel_data.has(neighbor):
+        return voxel_data[neighbor].support
+    if _part_support != null and _part_support.has_cell(neighbor):
+        return _part_support.best_support_at(neighbor)
+    if not _is_terrain_solid(neighbor):
+        return NO_SUPPORT
+    if neighbor.y > self_pos.y:
+        return NO_SUPPORT
+    if _is_bedrock(neighbor):
+        return FULL_SUPPORT
+    if self_support > VoxelConstants.FALL_THRESHOLD:
+        register_voxel(neighbor, Materials.STONE)
+    return NO_SUPPORT
 
 
 # --- Internals ---

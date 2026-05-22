@@ -102,12 +102,8 @@ func _calculate_part_support(node: Node3D, data: PartData) -> float:
     var has_supporter := false
     var any_dirty     := false
     var found_full    := false
-    var support_y     := floori(data.placement_y - 0.001)
-
-    var min_cell_y := data.cells[0].y
-    for cell in data.cells:
-        if cell.y < min_cell_y:
-            min_cell_y = cell.y
+    var support_y  := floori(data.placement_y - 0.001)
+    var min_cell_y := _min_y(data.cells)
 
     for cell in data.cells:
         if cell.y != min_cell_y:
@@ -138,6 +134,13 @@ func _calculate_part_support(node: Node3D, data: PartData) -> float:
     if not has_supporter:
         return NO_SUPPORT
     return maxf(NO_SUPPORT, best - data.material.decay)
+
+static func _min_y(cells: Array[Vector3i]) -> int:
+    var min_cell_y := cells[0].y
+    for cell in cells:
+        if cell.y < min_cell_y:
+            min_cell_y = cell.y
+    return min_cell_y
 
 func _direct_part_supporter(self_node: Node3D, my_cell: Vector3i, my_y: float) -> Node3D:
     var best_y    := -INF
