@@ -2,6 +2,10 @@
 
 [ext_resource type="PackedScene" uid="uid://nqorq1p6ak5q" path="res://scenes/player/player.tscn" id="1_dphjl"]
 [ext_resource type="Script" uid="uid://cel7053sndciw" path="res://scripts/structural_integrity.gd" id="2_sl2e5"]
+[ext_resource type="Script" path="res://scripts/world.gd" id="3_world"]
+
+[sub_resource type="VoxelStreamSQLite" id="VoxelStreamSQLite_save"]
+database_path = "user://saves/world.db"
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_4rhad"]
 
@@ -29,6 +33,7 @@ mesh_optimization_enabled = true
 albedo_color = Color(0.659295, 0.91, 0.39130002, 1)
 
 [node name="World" type="Node3D" unique_id=99934390]
+script = ExtResource("3_world")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=979428692]
 transform = Transform3D(1, 0, 0, 0, -0.9659258262890682, 0.258819045102521, 0, -0.258819045102521, -0.9659258262890682, 0, 0, 0)
@@ -40,6 +45,7 @@ shadow_enabled = true
 environment = SubResource("Environment_sl2e5")
 
 [node name="VoxelLodTerrain" type="VoxelLodTerrain" parent="." unique_id=1063642795]
+stream = SubResource("VoxelStreamSQLite_save")
 generator = SubResource("VoxelGeneratorNoise2D_6m72w")
 mesher = SubResource("VoxelMesherTransvoxel_v5dby")
 material = SubResource("StandardMaterial3D_t5ptc")

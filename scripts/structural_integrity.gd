@@ -61,8 +61,8 @@ func register_exposed_cells(box_origin: Vector3, box_size: Vector3) -> void:
 func get_support(pos: Vector3i) -> float:
     return terrain_support.get_support(pos)
 
-func register_part(node: Node3D, cells: Array[Vector3i], material: Materials, placement_y: float) -> void:
-    part_support.register_part(node, cells, material, placement_y)
+func register_part(node: Node3D, cells: Array[Vector3i], material: Materials, placement_y: float, part: Part) -> void:
+    part_support.register_part(node, cells, material, placement_y, part)
 
 func remove_part(node: Node3D) -> void:
     part_support.remove_part(node)
@@ -97,6 +97,14 @@ func wake_falling_bodies() -> void:
         var body := child as RigidBody3D
         if body != null and body.sleeping:
             body.sleeping = false
+
+func is_quiescent() -> bool:
+    if not terrain_support.dirty_queue.is_empty():     return false
+    if not _collapse_detector.is_idle():               return false
+    for child in get_parent().get_children():
+        var body := child as RigidBody3D
+        if body != null and not body.sleeping:         return false
+    return true
 
 const SUPPORT_COLOR_TIERS := [
     [0.75, Color(0.0, 0.3, 1.0)],

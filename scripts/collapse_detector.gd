@@ -72,6 +72,9 @@ func tick_pending(delta: float) -> void:
 func get_straining_voxels() -> Dictionary:
     return _voxel_to_pending
 
+func is_idle() -> bool:
+    return _pending_floods.is_empty() and _pending_collapses.is_empty()
+
 
 # --- Signal handler: rewind strain when support comes back ---
 

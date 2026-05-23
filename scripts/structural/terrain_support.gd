@@ -26,6 +26,18 @@ func bind_part_support(ps) -> void:
 func register_voxel(pos: Vector3i, material: Materials) -> void:
     voxel_data[pos] = VoxelRecord.new(material)
     dirty_queue.append(pos)
+    _track_column_low(pos)
+
+# Restore a voxel from a saved snapshot: bypasses propagation by trusting the
+# saved support, which was captured while the world was quiescent.
+func restore_voxel(pos: Vector3i, material: Materials, support: float) -> void:
+    var rec := VoxelRecord.new(material)
+    rec.support = support
+    rec.dirty   = false
+    voxel_data[pos] = rec
+    _track_column_low(pos)
+
+func _track_column_low(pos: Vector3i) -> void:
     var col := Vector2i(pos.x, pos.z)
     if not _lowest_registered_y.has(col) or _lowest_registered_y[col] > pos.y:
         _lowest_registered_y[col] = pos.y

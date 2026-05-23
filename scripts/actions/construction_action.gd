@@ -68,7 +68,7 @@ func execute() -> void:
     instance.transform = Transform3D(_basis(), placement_pos + shift)
     terrain.get_parent().add_child(instance)
 
-    integrity.register_part(instance, _footprint(), Materials.from_name(material_name), placement_pos.y)
+    integrity.register_part(instance, _footprint(), Materials.from_name(material_name), placement_pos.y, part)
 
 # --- internals ---
 

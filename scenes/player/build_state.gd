@@ -64,3 +64,15 @@ func rotate_x() -> void:
 func rotate_z() -> void:
     rotation.z = (rotation.z + 1) % 4
     changed.emit()
+
+func restore(part_path: String, material: StringName, rot: Vector3i) -> void:
+    for i in _parts.size():
+        if _parts[i].resource_path == part_path:
+            _part_index = i
+            break
+    for i in _materials.size():
+        if _materials[i] == material:
+            _material_index = i
+            break
+    rotation = rot
+    changed.emit()

@@ -47,6 +47,8 @@ func _ready() -> void:
         KEY_Y:            build_state.rotate_z,
         KEY_BRACKETLEFT:  build_state.prev_part,
         KEY_BRACKETRIGHT: build_state.next_part,
+        KEY_F5:           _save_game,
+        KEY_F9:           _load_game,
     }
 
     _mouse_button_actions = {
@@ -141,3 +143,18 @@ func _toggle_wireframe() -> void:
 
 func _quit_game() -> void:
     get_tree().quit()
+
+
+# --- Save/load ---
+
+func _save_game() -> void:
+    if not integrity.is_quiescent():
+        print("Cannot save: world still settling.")
+        return
+    var err := WorldSnapshot.save(SavePaths.SNAPSHOT_FILE, get_parent())
+    print("Saved." if err == OK else "Save failed: %s" % err)
+
+func _load_game() -> void:
+    if not SavePaths.snapshot_exists():
+        return
+    get_tree().reload_current_scene()

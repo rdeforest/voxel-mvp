@@ -20,8 +20,8 @@ func _init(terrain_support: TerrainSupport, facade: Node) -> void:
 
 # --- Registration ---
 
-func register_part(node: Node3D, cells: Array[Vector3i], material: Materials, placement_y: float) -> void:
-    part_registry[node] = PartData.new(cells, material, placement_y)
+func register_part(node: Node3D, cells: Array[Vector3i], material: Materials, placement_y: float, part: Part) -> void:
+    part_registry[node] = PartData.new(cells, material, placement_y, part)
     for cell in cells:
         if not _cell_to_part.has(cell):
             _cell_to_part[cell] = []
