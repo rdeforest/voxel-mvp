@@ -1,8 +1,8 @@
 # Voxel Valheim MVP — Project Roadmap v2
 
-**Engine:** Godot 4.6.x stable + Zylann's godot_voxel  
-**Assets:** Creative Commons / open-source  
-**AI Assist:** Claude Code for boilerplate, systems scaffolding, iteration  
+**Engine:** Godot 4.6.x stable + Zylann's godot_voxel
+**Assets:** Creative Commons / open-source
+**AI Assist:** Claude Code for boilerplate, systems scaffolding, iteration
 **Working Title:** TBD (not Norse mythology — see Post-MVP Vision)
 
 ---
