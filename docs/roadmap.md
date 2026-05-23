@@ -1,8 +1,8 @@
 # Voxel Valheim MVP — Project Roadmap v2
 
-**Engine:** Godot 4.6.x stable + Zylann's godot_voxel
-**Assets:** Creative Commons / open-source
-**AI Assist:** Claude Code for boilerplate, systems scaffolding, iteration
+**Engine:** Godot 4.6.x stable + Zylann's godot_voxel  
+**Assets:** Creative Commons / open-source  
+**AI Assist:** Claude Code for boilerplate, systems scaffolding, iteration  
 **Working Title:** TBD (not Norse mythology — see Post-MVP Vision)
 
 ---
@@ -29,6 +29,19 @@ choosing voxel over heightmap:
 5. **Moore's Law is a market dynamic.** Don't over-optimize for 2025 hardware. Build the
    right architecture and let hardware catch up.
 
+6. **The voxel grid is a spatial database, not just a renderable surface.** SDF and
+   material are channels in this database. Temperature, moisture, pressure, momentum,
+   and other 3D-continuous quantities can be additional channels — possibly at different
+   resolutions per channel. The grid stores *what the matter is and what's happening in
+   the volume*. Roles, identities, and gameplay concepts (this is a building, this is
+   a load-bearing wall, this is a load-bearing wall belonging to player X's house) live
+   in sidecar indexes maintained by other systems, keyed by voxel coordinate.
+
+7. **Terrain operations should fail honest, not fake a surface.** When a terrain op can't
+   cleanly do the intended thing, it should produce truthful voxel data — even if that
+   means opening a void — rather than faking a result. The whole argument for voxels over
+   a heightmap is that the world is honest geometry, not trickery.
+
 ---
 
 ## Version Strategy
@@ -36,9 +49,8 @@ choosing voxel over heightmap:
 | Version | Question it answers | Roughly maps to |
 |---------|-------------------|-----------------|
 | 0.0 | Is this as good of an idea as I think it is? | Phases 0, 2, 5 (fast path) |
-| 0.0.1 | Can I save, load, and replay the world? | Persistence + history-as-journal (see below) |
-| 0.1 | Can I make it fun/performant? | Phases 1, 3, 4 (filling in the gameplay) |
-| 0.2 | Can I make it pretty? | Art pass, shader work, audio, polish |
+| 0.1 | Can I make it fun/performant? | Phases 1, 3, 4, 5.5 (filling in the gameplay) |
+| 0.2 | Can I make it pretty? | Art pass, shader work, audio, polish, fracture fidelity |
 | 0.9 | Can I make it into a real product? | Multiplayer, content depth, settings, QA |
 | 1.0 | Will people pay to get it from Steam? | Open-source + Steam for cloud saves, multiplayer |
 | 1.1 | Can I make it run on Windows? | Cross-platform builds via cloud CI |
@@ -83,11 +95,38 @@ powerful. The 7900X iGPU would be testing "can this run at all?" not "is this pe
 
 For v0.0 validation, don't worry about this at all. Test on your 5090 and optimize later.
 
+### Are voxels the right primitive, or are we picking a perfect hammer?
+
+**Voxels are right for the hardest part of the problem (continuous terrain, no loading
+screens, real modification, caves as first-class spaces) and adequate for the rest via
+a hybrid approach.** The alternatives surveyed:
+
+- **Tetrahedral / unstructured meshes:** Physically accurate, supports arbitrary topology.
+  Tooling is decades behind dense voxel engines; no shippable game uses these.
+- **CSG trees:** Lossless and semantically rich, but pathological after thousands of
+  edits. Prototyping tool, not a shipping representation.
+- **Sparse voxel octrees / OpenVDB-style structures:** Where godot_voxel will probably go
+  long-term for planet-scale work. Dynamic editing is harder than dense chunks; tooling
+  is research-grade.
+- **B-rep (CAD-style):** Perfect for buildings, catastrophic for terrain.
+- **Hybrid (voxels for terrain, mesh for construction):** What this project actually does.
+  Terrain is voxels with SDF; player-placed prefab pieces are traditional rigid bodies
+  with collision meshes; the structural integrity system is the connective tissue that
+  lets them speak the same language ("how supported is this thing, regardless of what
+  kind of thing it is").
+
+The instinct to worry about "what if a voxel is two types of cell?" is a category error.
+The voxel stores *what the matter is*. Whether that matter is *part of a building* or
+*part of a load-bearing structure* is a role, not a property — and roles live in sidecar
+indexes maintained by their owning systems. This is the same pattern as ECS: entities
+don't carry their roles, the role-systems carry indexes of which entities they care about.
+
 ---
 
 ## Phase 0: Foundation (Week 1)
 **Goal:** Walking around a procedural voxel world with basic physics.
 **Version target:** 0.0
+**Status:** Complete.
 
 ### Tasks
 - Set up Godot 4.6 project with godot_voxel (use pre-built binary or GDExtension)
@@ -118,6 +157,7 @@ You can walk across an infinite procedural landscape with hills, and fall off cl
 ## Phase 2 (moved up): Terrain Modification (Week 2)
 **Goal:** Dig, flatten, raise terrain with tools.
 **Version target:** 0.0
+**Status:** Complete.
 
 ### Why this comes before biomes
 For the 0.0 validation ("is this as good an idea as I think it is?"), you need to feel
@@ -156,54 +196,28 @@ vertical face in a rock wall.
 ## Phase 5 (moved up): Building System (Weeks 3–5)
 **Goal:** Place structures that integrate with voxel terrain.
 **Version target:** 0.0
+**Status:** Complete for v0.0 thesis defense. Deferred items moved to Phase 5.5.
 
-### This is the thesis defense. Budget accordingly.
+### This was the thesis defense. Budget accordingly.
 
 ### Tasks
 - **Hybrid building approach:**
   - Voxel building: place/remove material voxels (walls, floors from terrain material)
-  - Prefab building: parametric rectangular Parts (board, plank, stud, beam) with
-    multi-axis 90° rotation
+  - Prefab building: snap-together pieces for doors, roofs, stairs
+- Building piece catalog (MVP): wall, floor, roof (45°), stairs, door frame
+- Snap point system: pieces detect and align to adjacent pieces
 - Ghost preview showing placement before confirming
 - **Structural integrity system (the killer feature):**
   - Every voxel and prefab piece has a support value
-  - Support propagates from ground contact upward, weakening with material decay
+  - Support propagates from ground contact upward, weakening with distance
   - Material-dependent: stone supports more than wood, wood more than dirt
-  - Color-coded visual feedback (blue → green → yellow → orange → red → collapse),
-    same system for terrain AND player structures
-  - **Cave ceilings follow the same rules:** when terrain is dug, the exposed cells
-    register with the integrity system; unsupported spans show strain colors and
-    eventually collapse. Reinforcing with pillars (Parts) restores support.
-- Voxel-to-prefab interface (SDF seam matching, Option A2): Parts write matching SDF
-  samples into their footprint cells so the Transvoxel mesher produces a clean
-  surface continuous with surrounding terrain.
-
-### Deferred to v0.1 (not required for the thesis defense)
-- **SDF seam matching (Option A2)** — originally listed as a Phase 5 task; deferred
-  after the v0.0 build hit a resolution mismatch. Our parts are sub-cell (thinnest
-  axes 0.012–0.15m, voxel cells 1m), so writing per-cell SDF samples can't represent
-  a thin board accurately — the visible "seam" between part mesh and Transvoxel
-  terrain mesh is a rendering-resolution problem, not an integrity-system problem.
-  The right v0.1 answer is probably **physics-driven part-vs-terrain interaction**:
-  a buried beam either breaks under load or pushes the dirt aside, depending on
-  relative material strength. That pairs naturally with the load-propagation pass
-  and falling-damage work, all of which want the same "parts and terrain are
-  governed by one physical-strength model" thinking.
-- **Sub-assemblies and planning mode** — Dwarf-Fortress-style selection of existing
-  structures into reusable assemblies, plus a planning mode where build orders queue
-  and are executed step-by-step (with physics tested at each step). Needs UI work.
-  Autonomous helpers to execute plans come later still.
-- **Free-form placement physics** — placing a Part at an arbitrary position/rotation
-  and letting physics determine whether it settles into construction or falls. The
-  honest "drop a board, it falls if unsupported" model. Current grid-aligned +
-  validate-and-commit placement is enough to demonstrate the thesis.
-- **Snap point UI** — `Schematic.snap_points` data structure exists; the
-  selection/preview UI for hand-authoring and connecting via Joints is v0.1.
-- **Building piece catalog with joinery** — door frames, stairs, roof angles, etc.
-  Current rectangular Parts (board/plank/stud/beam) are enough for the cave
-  reinforcement demo. Specialised pieces with mate-only-with constraints are v0.1.
-- **Workbench radius** — Valheim convention for gating progression; doesn't
-  validate voxel-first design. Belongs to the survival loop (v0.9).
+  - Color-coded visual feedback (green → yellow → red → collapse), same system for
+    terrain AND player structures
+  - Cave ceilings follow the same rules: unsupported spans collapse over time
+  - Player can reinforce caves with wooden beams or stone pillars
+- Voxel-to-prefab interface: prefab pieces anchor to voxel terrain seamlessly
+- Foundation carving: building foundations carve into terrain voxels automatically
+- Workbench radius requirement for building
 
 ### Claude Code leverage: Moderate
 Snap logic and ghost preview are well-patterned. Structural integrity is algorithmic
@@ -225,25 +239,6 @@ novel and needs manual iteration.
   slope angle will "slump" — converting to a physics object that settles. For 0.0, this
   can be a simple threshold check on exposed faces. Full angle-of-repose simulation with
   material consistency is v0.1.
-- **Player-position safety is a construction-mode problem, not a scaffolding patch.**
-  The placeholder fill/dig/flatten verbs can drop the player through the world: any
-  *additive* terrain edit (fill, vertical flatten, default-normal flatten) can place a
-  solid voxel where the player stands or bury their floor. The scaffolding has a cheap
-  edit-driven fix (`_push_player_above_terrain` scans the player's column and re-seats
-  them), but the *real* answer belongs here: when construction mode replaces those verbs,
-  "can a build action place a voxel where the player is" must be an explicit design
-  decision. Options to weigh: lower-only semantics for some tools, a build-time collision
-  check that refuses or displaces, or treating "push the player" as part of the place
-  operation. The insight that generalizes: *subtractive-only editing structurally cannot
-  cause fall-through; additive editing always can.* Don't rediscover this — design for it.
-- **Terrain operations should fail honest, not fake a surface.** When a terrain op can't
-  cleanly do the intended thing, it should produce truthful voxel data — even if that
-  means opening a void — rather than faking a result. Example: a horizontal flatten that
-  can't lower cleanly because there's material above the cut should *open a small cave*,
-  not invent a floor. This is thesis-consistent: the whole argument for voxels over a
-  heightmap is that the world is honest geometry, not trickery (Valheim's flatten fakes
-  things; ours shouldn't). May generalize into a principle governing all terrain ops —
-  worth holding as a design stance going into the construction-mode work.
 
 ### Risk
 This is where the project sings or stalls. The voxel-prefab interface (a door frame flush
@@ -251,26 +246,20 @@ in a voxel wall that merges with the hillside) is genuinely novel. Budget the fu
 and be prepared to simplify. Fallback: prefab-only building (like Valheim) still works.
 
 ### Done when
-**The killer demo:** you can dig a wide cave into a hillside and watch the ceiling cells
-shift from blue through yellow toward red as unsupported span exceeds the material's
-decay budget. Before the strain timer expires, you place wooden beams as pillars,
-watch the ceiling's support recover, and continue digging. If you fail to reinforce,
-the unsupported section flood-fills into a falling RigidBody3D.
-
-**Distribution:** v0.0 ships as published source (CC BY-SA 4.0) plus Linux, macOS,
-and Windows playtester binaries. The thesis defense is *the working code itself* —
-no recorded demo, no trailer; the project's open-source release is the artifact
-that lets people verify the claim independently.
-
-The "house carved into hillside" framing from earlier drafts is descriptive of the
-*aesthetic* but isn't the thesis-defense demo. The cave-integrity loop is. A clean
-voxel-to-prefab visual seam was once on this phase; it moved to v0.1+ once sub-cell
-parts revealed that SDF samples-per-cell can't represent thin features. See the
-deferred list above.
+You can build a house partially carved into a hillside, with voxel stone walls that blend
+into the rock face, a door, a roof, and visual feedback showing structural integrity. You
+can dig a wide cave and watch the ceiling turn yellow, then place pillars to stabilize it.
 
 ---
 
 ## v0.0 Checkpoint: "Is This As Good An Idea As I Think It Is?"
+
+**Answered: yes.** The thesis is largely architectural, and architectural theses are
+defensible by argument. The conversation around the design — the role-vs-matter
+distinction, the event-bus pattern, the multi-grid approach for vehicles, the
+fracture-as-mesh-extraction insight — has stress-tested the architecture and surfaced
+plausible answers to every seam found so far. The v0.0 work proved out the foundation;
+the design conversation proved out the path forward.
 
 At this point (~5 weeks part-time), you have:
 - Infinite procedural terrain you can walk across
@@ -280,99 +269,7 @@ At this point (~5 weeks part-time), you have:
 - Cave reinforcement gameplay
 
 **No** biomes, resources, inventory, crafting, enemies, or survival loop. This is
-deliberately a tech demo, not a game. But it answers the fundamental question: does the
-voxel approach deliver on its architectural promises?
-
-If yes → proceed to v0.0.1, then v0.1.
-If the structural integrity is too computationally expensive, or the voxel-prefab seam
-looks bad, or the terrain modification feels worse than Valheim's → you've spent 5 weeks
-instead of 5 months finding out.
-
----
-
-## v0.0.1: Persistence as Replayable History
-**Goal:** Save and load world state — and the operations that produced it.
-**Version target:** 0.0.1
-
-### Why this is interesting, not just necessary
-
-A naive save system serializes the current state and reloads it. That's fine for shipping
-a game, but it's a missed opportunity for a project whose thesis is *the world is honest
-geometry produced by honest operations*. If every terrain edit and part placement is
-already a discrete `Action` (validated, then executed), the save file can be the
-**journal of actions that produced the current world** — not just a snapshot of the
-result.
-
-This is the Quake `.dem` model: a demo file is just the sequence of inputs the engine
-replays to reproduce the game state. Same idea here, scaled to world-mutating operations
-instead of input events. The save file is both:
-
-- A **state restore** mechanism for normal save/load (replay all actions, or restore
-  from a periodic snapshot + tail of actions since the snapshot)
-- A **bug reproduction** artifact: a player files a bug, attaches the save, you replay
-  it step-by-step and watch the failure happen. No "can you remember what you did?"
-- A **debugging tool**: step forward and backward through the action history with the
-  integrity system computing live. Watch the strain gradient develop, see exactly which
-  action caused a collapse, identify off-by-one or propagation bugs by their visual
-  signature.
-- A **test harness foundation**: replay a known sequence as a regression test. If the
-  cave-integrity demo ever stops behaving correctly, the failing replay is the bug
-  report.
-
-The thesis-consistency argument: the world is geometry produced by operations on
-geometry. Saving the operations rather than just the result is more honest. It also
-means a save file is portable across builds in a way a state snapshot isn't — as long
-as the action semantics stay stable, a save from yesterday's build replays correctly
-on today's.
-
-### Tasks
-
-- Serialise the `Action` history: every executed action records its type and parameters
-  in an append-only journal
-- Periodic state snapshots (every N actions or M seconds) so replay-from-zero isn't
-  required on every load
-- Save format: snapshot + journal tail since snapshot. Versioned, with an action-schema
-  version number so old saves can be detected and either replayed under their original
-  semantics or rejected cleanly
-- Load: restore from snapshot, then replay journal tail with the integrity system
-  computing live (or fast-forwarded if the integrity state is part of the snapshot)
-- Debug controls: pause replay, step forward/back one action at a time, scrub to a
-  timestamp
-- godot_voxel chunk persistence integration: the SDF state is part of the snapshot,
-  not the journal (journal records the action that mutated SDF, snapshot records the
-  SDF result)
-- Save UI: at minimum a hotkey for quicksave/quickload; full UI deferred to v0.9
-
-### Key decisions
-
-- **Action serialisation format.** Each Action class knows how to serialise itself. The
-  `Action` base class grows `serialise() -> Dictionary` and a static `deserialise(d) ->
-  Action`. Keep it simple — strings for action type, primitive values for parameters.
-- **Snapshot cadence.** Tunable. Probably every 30 seconds or every 50 actions for v0.0.1,
-  optimise later if load times are bad.
-- **Action schema versioning is non-negotiable.** Once people start saving worlds, an
-  action-semantics change is a save-format break. Version the schema from day one;
-  refuse to load saves with unknown schemas; provide a migration path or an honest
-  "this save predates the current build, sorry" message. This is the cheapest place
-  to put forward-compatibility work and it pays off forever.
-- **Determinism.** Replay must be deterministic for the bug-reproduction case to work.
-  This means seeded RNG for anything stochastic (collapse direction tie-breaking,
-  particle effects if any). Treat non-determinism as a bug from v0.0.1 onward.
-
-### Claude Code leverage: High
-Serialisation boilerplate, format versioning, snapshot/journal coordination are
-pattern-heavy. The deterministic-replay discipline needs human attention.
-
-### Risk
-Determinism is the gotcha. Anything that reads wall-clock time, system RNG, or unordered
-dictionary iteration can break replay. Catching these requires a CI test that replays a
-known journal and checks the final state matches a recorded hash.
-
-### Done when
-You can dig a cave, place beams, watch a collapse, save, quit, reload, and the world is
-exactly as you left it — including the in-progress strain timers. You can also replay
-the save from zero and watch your session happen in fast-forward, step through one
-action at a time, and produce a deterministic state hash.
+deliberately a tech demo, not a game. Proceed to v0.1.
 
 ---
 
@@ -431,8 +328,6 @@ Data modeling, item databases, state machines for continuous work actions.
 ### Key decisions
 - **Continuous actions** are a significant UX improvement over Valheim's click-spam. The
   implementation is a state machine: IDLE → TARGETING → WORKING → INTERRUPTED → RESUMING.
-  Claude Code can scaffold this pattern quickly; the tuning (animation timing, camera
-  behavior during work) needs manual feel-testing.
 - **Directional tree felling** is a real woodcutting technique (the notch cut). This is
   both more realistic and more engaging than Valheim's "hit tree, tree falls randomly."
 - **Voxel material types:** godot_voxel supports material IDs per voxel. Ore IS the
@@ -479,33 +374,151 @@ mine faster than bare hands.
 
 ---
 
+## Phase 5.5: Architectural Maturation (Interleaved with 1, 3, 4)
+**Goal:** Replace v0.0's direct couplings with the architecture needed for the rest of v0.1.
+**Version target:** 0.1
+
+This phase contains the items we deferred from Phase 5 plus the architectural insights
+from the v0.0 retrospective. It's deliberately split into independent sub-phases so each
+can be tackled when context allows. **5.5a is the root dependency** — the others can
+proceed in any order after it.
+
+### Phase 5.5a: Voxel change event bus + indexer refactor
+
+**Goal:** Decouple voxel editing from the systems that care about voxel changes.
+
+Current state: `player.gd` directly calls `integrity.register_voxel` and
+`integrity.remove_voxel` from inside `_edit_fill` / `_edit_dig`. This works for one
+indexer (structural integrity). It will not scale to two (add a building registry), let
+alone four or five (biome map, ore depletion tracker, decay system, fire propagation).
+
+Tasks:
+- Define a voxel change event: `(grid_id, position, old_material, new_material, cause)`
+- Add a signal on the voxel editing layer that fires for every modified voxel
+- Refactor `StructuralIntegrity` to be a subscriber rather than a callee
+- Establish spatial filtering: indexers declare interest in a region, only get events
+  for that region. (HTML-style capture/bubble doesn't fit a flat 3D grid; pub/sub with
+  spatial filtering is the right shape.)
+- Establish priority + cancellation: structural integrity runs before building registry,
+  because a cascade collapse should be batched, not reported voxel-by-voxel
+- **Design the bus API for multi-grid from the start** — even if there's only one grid
+  for now, the event payload should carry a grid identifier. This costs nothing now and
+  prevents a painful refactor when vehicles arrive.
+
+Done when: structural integrity works exactly as it does today, but `player.gd` no longer
+imports or references it.
+
+### Phase 5.5b: Construction mode + honest-failure terrain ops
+
+**Goal:** Replace the placeholder fill/dig/flatten verbs with construction-mode equivalents
+that respect the design principles, especially "fail honest, not fake a surface."
+
+The v0.0 scaffolding has two problems the player can hit today:
+- Additive edits (fill, vertical flatten, default-normal flatten) can place a solid voxel
+  where the player is standing, burying them. Currently patched with
+  `_push_player_above_terrain`, which is a band-aid.
+- Horizontal flatten that can't lower cleanly (because there's material above the cut)
+  fakes a floor instead of producing truthful geometry. This violates the thesis.
+
+Tasks:
+- Promote "fill / dig / flatten" from placeholder verbs to first-class construction-mode
+  operations with explicit semantics:
+  - Each operation declares whether it's subtractive-only, additive-only, or both
+  - Additive operations explicitly decide what to do when they'd place a voxel at the
+    player's position: refuse, displace the player, or treat the displacement as part of
+    the operation
+  - The insight worth preserving: *subtractive-only editing structurally cannot cause
+    fall-through; additive editing always can*
+- Horizontal flatten that hits material above the cut should *open a cave* into that
+  material, not invent a floor. This is the principle: terrain ops produce truthful
+  voxel data, even if that means opening a void.
+- Visual + UI affordances for the new construction mode (mode selection, parameter
+  configuration, preview rendering)
+- Remove `_push_player_above_terrain` once the build-time decision replaces it
+
+Done when: you can't get buried by your own construction, and the design principle
+"terrain ops should fail honest" is enforced at the verb level.
+
+### Phase 5.5c (deferred to v0.2): Fracture as mesh extraction
+
+**Moved out of v0.1.** Rationale: the current flood-fill structural integrity with
+voxel-aligned collapse is fine for "is this fun?" v0.1 work. The mesh-extraction
+fracture is an aesthetics-and-fidelity upgrade, not a gameplay-enabling one. Belongs in
+v0.2 ("can I make it pretty?") with the rest of the visual fidelity work.
+
+Forward-looking sketch (preserved here so the design isn't lost):
+- When structural integrity decides a region has failed, extract that region from the
+  voxel grid as a rigid-body mesh along a *computed failure surface*, not voxel-aligned
+  cubes
+- Re-integrate into voxels when it comes to rest, or stay as a mesh prop if it doesn't
+- This is what unlocks sub-meter fracture precision without sub-meter voxels
+- Roughly what Teardown does — their voxels are 10cm, but fractures don't break on voxel
+  boundaries; they break along computed failure surfaces and re-voxelize the result
+- For determining fracture direction, a localized FEM-style stress tensor calculation
+  (in the affected region only, not globally) gives much better results than flood-fill
+  support values. See the "FEM" note in Known Hard Problems below.
+
+### Phase 5.5d (deferred to v0.2 or v0.9): Multi-grid foundation
+
+**Moved out of v0.1.** Rationale: nothing in the v0.1 gameplay loop requires multiple
+voxel grids. The first vehicle (cart, boat, eventually locomotive) is v0.2 at the
+earliest. The *API design implications* of multi-grid stay in 5.5a (the event bus
+carries a grid identifier from day one), but actually instantiating a second grid
+defers until there's something to put in it.
+
+Forward-looking sketch (preserved here so the design isn't lost):
+- Vehicles are independent voxel grids parented to a `RigidBody3D` or equivalent
+- Use `VoxelTerrain` (bounded), not `VoxelLodTerrain` (streaming/LOD), for vehicles
+- godot_voxel terrains are axis-aligned in their local space; world rotation is handled
+  by the scene graph parent. The voxel grid rolls and tilts with the vehicle as a unit.
+- Per-grid voxel size is allowed and encouraged: main world at 1m, locomotive at 0.25m,
+  boat at 0.5m
+- The thesis ("matter is matter") survives because the *physical rules* are the same
+  across grids — structural integrity, material properties, fracture mechanics — even
+  though grid resolutions differ. The grid is an implementation detail; the physics is
+  the abstraction.
+- Coupling between grids is mostly via normal physics collision (each grid generates its
+  own collision shape). Transfer operations (crash debris from a vehicle integrating into
+  the world, or a player extracting a region of the world to make a cart) are bounded
+  one-time operations, not continuous coupling.
+- Architectural rule of thumb: **the main world is always the default; things become
+  separate grids only when they need an independent transform.** A house is part of the
+  main world. A locomotive is its own grid because it moves.
+
+### Phase 5.5e (deferred to v0.2 or v0.9): Per-channel non-SDF data
+
+**Moved out of v0.1.** Rationale: temperature, moisture, pressure, momentum, and other
+cellular-automata channels are locomotive-era and weather-era concerns. The decision
+worth recording now is just that the event bus and any per-voxel data structures should
+be designed to *allow* multiple channels at different resolutions — not that they have
+to be implemented yet.
+
+Forward-looking sketch:
+- godot_voxel's channel system already supports independent per-channel storage,
+  compression, and streaming. You're not paying for temperature data in empty sky.
+- Different channels can have different spatial resolutions. Temperature at 2m is fine
+  because it diffuses slowly. Pressure for steam systems wants 0.25m or smaller. Wind
+  vectors at 8m. Each channel is sized for its physics.
+- Channels are how non-rendered volume data lives in the world: the tree might be an
+  iterated function system for its geometry, but its temperature is tracked in the
+  voxel grid at whatever resolution thermal simulation wants.
+
+---
+
 ## v0.1 Checkpoint: "Can I Make It Fun/Performant?"
 
 At this point (~11 weeks part-time from start), you have everything from v0.0 plus biomes,
-resource gathering with continuous work actions, inventory, crafting, and the full material
-loop. No enemies or survival pressure yet, but it's a playable sandbox.
+resource gathering with continuous work actions, inventory, crafting, the full material
+loop, and the architectural foundation (event bus, construction-mode verbs) needed for
+everything after. No enemies or survival pressure yet, but it's a playable sandbox.
+
+**This is the version to show to friends.** Earlier than this, the engine impresses but
+there's nothing to *do*; later than this, the polish-vs-feedback ratio starts favoring
+public release.
 
 **Performance validation:** Profile on your 5090, then test with aggressive quality
 reduction to simulate lower-end hardware. Key metrics: chunk meshing time, frame budget
-at various draw distances, structural integrity computation cost.
-
-### Forward-looking design direction for v0.1: honest physics interaction
-
-The v0.0 deferred list (see Phase 5) clustered several items — SDF seam matching,
-load propagation, falling damage, fallen-dirt-as-terrain — that initially looked
-like separate features but resolve to a single design statement:
-
-> Transient physics state and persistent terrain state should be able to become
-> each other, governed by relative material strength.
-
-A falling RigidBody3D of dirt that comes to rest should be able to rejoin the SDF
-as terrain. A beam under enough load should snap. A buried beam, depending on
-relative strength, should either break under the dirt or displace the dirt aside.
-The SDF seam between part and terrain isn't a rendering problem to be hidden —
-it's a contact between two materials with strength properties, and what happens
-at that contact is part of the physics. This is the natural extension of
-"material physics matter" from the Design Principles, and it's the v0.1 design
-direction that ties the deferred items together.
+at various draw distances, structural integrity computation cost, event bus throughput.
 
 ---
 
@@ -521,6 +534,13 @@ direction that ties the deferred items together.
 - Tree/vegetation shader wind
 - Water shader (reflections, shoreline foam)
 - UI overhaul
+- **Fracture as mesh extraction (Phase 5.5c)** — sub-voxel fracture surfaces via localized
+  FEM, mesh extraction, rigid-body simulation, re-voxelization
+- **Multi-grid foundation (Phase 5.5d) — first vehicle prototype**, probably a simple cart
+  or rowboat. Not yet the locomotive.
+- **Per-channel non-SDF data (Phase 5.5e) — initial channels** for whatever the first
+  vehicle and the weather system want (probably temperature and a simple wind vector
+  field for atmospheric effects)
 
 ### v0.9: "Can I Make It Into A Real Product?"
 
@@ -531,7 +551,12 @@ direction that ties the deferred items together.
 - Procedural dungeons (generated cave complexes — no loading screens)
 - Building material tiers (wood → stone → iron-reinforced)
 - Death, respawn, bed placement
+- Save system (player state + modified chunks + structures)
 - Settings menu, keybinding, accessibility
+- **Locomotive-class vehicles** — the boiler / firebox / pressure-driven piston
+  demonstration. Cellular automata for heat and pressure. This is the "wow, *that's* what
+  this engine does" moment that sells the project on its own, and it can only happen once
+  multi-grid, fracture, and channel infrastructure are all mature.
 
 ### v1.0: "Will People Pay For It On Steam?"
 
@@ -550,6 +575,53 @@ direction that ties the deferred items together.
 ---
 
 ## Known Hard Problems
+
+### Sub-meter precision without the cubic penalty
+
+The naive "shrink voxel size" answer has a real-world cost closer to 3–5x for most
+operations, not 8x, because real voxel engines are sparse and surface-dominated (memory
+compresses aggressively for fully-solid and fully-air regions; meshing and physics costs
+scale with surface area, not volume). But there are better answers than shrinking the
+global grid:
+
+1. **Multi-resolution sidecar data.** Render and collide at 1m; track structural integrity
+   at 0.5m or 0.25m in a separate sparse dictionary that only exists for modified regions.
+   The hard part is the coupling — what happens visually when a sub-region of a render
+   voxel fails? See Phase 5.5c (fracture as mesh extraction) for the answer.
+
+2. **Stress and strain as a continuous field, not a per-cell value.** A stress tensor
+   sampled at whatever resolution the physics wants, computed via something closer to
+   FEM than to cellular automata. Fractures happen along computed surfaces in continuous
+   space and produce arbitrary-shape debris. This is Teardown's approach.
+
+3. **Hybrid (voxels for matter, mesh for fracture).** The pragmatic shipping option. The
+   voxel grid stays at 1m. Fractures aren't aligned to it because fractures are a
+   *transition event* that produces non-voxel outputs (rigid bodies). The illusion of
+   sub-meter fracture precision comes from the moment of breaking, not the underlying
+   data structure. Recommended for v0.2.
+
+4. **Per-grid voxel size.** Locomotive at 0.25m, boat at 0.5m, main world at 1m. Costs
+   nothing in the main world; gives the precision where it matters.
+
+### FEM (Finite Element Method) for fracture direction
+
+FEM is the numerical technique behind real-world structural engineering. Subdivide an
+object into many small elements (tetrahedra, hexahedra), approximate the physics as a
+system of linear equations relating each element to its neighbors, solve the system, get
+a field of stress/strain values across the whole object. It tells you not just "this is
+supported" but "this is under 12kN of tension along this axis, exceeding stone's tensile
+strength of 8kN/m², so a crack will propagate along this plane."
+
+Relevance to this project: the flood-fill structural integrity is fine for the global
+"is this voxel supported?" question. But for determining *fracture direction* during a
+collapse event, a tiny localized FEM-ish calculation gives much better results than
+voxel-aligned cubes. The plan: keep the flood-fill cheap and continuous, reach for
+FEM-style math only when a fracture actually happens, in the affected region only. This
+is the foundation under Phase 5.5c.
+
+FEM at game-tick rates over the whole world would be prohibitive. FEM in a small region
+during a single collapse event is tractable. The difference is whether it's a continuous
+simulation cost or an event-driven one.
 
 ### Mob Pathfinding on Voxel Terrain
 
@@ -585,51 +657,6 @@ significant time for feel-testing.
 **The "does it look right" problem** is real and can't be automated. Record video of enemy
 movement, watch at 0.5x speed, identify what looks wrong. Common issues: path oscillation,
 inability to handle ledges, getting stuck on terrain features, unnatural turning.
-
-### CPU-Bound Architecture and GPU Offload
-
-The current architecture runs all the interesting work — structural integrity
-propagation, part support recomputation, collapse detection — on the main thread.
-godot_voxel meshes on background threads, so chunk meshing isn't the bottleneck, but
-our systems are. Heavy digging already produces observable frame drops in v0.0,
-and the load gets worse as the tracked region grows.
-
-**Two open questions, ordered by likelihood of being the right move:**
-
-1. **More threads first.** Structural integrity propagation is a fixpoint over a
-   dirty queue. The natural parallel structure is "work-steal from the queue,"
-   with care taken around the shared `voxel_data` dictionary. Part recomputation
-   is a topological sort followed by an embarrassingly parallel pass within each
-   level. Both are tractable on CPU threads and probably enough for v0.1's
-   performance target.
-
-2. **GPU offload via compute shaders or OpenCL.** Tempting because the integrity
-   field is structurally a 3D scalar field with local update rules — the kind of
-   thing GPUs eat for breakfast. The catch is that the current algorithm has
-   *non-local* dependencies (lazy expansion can chain through ~20 cells of
-   untracked terrain), and the part recomputation has explicit ordering (sort
-   parts by `placement_y`, then resolve direct supporters). Both could plausibly
-   be reformulated to flatten dependencies into independent passes — e.g.,
-   pre-expand the tracked region before each propagation step, then run a fixed
-   number of Jacobi-style iterations until convergence — but that's a real
-   redesign, not a port.
-
-**Recommendation:** Don't pursue GPU offload until threading is exhausted and a
-profile points unambiguously at structural integrity as the bottleneck. The
-threading path is incremental and reversible; the GPU path is a structural
-redesign that fights the algorithm's natural shape. If the GPU path *is* the
-right answer, the redesign work (flattening dependencies into independent passes)
-is also what makes the threaded version faster, so the threading work isn't
-wasted.
-
-**The lurking architectural question:** if and when GPU offload happens, does the
-integrity field live on the GPU full-time with periodic CPU readback for game
-logic, or does it ping-pong per frame? The answer depends on whether anything
-other than the integrity system reads the integrity field. If only the renderer
-(via strain-color shaders) and the collapse detector need it, GPU-resident is
-fine. If gameplay systems start querying support values, ping-pong gets
-expensive. Worth flagging now so we don't accidentally design ourselves into a
-ping-pong corner.
 
 ### Planet-Scale World (Post-MVP)
 
@@ -710,110 +737,6 @@ The click-spam replacement for mining and logging:
 
 ## Architecture Notes
 
-### Architectural Commitments
-
-These patterns emerged during v0.0 implementation and are now load-bearing across the
-codebase. They're documented here as design commitments, not just code conventions,
-because changing them would mean rewriting most of the world-mutating code. `CLAUDE.md`
-documents how to *use* them; this section documents *why they exist*. For mechanism
-rationale (in-limbo semantics, pause-correct strain accumulation, seed-vs-expand
-asymmetry, etc.), see `docs/architecture.md`.
-
-**Action-as-data with `validate()` then `execute()`.** Every world-mutating operation
-— dig, fill, flatten, place-part — is a `RefCounted` subclass of `Action` carrying its
-final computed parameters (not raw input). `validate()` returns true only if the
-operation can be performed with truthful semantics; `execute()` then performs it.
-Targeting logic (raycasting, computing sphere centres) lives at the call site, not
-inside the Action. This shape is what makes v0.0.1's history-as-journal feasible: an
-Action with a deserialisable parameter set is replayable.
-
-**Refuse-don't-deform.** Actions refuse via `validate()` when constraints can't be met,
-rather than silently adjusting to produce *some* result. Extended to physics state via
-FillAction's `intersect_shape` check (fills that would overlap a RigidBody3D are
-refused, otherwise the body squirts through the world). This is the operational
-expression of the thesis-defence design stance: a terrain op that can't cleanly do the
-intended thing should produce honest data — even if that means opening a void or
-returning failure — rather than faking a result. The Valheim flatten fakes things;
-ours doesn't.
-
-**Worklist-fixpoint propagation for terrain support.** `StructuralIntegrity` drains a
-FIFO dirty queue at a bounded budget per physics frame. BFS-order is the right shape for
-support propagation (changes spread outward from their origin); the shift cost on
-typical queue sizes isn't where the time goes. The fixpoint is reached when no
-additional dirty cells are produced by recomputation — budget exhaustion just stretches
-the fixpoint across multiple frames, it doesn't change the result.
-
-**Per-column bedrock detection.** `_lowest_registered_y: Dictionary[Vector2i, int]`
-indexes the lowest registered Y per `(x, z)` column; `_is_bedrock(pos)` returns true
-when the column has nothing registered below `pos.y`. Combined with untracked-solid
-status, this is what distinguishes *real* bedrock (which grants full support to its
-neighbours) from *suspended mass* (which doesn't, even though it's solid in the SDF).
-Necessary to prevent floating chunks from blessing the cells above them as supported
-after a collapse.
-
-**Lazy expansion bounded by material decay.** When propagation reaches an
-untracked-solid neighbour that isn't bedrock, it gets lazy-registered with material
-STONE so the algorithm can compute its actual support. Lazy registration is gated on
-the current cell's support being above `FALL_THRESHOLD` — cells already at zero won't
-seed a chain worth extending. The cascade depth is therefore bounded by the material's
-decay budget (~20 cells for STONE), which is the same bound that makes the support
-values meaningful.
-
-**Per-cell stack of parts.** Multi-cell rotation can place multiple thin parts in the
-same voxel cell. `_cell_to_part: Dictionary[Vector3i, Array[Node3D]]` is therefore a
-stack ordered by `placement_y`, and direct-supporter lookup walks the stack to find the
-part with the highest `placement_y` below the queried part. Single-part-per-cell would
-have been simpler but couldn't represent stacked boards.
-
-**In-limbo semantics for parts.** A part is `in_limbo` when any of its support
-dependencies (a supporter Part still in-limbo, or a terrain voxel still dirty) hasn't
-settled. Strain accumulation skips while in-limbo, so a transient zero during
-propagation doesn't trigger a 3-second countdown that would resolve before expiry.
-Without this, every dig near a part triggers spurious collapse timers.
-
-**Data-driven definitions via `.tres`.** Parts (`assets/parts/*.tres`) and Materials
-(`assets/materials/*.tres`) live in resource files, not in code. Adding a wood Part or
-a new material is a file copy and a parameter tweak. The roadmap originally specified
-JSON for this; `.tres` is strictly better in this codebase — it's Godot-native,
-editor-discoverable, and avoids a parse step at startup. Anyone who wants JSON can
-export from `.tres` as easily as the reverse.
-
-**Facade composition for the structural subsystem.** `StructuralIntegrity` is a thin
-`Node` facade composing three `RefCounted` components — `TerrainSupport` (voxel
-propagation), `PartSupport` (part recomputation + strain + collapse), `IntegrityDebug`
-(debug cubes) — plus `CollapseDetector` as a peer of `TerrainSupport`. Components hold
-typed back-references to each other for cross-state lookups (terrain reading parts'
-`best_support_at`, parts reading terrain's `voxel_data`); the facade breaks the
-`TerrainSupport ↔ PartSupport` cycle in `_exit_tree` so RefCounteds free cleanly.
-The split exists because each component owns a chunk of state that maps directly to
-"what to save/restore" for v0.0.1 persistence, and because the previous single
-500-line script no longer fit a working-memory budget.
-
-**Player composes RefCounted helpers.** The player Node (`scenes/player/player.gd`)
-composes five helpers — `PlayerMovement`, `CameraRig`, `BuildState`, `ActionFactories`,
-`EditModeCatalog` — each owning one concern. The player keeps input dispatch dicts,
-the per-frame orchestration glue, and the `@onready` references that nodes need.
-Same pattern as the structural facade and same justification: each file owns one job,
-no file blows the size budget, and each helper is independently testable.
-
-**Helper lambdas capture local refs, not `self`.** When a RefCounted class holds an
-`Array[Callable]` (e.g. `EditModeCatalog.modes` holding `EditMode` instances whose
-make-action and preview lambdas reference instance fields), the implicit `self` capture
-forms a cycle: catalog → modes → EditMode → Callable → catalog. The cycle prevents
-the RefCounted catalog from freeing on exit and leaks Mesh resources. The fix is to
-pass dependencies as parameters into the builder function and let lambdas close over
-the locals. See `EditModeCatalog._build_catalog` for the pattern. This is general
-across the codebase: when a helper stashes lambdas in a long-lived collection,
-prefer local-capture over self-capture.
-
-**Typed records over dict-as-struct.** `VoxelRecord`, `PartData`, `PendingCollapse`,
-`PendingFlood` are RefCounted classes with named fields rather than string-keyed
-dictionaries. Field access has the same syntax (`rec.support`); the wins are
-editor-discoverable types, no string-key duplication, and correctly-typed iteration
-variables (a `for x in voxel_data` loop's `x` is `Vector3i`, not `Variant`). Same
-reason to convert Materials from a code-defined class to `.tres` files: structured
-data beats stringy data when the IDE can help.
-
 ### Why godot_voxel
 
 This is the single most important dependency. Without it, the voxel engine alone is 6–12
@@ -829,6 +752,23 @@ with your experience if necessary.
 
 **Use the double-precision build** from the start for planet-scale future-proofing.
 
+### Channel architecture
+
+godot_voxel exposes voxel data as a multi-channel volume, not a single typed value per
+cell. Relevant channels for this project:
+
+- `CHANNEL_SDF` — signed distance field, float per voxel. Used by TransVoxel for smooth
+  terrain. The "how far is this from the surface" mental model maps here.
+- `CHANNEL_INDICES` + `CHANNEL_WEIGHTS` — texture blending for terrain (up to 4 materials
+  per voxel, weighted)
+- `CHANNEL_TYPE` — integer ID, used by the blocky mesher. Not relevant to this project's
+  smooth-terrain approach.
+- `CHANNEL_COLOR` plus several user channels — available for project-specific data
+
+The voxel grid is a multi-channel spatial database. "What is this voxel?" is not a single
+question; it's several independent questions (SDF, material, temperature, moisture, ...)
+that share a coordinate space.
+
 ### Performance Budget (Targeting 60fps on GTX 1660-class)
 
 | System | Budget | Strategy |
@@ -843,9 +783,52 @@ with your experience if necessary.
 
 ### Folder Structure
 
-See `CLAUDE.md` for the current scene graph, script organisation, and architectural
-conventions. That doc is maintained as the authoritative description of where code
-lives and how it's structured; duplicating it here would just create drift.
+```
+project/
+├── addons/
+│   └── zylann.voxel/          # godot_voxel module
+├── assets/
+│   ├── models/                # CC0 models (Kenney, Quaternius)
+│   ├── textures/              # terrain materials, UI
+│   ├── sounds/                # CC0 audio
+│   └── fonts/
+├── scenes/
+│   ├── world/
+│   │   ├── terrain_generator.gd
+│   │   ├── biome_manager.gd
+│   │   ├── structural_integrity.gd
+│   │   └── world.tscn
+│   ├── player/
+│   │   ├── player.tscn
+│   │   ├── player_controller.gd
+│   │   ├── work_action_manager.gd  # continuous mining/logging
+│   │   ├── inventory.gd
+│   │   └── stats.gd
+│   ├── building/
+│   │   ├── build_system.gd
+│   │   ├── snap_manager.gd
+│   │   └── pieces/
+│   ├── enemies/
+│   │   ├── enemy_base.gd
+│   │   ├── pathfinding/
+│   │   │   ├── raycast_steering.gd
+│   │   │   └── nav_grid_3d.gd
+│   │   └── types/
+│   └── ui/
+│       ├── hud.tscn
+│       ├── inventory_ui.tscn
+│       ├── crafting_ui.tscn
+│       └── work_progress_ui.tscn
+├── data/
+│   ├── items.json
+│   ├── recipes.json
+│   ├── materials.json         # structural properties per material
+│   └── biomes.json
+└── scripts/
+    ├── voxel_editor.gd
+    ├── resource_node.gd
+    └── save_manager.gd
+```
 
 ---
 
@@ -927,7 +910,9 @@ proof that structural integrity simulation at game-scale is achievable and fun.
 
 **What to learn:** Their structural simulation algorithm. When you remove voxels, connected
 components are evaluated and unsupported sections become physics objects. This is exactly
-the behavior we want for cave ceilings and unsupported building sections.
+the behavior we want for cave ceilings and unsupported building sections. Their fracture
+mechanics — breaking along computed failure surfaces rather than voxel boundaries — are
+the model for Phase 5.5c.
 
 ### Hytale (Hypixel Studios, Early Access January 2026)
 
