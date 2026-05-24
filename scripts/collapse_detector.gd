@@ -15,7 +15,7 @@ var _facade:            Node
 func _init(terrain_support: TerrainSupport, facade: Node) -> void:
     _terrain_support = terrain_support
     _facade          = facade
-    VoxelEventBus.subscribe(VoxelSupportChangedEvent.CHANNEL, _on_voxel_support_changed)
+    VoxelEventBusSingleton.subscribe(VoxelSupportChangedEvent.CHANNEL, _on_voxel_support_changed)
 
 
 # --- Phases (called by StructuralIntegrity once dirty_queue settles) ---
@@ -186,7 +186,7 @@ func _materialize_collapse(voxels: Array[Vector3i]) -> void:
     var body := FallingBodyFactory.from_voxels(voxels)
     _facade.get_parent().add_child(body)
 
-    VoxelEventBus.emit(
+    VoxelEventBusSingleton.emit(
         RegionCollapsingEvent.CHANNEL,
         RegionCollapsingEvent.new(GRID_ID, voxels))
 
@@ -195,12 +195,12 @@ func _materialize_collapse(voxels: Array[Vector3i]) -> void:
     voxel_tool.mode    = VoxelTool.MODE_REMOVE
     for v in voxels:
         voxel_tool.set_voxel_f(v, VoxelConstants.SDF_AIR)
-        VoxelEventBus.emit(
+        VoxelEventBusSingleton.emit(
             VoxelRemovedEvent.CHANNEL,
             VoxelRemovedEvent.new(GRID_ID, v))
 
     var box := _bounding_box(voxels)
-    VoxelEventBus.emit(
+    VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
         TerrainSdfChangedEvent.new(GRID_ID, box.position, box.size))
 

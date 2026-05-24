@@ -61,13 +61,17 @@ New Actions: extend `Action`, implement `validate()` and `execute()`, add a `mak
 
 ### Event bus (`scripts/events/`)
 
-`VoxelEventBus` (`scripts/events/voxel_event_bus.gd`) is an **autoload** registered in `project.godot`. Spatial pub/sub: subscribers register per-cell or channel-wide interest; the bus dispatches each emitted event to overlapping subscribers.
+Two identifiers refer to the same thing for different purposes:
+- **`VoxelEventBusSingleton`** — the autoload instance (registered in `project.godot`). Use this at call sites.
+- **`VoxelEventBusType`** — the `class_name` of the script. Use this in type hints. Godot 4 forbids the class_name from matching any autoload name, hence the `Type` / `Singleton` suffixes; the prefix `Voxel` is part of the name because the bus has voxel-space spatial filtering, not just plain pub/sub.
+
+Spatial pub/sub: subscribers register per-cell or channel-wide interest; the bus dispatches each emitted event to overlapping subscribers.
 
 API:
 ```gdscript
-VoxelEventBus.subscribe_cell(channel, cell, callback)
-VoxelEventBus.subscribe(channel, callback)          # channel-wide
-VoxelEventBus.emit(channel, event)
+VoxelEventBusSingleton.subscribe_cell(channel, cell, callback)
+VoxelEventBusSingleton.subscribe(channel, callback)          # channel-wide
+VoxelEventBusSingleton.emit(channel, event)
 # matching unsubscribe_cell / unsubscribe (only needed for intentional cancel)
 ```
 
@@ -150,7 +154,13 @@ Multi-axis rotation: `ConstructionAction.rotation: Vector3i` (0–3 per axis). R
 
 Player controls in Build mode: `[`/`]` cycle parts, `R` rotates around Y, `T` rotates around X, `Y` rotates around Z, `M` cycles material.
 
-**Debug overlays:** `V` toggles the per-voxel debug cubes (color-coded by support); `G` toggles the voxel grid overlay (wireframes the targeted cell and its Chebyshev neighborhood, helpful for understanding voxel boundaries during flatten/dig/fill); `F` toggles full-scene wireframe.
+**Debug overlays:**
+- `V` toggles the stress overlay (`IntegrityDebug`). Two-pass renderer: visible-pass wireframe outlines (depth-tested), obscured-pass corner-bracket markers (no depth test, off until `H`). Cells with `support > 0.30` only render within 6m of the raycast hit; cells `≤ 0.30` always render so failures are never hidden.
+- `H` toggles the obscured-pass corner markers (only visible with `V` on).
+- `G` toggles the voxel grid overlay (wireframes the targeted cell and its Chebyshev neighborhood, helpful for understanding voxel boundaries during flatten/dig/fill).
+- `F` toggles full-scene wireframe.
+
+**Action preview rendering:** Every `Action` subclass implements `preview() -> ActionPreview`, returning the cells it would change classified by intent (`air`, `solid`, `part`) plus a `refused` flag. The world-space `VoxelPreviewRenderer` (`scenes/player/voxel_preview_renderer.gd`) builds an Action each frame from the current raycast hit, calls `preview()`, and draws the cells via two ImmediateMesh passes (visible / obscured). Outlines inset 0.05 to avoid z-fighting with the Transvoxel surface. Refusal lerps intent colors toward grey. The legacy idealised sphere/plane previews are gone for Dig/Fill/Flatten; Build keeps its part-mesh ghost.
 
 ### Materials
 

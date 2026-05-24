@@ -32,6 +32,26 @@ func validate() -> bool:
             return false
     return true
 
+func preview() -> ActionPreview:
+    var p := ActionPreview.new()
+    p.refused = not validate()
+    if terrain == null:
+        return p
+    var vt := terrain.get_voxel_tool()
+    vt.channel = VoxelBuffer.CHANNEL_SDF
+    var origin     := position - Vector3.ONE *  radius
+    var dimensions :=            Vector3.ONE * (radius * 2.0)
+    VoxelUtils.for_each_in_bounding_box(
+        origin,
+        dimensions,
+        func(cell: Vector3i) -> void:
+            if not VoxelUtils.is_in_sphere(Vector3(cell), position, radius):
+                return
+            if vt.get_voxel_f(cell) >= VoxelConstants.SDF_SOLID_THRESHOLD:
+                p.solid.append(cell)
+    )
+    return p
+
 func execute() -> void:
     if terrain == null:
         push_error("FillAction.execute(): no terrain")
@@ -56,12 +76,12 @@ func execute() -> void:
         dimensions,
         func(pos: Vector3i) -> void:
             if VoxelUtils.is_in_sphere(Vector3(pos), position, radius):
-                VoxelEventBus.emit(
+                VoxelEventBusSingleton.emit(
                     VoxelAddedEvent.CHANNEL,
                     VoxelAddedEvent.new(GRID_ID, pos, Materials.STONE))
     )
 
-    VoxelEventBus.emit(
+    VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
         TerrainSdfChangedEvent.new(GRID_ID, origin, dimensions))
 

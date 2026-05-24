@@ -17,7 +17,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-VoxelEventBus="*res://scripts/events/voxel_event_bus.gd"
+VoxelEventBusSingleton="*res://scripts/events/voxel_event_bus.gd"
 
 [display]
 

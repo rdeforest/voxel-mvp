@@ -14,8 +14,16 @@ func _init(p_node: Node3D, p_integrity: StructuralIntegrity) -> void:
 func validate() -> bool:
     return integrity.has_part(target_node)
 
+func preview() -> ActionPreview:
+    var p := ActionPreview.new()
+    p.refused = not validate()
+    if integrity.part_support.part_registry.has(target_node):
+        var data: PartData = integrity.part_support.part_registry[target_node]
+        p.air = data.cells.duplicate()
+    return p
+
 func execute() -> void:
-    VoxelEventBus.emit(
+    VoxelEventBusSingleton.emit(
         PartRemovedEvent.CHANNEL,
         PartRemovedEvent.new(GRID_ID, target_node))
     target_node.queue_free()

@@ -97,7 +97,7 @@ static func _apply_parts(world: Node, _integrity: StructuralIntegrity, parts: Ar
         var instance      := part.instantiate(material_name)
         instance.transform = entry["transform"]
         world.add_child(instance)
-        VoxelEventBus.emit(
+        VoxelEventBusSingleton.emit(
             PartAddedEvent.CHANNEL,
             PartAddedEvent.new(
                 0,

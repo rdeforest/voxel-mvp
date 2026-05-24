@@ -22,8 +22,8 @@ func _ready() -> void:
     debug              = IntegrityDebug.new(terrain_support, self)
     _collapse_detector = CollapseDetector.new(terrain_support, self)
 
-    VoxelEventBus.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_world_mutated)
-    VoxelEventBus.subscribe(PartRemovedEvent.CHANNEL,       _on_world_mutated)
+    VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_world_mutated)
+    VoxelEventBusSingleton.subscribe(PartRemovedEvent.CHANNEL,       _on_world_mutated)
 
 func _exit_tree() -> void:
     # Break the TerrainSupport ↔ PartSupport reference cycle so the
@@ -125,7 +125,7 @@ func _integrate_buried_body(body: RigidBody3D, offsets: Array[Vector3], transfor
     for offset in offsets:
         var world := transform * offset
         var cell  := Vector3i(floori(world.x), floori(world.y), floori(world.z))
-        VoxelEventBus.emit(
+        VoxelEventBusSingleton.emit(
             VoxelAddedEvent.CHANNEL,
             VoxelAddedEvent.new(0, cell, Materials.STONE))
     body.queue_free()

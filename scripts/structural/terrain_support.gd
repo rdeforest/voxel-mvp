@@ -15,9 +15,9 @@ var _part_support:        PartSupport
 
 func _init(p_terrain: VoxelLodTerrain) -> void:
     terrain = p_terrain
-    VoxelEventBus.subscribe(VoxelAddedEvent.CHANNEL,        _on_voxel_added)
-    VoxelEventBus.subscribe(VoxelRemovedEvent.CHANNEL,      _on_voxel_removed)
-    VoxelEventBus.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_terrain_sdf_changed)
+    VoxelEventBusSingleton.subscribe(VoxelAddedEvent.CHANNEL,        _on_voxel_added)
+    VoxelEventBusSingleton.subscribe(VoxelRemovedEvent.CHANNEL,      _on_voxel_removed)
+    VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_terrain_sdf_changed)
 
 func bind_part_support(ps) -> void:
     _part_support = ps
@@ -119,7 +119,7 @@ func process_dirty_queue() -> void:
 
         if absf(new_support - old_support) > VoxelConstants.SUPPORT_EPSILON:
             dirty_neighbors_of(pos)
-            VoxelEventBus.emit(
+            VoxelEventBusSingleton.emit(
                 VoxelSupportChangedEvent.CHANNEL,
                 VoxelSupportChangedEvent.new(GRID_ID, pos, old_support, new_support))
 

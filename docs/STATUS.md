@@ -8,11 +8,11 @@
 
 ## Resumption Brief
 
-*Last updated: Phase 5.5a (event bus), 5.5b1+b2 (AdditiveAction +
-honest-failure flatten), and fallen-dirt-as-terrain are all landed.
-A voxel grid overlay (G key) helps the player see voxel boundaries.
-Next: 5.5b3 (preview UI) or new verbs (Raise/Lower/FillVoxel/
-EmptyVoxel).*
+*Last updated: Phase 5.5b3 (voxel-aware preview) and the stress-
+indicator overhaul are both landed. Bus identifiers cleaned up
+(`VoxelEventBusType` class + `VoxelEventBusSingleton` autoload) to
+satisfy GDScript LSP. Next: new verbs (Raise/Lower/FillVoxel/
+EmptyVoxel) or free part placement.*
 
 **Where you are:** v0.0 demo + persistence + bus + honest flatten +
 falling-debris-integrates-with-terrain all working. Recent landings:
@@ -47,20 +47,25 @@ falling-debris-integrates-with-terrain all working. Recent landings:
 
 **Pick up here:**
 
-1. **5.5b3 — preview UI.** Communicate flatten intent visually
-   (which cells will cut, which fill, refuse state). Currently
-   refusals are silent.
+1. **Free part placement (off voxel boundaries).** Robert-flagged
+   as "needs to come soon" — construction is *tantalizingly close to
+   useful*. Currently `placement_pos.y` snaps to `floor(hit_pos.y)`
+   and XZ are `roundi`'d. Needs free placement on all three axes,
+   plus snap-modifier hotkeys for explicit grid alignment when wanted.
+   Pairs with the "rest of part placement control" item.
 
 2. **New verbs (Robert's request).** RaiseAction / LowerAction
    (flatten-like but bell-shaped), FillVoxelAction / EmptyVoxelAction
    (per-voxel surgical control). Greatly expand creative options.
 
-3. **Playtester binaries.** Linux + macOS + Windows via GitHub
+3. **Grass shader on shallow slopes.** Texture surfaces ≤30° from
+   horizontal, animation-ready for wind. Depth-perception aid during
+   testing. The 5090 won't notice.
+
+4. **Playtester binaries.** Linux + macOS + Windows via GitHub
    Actions. Not yet started.
 
-4. **v0.1 gameplay scoping.** When 5.5b3 is done, the v0.1 question
-   is "can I make it fun/performant?" — see `roadmap.md` Phases 1,
-   3, 4.
+5. **v0.1 gameplay scoping.** Phases 1, 3, 4 in `roadmap.md`.
 
 **Architectural status — what's solid, what's known-imperfect:**
 
@@ -114,7 +119,7 @@ falling-debris-integrates-with-terrain all working. Recent landings:
 | 5.5a — Voxel event bus | Complete (`ee80b63`) | Autoload bus, typed events, WeakRef lifetime |
 | 5.5b1 — AdditiveAction base | Complete (`15308bd`) | Verb classification, shared PLAYER_CLEARANCE |
 | 5.5b2 — Honest flatten | Complete (`15308bd`) | Column-based work, symmetric box, per-cell endanger check |
-| 5.5b3 — Preview UI for honest verbs | Not started | Next architectural item |
+| 5.5b3 — Voxel-aware preview UI | Complete (this session) | Per-cell highlighting via Action.preview(); two-pass visible/obscured rendering |
 | 5.5c — Fracture as mesh extraction | Deferred to v0.2 | per roadmap |
 | 5.5d — Multi-grid foundation | Deferred to v0.2/v0.9 | grid_id carried in payloads from day one |
 | 5.5e — Per-channel non-SDF data | Deferred to v0.2/v0.9 | |
@@ -247,6 +252,32 @@ items in git history; commit hashes in parentheses where useful.
   ImmediateMesh. 4 Chebyshev shells from the targeted cell, alphas
   0.9 / 0.6 / 0.3 / 0.1. Helps the player understand voxel boundaries
   during fill/flatten/dig.
+- **Phase 5.5b3 — voxel-aware action preview** (this session).
+  `ActionPreview` (RefCounted) returned by `Action.preview()` lists
+  the affected cells by intent (air / solid / part) plus a refused
+  flag. `VoxelPreviewRenderer` (world-space, dual ImmediateMesh —
+  visible depth-tested + obscured no-depth-test, faint) draws cell
+  outlines + translucent fills each frame, intent-colored (red /
+  blue / yellow), with refusal lerping toward grey. Wireframes inset
+  0.05 to avoid z-fighting with the Transvoxel surface. Idealised
+  sphere/plane previews dropped from Dig/Fill/Flatten; Build keeps
+  its part-mesh ghost.
+- **Stress-indicator overhaul** (this session). `IntegrityDebug`
+  rewritten on top of an ImmediateMesh pair (visible + obscured)
+  instead of one MeshInstance3D per voxel — the per-cube material
+  poke was the framerate sink. New behaviour: cells with
+  support > 0.30 only render within 6m of the player's raycast hit
+  (spatial filter); cells ≤ 0.30 (orange or worse) always render so
+  failures aren't hidden. Obscured pass off by default; `H` reveals
+  it as corner-bracket markers (3 short stubs per cube corner).
+- **Bus identifier cleanup** (this session). `class_name
+  VoxelEventBusType` on the script; autoload renamed
+  `VoxelEventBusSingleton`. Godot 4 forbids `class_name` colliding
+  with an autoload name, and the GDScript LSP needs the class_name
+  declaration to recognise the identifier. Pure rename — no
+  runtime behaviour change. The class is for type hints
+  (`var bus: VoxelEventBusType`); the singleton is the call site
+  (`VoxelEventBusSingleton.subscribe(...)`).
 
 ### Deferred to v0.1+ (the "can I make it fun?" question)
 
@@ -259,6 +290,13 @@ items in git history; commit hashes in parentheses where useful.
 | Hinge-at-boundary collapse | Polish on falling drama |
 | RaiseAction / LowerAction (bell-shape) | Robert-requested; "after we're done with 5.5" |
 | FillVoxelAction / EmptyVoxelAction (per-voxel) | Robert-requested; per-voxel surgical control |
+| Free part placement (off voxel boundaries, all 3 axes) | Robert-flagged as "soon"; currently parts snap to floor(hit_pos.y) and round XZ. Construction is "tantalizingly close to useful" without this. |
+| Rest of part placement control (size, snap modifiers, etc.) | Bundled with above; coming soon |
+| Pick-and-stamp plane orientation | Click an example wall to capture its plane, then use that plane for vertical flatten elsewhere. Currently vertical flatten always faces player. Same UI primitive supports "make a ramp by flattening, stay on that plane for the next clicks." v0.2 polish. |
+| Slow-step movement / "stop at edge" toggle | Don't accidentally run off structures you're building. Edge detection on slopes/curves is the hard part. |
+| Spinning-beam physics quirk | Vertical metal beam, falls, hits ground at angle, picks up angular momentum and gyroscopes off down the hill. Polish-stage observation; keep an eye out for similar physics weirdness. |
+| Grass shader on shallow slopes | Texture for surfaces ≤30° from horizontal, animation-ready for wind. Helps depth perception during testing. Steeper slopes show dirt. Worth investing in on the 5090 testbed. |
+| Stress-overlay SDF-surface coloring | Aspirational — apply support color to the actual Transvoxel surface via shader/material override on VoxelLodTerrain, instead of separate floating wireframes. The current per-cell wireframe overlay is the right MVP. |
 | Sub-assemblies + planning mode (Dwarf-Fortress queue) | Significant UI work |
 | Free-form placement with physics settle-to-construction | Architectural change; current grid-aligned demo carries thesis |
 | Snap point authoring UI | Data structure exists; UI is v0.1 |
@@ -296,10 +334,18 @@ items in git history; commit hashes in parentheses where useful.
   attachment per `validate`), but the new beam only sees support
   through "cell below," not through shared cells. Welding/joining is
   v0.1.
-- **Debug-cube viz is the dominant framerate cost** when enabled.
-  Per-frame iteration over every tracked voxel + per-cube material
-  poke. `V` toggles it off; v0.1 should rewrite on MultiMesh and only
-  update on change.
+- **Vertical-on-horizontal beam support sometimes fails.** A vertical
+  beam placed on top of a cantilevered horizontal beam doesn't always
+  pick up the horizontal beam's support, even though `_direct_part_
+  supporter` checks the cell below. Likely a coordinate-snap edge in
+  the footprint math; defer until the part-placement-controls work
+  needs it.
+- **Obscured stress-overlay overlay slightly tints visible cells too.**
+  When `H` is on, the obscured-pass corner brackets render
+  unconditionally (no_depth_test), so visible cells get a faint
+  bracket overlay in addition to their full outline. A depth-comparison
+  shader could discriminate; for MVP the overlay is faint enough that
+  it reads as a tint, not noise.
 
 ---
 

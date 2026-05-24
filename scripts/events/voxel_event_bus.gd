@@ -1,8 +1,15 @@
+class_name VoxelEventBusType
 extends Node
 
 # Spatial pub/sub for voxel-grid events. Subscribers register per-cell or
 # channel-wide interest; the bus dispatches each emitted event to the
 # subscribers whose interest overlaps the event.
+#
+# Runtime usage: `VoxelEventBusSingleton.subscribe(...)` — that's the
+# autoload-registered instance (see project.godot). The class itself is
+# named VoxelEventBusType so GDScript LSP recognises it as a global
+# identifier without colliding with the autoload's singleton name.
+# Godot 4 forbids a class_name from matching any autoload name.
 #
 # Lifetime: each subscription stores a WeakRef to the subscriber object plus
 # the method name. When the subscriber is freed (Node.queue_free, or a

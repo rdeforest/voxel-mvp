@@ -17,8 +17,8 @@ var _facade:          Node
 func _init(terrain_support: TerrainSupport, facade: Node) -> void:
     _terrain_support = terrain_support
     _facade          = facade
-    VoxelEventBus.subscribe(PartAddedEvent.CHANNEL,   _on_part_added)
-    VoxelEventBus.subscribe(PartRemovedEvent.CHANNEL, _on_part_removed)
+    VoxelEventBusSingleton.subscribe(PartAddedEvent.CHANNEL,   _on_part_added)
+    VoxelEventBusSingleton.subscribe(PartRemovedEvent.CHANNEL, _on_part_removed)
 
 
 # --- Bus handlers ---

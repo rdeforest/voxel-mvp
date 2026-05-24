@@ -36,6 +36,17 @@ func validate() -> bool:
         return false
     return true
 
+func preview() -> ActionPreview:
+    var p := ActionPreview.new()
+    _ensure_work()
+    for entry in _work:
+        if entry[1] > 0.0:
+            p.air.append(entry[0])
+        else:
+            p.solid.append(entry[0])
+    p.refused = _work.is_empty() or _would_endanger_player()
+    return p
+
 func execute() -> void:
     if terrain == null:
         push_error("FlattenAction.execute(): no terrain")
@@ -49,7 +60,7 @@ func execute() -> void:
 
     var origin := plane_point - Vector3.ONE *  radius
     var dims   :=                Vector3.ONE * (radius * 2.0)
-    VoxelEventBus.emit(
+    VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
         TerrainSdfChangedEvent.new(GRID_ID, origin, dims))
 

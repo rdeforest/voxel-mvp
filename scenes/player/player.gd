@@ -6,6 +6,7 @@ var build_state:        BuildState
 var action_factories:   ActionFactories
 var edit_modes_catalog: EditModeCatalog
 var _grid_overlay:      Node3D
+var _preview_renderer:  Node3D
 
 var edit_mode_index: int  = 0
 var wireframe_enabled := false
@@ -36,6 +37,15 @@ func _ready() -> void:
     _grid_overlay.raycast = raycast
     get_parent().add_child.call_deferred(_grid_overlay)
 
+    _preview_renderer = preload("res://scenes/player/voxel_preview_renderer.gd").new()
+    _preview_renderer.player = self
+    get_parent().add_child.call_deferred(_preview_renderer)
+
+    _wire_debug_raycast.call_deferred()
+
+func _wire_debug_raycast() -> void:
+    integrity.debug.raycast = raycast
+
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
     edit_preview.player     = self
@@ -53,6 +63,7 @@ func _ready() -> void:
         KEY_BRACKETLEFT:  build_state.prev_part,
         KEY_BRACKETRIGHT: build_state.next_part,
         KEY_G:            _toggle_grid_overlay,
+        KEY_H:            _toggle_obscured_stress,
         KEY_F5:           _save_game,
         KEY_F9:           _load_game,
     }
@@ -141,6 +152,9 @@ func _toggle_debug_visuals() -> void:
 
 func _toggle_grid_overlay() -> void:
     _grid_overlay.toggle()
+
+func _toggle_obscured_stress() -> void:
+    integrity.debug.toggle_obscured()
 
 func _toggle_wireframe() -> void:
     wireframe_enabled = not wireframe_enabled

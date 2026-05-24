@@ -55,6 +55,12 @@ func validate() -> bool:
 
     return false
 
+func preview() -> ActionPreview:
+    var p := ActionPreview.new()
+    p.part    = _footprint()
+    p.refused = not validate()
+    return p
+
 func execute() -> void:
     var instance := part.instantiate(material_name)
     # The procedural body's local origin is the unrotated bottom-center. After
@@ -70,7 +76,7 @@ func execute() -> void:
     instance.transform = Transform3D(_basis(), placement_pos + shift)
     terrain.get_parent().add_child(instance)
 
-    VoxelEventBus.emit(
+    VoxelEventBusSingleton.emit(
         PartAddedEvent.CHANNEL,
         PartAddedEvent.new(
             GRID_ID,
