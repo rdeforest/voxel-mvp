@@ -3,15 +3,16 @@ class_name FallingBodyFactory
 const DEBRIS_COLOR := Color(0.45, 0.30, 0.18)
 
 # Returns an unparented RigidBody3D positioned at the component's centroid.
-# Caller adds it to the scene tree. See docs/architecture.md → "Greedy box merge".
+# Caller adds it to a parent with identity world transform (currently the
+# World root). See docs/architecture.md → "Greedy box merge".
 static func from_voxels(voxels: Array[Vector3i]) -> RigidBody3D:
     var centroid := _centroid_of(voxels)
     var boxes    := _greedy_merge(_set_of(voxels))
 
     var body := RigidBody3D.new()
-    body.global_position = centroid
-    body.mass            = float(voxels.size())
-    body.can_sleep       = false
+    body.position  = centroid
+    body.mass      = float(voxels.size())
+    body.can_sleep = false
 
     for box in boxes:
         var local_center := Vector3(box.min) + Vector3(box.size) * 0.5 - centroid

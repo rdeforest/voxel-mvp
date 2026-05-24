@@ -54,8 +54,8 @@ func _make_cube(pos: Vector3i, color: Color) -> MeshInstance3D:
     var mi := MeshInstance3D.new()
     mi.mesh              = box
     mi.material_override = mat
-    mi.global_position   = Vector3(pos) + Vector3.ONE * 0.5
     _container.add_child(mi)
+    mi.global_position   = Vector3(pos) + Vector3.ONE * 0.5
     return mi
 
 func _clear() -> void:
