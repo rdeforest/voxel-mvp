@@ -15,14 +15,14 @@ run/main_scene="uid://csqf8gxiq0ou4"
 config/features=PackedStringArray("4.6", "Double Precision", "Forward Plus")
 config/icon="res://icon.svg"
 
+[autoload]
+
+VoxelEventBus="*res://scripts/events/voxel_event_bus.gd"
+
 [display]
 
 window/size/viewport_width=1280
 window/size/viewport_height=720
-
-[autoload]
-
-VoxelEventBus="*res://scripts/events/voxel_event_bus.gd"
 
 [editor_plugins]
 

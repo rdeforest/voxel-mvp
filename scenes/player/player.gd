@@ -5,6 +5,7 @@ var _camera_rig:        CameraRig
 var build_state:        BuildState
 var action_factories:   ActionFactories
 var edit_modes_catalog: EditModeCatalog
+var _grid_overlay:      Node3D
 
 var edit_mode_index: int  = 0
 var wireframe_enabled := false
@@ -31,6 +32,10 @@ func _ready() -> void:
     edit_modes_catalog = EditModeCatalog.new(action_factories, build_state)
     build_state.changed.connect(_update_mode_label)
 
+    _grid_overlay = preload("res://scenes/player/voxel_grid_overlay.gd").new()
+    _grid_overlay.raycast = raycast
+    get_parent().add_child.call_deferred(_grid_overlay)
+
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
     edit_preview.player     = self
@@ -47,6 +52,7 @@ func _ready() -> void:
         KEY_Y:            build_state.rotate_z,
         KEY_BRACKETLEFT:  build_state.prev_part,
         KEY_BRACKETRIGHT: build_state.next_part,
+        KEY_G:            _toggle_grid_overlay,
         KEY_F5:           _save_game,
         KEY_F9:           _load_game,
     }
@@ -132,6 +138,9 @@ func _update_mode_label() -> void:
 
 func _toggle_debug_visuals() -> void:
     integrity.set_debug_visuals_enabled(not integrity.debug_visuals_enabled)
+
+func _toggle_grid_overlay() -> void:
+    _grid_overlay.toggle()
 
 func _toggle_wireframe() -> void:
     wireframe_enabled = not wireframe_enabled
