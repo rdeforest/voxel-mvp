@@ -41,8 +41,7 @@ func make_flatten(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var flatten_normal := get_flatten_normal()
     if flatten_normal == Vector3.ZERO:
         flatten_normal = hit_normal
-    var center := hit_pos - hit_normal * (EDIT_RADIUS * 0.5)
-    return FlattenAction.new(center, hit_pos, flatten_normal, EDIT_RADIUS, _terrain, _player)
+    return FlattenAction.new(hit_pos, flatten_normal, EDIT_RADIUS, _terrain, _player)
 
 func make_removal(_hit_pos: Vector3, _hit_normal: Vector3) -> Action:
     var collider := _raycast.get_collider()

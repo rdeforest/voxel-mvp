@@ -1,5 +1,5 @@
 class_name ConstructionAction
-extends Action
+extends AdditiveAction
 
 const GRID_ID = 0
 

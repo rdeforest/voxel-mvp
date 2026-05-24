@@ -1,5 +1,5 @@
 class_name FillAction
-extends Action
+extends AdditiveAction
 
 const GRID_ID = 0
 
@@ -11,10 +11,6 @@ var shape:     int  # Shape enum
 
 var terrain:   VoxelLodTerrain
 var player:    CharacterBody3D  # for fall-through prevention
-
-# Clearance beyond the sphere surface within which fills are refused.
-# Roughly the player's capsule height; tune if the player capsule changes.
-const PLAYER_CLEARANCE := 1.0
 
 func _init(
     p_position:  Vector3,
