@@ -1,6 +1,8 @@
 class_name CollapseDetector
 extends RefCounted
 
+const GRID_ID = 0
+
 var _pending_floods:    Array[PendingFlood]                       = []
 var _pending_collapses: Array[PendingCollapse]                    = []
 var _voxel_to_pending:  Dictionary[Vector3i, PendingCollapse]     = {}
@@ -13,7 +15,7 @@ var _facade:            Node
 func _init(terrain_support: TerrainSupport, facade: Node) -> void:
     _terrain_support = terrain_support
     _facade          = facade
-    _terrain_support.voxel_support_increased.connect(_on_voxel_support_increased)
+    VoxelEventBus.subscribe(VoxelSupportChangedEvent.CHANNEL, _on_voxel_support_changed)
 
 
 # --- Phases (called by StructuralIntegrity once dirty_queue settles) ---
@@ -76,14 +78,15 @@ func is_idle() -> bool:
     return _pending_floods.is_empty() and _pending_collapses.is_empty()
 
 
-# --- Signal handler: rewind strain when support comes back ---
+# --- Bus handler: rewind strain when support comes back ---
 
-func _on_voxel_support_increased(
-        pos: Vector3i, _old_support: float, _new_support: float) -> void:
-    if not _voxel_to_pending.has(pos):
+func _on_voxel_support_changed(event: VoxelSupportChangedEvent) -> void:
+    if event.new_support <= event.old_support:
+        return
+    if not _voxel_to_pending.has(event.pos):
         return
 
-    var pc: PendingCollapse = _voxel_to_pending[pos]
+    var pc: PendingCollapse = _voxel_to_pending[event.pos]
     var reset_floor := VoxelConstants.STRAIN_DURATION_SEC \
         - VoxelConstants.STRAIN_RESET_SEC
     pc.strained = minf(pc.strained, reset_floor)
@@ -183,9 +186,28 @@ func _materialize_collapse(voxels: Array[Vector3i]) -> void:
     var body := FallingBodyFactory.from_voxels(voxels)
     _facade.get_parent().add_child(body)
 
+    VoxelEventBus.emit(
+        RegionCollapsingEvent.CHANNEL,
+        RegionCollapsingEvent.new(GRID_ID, voxels))
+
     var voxel_tool: VoxelTool = _terrain_support.terrain.get_voxel_tool()
     voxel_tool.channel = VoxelBuffer.CHANNEL_SDF
     voxel_tool.mode    = VoxelTool.MODE_REMOVE
     for v in voxels:
         voxel_tool.set_voxel_f(v, VoxelConstants.SDF_AIR)
-        _terrain_support.remove_voxel(v)
+        VoxelEventBus.emit(
+            VoxelRemovedEvent.CHANNEL,
+            VoxelRemovedEvent.new(GRID_ID, v))
+
+    var box := _bounding_box(voxels)
+    VoxelEventBus.emit(
+        TerrainSdfChangedEvent.CHANNEL,
+        TerrainSdfChangedEvent.new(GRID_ID, box.position, box.size))
+
+static func _bounding_box(voxels: Array[Vector3i]) -> AABB:
+    var lo := Vector3(voxels[0])
+    var hi := lo + Vector3.ONE
+    for v in voxels:
+        lo = lo.min(Vector3(v))
+        hi = hi.max(Vector3(v) + Vector3.ONE)
+    return AABB(lo, hi - lo)

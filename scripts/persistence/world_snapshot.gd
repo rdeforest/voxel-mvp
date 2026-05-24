@@ -88,7 +88,7 @@ static func _apply_voxels(integrity: StructuralIntegrity, voxels: Array) -> void
         var mat := Materials.from_name(StringName(entry["material"]))
         integrity.terrain_support.restore_voxel(entry["pos"], mat, entry["support"])
 
-static func _apply_parts(world: Node, integrity: StructuralIntegrity, parts: Array) -> void:
+static func _apply_parts(world: Node, _integrity: StructuralIntegrity, parts: Array) -> void:
     for entry in parts:
         var part: Part = load(entry["part_path"]) as Part
         if part == null:
@@ -97,13 +97,15 @@ static func _apply_parts(world: Node, integrity: StructuralIntegrity, parts: Arr
         var instance      := part.instantiate(material_name)
         instance.transform = entry["transform"]
         world.add_child(instance)
-        integrity.register_part(
-            instance,
-            _retype_cells(entry["cells"]),
-            Materials.from_name(material_name),
-            entry["placement_y"],
-            part,
-        )
+        VoxelEventBus.emit(
+            PartAddedEvent.CHANNEL,
+            PartAddedEvent.new(
+                0,
+                instance,
+                _retype_cells(entry["cells"]),
+                Materials.from_name(material_name),
+                entry["placement_y"],
+                part))
 
 static func _retype_cells(raw: Array) -> Array[Vector3i]:
     var out: Array[Vector3i] = []

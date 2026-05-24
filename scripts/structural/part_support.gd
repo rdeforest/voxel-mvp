@@ -3,6 +3,7 @@ extends RefCounted
 
 const NO_SUPPORT   = 0.0
 const FULL_SUPPORT = 1.0
+const GRID_ID      = 0
 
 var part_registry:    Dictionary[Node3D, PartData] = {}
 var _cell_to_part:    Dictionary                   = {}
@@ -16,11 +17,25 @@ var _facade:          Node
 func _init(terrain_support: TerrainSupport, facade: Node) -> void:
     _terrain_support = terrain_support
     _facade          = facade
+    VoxelEventBus.subscribe(PartAddedEvent.CHANNEL,   _on_part_added)
+    VoxelEventBus.subscribe(PartRemovedEvent.CHANNEL, _on_part_removed)
 
 
-# --- Registration ---
+# --- Bus handlers ---
+
+func _on_part_added(event: PartAddedEvent) -> void:
+    _register_part(event.node, event.cells, event.material, event.placement_y, event.part)
+
+func _on_part_removed(event: PartRemovedEvent) -> void:
+    _remove_part(event.node)
+
+
+# --- Internal data ops (also called by snapshot restore) ---
 
 func register_part(node: Node3D, cells: Array[Vector3i], material: Materials, placement_y: float, part: Part) -> void:
+    _register_part(node, cells, material, placement_y, part)
+
+func _register_part(node: Node3D, cells: Array[Vector3i], material: Materials, placement_y: float, part: Part) -> void:
     part_registry[node] = PartData.new(cells, material, placement_y, part)
     for cell in cells:
         if not _cell_to_part.has(cell):
@@ -28,7 +43,7 @@ func register_part(node: Node3D, cells: Array[Vector3i], material: Materials, pl
         _cell_to_part[cell].append(node)
         _terrain_support.dirty_neighbors_of(cell)
 
-func remove_part(node: Node3D) -> void:
+func _remove_part(node: Node3D) -> void:
     if not part_registry.has(node):
         return
     var data := part_registry[node]
@@ -192,5 +207,5 @@ func _collapse_part(node: Node3D) -> void:
         child.reparent(body)
     node.queue_free()
 
-    remove_part(node)
+    _remove_part(node)
     _facade.wake_falling_bodies()

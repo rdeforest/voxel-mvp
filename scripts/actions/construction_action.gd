@@ -1,13 +1,15 @@
 class_name ConstructionAction
 extends Action
 
+const GRID_ID = 0
+
 var part:          Part
 var placement_pos: Vector3    # world position for the rotated bottom-center
 var world_anchor:  Vector3i   # voxel-grid cell for the click point
 var rotation:      Vector3i   # 0-3 per axis (X, Y, Z), each step = 90°
 var material_name: StringName # overrides part.material_name when non-empty
 var terrain:       VoxelLodTerrain
-var integrity:     StructuralIntegrity
+var integrity:     StructuralIntegrity   # query path only (has_part_cell)
 var player:        CharacterBody3D
 
 var _cached_fp:   Array[Vector3i] = []
@@ -68,7 +70,15 @@ func execute() -> void:
     instance.transform = Transform3D(_basis(), placement_pos + shift)
     terrain.get_parent().add_child(instance)
 
-    integrity.register_part(instance, _footprint(), Materials.from_name(material_name), placement_pos.y, part)
+    VoxelEventBus.emit(
+        PartAddedEvent.CHANNEL,
+        PartAddedEvent.new(
+            GRID_ID,
+            instance,
+            _footprint(),
+            Materials.from_name(material_name),
+            placement_pos.y,
+            part))
 
 # --- internals ---
 

@@ -15,16 +15,20 @@ var _strain_pulse_phase := 0.0
 
 
 func _ready() -> void:
-    terrain          = get_parent().get_node("VoxelLodTerrain")
-    terrain_support  = TerrainSupport.new(terrain)
-    part_support     = PartSupport.new(terrain_support, self)
+    terrain            = get_parent().get_node("VoxelLodTerrain")
+    terrain_support    = TerrainSupport.new(terrain)
+    part_support       = PartSupport.new(terrain_support, self)
     terrain_support.bind_part_support(part_support)
-    debug            = IntegrityDebug.new(terrain_support, self)
+    debug              = IntegrityDebug.new(terrain_support, self)
     _collapse_detector = CollapseDetector.new(terrain_support, self)
+
+    VoxelEventBus.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_world_mutated)
+    VoxelEventBus.subscribe(PartRemovedEvent.CHANNEL,       _on_world_mutated)
 
 func _exit_tree() -> void:
     # Break the TerrainSupport ↔ PartSupport reference cycle so the
-    # RefCounted components can free cleanly.
+    # RefCounted components can free cleanly. Bus subscriptions auto-clean
+    # via WeakRef once the components' refcounts drop to zero.
     if terrain_support != null:
         terrain_support.bind_part_support(null)
 
@@ -43,30 +47,16 @@ func _physics_process(delta: float) -> void:
     debug.update(pulse, _collapse_detector.get_straining_voxels())
 
 
-# --- Public API (delegating) ---
+# --- Bus handlers ---
 
-func register_voxel(pos: Vector3i, material: Materials) -> void:
-    terrain_support.register_voxel(pos, material)
-
-func remove_voxel(pos: Vector3i) -> void:
-    terrain_support.remove_voxel(pos)
-
-func notify_terrain_changed(center: Vector3, radius: float) -> void:
-    terrain_support.notify_terrain_changed(center, radius)
+func _on_world_mutated(_event: VoxelEvent) -> void:
     wake_falling_bodies()
 
-func register_exposed_cells(box_origin: Vector3, box_size: Vector3) -> void:
-    terrain_support.register_exposed_cells(box_origin, box_size)
+
+# --- Queries (kept; not bus-routed) ---
 
 func get_support(pos: Vector3i) -> float:
     return terrain_support.get_support(pos)
-
-func register_part(node: Node3D, cells: Array[Vector3i], material: Materials, placement_y: float, part: Part) -> void:
-    part_support.register_part(node, cells, material, placement_y, part)
-
-func remove_part(node: Node3D) -> void:
-    part_support.remove_part(node)
-    wake_falling_bodies()
 
 func has_part(node: Node3D) -> bool:
     return part_support.has_part(node)

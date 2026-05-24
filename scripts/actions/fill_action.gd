@@ -1,6 +1,8 @@
 class_name FillAction
 extends Action
 
+const GRID_ID = 0
+
 enum Shape { SPHERE }
 
 var position:  Vector3
@@ -8,7 +10,6 @@ var radius:    float
 var shape:     int  # Shape enum
 
 var terrain:   VoxelLodTerrain
-var integrity: StructuralIntegrity
 var player:    CharacterBody3D  # for fall-through prevention
 
 # Clearance beyond the sphere surface within which fills are refused.
@@ -19,16 +20,14 @@ func _init(
     p_position:  Vector3,
     p_radius:    float,
     p_terrain:   VoxelLodTerrain,
-    p_integrity: StructuralIntegrity,
     p_player:    CharacterBody3D,
     p_shape:     int = Shape.SPHERE,
 ) -> void:
-    position  = p_position
-    radius    = p_radius
-    shape     = p_shape
-    terrain   = p_terrain
-    integrity = p_integrity
-    player    = p_player
+    position = p_position
+    radius   = p_radius
+    shape    = p_shape
+    terrain  = p_terrain
+    player   = p_player
 
 func validate() -> bool:
     # Refuse-don't-deform: if filling would bury the player, refuse.
@@ -68,14 +67,16 @@ func execute() -> void:
     var origin     := position - Vector3.ONE *  radius
     var dimensions :=            Vector3.ONE * (radius * 2.0)
 
-    # Notify integrity manager of placed voxels. The integrity system
-    # decides ground-contact itself during propagation; we just register.
     VoxelUtils.for_each_in_bounding_box(
         origin,
         dimensions,
         func(pos: Vector3i) -> void:
             if VoxelUtils.is_in_sphere(Vector3(pos), position, radius):
-                integrity.register_voxel(pos, Materials.STONE)
+                VoxelEventBus.emit(
+                    VoxelAddedEvent.CHANNEL,
+                    VoxelAddedEvent.new(GRID_ID, pos, Materials.STONE))
     )
 
-    integrity.notify_terrain_changed(position, radius)
+    VoxelEventBus.emit(
+        TerrainSdfChangedEvent.CHANNEL,
+        TerrainSdfChangedEvent.new(GRID_ID, origin, dimensions))
