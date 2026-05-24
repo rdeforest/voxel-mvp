@@ -5,14 +5,19 @@ const DEBRIS_COLOR := Color(0.45, 0.30, 0.18)
 # Returns an unparented RigidBody3D positioned at the component's centroid.
 # Caller adds it to a parent with identity world transform (currently the
 # World root). See docs/architecture.md → "Greedy box merge".
+#
+# The body carries its origin cells as local-space offsets via
+# set_meta("cell_offsets"), so a later pass (StructuralIntegrity's
+# falling-body tick) can determine whether the body has come to rest
+# inside terrain SDF and react accordingly.
 static func from_voxels(voxels: Array[Vector3i]) -> RigidBody3D:
     var centroid := _centroid_of(voxels)
     var boxes    := _greedy_merge(_set_of(voxels))
 
     var body := RigidBody3D.new()
-    body.position  = centroid
-    body.mass      = float(voxels.size())
-    body.can_sleep = false
+    body.position = centroid
+    body.mass     = float(voxels.size())
+    body.set_meta("cell_offsets", _cell_offsets(voxels, centroid))
 
     for box in boxes:
         var local_center := Vector3(box.min) + Vector3(box.size) * 0.5 - centroid
@@ -20,6 +25,13 @@ static func from_voxels(voxels: Array[Vector3i]) -> RigidBody3D:
         _add_visual(  body, box.size, local_center)
 
     return body
+
+
+static func _cell_offsets(voxels: Array[Vector3i], centroid: Vector3) -> Array[Vector3]:
+    var out: Array[Vector3] = []
+    for v in voxels:
+        out.append(Vector3(v) + Vector3.ONE * 0.5 - centroid)
+    return out
 
 
 static func _centroid_of(voxels: Array[Vector3i]) -> Vector3:

@@ -45,6 +45,7 @@ func _physics_process(delta: float) -> void:
     _collapse_detector.tick_pending(delta)
     part_support.tick_strain(delta, pulse)
     debug.update(pulse, _collapse_detector.get_straining_voxels())
+    _tick_falling_bodies()
 
 
 # --- Bus handlers ---
@@ -87,6 +88,50 @@ func wake_falling_bodies() -> void:
         var body := child as RigidBody3D
         if body != null and body.sleeping:
             body.sleeping = false
+
+# Each frame, classify every falling body's relationship with the terrain
+# SDF at its current pose. Partially-buried bodies freeze in place; fully-
+# buried bodies integrate back into the SDF as tracked voxels.
+func _tick_falling_bodies() -> void:
+    if terrain == null:
+        return
+    var vt := terrain.get_voxel_tool()
+    vt.channel = VoxelBuffer.CHANNEL_SDF
+    for child in get_parent().get_children():
+        var body := child as RigidBody3D
+        if body == null or not body.has_meta("cell_offsets"):
+            continue
+        _classify_falling_body(body, vt)
+
+func _classify_falling_body(body: RigidBody3D, vt: VoxelTool) -> void:
+    var offsets:   Array[Vector3] = body.get_meta("cell_offsets")
+    var transform := body.global_transform
+    var buried    := 0
+    for offset in offsets:
+        if _cell_at(transform * offset, vt) < VoxelConstants.SDF_SOLID_THRESHOLD:
+            buried += 1
+    if buried == offsets.size():
+        _integrate_buried_body(body, offsets, transform)
+        return
+    if buried > 0:
+        if not body.freeze:
+            body.freeze = true
+        return
+    if body.freeze:
+        body.freeze   = false
+        body.sleeping = false
+
+func _integrate_buried_body(body: RigidBody3D, offsets: Array[Vector3], transform: Transform3D) -> void:
+    for offset in offsets:
+        var world := transform * offset
+        var cell  := Vector3i(floori(world.x), floori(world.y), floori(world.z))
+        VoxelEventBus.emit(
+            VoxelAddedEvent.CHANNEL,
+            VoxelAddedEvent.new(0, cell, Materials.STONE))
+    body.queue_free()
+
+static func _cell_at(world: Vector3, vt: VoxelTool) -> float:
+    return vt.get_voxel_f(Vector3i(floori(world.x), floori(world.y), floori(world.z)))
 
 func is_quiescent() -> bool:
     if not terrain_support.dirty_queue.is_empty():     return false
