@@ -8,89 +8,80 @@
 
 ## Resumption Brief
 
-*Last updated: cleanup pass complete (steps #1, #2, #3, #5, #6, #7+#9, #8
-from `docs/code-cleanup-plan.md`; step #4 explicitly deferred to v0.0.1).
-v0.0 thesis demo unchanged; pivot is now v0.0.1 (persistence as
-replayable history) and playtester binaries.*
+*Last updated: Persistence (save/load via SQLite stream + snapshot) and
+Phase 5.5a (voxel event bus + indexer decoupling) are both landed.
+Next: Phase 5.5b — honest-failure construction verbs.*
 
-**Where you are:** v0.0 thesis demo still works end-to-end — dig a wide
-cave, ceiling cells develop a strain gradient, fail to reinforce and
-watch a falling RigidBody3D, or place a beam under it and watch
-support propagate back up. The cleanup pass restructured the codebase
-without semantic change:
+**Where you are:** v0.0 demo still works end-to-end; two architectural
+landings on top:
 
-- `StructuralIntegrity` is now a `Node` facade composed of three
-  `RefCounted` components: `TerrainSupport`, `PartSupport`,
-  `IntegrityDebug`. `CollapseDetector` is a peer of `TerrainSupport`,
-  not a child of the facade.
-- `player.gd` was 339 lines; now 143, composing five helpers
-  (`PlayerMovement`, `CameraRig`, `BuildState`, `ActionFactories`,
-  `EditModeCatalog`).
-- Three dict-as-struct shapes became typed classes (`VoxelRecord`,
-  `PendingCollapse`, `PendingFlood`); the inner `PartData` was lifted
-  out.
-- `FallingBodyFactory` extracted from `CollapseDetector`.
-- Design-rationale comments lifted into `docs/architecture.md`; code
-  comments aggressively pruned.
-- Color-tier ladder data-tabled.
-- Support classification cascade extracted into a clean helper
-  (`_support_from_neighbor`).
+- **Persistence** (commit `a4b95da`). F5 saves a snapshot to
+  `user://saves/world.snapshot` (gated on `is_quiescent()`); F9 reloads
+  the scene; terrain SDF persists continuously via
+  `VoxelStreamSQLite` at `user://saves/world.db`. Tracked voxels
+  restore with their saved support, bypassing propagation so a settled
+  pillar doesn't get flood-collapsed while SDF blocks stream in.
 
-Every file is now under ~200 lines except `edit_mode_catalog.gd` (101 —
-the EditMode array builder, hard to shrink without losing
-readability). All 5 GUT tests pass. No leak warnings at exit.
+- **Phase 5.5a — voxel event bus** (commit `ee80b63`). Actions emit
+  typed events through a `VoxelEventBus` autoload; structural
+  components subscribe. Mutations no longer pass through
+  `StructuralIntegrity` direct method calls. The facade exposes only
+  queries (`has_part`, `has_part_cell`, `get_support`) and UI hooks
+  (`set_hovered_part`, `set_debug_visuals_enabled`). Lifetime is
+  WeakRef-based — subscribers can be forgotten; the bus prunes on
+  emit. The `voxel_support_increased` signal is gone, replaced by a
+  `voxel_support_changed` bus event.
+
+19/19 GUT tests pass. No leak warnings at exit.
 
 **Pick up here:**
 
-1. **Playtest the cleaned v0.0** to confirm the thesis answer hasn't
-   shifted. Same demo loop as before; the question of whether voxel-
-   first construction-and-integrity is as good an idea as it seemed is
-   still up for Robert to decide.
+1. **Phase 5.5b: honest-failure construction verbs.** The other v0.1
+   architectural item. Reframe `fill` / `dig` / `flatten` as
+   construction-mode operations with explicit semantics for the
+   bury-the-player case and the "horizontal flatten into material
+   above the cut → open a cave, don't fake a floor" case. Remove the
+   band-aid `_push_player_above_terrain` if anything still references
+   it. See `roadmap.md` Phase 5.5b.
 
-2. **v0.0.1: persistence as replayable history.** Save/load scoped as
-   action-journal + periodic snapshot. The Action pattern is in place
-   and clean; the work is serialisation, snapshot cadence, schema
-   versioning, and determinism discipline. Step #4 (collapse-detector
-   state machine) was deferred specifically to land alongside the
-   replay harness — together they give regression coverage for the
-   subtle phase ordering. See `roadmap.md`.
+2. **Playtester binaries.** Linux + macOS + Windows via GitHub
+   Actions. Not yet started. Robert wants v0.0 locally first to decide
+   it's not embarrassing before distributing.
 
-3. **Playtester binaries.** Linux + macOS + Windows via GitHub
-   Actions (cross-compile from a Linux runner with MinGW for Windows,
-   native on `macos-latest`). Not yet started. Robert wants v0.0
-   locally first to decide it's not embarrassing before distributing.
-
-4. **v0.1 scoping.** When the v0.0 (and v0.0.1) answers come back
-   "yes," the v0.1 question is "can I make it fun/performant?" — see
-   `roadmap.md` Phases 1, 3, 4, the deferred list below, and the
-   "honest physics interaction" design direction.
+3. **v0.1 scoping.** When 5.5a + 5.5b are done, the v0.1 question is
+   "can I make it fun/performant?" — see `roadmap.md` Phases 1, 3, 4,
+   and the deferred list below.
 
 **Architectural status — what's solid, what's known-imperfect:**
 
 - Structural integrity is the load-bearing thesis claim. Still works.
-  Facade composition makes ownership of state explicit and persistence
-  surface-area easier to identify.
+  Facade composition + bus decoupling means adding a second indexer
+  (building registry, biome map, etc.) is a `subscribe()` call, not
+  a refactor.
 - Parts are parametric (one-line `.tres` for new shapes), multi-axis
   rotation works, material independently selectable at build time.
 - Physics integration: thin parts use `continuous_cd`, fills refuse on
-  top of RigidBody3Ds, terrain edits wake sleeping bodies.
+  top of RigidBody3Ds, terrain edits wake sleeping bodies via
+  bus subscription.
+- Persistence works: build a structure, F5, F9, structure comes back
+  with correct support. Restore-with-saved-support skips the
+  propagation race against lazy SDF streaming.
 - Construction placement snaps `placement_pos.y` to `floor(hit_pos.y)`
-  so parts always sit on cell Y-boundaries. Avoids the "click on a
-  slope, part floats above the surface" failure mode by anchoring to
-  the cell containing the click.
+  so parts always sit on cell Y-boundaries.
 - **Performance is CPU-bound** and observably degrades under heavy
   digging. The debug-cube viz (V toggle) is the biggest contributor
   when on; with it off, framerate is smooth. Threading + MultiMesh
-  for debug viz are v0.1 work, documented in roadmap.
+  for debug viz are v0.1 work.
 - **SDF seam matching** still deferred to v0.1+ under the "honest
   physics interaction" design direction.
-- **Intersecting parts do not mutually support each other.** Building
-  cross-beams (one beam intersecting another in shared cells) requires
-  welding/joining, which is v0.1. Current `ConstructionAction.validate`
-  accepts intersection placement so cross-beams can be *placed*, but
-  the new beam's support is computed independently — it sees the other
-  beam as the supporter only via the "cell below" path, not via shared
-  cells.
+- **Intersecting parts do not mutually support each other.** Cross-beam
+  placement is accepted by `ConstructionAction.validate`, but the new
+  beam only sees support through "cell below," not shared cells.
+  Welding/joining is v0.1.
+- **No performance baseline captured before the bus refactor.** Heavy
+  digging *feels* slightly faster post-refactor but wasn't measured.
+  A small instrumentation pass (Time.get_ticks_usec deltas on
+  action.execute) is cheap insurance for the next refactor.
 
 ---
 
@@ -103,21 +94,22 @@ readability). All 5 GUT tests pass. No leak warnings at exit.
 | 0 — Foundation | Complete | godot + godot_voxel build chain, walking-around prototype |
 | 2 — Terrain Modification | Complete | dig, fill, flatten with refuse-don't-deform |
 | 5 — Building System | Functionally complete for v0.0 | Parts, structural integrity, cave integrity, pillar reinforcement all working; SDF seam matching deferred to v0.1+ |
-| Cleanup pass | Complete | Plan in `docs/code-cleanup-plan.md`; step #4 deferred to v0.0.1 |
+| Cleanup pass | Complete | Plan in `docs/code-cleanup-plan.md`; step #4 deferred |
+| Persistence (snapshot + stream) | Complete (`a4b95da`) | F5 save, F9 load, terrain SDF auto-persists. Action-journal/replay deferred. |
 
-### v0.0.1 — Scope
+### v0.1 — Phase status
 
-Full design in `roadmap.md`. Summary: serialise `Action` history as an
-append-only journal, periodic state snapshots, versioned save format
-with action-schema versioning, deterministic replay (seeded RNG, no
-wall-clock reads), debug controls for stepping through history. Not
-started. Cleanup step #4 (collapse-detector state machine) folds into
-this work — the state machine is easier to test against a deterministic
-replay harness than against ad-hoc cave-digging.
+| Phase | State | Notes |
+|-------|-------|-------|
+| 5.5a — Voxel event bus | Complete (`ee80b63`) | Autoload bus, typed events, WeakRef lifetime |
+| 5.5b — Honest-failure construction verbs | Not started | Next |
+| 5.5c — Fracture as mesh extraction | Deferred to v0.2 | per roadmap |
+| 5.5d — Multi-grid foundation | Deferred to v0.2/v0.9 | grid_id carried in payloads from day one |
+| 5.5e — Per-channel non-SDF data | Deferred to v0.2/v0.9 | |
 
 ### In flight
 
-*(nothing in flight — playtesting cleaned v0.0)*
+*(nothing in flight — Phase 5.5b is the next scheduled work)*
 
 ### Bugs
 
@@ -132,6 +124,20 @@ replay harness than against ad-hoc cave-digging.
 - **Double-precision godot_voxel build from day one.** Non-retrofittable.
 - **No engine forks.** Pull upstream directly.
 - **`godot/modules/voxel` symlink, not `custom_modules`.**
+- **Voxel changes flow through `VoxelEventBus` (autoload).** Actions
+  emit typed events; structural components subscribe. Mutations don't
+  call `StructuralIntegrity` methods directly. Queries
+  (`has_part_cell`, etc.) still do — they're synchronous validation.
+- **Bus subscriptions use WeakRef lifetime.** Each subscription stores
+  `WeakRef(owner) + method name`. Dead subscribers prune lazily on
+  emit. Subscribers can be created and forgotten — no `dispose()`
+  required. Caveat: subscribe with `self.method_name`, not lambdas.
+- **Every event payload carries `grid_id`** even though only one grid
+  exists. Multi-grid (Phase 5.5d) lands without payload churn.
+- **Terrain SDF persists via `VoxelStreamSQLite`** (continuous, no
+  manual save). Structural state persists via snapshot, gated on
+  `is_quiescent()`. Snapshot restore bypasses the propagation queue;
+  saved support values are trusted because save required quiescence.
 - **Facade composition for `StructuralIntegrity`.** A `Node` facade
   holds three `RefCounted` components (`TerrainSupport`, `PartSupport`,
   `IntegrityDebug`) plus `CollapseDetector` (peer of `TerrainSupport`).
@@ -198,6 +204,17 @@ items in git history; commit hashes in parentheses where useful.
     - Support classification cascade extracted.
     - Construction placement snaps Y to cell boundary.
     - `ConstructionAction.validate` accepts intersection placement.
+- **Persistence** (`a4b95da`): `VoxelStreamSQLite` for terrain;
+  `WorldSnapshot` (var_to_str) for structural + player state. F5 save
+  (quiescence-gated), F9 reload-scene. `TerrainSupport.restore_voxel`
+  bypasses dirty queue using saved support values.
+- **Phase 5.5a — voxel event bus** (`ee80b63`): autoload
+  `VoxelEventBus` with per-cell + channel-wide subscriptions, typed
+  event classes (`scripts/events/`), WeakRef lifetime. Actions emit
+  primitives; integrity components emit derived events. The old
+  `voxel_support_increased` signal and `register_voxel`/`remove_voxel`/
+  `notify_terrain_changed`/`register_exposed_cells`/`register_part`/
+  `remove_part` facade methods are all gone.
 
 ### Deferred to v0.1+ (the "can I make it fun?" question)
 

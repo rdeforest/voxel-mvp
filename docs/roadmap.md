@@ -383,30 +383,33 @@ from the v0.0 retrospective. It's deliberately split into independent sub-phases
 can be tackled when context allows. **5.5a is the root dependency** — the others can
 proceed in any order after it.
 
-### Phase 5.5a: Voxel change event bus + indexer refactor
+### Phase 5.5a: Voxel change event bus + indexer refactor — **DONE** (commit ee80b63)
 
 **Goal:** Decouple voxel editing from the systems that care about voxel changes.
 
-Current state: `player.gd` directly calls `integrity.register_voxel` and
-`integrity.remove_voxel` from inside `_edit_fill` / `_edit_dig`. This works for one
-indexer (structural integrity). It will not scale to two (add a building registry), let
-alone four or five (biome map, ore depletion tracker, decay system, fire propagation).
+Shipped:
+- `VoxelEventBus` autoload (`scripts/events/voxel_event_bus.gd`). Per-cell and
+  channel-wide subscriptions. `subscribe()` / `subscribe_cell()` and matching
+  `unsubscribe_*`. Each event carries a `grid_id` even though only one grid exists.
+- Eight typed event classes (`scripts/events/`): primitive events emitted by actions
+  (`terrain_sdf_changed`, `voxel_added`, `voxel_removed`, `part_added`, `part_removed`)
+  and derived events emitted by integrity components (`voxel_support_changed`,
+  `region_collapsing`, `part_support_changed` — last is reserved, not yet emitted).
+- WeakRef lifetime: each subscription stores `WeakRef(owner) + method name`. Dead
+  subscribers (Node freed, RefCounted refcount-to-zero) are pruned lazily at emit
+  time. No `dispose()` calls required from callers. Caveat: subscribe with
+  `self.method_name`, not anonymous lambdas.
+- Actions emit; they no longer take a `StructuralIntegrity` reference for mutation.
+  `ConstructionAction` and `RemovalAction` still hold one for `has_part_cell` /
+  `has_part` queries during `validate()`.
+- The `voxel_support_increased` signal is gone; `CollapseDetector` subscribes to
+  `voxel_support_changed` instead. `notify_terrain_changed` and
+  `register_exposed_cells` absorbed into `TerrainSupport`'s `terrain_sdf_changed`
+  handler.
 
-Tasks:
-- Define a voxel change event: `(grid_id, position, old_material, new_material, cause)`
-- Add a signal on the voxel editing layer that fires for every modified voxel
-- Refactor `StructuralIntegrity` to be a subscriber rather than a callee
-- Establish spatial filtering: indexers declare interest in a region, only get events
-  for that region. (HTML-style capture/bubble doesn't fit a flat 3D grid; pub/sub with
-  spatial filtering is the right shape.)
-- Establish priority + cancellation: structural integrity runs before building registry,
-  because a cascade collapse should be batched, not reported voxel-by-voxel
-- **Design the bus API for multi-grid from the start** — even if there's only one grid
-  for now, the event payload should carry a grid identifier. This costs nothing now and
-  prevents a painful refactor when vehicles arrive.
-
-Done when: structural integrity works exactly as it does today, but `player.gd` no longer
-imports or references it.
+Priority + cancellation deferred — single subscriber per channel today, no ordering
+problem yet. Spatial filtering beyond per-cell deferred — first non-StructuralIntegrity
+subscriber will tell us what shape it wants (AABB? sphere? coarse grid bucket?).
 
 ### Phase 5.5b: Construction mode + honest-failure terrain ops
 

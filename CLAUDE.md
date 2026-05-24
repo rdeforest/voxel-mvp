@@ -59,25 +59,47 @@ action.execute()  -> void   # performs the operation
 
 New Actions: extend `Action`, implement `validate()` and `execute()`, add a `make_*` factory to `ActionFactories`, and a new `EditMode` entry in `EditModeCatalog._build_catalog()`.
 
+### Event bus (`scripts/events/`)
+
+`VoxelEventBus` (`scripts/events/voxel_event_bus.gd`) is an **autoload** registered in `project.godot`. Spatial pub/sub: subscribers register per-cell or channel-wide interest; the bus dispatches each emitted event to overlapping subscribers.
+
+API:
+```gdscript
+VoxelEventBus.subscribe_cell(channel, cell, callback)
+VoxelEventBus.subscribe(channel, callback)          # channel-wide
+VoxelEventBus.emit(channel, event)
+# matching unsubscribe_cell / unsubscribe (only needed for intentional cancel)
+```
+
+Channel taxonomy (`scripts/events/*_event.gd`):
+- **Primitive** (emitted by actions): `terrain_sdf_changed`, `voxel_added`, `voxel_removed`, `part_added`, `part_removed`.
+- **Derived** (emitted by integrity components): `voxel_support_changed`, `region_collapsing`, `part_support_changed` (reserved).
+
+Each event extends `VoxelEvent { grid_id, cells }`. `cells` is the dispatch footprint — the bus indexes per-cell subscribers against it. `grid_id` is in every payload from day one so multi-grid (Phase 5.5d, deferred) lands without payload churn.
+
+**Lifetime: WeakRef.** Each subscription stores `WeakRef(owner) + method name`, not the bare `Callable`. When the subscriber is freed (Node `queue_free`, or RefCounted refcount-to-zero), the WeakRef goes null and the bus prunes lazily on next emit. **No `dispose()` calls required.** Subscribers can be created and forgotten.
+
+**Caveat:** subscribe with a bound method (`self.my_method`), not an anonymous lambda. Lambdas have no Object to weakref and would persist until manually unsubscribed.
+
 ### Structural integrity system
 
 **`StructuralIntegrity`** (`scripts/structural_integrity.gd`) is a `Node` facade. It composes three `RefCounted` components plus a peer `CollapseDetector`:
 
 ```
 StructuralIntegrity (Node, facade)
-├── terrain_support: TerrainSupport     ← voxel_data, propagation, signal
+├── terrain_support: TerrainSupport     ← voxel_data, propagation
 ├── part_support:    PartSupport        ← part_registry, strain, collapse
 ├── debug:           IntegrityDebug     ← debug cubes
 └── _collapse_detector: CollapseDetector (peer of terrain_support)
 ```
 
-The facade owns `_physics_process` orchestration and `wake_falling_bodies` (which needs scene-tree access). All other state lives on the components.
+The facade owns `_physics_process` orchestration, `wake_falling_bodies` (which needs scene-tree access), and `is_quiescent` (for save gating). All other state lives on the components. Mutations come through the bus; the facade only exposes **queries** (`get_support`, `has_part`, `has_part_cell`) and UI hooks (`set_hovered_part`, `set_debug_visuals_enabled`). The bus is subscribed in `_ready` for `terrain_sdf_changed` + `part_removed` so the facade can call `wake_falling_bodies` when the world changes.
 
-**`TerrainSupport`** (`scripts/structural/terrain_support.gd`) owns `voxel_data: Dictionary[Vector3i, VoxelRecord]`, `dirty_queue`, and `_lowest_registered_y`. A worklist fixpoint drains `dirty_queue` (FIFO, BFS-order) at `PROPAGATION_BUDGET` (200) cells per physics frame via `process_dirty_queue()`. `is_natural_terrain(pos)` requires both untracked-solid AND bedrock — the combination grants `FULL_SUPPORT` to neighbours.
+**`TerrainSupport`** (`scripts/structural/terrain_support.gd`) owns `voxel_data: Dictionary[Vector3i, VoxelRecord]`, `dirty_queue`, and `_lowest_registered_y`. Subscribes channel-wide in `_init` to `voxel_added`, `voxel_removed`, and `terrain_sdf_changed`. A worklist fixpoint drains `dirty_queue` (FIFO, BFS-order) at `PROPAGATION_BUDGET` (200) cells per physics frame via `process_dirty_queue()`. `is_natural_terrain(pos)` requires both untracked-solid AND bedrock — the combination grants `FULL_SUPPORT` to neighbours.
 
 Classification cascade in `_support_from_neighbor` (priority order): tracked voxel → part-occupied → solid-above (skip) → solid-bedrock (FULL) → suspended-mass (lazy-register, skip) → air (skip).
 
-Emits `voxel_support_increased` when a voxel's recalculated support is meaningfully higher. `CollapseDetector` listens (it's wired in its `_init` taking `TerrainSupport` directly).
+Emits `voxel_support_changed` via the bus when a voxel's recalculated support changes meaningfully. `CollapseDetector` subscribes and uses the event for strain-rewind on support increases.
 
 **`PartSupport`** (`scripts/structural/part_support.gd`) owns `part_registry: Dictionary[Node3D, PartData]`, `_cell_to_part`, `_part_strain`, `_hovered_part`. Part support is recomputed fresh each physics frame in `tick_strain(delta, pulse)`: sort parts ascending by `placement_y`, then for each part find its **direct supporter** (the part with the highest `placement_y < mine` in the part's own cell or the cell below). Direct terrain contact short-circuits to `FULL_SUPPORT`. Tall parts (multi-cell Y span from non-Y rotation) only check support from the bottom row of footprint cells (`_min_y(cells)`).
 
@@ -137,12 +159,19 @@ Player controls in Build mode: `[`/`]` cycle parts, `R` rotates around Y, `T` ro
 - **Refuse-don't-deform.** Actions refuse via `validate()` when constraints can't be met. `FillAction` extends this to physics state via `intersect_shape` — fills that would overlap a `RigidBody3D` are refused. `ConstructionAction.validate` accepts a footprint cell as valid attachment if it directly intersects an existing part (intersection placement); welding/joining to make that mutual is v0.1.
 - **Input dispatch via dictionary lookup.** `_key_actions` and `_mouse_button_actions` map keycodes/buttons to callables; no if-chains.
 - **`PLAYER_CLEARANCE = 1.0m`** in `FillAction` and `FlattenAction` prevents filling the player's occupied space.
-- **Signal locality.** `voxel_support_increased` lives on `TerrainSupport`, not the facade — it's emitted from terrain propagation, and `CollapseDetector` listens directly via its `_terrain_support` reference.
+- **Mutations go through the bus.** Actions emit primitive events (`terrain_sdf_changed`, `voxel_added`, etc.); they don't call `StructuralIntegrity` directly for state changes. Queries (`has_part_cell`, `has_part`) still call the facade — they're synchronous validation, not notification.
+- **Subscribe with bound methods, not lambdas.** `self.my_handler` lets the bus weakref the owner and auto-clean. `func(e): handle(e)` has no Object to weakref and would leak until manually unsubscribed.
+- **Wake-on-mutate.** `wake_falling_bodies()` is bus-triggered: `StructuralIntegrity` subscribes to `terrain_sdf_changed` and `part_removed`. SDF terrain edits don't signal contact-change to the physics engine, so resting `RigidBody3D`s need an explicit nudge.
 - **Strain timer accumulates against physics `delta`** (not wall-clock), so it pauses correctly when the tree is paused.
-- **`wake_falling_bodies()`** runs on every `notify_terrain_changed` and `remove_part` — SDF terrain edits don't signal contact-change to the physics engine, so resting `RigidBody3D`s need an explicit nudge.
 - **Typed dicts (`Dictionary[K, V]`)** for `part_registry`, `voxel_data`, `_voxel_to_pending`. Plain `Dictionary` poisons inferred types from iteration (`for x in dict` makes `x` Variant).
 - **Helper lambdas capture local refs, not `self`.** When a `RefCounted` class holds an `Array[Callable]` whose Callables reference instance fields, the implicit `self` capture forms a cycle. Pass dependencies as parameters and let lambdas close over the locals. See `EditModeCatalog._build_catalog` for the pattern.
-- **Cycle break in `_exit_tree`.** `StructuralIntegrity._exit_tree` calls `terrain_support.bind_part_support(null)` to break the `TerrainSupport ↔ PartSupport` reference cycle.
+- **Cycle break in `_exit_tree`.** `StructuralIntegrity._exit_tree` calls `terrain_support.bind_part_support(null)` to break the `TerrainSupport ↔ PartSupport` reference cycle. Bus subscriptions auto-clean via WeakRef once the components' refcounts drop to zero.
+
+### Persistence (`scripts/persistence/`, `scripts/world.gd`)
+
+- **Terrain SDF**: continuous via `VoxelStreamSQLite` wired into `world.tscn` at `user://saves/world.db`. The terrain stream persists edited blocks against the procedural generator automatically.
+- **Snapshot**: F5 saves `user://saves/world.snapshot` (typed-event-serialized via `var_to_str`); F9 reloads the scene. Save is gated on `StructuralIntegrity.is_quiescent()` — dirty queue empty, collapse detector idle, no awake `RigidBody3D` children — so the saved state is settled.
+- **Restore path**: `world.gd:_ready` calls `WorldSnapshot.load_into` if the snapshot file exists. Tracked voxels are restored with their saved support via `TerrainSupport.restore_voxel` (bypasses propagation queue — the saved values were captured while quiescent, and re-propagating against not-yet-streamed-in SDF blocks would briefly drop everything to NO_SUPPORT). Parts are restored by emitting `part_added` on the bus.
 
 ## Project State
 
