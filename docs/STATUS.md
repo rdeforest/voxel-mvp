@@ -8,49 +8,59 @@
 
 ## Resumption Brief
 
-*Last updated: Persistence (save/load via SQLite stream + snapshot) and
-Phase 5.5a (voxel event bus + indexer decoupling) are both landed.
-Next: Phase 5.5b — honest-failure construction verbs.*
+*Last updated: Phase 5.5a (event bus), 5.5b1+b2 (AdditiveAction +
+honest-failure flatten), and fallen-dirt-as-terrain are all landed.
+A voxel grid overlay (G key) helps the player see voxel boundaries.
+Next: 5.5b3 (preview UI) or new verbs (Raise/Lower/FillVoxel/
+EmptyVoxel).*
 
-**Where you are:** v0.0 demo still works end-to-end; two architectural
-landings on top:
+**Where you are:** v0.0 demo + persistence + bus + honest flatten +
+falling-debris-integrates-with-terrain all working. Recent landings:
 
-- **Persistence** (commit `a4b95da`). F5 saves a snapshot to
-  `user://saves/world.snapshot` (gated on `is_quiescent()`); F9 reloads
-  the scene; terrain SDF persists continuously via
-  `VoxelStreamSQLite` at `user://saves/world.db`. Tracked voxels
-  restore with their saved support, bypassing propagation so a settled
-  pillar doesn't get flood-collapsed while SDF blocks stream in.
+- **Phase 5.5b1+b2** (commit `15308bd`). `AdditiveAction` base class
+  declares the bury-relevant verbs (Fill/Flatten/Construction).
+  `FlattenAction` rewritten with column-based work computation:
+  cells in the cut box are bucketed by their lateral projection onto
+  the plane; each column's +N side cuts only if it reaches existing
+  air within radius, -N side fills only if it reaches existing solid
+  within radius. Refuses silently if no column has work. Box is now
+  symmetric around the plane point. Per-cell player-endanger check
+  catches "you'd cut my support" before "you'd bury me," fixing
+  the slope-fall-through case.
 
-- **Phase 5.5a — voxel event bus** (commit `ee80b63`). Actions emit
-  typed events through a `VoxelEventBus` autoload; structural
-  components subscribe. Mutations no longer pass through
-  `StructuralIntegrity` direct method calls. The facade exposes only
-  queries (`has_part`, `has_part_cell`, `get_support`) and UI hooks
-  (`set_hovered_part`, `set_debug_visuals_enabled`). Lifetime is
-  WeakRef-based — subscribers can be forgotten; the bus prunes on
-  emit. The `voxel_support_increased` signal is gone, replaced by a
-  `voxel_support_changed` bus event.
+- **Fallen-dirt-as-terrain** (this session). Falling rigid bodies
+  now classify themselves each physics tick by sampling SDF at each
+  of their original cells' current world positions. Three outcomes:
+  free (default — sleeps when at rest), partially buried (`freeze =
+  true` to lock in place; reclassifies each tick so a later dig
+  un-freezes them), fully buried (emit `voxel_added` per cell, free
+  the body). `FillAction` freezes overlapping bodies *before* the
+  SDF mutation lands so physics doesn't squirt them sideways. The
+  RigidBody3D refusal in `FillAction.validate` is gone — fills into
+  bodies are now valid, the burial system handles the integration.
 
-19/19 GUT tests pass. No leak warnings at exit.
+- **Voxel grid overlay** (this session). G toggles a wireframe
+  display of the targeted cell and its Chebyshev neighborhood (3
+  shells out, 7³ = 343 cubes), drawn via ImmediateMesh.
+
+19/19 GUT tests pass.
 
 **Pick up here:**
 
-1. **Phase 5.5b: honest-failure construction verbs.** The other v0.1
-   architectural item. Reframe `fill` / `dig` / `flatten` as
-   construction-mode operations with explicit semantics for the
-   bury-the-player case and the "horizontal flatten into material
-   above the cut → open a cave, don't fake a floor" case. Remove the
-   band-aid `_push_player_above_terrain` if anything still references
-   it. See `roadmap.md` Phase 5.5b.
+1. **5.5b3 — preview UI.** Communicate flatten intent visually
+   (which cells will cut, which fill, refuse state). Currently
+   refusals are silent.
 
-2. **Playtester binaries.** Linux + macOS + Windows via GitHub
-   Actions. Not yet started. Robert wants v0.0 locally first to decide
-   it's not embarrassing before distributing.
+2. **New verbs (Robert's request).** RaiseAction / LowerAction
+   (flatten-like but bell-shaped), FillVoxelAction / EmptyVoxelAction
+   (per-voxel surgical control). Greatly expand creative options.
 
-3. **v0.1 scoping.** When 5.5a + 5.5b are done, the v0.1 question is
-   "can I make it fun/performant?" — see `roadmap.md` Phases 1, 3, 4,
-   and the deferred list below.
+3. **Playtester binaries.** Linux + macOS + Windows via GitHub
+   Actions. Not yet started.
+
+4. **v0.1 gameplay scoping.** When 5.5b3 is done, the v0.1 question
+   is "can I make it fun/performant?" — see `roadmap.md` Phases 1,
+   3, 4.
 
 **Architectural status — what's solid, what's known-imperfect:**
 
@@ -102,10 +112,13 @@ landings on top:
 | Phase | State | Notes |
 |-------|-------|-------|
 | 5.5a — Voxel event bus | Complete (`ee80b63`) | Autoload bus, typed events, WeakRef lifetime |
-| 5.5b — Honest-failure construction verbs | Not started | Next |
+| 5.5b1 — AdditiveAction base | Complete (`15308bd`) | Verb classification, shared PLAYER_CLEARANCE |
+| 5.5b2 — Honest flatten | Complete (`15308bd`) | Column-based work, symmetric box, per-cell endanger check |
+| 5.5b3 — Preview UI for honest verbs | Not started | Next architectural item |
 | 5.5c — Fracture as mesh extraction | Deferred to v0.2 | per roadmap |
 | 5.5d — Multi-grid foundation | Deferred to v0.2/v0.9 | grid_id carried in payloads from day one |
 | 5.5e — Per-channel non-SDF data | Deferred to v0.2/v0.9 | |
+| Fallen-dirt-as-terrain | Complete (this session) | Falling bodies freeze on partial bury, integrate as tracked SDF on full bury |
 
 ### In flight
 
@@ -215,6 +228,25 @@ items in git history; commit hashes in parentheses where useful.
   `voxel_support_increased` signal and `register_voxel`/`remove_voxel`/
   `notify_terrain_changed`/`register_exposed_cells`/`register_part`/
   `remove_part` facade methods are all gone.
+- **Phase 5.5b1+b2** (`15308bd`): `AdditiveAction` base for verbs that
+  can bury the player. `FlattenAction` rewritten with column-based
+  work computation (bucket cells by lateral plane projection; each
+  column's side cuts only if it reaches existing air-or-solid within
+  radius). Symmetric box around `plane_point`. Per-work-cell
+  endanger check catches both "fill into player capsule" and "remove
+  player's support cell."
+- **Fallen-dirt-as-terrain** (this session). Falling rigid bodies
+  carry `cell_offsets` metadata. `StructuralIntegrity._tick_falling_
+  bodies` reclassifies them each physics tick: fully buried →
+  emit `voxel_added` per cell and free; partial → `freeze = true`;
+  un-buried (was frozen but no longer touches solid SDF) → unfreeze.
+  `FillAction` freezes overlapping bodies before mutating SDF so
+  they don't squirt.
+- **Voxel grid overlay** (this session). `scenes/player/voxel_grid_
+  overlay.gd`. G toggles a wireframe MeshInstance3D drawn via
+  ImmediateMesh. 4 Chebyshev shells from the targeted cell, alphas
+  0.9 / 0.6 / 0.3 / 0.1. Helps the player understand voxel boundaries
+  during fill/flatten/dig.
 
 ### Deferred to v0.1+ (the "can I make it fun?" question)
 
@@ -225,7 +257,8 @@ items in git history; commit hashes in parentheses where useful.
 | Load propagation (top-down weight pass) | Pairs with falling damage and SDF-seam-as-physics |
 | Falling damage (impact breaks parts, crumbles dirt) | Needs a damage model |
 | Hinge-at-boundary collapse | Polish on falling drama |
-| Fallen-dirt-as-terrain | RigidBody3D rejoining SDF when at rest |
+| RaiseAction / LowerAction (bell-shape) | Robert-requested; "after we're done with 5.5" |
+| FillVoxelAction / EmptyVoxelAction (per-voxel) | Robert-requested; per-voxel surgical control |
 | Sub-assemblies + planning mode (Dwarf-Fortress queue) | Significant UI work |
 | Free-form placement with physics settle-to-construction | Architectural change; current grid-aligned demo carries thesis |
 | Snap point authoring UI | Data structure exists; UI is v0.1 |

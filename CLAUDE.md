@@ -109,6 +109,13 @@ When strain expires, `_collapse_part` reparents the part's children to a new `Ri
 
 **`CollapseDetector`** (`scripts/collapse_detector.gd`) handles *terrain* collapses. Flood-fills connected components of unsupported terrain voxels into pending collapses, runs the strain timer, and on expiry hands the voxels to `FallingBodyFactory.from_voxels()` (`scripts/structural/falling_body_factory.gd`) — which greedy-merges them into axis-aligned boxes and returns a `RigidBody3D`. The detector then carves the cells out of the SDF.
 
+**Falling body lifecycle.** `FallingBodyFactory` stashes `cell_offsets` (each origin cell's local-space offset from the body's centroid at collapse time) on the body via `set_meta`. `StructuralIntegrity._tick_falling_bodies()` runs every physics frame: for each body with `cell_offsets`, sample SDF at each cell's current world position (via `body.global_transform * offset`):
+- **All cells in solid SDF (fully buried)** → emit `voxel_added` per cell at its current world-cell, free the body. The fallen mass becomes tracked SDF terrain.
+- **Some cells in solid (partially buried)** → `body.freeze = true`. Body locks in place; physics stops simulating it.
+- **No cells in solid (free)** → leave alone; physics handles it (sleeps when at rest). If the body was previously frozen and is now free (e.g., player dug terrain out from around it), unfreeze and wake.
+
+`FillAction.execute` freezes any overlapping `RigidBody3D` **before** mutating SDF, so the next physics tick doesn't squirt the body sideways from the collision overlap. The classifier integrates them on subsequent ticks.
+
 Typed records (all `RefCounted`, in `scripts/structural/`):
 - `VoxelRecord` — `{support, material, dirty}` for tracked voxels.
 - `PartData` — `{cells, material, placement_y, support, in_limbo}` for placed parts.
@@ -142,6 +149,8 @@ Multi-axis rotation: `ConstructionAction.rotation: Vector3i` (0–3 per axis). R
 **Placement snap:** `_make_construction_action` snaps `placement_pos.y = floor(hit_pos.y)`. Parts always sit on cell Y-boundaries — avoids the "click on a slope, part floats above the surface" case where XZ rounding moved the placement away from the actual hit surface.
 
 Player controls in Build mode: `[`/`]` cycle parts, `R` rotates around Y, `T` rotates around X, `Y` rotates around Z, `M` cycles material.
+
+**Debug overlays:** `V` toggles the per-voxel debug cubes (color-coded by support); `G` toggles the voxel grid overlay (wireframes the targeted cell and its Chebyshev neighborhood, helpful for understanding voxel boundaries during flatten/dig/fill); `F` toggles full-scene wireframe.
 
 ### Materials
 
