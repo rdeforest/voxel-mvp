@@ -3,9 +3,7 @@
 [ext_resource type="PackedScene" uid="uid://nqorq1p6ak5q" path="res://scenes/player/player.tscn" id="1_dphjl"]
 [ext_resource type="Script" uid="uid://cel7053sndciw" path="res://scripts/structural_integrity.gd" id="2_sl2e5"]
 [ext_resource type="Script" path="res://scenes/world/world.gd" id="3_world"]
-
-[sub_resource type="VoxelStreamSQLite" id="VoxelStreamSQLite_save"]
-database_path = "user://saves/world.db"
+[ext_resource type="Shader" uid="uid://dsnpq62xvnod6" path="res://scripts/shaders/terrain.gdshader" id="4_terrain_shader"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_4rhad"]
 
@@ -18,6 +16,9 @@ sky = SubResource("Sky_dphjl")
 ambient_light_source = 3
 ambient_light_energy = 0.9
 
+[sub_resource type="VoxelStreamSQLite" id="VoxelStreamSQLite_save"]
+database_path = "user://saves/world.db"
+
 [sub_resource type="FastNoiseLite" id="FastNoiseLite_1fp7r"]
 seed = 1
 fractal_lacunarity = 1.5
@@ -29,8 +30,19 @@ noise = SubResource("FastNoiseLite_1fp7r")
 [sub_resource type="VoxelMesherTransvoxel" id="VoxelMesherTransvoxel_v5dby"]
 mesh_optimization_enabled = true
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_t5ptc"]
-albedo_color = Color(0.659295, 0.91, 0.39130002, 1)
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_terrain"]
+render_priority = 0
+shader = ExtResource("4_terrain_shader")
+shader_parameter/grass_color = Color(0.35, 0.55, 0.22, 1)
+shader_parameter/dirt_color = Color(0.42, 0.32, 0.2, 1)
+shader_parameter/slope_dirt_max = 0.3650000173375
+shader_parameter/slope_grass_min = 0.7590000360525
+shader_parameter/wave_scale = 1.4260000670364799
+shader_parameter/wave_speed = 0.698000033155
+shader_parameter/wave_amount = 0.4
+shader_parameter/hue_amount = 0.18
+shader_parameter/wave_dir = Vector2(0.7, 0.3)
+shader_parameter/roughness = 0.9
 
 [node name="World" type="Node3D" unique_id=99934390]
 script = ExtResource("3_world")
@@ -48,7 +60,7 @@ environment = SubResource("Environment_sl2e5")
 stream = SubResource("VoxelStreamSQLite_save")
 generator = SubResource("VoxelGeneratorNoise2D_6m72w")
 mesher = SubResource("VoxelMesherTransvoxel_v5dby")
-material = SubResource("StandardMaterial3D_t5ptc")
+material = SubResource("ShaderMaterial_terrain")
 
 [node name="Player" parent="." unique_id=1282768710 instance=ExtResource("1_dphjl")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 80, 0)

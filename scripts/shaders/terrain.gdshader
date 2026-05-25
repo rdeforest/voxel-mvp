@@ -1,0 +1,92 @@
+shader_type spatial;
+render_mode cull_back;
+
+// Slope-aware ground material: grass on shallow slopes (≤30°), dirt on
+// steeper ones. Grass colour is modulated by two-octave value noise
+// sampled at world XZ + TIME so the surface looks like wind is blowing
+// across it without actually deforming the Transvoxel mesh.
+
+uniform vec3  grass_color    : source_color = vec3(0.35, 0.55, 0.22);
+uniform vec3  dirt_color     : source_color = vec3(0.42, 0.32, 0.20);
+
+// Slope mask in cos(angle) space. cos(30°) ≈ 0.866; the transition band
+// from full-dirt to full-grass spans roughly 25°–35°.
+uniform float slope_dirt_max : hint_range(0.0, 1.0) = 0.82;   // ≥35°  → full dirt
+uniform float slope_grass_min: hint_range(0.0, 1.0) = 0.91;   // ≤25°  → full grass
+
+uniform float wave_scale     : hint_range(0.01, 5.0) = 1.4;   // base frequency; larger = denser pattern
+uniform float wave_speed     : hint_range(0.0, 10.0) = 0.9;
+uniform float wave_amount    : hint_range(0.0, 1.0) = 0.40;   // brightness modulation depth
+uniform float hue_amount     : hint_range(0.0, 1.0) = 0.18;   // green-tint variation
+uniform vec2  wave_dir                              = vec2(0.7, 0.3);
+
+uniform float roughness      : hint_range(0.0, 1.0) = 0.9;
+
+varying vec3 v_world_pos;
+varying vec3 v_world_normal;
+
+
+vec2 hash2(vec2 p) {
+    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+    return -1.0 + 2.0 * fract(sin(p) * 43758.5453);
+}
+
+// Gradient (Perlin-ish) noise. No axis-aligned grid artefacts the way
+// value_noise has — the per-cell gradients break the squareness.
+float gnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(
+        mix(dot(hash2(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
+            dot(hash2(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
+        mix(dot(hash2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
+            dot(hash2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x),
+        u.y);
+}
+
+// 4-octave fbm with per-octave rotation and direction variation, so the
+// pattern doesn't read as a single sliding texture.
+float wind_fbm(vec2 p, vec2 dir, float t) {
+    const mat2 R = mat2(vec2( 0.80, -0.60), vec2(0.60, 0.80));   // ~37° rotation
+    float total = 0.0;
+    float amp   = 0.55;
+    float norm  = 0.0;
+    // Each octave: rotate coords, shift by direction-perturbed motion.
+    for (int i = 0; i < 4; i++) {
+        float fi   = float(i);
+        vec2  flow = dir + 0.25 * vec2(sin(fi * 1.7), cos(fi * 2.3));
+        total += gnoise(p + flow * t) * amp;
+        norm  += amp;
+        p      = R * p * 2.07;     // 2x freq with rotation — kills axis alignment
+        amp   *= 0.55;
+    }
+    return 0.5 + 0.5 * (total / norm);   // remap [-1,1] → [0,1]
+}
+
+
+void vertex() {
+    v_world_pos    = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    v_world_normal = normalize(mat3(MODEL_MATRIX) * NORMAL);
+}
+
+
+void fragment() {
+    float slope_cos  = clamp(v_world_normal.y, 0.0, 1.0);
+    float grass_mask = smoothstep(slope_dirt_max, slope_grass_min, slope_cos);
+
+    vec2 wp    = v_world_pos.xz * wave_scale;
+    float wave = wind_fbm(wp, wave_dir, TIME * wave_speed);
+
+    // Brightness modulation + small hue shift in the green channel so the
+    // grass varies between slightly warmer and cooler greens, not just
+    // light/dark of one colour.
+    float bright = 1.0 - wave_amount + wave * wave_amount * 2.0;
+    vec3 grass   = grass_color * bright;
+    grass.g     += hue_amount * (wave - 0.5);
+
+    vec3 albedo = mix(dirt_color, grass, grass_mask);
+
+    ALBEDO    = albedo;
+    ROUGHNESS = roughness;
+}
