@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" uid="uid://nqorq1p6ak5q" path="res://scenes/player/player.tscn" id="1_dphjl"]
 [ext_resource type="Script" uid="uid://cel7053sndciw" path="res://scripts/structural_integrity.gd" id="2_sl2e5"]
-[ext_resource type="Script" path="res://scripts/world.gd" id="3_world"]
+[ext_resource type="Script" path="res://scenes/world/world.gd" id="3_world"]
 
 [sub_resource type="VoxelStreamSQLite" id="VoxelStreamSQLite_save"]
 database_path = "user://saves/world.db"
