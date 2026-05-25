@@ -1,7 +1,13 @@
 class_name WorldSnapshot
 extends RefCounted
 
-const VERSION := 2
+const VERSION := 4
+
+# Survives scene reloads (static var on a loaded script). Set by the `reset`
+# console command and consumed by world.gd on the next _enter_tree/_ready
+# cycle. When true: the SQLite terrain stream is detached for that load
+# (procedural-only terrain), and the snapshot file is left untouched on disk.
+static var reset_pending: bool = false
 
 
 # --- public API ---
@@ -18,7 +24,13 @@ static func load_into(path: String, world: Node) -> bool:
     if file == null:
         return false
     var snap = str_to_var(file.get_as_text())
-    if not (snap is Dictionary) or snap.get("version") != VERSION:
+    if not (snap is Dictionary):
+        return false
+    var v: int = snap.get("version", 0)
+    # Forward-compat: newer-than-known schema → refuse.
+    # Backward-compat: older snapshot → load what we can, missing keys
+    # use defaults (e.g. V2 saves lack tunables; shader keeps its defaults).
+    if v > VERSION:
         return false
     apply(snap, world)
     return true
@@ -29,12 +41,27 @@ static func load_into(path: String, world: Node) -> bool:
 static func encode(world: Node) -> Dictionary:
     var integrity := world.get_node("StructuralIntegrity") as StructuralIntegrity
     var player    := world.get_node("Player") as CharacterBody3D
+    var terrain   := world.get_node("VoxelLodTerrain") as VoxelLodTerrain
     return {
-        "version": VERSION,
-        "player":  _encode_player(player),
-        "voxels":  _encode_voxels(integrity.terrain_support),
-        "parts":   _encode_parts(integrity.part_support),
+        "version":  VERSION,
+        "player":   _encode_player(player),
+        "voxels":   _encode_voxels(integrity.terrain_support),
+        "parts":    _encode_parts(integrity.part_support),
+        "tunables": _encode_tunables(terrain),
     }
+
+static func _encode_tunables(terrain: VoxelLodTerrain) -> Dictionary:
+    var mat := terrain.material as ShaderMaterial
+    if mat == null:
+        return {}
+    var out: Dictionary = {}
+    for prop in mat.get_property_list():
+        var name: String = prop.name
+        if not name.begins_with("shader_parameter/"):
+            continue
+        var uniform := name.substr("shader_parameter/".length())
+        out[uniform] = mat.get_shader_parameter(uniform)
+    return out
 
 static func _encode_player(player: CharacterBody3D) -> Dictionary:
     var head: Node3D    = player.get_node("Head")
@@ -43,7 +70,8 @@ static func _encode_player(player: CharacterBody3D) -> Dictionary:
         "position":         player.global_position,
         "body_rotation_y":  player.rotation.y,
         "head_rotation_x":  head.rotation.x,
-        "edit_mode_index":  player.edit_mode_index,
+        "tool_index":       player.tool_index,
+        "activity_indices": player._activity_indices.duplicate(),
         "build_part_path":  bs.current_part().resource_path,
         "build_material":   String(bs.current_material()),
         "build_rotation":   bs.rotation,
@@ -79,9 +107,20 @@ static func _encode_parts(ps: PartSupport) -> Array:
 static func apply(snap: Dictionary, world: Node) -> void:
     var integrity := world.get_node("StructuralIntegrity") as StructuralIntegrity
     var player    := world.get_node("Player") as CharacterBody3D
+    var terrain   := world.get_node("VoxelLodTerrain") as VoxelLodTerrain
     _apply_voxels(integrity, snap.get("voxels", []))
     _apply_parts(world, integrity, snap.get("parts", []))
     _apply_player(player, snap.get("player", {}))
+    _apply_tunables(terrain, snap.get("tunables", {}))
+
+static func _apply_tunables(terrain: VoxelLodTerrain, tunables: Dictionary) -> void:
+    if tunables.is_empty():
+        return
+    var mat := terrain.material as ShaderMaterial
+    if mat == null:
+        return
+    for uniform in tunables:
+        mat.set_shader_parameter(uniform, tunables[uniform])
 
 static func _apply_voxels(integrity: StructuralIntegrity, voxels: Array) -> void:
     for entry in voxels:
@@ -120,7 +159,14 @@ static func _apply_player(player: CharacterBody3D, data: Dictionary) -> void:
     player.rotation.y      = data["body_rotation_y"]
     var head: Node3D = player.get_node("Head")
     head.rotation.x  = data["head_rotation_x"]
-    player.edit_mode_index = data["edit_mode_index"]
+    # tool_index + activity_indices replace the old V3 edit_mode_index.
+    # Old saves without these keys: default to the None tool, activity 0.
+    if data.has("tool_index"):
+        player.tool_index = data["tool_index"]
+    if data.has("activity_indices"):
+        var raw: Array = data["activity_indices"]
+        for i in mini(raw.size(), player._activity_indices.size()):
+            player._activity_indices[i] = raw[i]
     player.build_state.restore(
         data["build_part_path"],
         StringName(data["build_material"]),

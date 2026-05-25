@@ -76,7 +76,9 @@ func _process(_delta: float) -> void:
     var rc: RayCast3D = player.raycast
     if not rc.is_colliding():
         return
-    var mode: EditMode = player.current_mode()
+    var mode: EditMode = player.current_activity()
+    if mode == null:
+        return
     var hit_pos    := rc.get_collision_point()
     var hit_normal := rc.get_collision_normal()
     var action: Action = mode.make_action.call(hit_pos, hit_normal)

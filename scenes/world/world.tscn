@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" uid="uid://nqorq1p6ak5q" path="res://scenes/player/player.tscn" id="1_dphjl"]
 [ext_resource type="Script" uid="uid://cel7053sndciw" path="res://scripts/structural_integrity.gd" id="2_sl2e5"]
-[ext_resource type="Script" path="res://scenes/world/world.gd" id="3_world"]
+[ext_resource type="Script" uid="uid://b4i4mra3l3xuj" path="res://scenes/world/world.gd" id="3_world"]
 [ext_resource type="Shader" uid="uid://dsnpq62xvnod6" path="res://scripts/shaders/terrain.gdshader" id="4_terrain_shader"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_4rhad"]
@@ -37,7 +37,7 @@ shader_parameter/grass_color = Color(0.35, 0.55, 0.22, 1)
 shader_parameter/dirt_color = Color(0.42, 0.32, 0.2, 1)
 shader_parameter/slope_dirt_max = 0.3650000173375
 shader_parameter/slope_grass_min = 0.7590000360525
-shader_parameter/wave_scale = 1.4260000670364799
+shader_parameter/wave_scale = 1.42600006703648
 shader_parameter/wave_speed = 0.698000033155
 shader_parameter/wave_amount = 0.4
 shader_parameter/hue_amount = 0.18

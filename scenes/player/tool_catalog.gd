@@ -1,24 +1,34 @@
-class_name EditModeCatalog
+class_name ToolCatalog
 extends RefCounted
 
-const SPHERE_RADIAL_SEGMENTS := 16
-const SPHERE_RINGS           :=  8
+# Three top-level tools, each holding a list of activity EditModes:
+#   None         — probe-only
+#   Landscape    — Dig, Fill, Flatten, Raise, Lower, FillVoxel, EmptyVoxel
+#   Construction — Build, Remove
 
-var modes: Array[EditMode] = []
+var tools: Array[Tool] = []
 
 
 func _init(action_factories: ActionFactories, build_state: BuildState) -> void:
-    modes = _build_catalog(action_factories, build_state)
+    tools = _build_catalog(action_factories, build_state)
 
 
-# Lambdas below close over the local `af`, `bs` and mesh/material vars rather
-# than over `self`. Capturing self would create a cycle
-# (catalog → modes → EditMode → Callable → catalog) that prevents the
-# RefCounted catalog from freeing when the player exits the tree.
-func _build_catalog(af: ActionFactories, bs: BuildState) -> Array[EditMode]:
+# Lambdas below close over the local `af`, `bs` and mesh/material vars
+# rather than over `self`. Capturing self would create a cycle that
+# prevents the RefCounted catalog from freeing when the player exits.
+func _build_catalog(af: ActionFactories, bs: BuildState) -> Array[Tool]:
     var build_mat := _make_preview_material(Color(1.0, 1.0, 0.5, 0.4))
 
-    return [
+    var none_activities: Array[EditMode] = [
+        EditMode.new()                                            \
+            .named("Probe")                                       \
+            .on_make_action(af.make_probe)                        \
+            .preview_mesh(    func(_hp, _hn): return null)        \
+            .preview_material(func(_hp, _hn): return null)        \
+            .preview_position(func( hp, _hn): return hp),
+    ]
+
+    var landscape_activities: Array[EditMode] = [
         EditMode.new()                                            \
             .named("Dig")                                         \
             .on_make_action(af.make_dig)                          \
@@ -40,6 +50,36 @@ func _build_catalog(af: ActionFactories, bs: BuildState) -> Array[EditMode]:
             .preview_material(func(_hp, _hn): return null)        \
             .preview_position(func( hp, _hn): return hp),
 
+        EditMode.new()                                            \
+            .named("Raise")                                       \
+            .on_make_action(af.make_raise)                        \
+            .preview_mesh(    func(_hp, _hn): return null)        \
+            .preview_material(func(_hp, _hn): return null)        \
+            .preview_position(func( hp, _hn): return hp),
+
+        EditMode.new()                                            \
+            .named("Lower")                                       \
+            .on_make_action(af.make_lower)                        \
+            .preview_mesh(    func(_hp, _hn): return null)        \
+            .preview_material(func(_hp, _hn): return null)        \
+            .preview_position(func( hp, _hn): return hp),
+
+        EditMode.new()                                            \
+            .named("FillVoxel")                                   \
+            .on_make_action(af.make_fill_voxel)                   \
+            .preview_mesh(    func(_hp, _hn): return null)        \
+            .preview_material(func(_hp, _hn): return null)        \
+            .preview_position(func( hp, _hn): return hp),
+
+        EditMode.new()                                            \
+            .named("EmptyVoxel")                                  \
+            .on_make_action(af.make_empty_voxel)                  \
+            .preview_mesh(    func(_hp, _hn): return null)        \
+            .preview_material(func(_hp, _hn): return null)        \
+            .preview_position(func( hp, _hn): return hp),
+    ]
+
+    var construction_activities: Array[EditMode] = [
         EditMode.new()                                                                          \
             .named("Build")                                                                     \
             .on_make_action(af.make_construction)                                               \
@@ -54,6 +94,12 @@ func _build_catalog(af: ActionFactories, bs: BuildState) -> Array[EditMode]:
             .preview_mesh(    func(_hp, _hn): return null)      \
             .preview_material(func(_hp, _hn): return null)      \
             .preview_position(func( hp, _hn): return hp),
+    ]
+
+    return [
+        Tool.new("None",         none_activities),
+        Tool.new("Landscape",    landscape_activities),
+        Tool.new("Construction", construction_activities),
     ]
 
 

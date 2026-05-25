@@ -134,7 +134,7 @@ falling-debris-integrates-with-terrain all working. Recent landings:
 | ID | State | Notes |
 |----|-------|-------|
 | 2c | Closed | Player fall-through fixed via `Action.validate()` refusal |
-| 2a | Deferred | Flatten clears only one sheet above — cosmetic; deferred until building system replaces flatten |
+| 2a | Closed | Closed by the Phase 5.5b2 column-based flatten — each lateral column now cuts up to the reachable air within radius, not a single sheet |
 
 ### Architectural commitments worth not re-litigating
 
@@ -340,6 +340,16 @@ items in git history; commit hashes in parentheses where useful.
   supporter` checks the cell below. Likely a coordinate-snap edge in
   the footprint math; defer until the part-placement-controls work
   needs it.
+- **Phantom strained voxels survive deregistration.** Observed after
+  filling and re-digging a mound: stress visualization showed strain
+  in cells with no actual dirt. Rebuilding the mound to include the
+  phantoms and then carving them loose did not bring them down —
+  strain propagation appears to skip cells whose tracked records
+  lingered past their SDF removal. Suspect: an event-ordering bug
+  where `voxel_removed` reaches some subscribers but not the dirty-
+  queue / strain pipeline. Keep an eye out during the tools refactor
+  and any future event-bus work — likely surfaces somewhere along
+  the FillVoxel/EmptyVoxel/dig path.
 - **Obscured stress-overlay overlay slightly tints visible cells too.**
   When `H` is on, the obscured-pass corner brackets render
   unconditionally (no_depth_test), so visible cells get a faint

@@ -1,14 +1,16 @@
 extends CharacterBody3D
 
-var _movement:          PlayerMovement
-var _camera_rig:        CameraRig
-var build_state:        BuildState
-var action_factories:   ActionFactories
-var edit_modes_catalog: EditModeCatalog
-var _grid_overlay:      Node3D
-var _preview_renderer:  Node3D
+var _movement:         PlayerMovement
+var _camera_rig:       CameraRig
+var build_state:       BuildState
+var action_factories:  ActionFactories
+var tool_catalog:      ToolCatalog
+var _grid_overlay:     Node3D
+var _preview_renderer: Node3D
 
-var edit_mode_index: int  = 0
+var tool_index:        int       = 0
+var _activity_indices: Array[int] = []   # remembered per tool
+
 var wireframe_enabled := false
 
 var _key_actions:          Dictionary
@@ -24,19 +26,17 @@ var _mouse_button_actions: Dictionary
 
 const EDIT_REACH := 20.0
 
-# Free-placement chord (Build mode only): hold Shift + (W|A|E), scroll wheel.
-# W = view-forward axis, A = view-lateral axis, E = view-up axis. Wheel up
-# moves the part in the positive direction of the held letter; wheel down,
-# the opposite. Each tick is WHEEL_STEP metres.
+# Free-placement chord (Build only): hold Shift + (W|A|E), scroll wheel.
 const WHEEL_STEP := 0.05
 
 
 func _ready() -> void:
-    _movement          = PlayerMovement.new(self)
-    _camera_rig        = CameraRig.new(self, $Head)
-    build_state        = BuildState.new()
-    action_factories   = ActionFactories.new(self, terrain, integrity, camera, raycast, build_state)
-    edit_modes_catalog = EditModeCatalog.new(action_factories, build_state)
+    _movement         = PlayerMovement.new(self)
+    _camera_rig       = CameraRig.new(self, $Head)
+    build_state       = BuildState.new()
+    action_factories  = ActionFactories.new(self, terrain, integrity, camera, raycast, build_state)
+    tool_catalog      = ToolCatalog.new(action_factories, build_state)
+    _activity_indices.resize(tool_catalog.tools.size())   # all zero
     build_state.changed.connect(_update_mode_label)
 
     _grid_overlay = preload("res://scenes/player/voxel_grid_overlay.gd").new()
@@ -55,7 +55,7 @@ func _ready() -> void:
     raycast.target_position = Vector3(0, 0, -EDIT_REACH)
 
     _key_actions = {
-        KEY_TAB:          _cycle_edit_mode,
+        KEY_TAB:          _cycle_tool,
         KEY_Q:            _quit_game,
         KEY_F:            _toggle_wireframe,
         KEY_V:            _toggle_debug_visuals,
@@ -69,6 +69,15 @@ func _ready() -> void:
         KEY_H:            _toggle_obscured_stress,
         KEY_F5:           _save_game,
         KEY_F9:           _load_game,
+        KEY_1:            _select_activity.bind(0),
+        KEY_2:            _select_activity.bind(1),
+        KEY_3:            _select_activity.bind(2),
+        KEY_4:            _select_activity.bind(3),
+        KEY_5:            _select_activity.bind(4),
+        KEY_6:            _select_activity.bind(5),
+        KEY_7:            _select_activity.bind(6),
+        KEY_8:            _select_activity.bind(7),
+        KEY_9:            _select_activity.bind(8),
     }
 
     _mouse_button_actions = {
@@ -78,16 +87,21 @@ func _ready() -> void:
     _update_mode_label()
 
 
-# Deferred because StructuralIntegrity (sibling Node, later in the scene
-# tree) constructs its `debug` and `part_support` components in *its*
-# _ready, after Player._ready.
+# Deferred because StructuralIntegrity constructs its `debug` and
+# `part_support` components in *its* _ready, after Player._ready.
 func _wire_debug_raycast() -> void:
     integrity.debug.raycast        = raycast
     integrity.part_support.raycast = raycast
 
 
-func current_mode() -> EditMode:
-    return edit_modes_catalog.modes[edit_mode_index]
+func current_tool() -> Tool:
+    return tool_catalog.tools[tool_index]
+
+func current_activity() -> EditMode:
+    var t := current_tool()
+    if t.activities.is_empty():
+        return null
+    return t.activities[_activity_indices[tool_index]]
 
 
 # --- Input dispatch ---
@@ -126,7 +140,8 @@ func _handle_placement_wheel(event: InputEventMouseButton) -> bool:
         return false
     if not Input.is_key_pressed(KEY_SHIFT):
         return false
-    if current_mode().mode_name != "Build":
+    var activity := current_activity()
+    if activity == null or activity.mode_name != "Build":
         return false
     var axis := _placement_chord_axis()
     if axis == Vector3.ZERO:
@@ -135,13 +150,11 @@ func _handle_placement_wheel(event: InputEventMouseButton) -> bool:
     build_state.adjust_offset(axis * step)
     return true
 
-# Maps the currently-held chord letter to a world-space direction vector,
-# in the camera's frame. Wheel-up moves the part in that direction.
 func _placement_chord_axis() -> Vector3:
     var cam_basis := camera.global_transform.basis
-    if Input.is_key_pressed(KEY_W):   return -cam_basis.z   # forward (away from camera)
-    if Input.is_key_pressed(KEY_A):   return -cam_basis.x   # left (camera left)
-    if Input.is_key_pressed(KEY_E):   return  cam_basis.y   # up (camera up)
+    if Input.is_key_pressed(KEY_W):   return -cam_basis.z
+    if Input.is_key_pressed(KEY_A):   return -cam_basis.x
+    if Input.is_key_pressed(KEY_E):   return  cam_basis.y
     return Vector3.ZERO
 
 
@@ -156,9 +169,12 @@ func _physics_process(delta: float) -> void:
 func _try_edit_terrain() -> void:
     if not raycast.is_colliding():
         return
+    var activity := current_activity()
+    if activity == null:
+        return
     var hit_pos    := raycast.get_collision_point()
     var hit_normal := raycast.get_collision_normal()
-    var action: Action = current_mode().make_action.call(hit_pos, hit_normal)
+    var action: Action = activity.make_action.call(hit_pos, hit_normal)
     if action == null:
         return
     if action.validate():
@@ -166,19 +182,35 @@ func _try_edit_terrain() -> void:
         build_state.reset_offset()
 
 
-# --- Mode UI ---
+# --- Tool / activity UI ---
 
-func _cycle_edit_mode() -> void:
-    edit_mode_index = (edit_mode_index + 1) % edit_modes_catalog.modes.size()
+func _cycle_tool() -> void:
+    tool_index = (tool_index + 1) % tool_catalog.tools.size()
+    build_state.reset_offset()
+    _update_mode_label()
+
+func _select_activity(idx: int) -> void:
+    var t := current_tool()
+    if idx < 0 or idx >= t.activities.size():
+        return
+    _activity_indices[tool_index] = idx
     build_state.reset_offset()
     _update_mode_label()
 
 func _update_mode_label() -> void:
-    var mode := current_mode()
-    if mode.mode_name == "Build":
-        mode_label.text = "%s: %s (%s)" % [mode.mode_name, build_state.part_name(), build_state.current_material()]
-    else:
-        mode_label.text = mode.mode_name
+    var lines: Array[String] = []
+    var t        := current_tool()
+    var activity := current_activity()
+    if activity != null and activity.mode_name == "Build":
+        lines.append("Material: %s" % build_state.current_material())
+        lines.append("Part:     %s" % build_state.part_name())
+    if activity != null:
+        lines.append("Activity: %s" % activity.mode_name)
+    lines.append("Tool:     %s" % t.name)
+    mode_label.text = "\n".join(lines)
+
+
+# --- Other toggles ---
 
 func _toggle_debug_visuals() -> void:
     integrity.set_debug_visuals_enabled(not integrity.debug_visuals_enabled)

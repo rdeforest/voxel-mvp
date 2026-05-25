@@ -15,7 +15,10 @@ func _process(_delta: float) -> void:
     var hit_pos    := rc.get_collision_point()
     var hit_normal := rc.get_collision_normal()
 
-    var mode: EditMode = player.current_mode()
+    var mode: EditMode = player.current_activity()
+    if mode == null:
+        visible = false
+        return
 
     mesh              = mode.get_preview_mesh.call(hit_pos, hit_normal)
     material_override = mode.get_preview_material.call(hit_pos, hit_normal)

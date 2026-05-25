@@ -37,12 +37,26 @@ func _on_terrain_sdf_changed(event: TerrainSdfChangedEvent) -> void:
     var vt := terrain.get_voxel_tool()
     vt.channel = VoxelBuffer.CHANNEL_SDF
     for cell in event.cells:
+        var is_solid := vt.get_voxel_f(cell) < VoxelConstants.SDF_SOLID_THRESHOLD
         if voxel_data.has(cell):
+            # Tracked record exists. If the SDF has become air (e.g. via
+            # LowerAction or any other path that didn't explicitly emit
+            # voxel_removed for this cell), drop the record now so we
+            # don't end up with phantoms — tracked cells whose surface
+            # no longer exists.
+            if not is_solid:
+                _remove_voxel(cell)
+                VoxelEventBusSingleton.emit(
+                    VoxelRemovedEvent.CHANNEL,
+                    VoxelRemovedEvent.new(GRID_ID, cell))
+                continue
             if not voxel_data[cell].dirty:
                 voxel_data[cell].dirty = true
                 dirty_queue.append(cell)
             continue
-        if vt.get_voxel_f(cell) >= VoxelConstants.SDF_SOLID_THRESHOLD:
+        # Untracked cell. Register if it's a newly-exposed boundary
+        # (solid with at least one air neighbour).
+        if not is_solid:
             continue
         for neighbor in VoxelUtils.neighbors(cell):
             if vt.get_voxel_f(neighbor) >= VoxelConstants.SDF_SOLID_THRESHOLD:
