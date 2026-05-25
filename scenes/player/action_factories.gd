@@ -50,7 +50,7 @@ func make_removal(_hit_pos: Vector3, _hit_normal: Vector3) -> Action:
     return RemovalAction.new(collider, _integrity)
 
 func make_construction(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
-    var placement_pos := Vector3(roundi(hit_pos.x), floor(hit_pos.y), roundi(hit_pos.z))
+    var placement_pos := hit_pos + _build_state.placement_offset
     var anchor        := Vector3i(roundi(hit_pos.x), floori(hit_pos.y), roundi(hit_pos.z))
     return ConstructionAction.new(
         _build_state.current_part(),

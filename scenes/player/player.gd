@@ -24,6 +24,12 @@ var _mouse_button_actions: Dictionary
 
 const EDIT_REACH := 20.0
 
+# Free-placement chord (Build mode only): hold Shift + (W|A|E), scroll wheel.
+# W = view-forward axis, A = view-lateral axis, E = view-up axis. Wheel up
+# moves the part in the positive direction of the held letter; wheel down,
+# the opposite. Each tick is WHEEL_STEP metres.
+const WHEEL_STEP := 0.05
+
 
 func _ready() -> void:
     _movement          = PlayerMovement.new(self)
@@ -42,9 +48,6 @@ func _ready() -> void:
     get_parent().add_child.call_deferred(_preview_renderer)
 
     _wire_debug_raycast.call_deferred()
-
-func _wire_debug_raycast() -> void:
-    integrity.debug.raycast = raycast
 
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
@@ -75,6 +78,14 @@ func _wire_debug_raycast() -> void:
     _update_mode_label()
 
 
+# Deferred because StructuralIntegrity (sibling Node, later in the scene
+# tree) constructs its `debug` and `part_support` components in *its*
+# _ready, after Player._ready.
+func _wire_debug_raycast() -> void:
+    integrity.debug.raycast        = raycast
+    integrity.part_support.raycast = raycast
+
+
 func current_mode() -> EditMode:
     return edit_modes_catalog.modes[edit_mode_index]
 
@@ -102,19 +113,39 @@ func _on_mouse_button_pressed(event: InputEventMouseButton) -> void:
     if Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
         Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
         return
+    if _handle_placement_wheel(event):
+        return
     if _mouse_button_actions.has(event.button_index):
         _mouse_button_actions[event.button_index].call()
 
+# Returns true if the event was consumed as a placement-adjust wheel tick.
+func _handle_placement_wheel(event: InputEventMouseButton) -> bool:
+    var is_wheel_up   := event.button_index == MOUSE_BUTTON_WHEEL_UP
+    var is_wheel_down := event.button_index == MOUSE_BUTTON_WHEEL_DOWN
+    if not (is_wheel_up or is_wheel_down):
+        return false
+    if not Input.is_key_pressed(KEY_SHIFT):
+        return false
+    if current_mode().mode_name != "Build":
+        return false
+    var axis := _placement_chord_axis()
+    if axis == Vector3.ZERO:
+        return false
+    var step := WHEEL_STEP if is_wheel_up else -WHEEL_STEP
+    build_state.adjust_offset(axis * step)
+    return true
+
+# Maps the currently-held chord letter to a world-space direction vector,
+# in the camera's frame. Wheel-up moves the part in that direction.
+func _placement_chord_axis() -> Vector3:
+    var cam_basis := camera.global_transform.basis
+    if Input.is_key_pressed(KEY_W):   return -cam_basis.z   # forward (away from camera)
+    if Input.is_key_pressed(KEY_A):   return -cam_basis.x   # left (camera left)
+    if Input.is_key_pressed(KEY_E):   return  cam_basis.y   # up (camera up)
+    return Vector3.ZERO
+
 
 # --- Per-frame ---
-
-func _process(_delta: float) -> void:
-    var hovered: Node3D = null
-    if raycast.is_colliding():
-        var collider := raycast.get_collider() as Node3D
-        if collider != null and integrity.has_part(collider):
-            hovered = collider
-    integrity.set_hovered_part(hovered)
 
 func _physics_process(delta: float) -> void:
     _movement.tick(delta)
@@ -132,12 +163,14 @@ func _try_edit_terrain() -> void:
         return
     if action.validate():
         action.execute()
+        build_state.reset_offset()
 
 
 # --- Mode UI ---
 
 func _cycle_edit_mode() -> void:
     edit_mode_index = (edit_mode_index + 1) % edit_modes_catalog.modes.size()
+    build_state.reset_offset()
     _update_mode_label()
 
 func _update_mode_label() -> void:

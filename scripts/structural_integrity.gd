@@ -65,9 +65,6 @@ func has_part(node: Node3D) -> bool:
 func has_part_cell(pos: Vector3i) -> bool:
     return part_support.has_part_cell(pos)
 
-func set_hovered_part(node: Node3D) -> void:
-    part_support.set_hovered_part(node)
-
 
 # --- Debug ---
 

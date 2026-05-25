@@ -17,11 +17,19 @@ func tick(delta: float) -> void:
     if not _body.is_on_floor():
         _body.velocity.y -= _gravity * delta
 
-    if Input.is_action_just_pressed("ui_accept") and _body.is_on_floor():
+    # Shift is reserved as a modifier for input chords (e.g. placement
+    # adjustment in Build mode). When Shift is held we don't read the
+    # WASD-bound movement inputs at all — Shift+W is a distinct input,
+    # not "walk forward AND something else."
+    var chord_active := Input.is_key_pressed(KEY_SHIFT)
+
+    if not chord_active and Input.is_action_just_pressed("ui_accept") and _body.is_on_floor():
         _body.velocity.y = JUMP_VELOCITY
 
-    var input_dir := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
-    var direction := (_body.transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
+    var direction := Vector3.ZERO
+    if not chord_active:
+        var input_dir := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
+        direction = (_body.transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
 
     if direction:
         _body.velocity.x = direction.x * SPEED

@@ -68,10 +68,11 @@ static func _make_preview_material(color: Color) -> StandardMaterial3D:
 
 # Centered BoxMesh preview: the rotated mesh's Y centroid sits at the
 # MeshInstance3D's global_position.y. Lift it so the rotated bottom face
-# lands at the hit point.
+# lands at hit_pos + placement_offset (free placement; no cell snap).
 static func _compute_build_preview_position(hp: Vector3, bs: BuildState) -> Vector3:
     var part      := bs.current_part()
     var rot_basis := bs.rotation_basis()
     var aabb      := AABB(-part.dimensions * 0.5, part.dimensions)
     var rotated   := Transform3D(rot_basis, Vector3.ZERO) * aabb
-    return Vector3(roundi(hp.x), hp.y + rotated.size.y * 0.5, roundi(hp.z))
+    var base      := hp + bs.placement_offset
+    return Vector3(base.x, base.y + rotated.size.y * 0.5, base.z)

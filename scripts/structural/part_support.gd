@@ -1,15 +1,21 @@
 class_name PartSupport
 extends RefCounted
 
-const NO_SUPPORT   = 0.0
-const FULL_SUPPORT = 1.0
-const GRID_ID      = 0
+const NO_SUPPORT       = 0.0
+const FULL_SUPPORT     = 1.0
+const GRID_ID          = 0
+
+# Stress emission visibility: parts only glow when the cursor is within
+# PROXIMITY_RADIUS of any of the part's cells, OR support has dropped to
+# the always-show threshold (orange tier or worse). Matches IntegrityDebug.
+const PROXIMITY_RADIUS := 6.0
+const ALWAYS_SHOW_MAX  := 0.30
 
 var part_registry:    Dictionary[Node3D, PartData] = {}
 var _cell_to_part:    Dictionary                   = {}
 var _part_strain:     Dictionary                   = {}
-var _hovered_part:    Node3D                       = null
 
+var raycast:          RayCast3D                       # set externally (player._wire_debug_raycast)
 var _terrain_support: TerrainSupport
 var _facade:          Node
 
@@ -74,32 +80,42 @@ func best_support_at(cell: Vector3i) -> float:
         best = maxf(best, part_registry[part_node].support)
     return best
 
-func set_hovered_part(node: Node3D) -> void:
-    _hovered_part = node
-
 
 # --- Per-frame ---
 
 func tick_strain(delta: float, pulse: float) -> void:
     _recompute_part_support()
 
+    var pointer     := Vector3.ZERO
+    var has_pointer := false
+    if raycast != null and raycast.is_colliding():
+        pointer     = raycast.get_collision_point()
+        has_pointer = true
+
     var to_collapse: Array = []
     for node in part_registry:
-        var data    := part_registry[node]
-        var hovered := node == _hovered_part
+        var data         := part_registry[node]
+        var near_pointer := has_pointer and _is_part_near_pointer(data, pointer)
         if data.support > VoxelConstants.FALL_THRESHOLD:
             _part_strain.erase(node)
-            _apply_visual(node, data.support, 0.0, 0.0, hovered)
+            _apply_visual(node, data.support, 0.0, 0.0, near_pointer)
         elif data.in_limbo:
-            _apply_visual(node, data.support, 0.0, 0.0, hovered)
+            _apply_visual(node, data.support, 0.0, 0.0, near_pointer)
         else:
             _part_strain[node]   = _part_strain.get(node, 0.0) + delta
             var progress: float  = _part_strain[node] / VoxelConstants.STRAIN_DURATION_SEC
-            _apply_visual(node, data.support, progress, pulse, hovered)
+            _apply_visual(node, data.support, progress, pulse, near_pointer)
             if _part_strain[node] >= VoxelConstants.STRAIN_DURATION_SEC:
                 to_collapse.append(node)
     for node in to_collapse:
         _collapse_part(node)
+
+func _is_part_near_pointer(data: PartData, pointer: Vector3) -> bool:
+    var r2 := PROXIMITY_RADIUS * PROXIMITY_RADIUS
+    for cell in data.cells:
+        if (Vector3(cell) + Vector3.ONE * 0.5).distance_squared_to(pointer) < r2:
+            return true
+    return false
 
 
 # --- Internals ---
@@ -172,14 +188,14 @@ func _direct_part_supporter(self_node: Node3D, my_cell: Vector3i, my_y: float) -
                 best_node = other
     return best_node
 
-func _apply_visual(node: Node3D, support: float, strain_progress: float, pulse: float, hovered: bool) -> void:
+func _apply_visual(node: Node3D, support: float, strain_progress: float, pulse: float, near_pointer: bool) -> void:
     var data := part_registry[node]
     for child in node.get_children():
         var mi := child as MeshInstance3D
         if mi == null:
             continue
-        var degraded := support < FULL_SUPPORT - VoxelConstants.SUPPORT_EPSILON
-        if not (degraded or strain_progress > 0.0 or hovered):
+        var dangerous := support <= ALWAYS_SHOW_MAX
+        if not (dangerous or strain_progress > 0.0 or near_pointer):
             mi.material_override = null
             continue
         var mat := mi.material_override as StandardMaterial3D

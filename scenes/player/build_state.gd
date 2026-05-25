@@ -15,6 +15,7 @@ var _build_meshes: Array[BoxMesh]    = []
 var _part_index:     int      = 0
 var _material_index: int      = 0
 var rotation:        Vector3i = Vector3i.ZERO
+var placement_offset: Vector3 = Vector3.ZERO   # accumulated by wheel chords; resets on placement / mode change
 
 
 func _init() -> void:
@@ -64,6 +65,12 @@ func rotate_x() -> void:
 func rotate_z() -> void:
     rotation.z = (rotation.z + 1) % 4
     changed.emit()
+
+func adjust_offset(delta: Vector3) -> void:
+    placement_offset += delta
+
+func reset_offset() -> void:
+    placement_offset = Vector3.ZERO
 
 func restore(part_path: String, material: StringName, rot: Vector3i) -> void:
     for i in _parts.size():
