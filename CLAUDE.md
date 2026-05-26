@@ -55,9 +55,11 @@ action.validate() -> bool   # refuses if constraints can't be satisfied
 action.execute()  -> void   # performs the operation
 ```
 
-`EditMode` (`scripts/edit_mode.gd`) is a data object holding callables for one editing mode (Dig, Fill, Flatten, Build, Remove). The `EditModeCatalog` (`scenes/player/edit_mode_catalog.gd`) builds the array of EditModes at player startup, wiring each one's `make_action` callable to an `ActionFactories` (`scenes/player/action_factories.gd`) method. When the player clicks, `player.gd:_try_edit_terrain` calls `current_mode().make_action.call(hit_pos, hit_normal)`, then `validate()` → `execute()`. Targeting logic (raycasting, computing sphere centers, build placement snap) lives inside `ActionFactories`, not inside the Action itself.
+`EditMode` (`scripts/edit_mode.gd`) is a data object holding callables for one *activity* (Dig, Build, etc.). Activities are grouped under `Tool`s (`scripts/tool.gd`) — three of them today: **None**, **Landscape**, **Construction**. The `ToolCatalog` (`scenes/player/tool_catalog.gd`) builds the tool array at player startup, wiring each activity's `make_action` callable to an `ActionFactories` (`scenes/player/action_factories.gd`) method.
 
-New Actions: extend `Action`, implement `validate()` and `execute()`, add a `make_*` factory to `ActionFactories`, and a new `EditMode` entry in `EditModeCatalog._build_catalog()`.
+Input: **Tab** cycles tools; **1..9** picks an activity within the current tool; each tool remembers its last activity. When the player clicks, `player.gd:_try_edit_terrain` calls `current_activity().make_action.call(hit_pos, hit_normal)`, then `validate()` → `execute()`. Targeting logic (raycasting, sphere centers, build placement) lives inside `ActionFactories`, not inside the Action itself.
+
+New Actions: extend `Action`, implement `validate()` / `execute()` / `preview()`, add a `make_*` factory to `ActionFactories`, and a new `EditMode` entry under the appropriate tool in `ToolCatalog._build_catalog()`.
 
 ### Event bus (`scripts/events/`)
 
@@ -97,7 +99,7 @@ StructuralIntegrity (Node, facade)
 └── _collapse_detector: CollapseDetector (peer of terrain_support)
 ```
 
-The facade owns `_physics_process` orchestration, `wake_falling_bodies` (which needs scene-tree access), and `is_quiescent` (for save gating). All other state lives on the components. Mutations come through the bus; the facade only exposes **queries** (`get_support`, `has_part`, `has_part_cell`) and UI hooks (`set_hovered_part`, `set_debug_visuals_enabled`). The bus is subscribed in `_ready` for `terrain_sdf_changed` + `part_removed` so the facade can call `wake_falling_bodies` when the world changes.
+The facade owns `_physics_process` orchestration, `wake_falling_bodies` (which needs scene-tree access), and `is_quiescent` (for save gating). All other state lives on the components. Mutations come through the bus; the facade only exposes **queries** (`get_support`, `has_part`, `has_part_cell`) and one UI hook (`set_debug_visuals_enabled`). The bus is subscribed in `_ready` for `terrain_sdf_changed` + `part_removed` so the facade can call `wake_falling_bodies` when the world changes.
 
 **`TerrainSupport`** (`scripts/structural/terrain_support.gd`) owns `voxel_data: Dictionary[Vector3i, VoxelRecord]`, `dirty_queue`, and `_lowest_registered_y`. Subscribes channel-wide in `_init` to `voxel_added`, `voxel_removed`, and `terrain_sdf_changed`. A worklist fixpoint drains `dirty_queue` (FIFO, BFS-order) at `PROPAGATION_BUDGET` (200) cells per physics frame via `process_dirty_queue()`. `is_natural_terrain(pos)` requires both untracked-solid AND bedrock — the combination grants `FULL_SUPPORT` to neighbours.
 
@@ -105,7 +107,7 @@ Classification cascade in `_support_from_neighbor` (priority order): tracked vox
 
 Emits `voxel_support_changed` via the bus when a voxel's recalculated support changes meaningfully. `CollapseDetector` subscribes and uses the event for strain-rewind on support increases.
 
-**`PartSupport`** (`scripts/structural/part_support.gd`) owns `part_registry: Dictionary[Node3D, PartData]`, `_cell_to_part`, `_part_strain`, `_hovered_part`. Part support is recomputed fresh each physics frame in `tick_strain(delta, pulse)`: sort parts ascending by `placement_y`, then for each part find its **direct supporter** (the part with the highest `placement_y < mine` in the part's own cell or the cell below). Direct terrain contact short-circuits to `FULL_SUPPORT`. Tall parts (multi-cell Y span from non-Y rotation) only check support from the bottom row of footprint cells (`_min_y(cells)`).
+**`PartSupport`** (`scripts/structural/part_support.gd`) owns `part_registry: Dictionary[Node3D, PartData]`, `_cell_to_part`, `_part_strain`. Part support is recomputed fresh each physics frame in `tick_strain(delta, pulse)`: sort parts ascending by `placement_y`, then for each part find its **direct supporter** (the part with the highest `placement_y < mine` in the part's own cell or the cell below). Direct terrain contact short-circuits to `FULL_SUPPORT`. Tall parts (multi-cell Y span from non-Y rotation) only check support from the bottom row of footprint cells (`_min_y(cells)`). Holds a `raycast` reference (set by player); stress emission only renders when the cursor is within 6m of a part's cells *or* its support has fallen below 0.30 (orange tier).
 
 `PartData.in_limbo` is true when any dependency hasn't settled. `tick_strain` skips strain accumulation while in-limbo.
 
@@ -134,13 +136,13 @@ Detailed mechanism rationale (in-limbo, lazy-expansion bounds, strain rewind, pa
 
 `player.gd` (a `CharacterBody3D` Node) composes five `RefCounted` helpers:
 
-- `PlayerMovement` (`movement.gd`) — gravity, jump, WASD via `tick(delta)`.
+- `PlayerMovement` (`movement.gd`) — gravity, jump, WASD via `tick(delta)`. Shift suppresses horizontal movement (chord modifier).
 - `CameraRig` (`camera_rig.gd`) — mouse motion, head/body rotation.
-- `BuildState` (`build_state.gd`) — selected part, material, rotation. Emits `changed()` so the mode label updates.
-- `ActionFactories` (`action_factories.gd`) — `make_dig/fill/flatten/construction/removal` plus `get_flatten_normal`. Holds `EDIT_RADIUS` const.
-- `EditModeCatalog` (`edit_mode_catalog.gd`) — builds the EditMode array at startup, wiring factory callbacks. Lambdas inside `_build_catalog` deliberately close over local parameters (`af`, `bs`) and local mesh/material vars rather than `self`, to avoid catalog ↔ Callable cycles that would leak meshes at exit.
+- `BuildState` (`build_state.gd`) — selected part, material, rotation, `placement_offset`. Emits `changed()` so the HUD label updates.
+- `ActionFactories` (`action_factories.gd`) — one `make_*` per activity (probe, dig, fill, flatten, raise, lower, fill_voxel, empty_voxel, construction, removal). Holds `EDIT_RADIUS`.
+- `ToolCatalog` (`tool_catalog.gd`) — builds the `Tool` array (None / Landscape / Construction), each tool holding its activity `EditMode`s. Lambdas inside `_build_catalog` close over local parameters (`af`, `bs`) rather than `self`, to avoid catalog ↔ Callable cycles that would leak meshes at exit.
 
-`player.gd` keeps: `@onready` node references, input dispatch dicts (`_key_actions`, `_mouse_button_actions`), `_process` hover detection, `_physics_process` movement delegation, `_try_edit_terrain`, and mode UI (label update, cycle, wireframe/debug toggles, quit).
+`player.gd` state: `tool_index: int` plus `_activity_indices: Array[int]` (one per tool — last-activity memory). `current_tool()` and `current_activity()` are the accessors. Input dispatch dicts (`_key_actions`, `_mouse_button_actions`) and `_handle_placement_wheel` route Shift+W/A/E + wheel into `build_state.adjust_offset` for free part placement.
 
 ### Parts (`scripts/schematics/`, `assets/parts/`)
 
@@ -150,9 +152,9 @@ Current catalog (`assets/parts/<name>/<name>.tres`): board, plank, stud, beam �
 
 Multi-axis rotation: `ConstructionAction.rotation: Vector3i` (0–3 per axis). Rotation is around the body's local origin (the unrotated bottom-center); after rotation, the instance is shifted so the rotated bottom lands at `placement_pos.y` and the rotated horizontal centroid sits over `placement_pos.x/.z`. Use `Transform3D(basis, Vector3.ZERO) * aabb` for AABB rotation (Godot doesn't define `Basis * AABB`).
 
-**Placement snap:** `_make_construction_action` snaps `placement_pos.y = floor(hit_pos.y)`. Parts always sit on cell Y-boundaries — avoids the "click on a slope, part floats above the surface" case where XZ rounding moved the placement away from the actual hit surface.
+**Placement is free** along all three axes — `ConstructionAction.placement_pos = hit_pos + BuildState.placement_offset`. The offset accumulates from Shift+W/A/E + wheel ticks (camera-relative axes, WHEEL_STEP = 0.05m). The offset resets on each successful placement and on tool cycle.
 
-Player controls in Build mode: `[`/`]` cycle parts, `R` rotates around Y, `T` rotates around X, `Y` rotates around Z, `M` cycles material.
+Player controls in **Construction → Build** activity: `[`/`]` cycle parts, `R/T/Y` rotate around Y/X/Z, `M` cycles material, Shift+W/A/E + wheel adjusts offset. Shift+key always suppresses the underlying WASD movement key — Shift+W is a distinct input from W, not "walk + something."
 
 **Debug overlays:**
 - `V` toggles the stress overlay (`IntegrityDebug`). Two-pass renderer: visible-pass wireframe outlines (depth-tested), obscured-pass corner-bracket markers (no depth test, off until `H`). Cells with `support > 0.30` only render within 6m of the raycast hit; cells `≤ 0.30` always render so failures are never hidden.
@@ -183,14 +185,23 @@ Player controls in Build mode: `[`/`]` cycle parts, `R` rotates around Y, `T` ro
 - **Wake-on-mutate.** `wake_falling_bodies()` is bus-triggered: `StructuralIntegrity` subscribes to `terrain_sdf_changed` and `part_removed`. SDF terrain edits don't signal contact-change to the physics engine, so resting `RigidBody3D`s need an explicit nudge.
 - **Strain timer accumulates against physics `delta`** (not wall-clock), so it pauses correctly when the tree is paused.
 - **Typed dicts (`Dictionary[K, V]`)** for `part_registry`, `voxel_data`, `_voxel_to_pending`. Plain `Dictionary` poisons inferred types from iteration (`for x in dict` makes `x` Variant).
-- **Helper lambdas capture local refs, not `self`.** When a `RefCounted` class holds an `Array[Callable]` whose Callables reference instance fields, the implicit `self` capture forms a cycle. Pass dependencies as parameters and let lambdas close over the locals. See `EditModeCatalog._build_catalog` for the pattern.
+- **Helper lambdas capture local refs, not `self`.** When a `RefCounted` class holds an `Array[Callable]` whose Callables reference instance fields, the implicit `self` capture forms a cycle. Pass dependencies as parameters and let lambdas close over the locals. See `ToolCatalog._build_catalog` for the pattern.
 - **Cycle break in `_exit_tree`.** `StructuralIntegrity._exit_tree` calls `terrain_support.bind_part_support(null)` to break the `TerrainSupport ↔ PartSupport` reference cycle. Bus subscriptions auto-clean via WeakRef once the components' refcounts drop to zero.
 
-### Persistence (`scripts/persistence/`, `scripts/world.gd`)
+### Persistence (`scripts/persistence/`, `scenes/world/world.gd`)
 
-- **Terrain SDF**: continuous via `VoxelStreamSQLite` wired into `world.tscn` at `user://saves/world.db`. The terrain stream persists edited blocks against the procedural generator automatically.
-- **Snapshot**: F5 saves `user://saves/world.snapshot` (typed-event-serialized via `var_to_str`); F9 reloads the scene. Save is gated on `StructuralIntegrity.is_quiescent()` — dirty queue empty, collapse detector idle, no awake `RigidBody3D` children — so the saved state is settled.
-- **Restore path**: `world.gd:_ready` calls `WorldSnapshot.load_into` if the snapshot file exists. Tracked voxels are restored with their saved support via `TerrainSupport.restore_voxel` (bypasses propagation queue — the saved values were captured while quiescent, and re-propagating against not-yet-streamed-in SDF blocks would briefly drop everything to NO_SUPPORT). Parts are restored by emitting `part_added` on the bus.
+- **Terrain SDF**: continuous via `VoxelStreamSQLite` wired into `world.tscn` at `user://saves/world.db`. The stream persists edited blocks against the procedural generator automatically.
+- **Snapshot**: F5 saves `user://saves/world.snapshot` (V4 schema, `var_to_str`-serialised); F9 reloads the scene. Save is gated on `StructuralIntegrity.is_quiescent()` — dirty queue empty, collapse detector idle, no awake `RigidBody3D` children — so the saved state is settled. The snapshot includes tracked voxels (with restored support), placed parts, player state, **shader tunables**, and **tool/activity indices**.
+- **Restore path**: `world.gd:_ready` calls `WorldSnapshot.load_into` if the snapshot exists. Tracked voxels skip the propagation queue (saved values were captured while quiescent). Parts are restored by emitting `part_added` on the bus.
+- **Version check is asymmetric**: newer-than-known schemas are rejected; older ones load with missing fields defaulted. So V2/V3 saves still load in V4 code, just without tunables / tool state.
+
+### In-game console (Limbo Console)
+
+`addons/limbo_console` is a git submodule pinned to v0.7.0. The `LimboConsole` autoload (set in `project.godot`) provides the runtime; `~` toggles. Commands are registered in `scenes/world/world.gd:_register_console_commands` — currently `set` (write a float shader uniform), `reset` (rewind to procedural defaults without touching save files), `quiescent`, `parts`, `voxels`, `tp`, `quit_game`.
+
+**Reset semantics**: sets a `static var WorldSnapshot.reset_pending = true` flag (survives scene reload), then reloads the scene. World's `_enter_tree` sees the flag and detaches the SQLite stream so procedural terrain regenerates; `_ready` skips the snapshot load and clears the flag. F9 afterwards still restores the save normally.
+
+**Known annoyance**: the Godot editor sometimes rewrites the `LimboConsole=` autoload entry in `project.godot` from `*res://addons/limbo_console/limbo_console.gd` to `*uid://...`, but the headless runtime can't resolve that UID (the addon was added via submodule and its UID isn't in `.godot/uid_cache.bin`). If runtime starts failing with `Nonexistent function 'register_command' in base 'Nil'`, fix is to swap the line back to the path form.
 
 ## Project State
 

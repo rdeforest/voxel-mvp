@@ -8,95 +8,63 @@
 
 ## Resumption Brief
 
-*Last updated: Phase 5.5b3 (voxel-aware preview) and the stress-
-indicator overhaul are both landed. Bus identifiers cleaned up
-(`VoxelEventBusType` class + `VoxelEventBusSingleton` autoload) to
-satisfy GDScript LSP. Next: new verbs (Raise/Lower/FillVoxel/
-EmptyVoxel) or free part placement.*
+*Last updated: Tools/activities UI overhaul, Limbo Console with
+seven commands, four new verbs (Raise/Lower/FillVoxel/EmptyVoxel),
+grass shader, free part placement, part-stress proximity
+visibility, and the phantom-voxel deregistration fix are all in.*
 
-**Where you are:** v0.0 demo + persistence + bus + honest flatten +
-falling-debris-integrates-with-terrain all working. Recent landings:
+**Where you are:** Construction + landscaping have reached a
+"tantalizingly close to genuinely useful" point. Recent landings
+(see Done list for the full chronological list):
 
-- **Phase 5.5b1+b2** (commit `15308bd`). `AdditiveAction` base class
-  declares the bury-relevant verbs (Fill/Flatten/Construction).
-  `FlattenAction` rewritten with column-based work computation:
-  cells in the cut box are bucketed by their lateral projection onto
-  the plane; each column's +N side cuts only if it reaches existing
-  air within radius, -N side fills only if it reaches existing solid
-  within radius. Refuses silently if no column has work. Box is now
-  symmetric around the plane point. Per-cell player-endanger check
-  catches "you'd cut my support" before "you'd bury me," fixing
-  the slope-fall-through case.
-
-- **Fallen-dirt-as-terrain** (this session). Falling rigid bodies
-  now classify themselves each physics tick by sampling SDF at each
-  of their original cells' current world positions. Three outcomes:
-  free (default — sleeps when at rest), partially buried (`freeze =
-  true` to lock in place; reclassifies each tick so a later dig
-  un-freezes them), fully buried (emit `voxel_added` per cell, free
-  the body). `FillAction` freezes overlapping bodies *before* the
-  SDF mutation lands so physics doesn't squirt them sideways. The
-  RigidBody3D refusal in `FillAction.validate` is gone — fills into
-  bodies are now valid, the burial system handles the integration.
-
-- **Voxel grid overlay** (this session). G toggles a wireframe
-  display of the targeted cell and its Chebyshev neighborhood (3
-  shells out, 7³ = 343 cubes), drawn via ImmediateMesh.
+- Tools/activities UI. Tab cycles three Tools (None / Landscape /
+  Construction); 1-9 picks the activity within. Each tool remembers
+  its last activity. None.Probe prints SDF + tracked + support state
+  to the in-game console — useful for the phantom-strain class of
+  bug.
+- Limbo Console as a git submodule (pinned v0.7.0) plus seven
+  starter commands: `set`, `reset`, `quiescent`, `parts`, `voxels`,
+  `tp`, `quit_game`. Backtick toggles. `reset` rewinds to procedural
+  defaults without touching the save files; F9 still restores.
+- Four new verbs in `scripts/actions/`: Raise / Lower (bell-shaped
+  brushes), FillVoxel / EmptyVoxel (surgical single-cell).
+- Free part placement: drop the cell-snap; Shift+W/A/E + wheel
+  adjusts the offset along view axes. Shift suppresses WASD
+  movement (Shift+key is a *distinct* input from key alone).
+- Grass shader: slope-based grass/dirt with 4-octave gradient noise
+  driving a wind animation. Uniforms tweakable via the editor's
+  Remote inspector or the `set` console command.
+- Phantom voxels fixed: TerrainSupport's `terrain_sdf_changed`
+  handler now deregisters tracked cells whose SDF has become air,
+  not just registers newly-exposed cells.
 
 19/19 GUT tests pass.
 
 **Pick up here:**
 
-1. **Free part placement (off voxel boundaries).** Robert-flagged
-   as "needs to come soon" — construction is *tantalizingly close to
-   useful*. Currently `placement_pos.y` snaps to `floor(hit_pos.y)`
-   and XZ are `roundi`'d. Needs free placement on all three axes,
-   plus snap-modifier hotkeys for explicit grid alignment when wanted.
-   Pairs with the "rest of part placement control" item.
+1. **Rest of part-placement control.** Free placement landed; what's
+   still wanted: snap-modifier hotkeys for explicit grid alignment,
+   maybe rotation snapping, KSP-style parametric resize. Part
+   placement is *close* to useful; one more polish pass would
+   probably get there.
+2. **Vertical-on-horizontal beam support bug.** Known-limit; the
+   `_direct_part_supporter` cell-below check sometimes misses.
+   Surfaces when the part-placement work needs it.
+3. **Pick-and-stamp plane orientation.** Capture an example wall's
+   plane to reuse for vertical flatten elsewhere. Same primitive
+   supports "make a ramp, keep that plane for the next clicks." v0.2
+   polish.
+4. **Slow-step movement / edge-stop toggle.** Don't accidentally
+   walk off structures you just built.
+5. **Playtester binaries** (Linux/macOS/Windows via GitHub Actions).
+6. **v0.1 gameplay scoping** — see `roadmap.md` Phases 1, 3, 4.
 
-2. **New verbs (Robert's request).** RaiseAction / LowerAction
-   (flatten-like but bell-shaped), FillVoxelAction / EmptyVoxelAction
-   (per-voxel surgical control). Greatly expand creative options.
-
-3. **Grass shader on shallow slopes.** Texture surfaces ≤30° from
-   horizontal, animation-ready for wind. Depth-perception aid during
-   testing. The 5090 won't notice.
-
-4. **Playtester binaries.** Linux + macOS + Windows via GitHub
-   Actions. Not yet started.
-
-5. **v0.1 gameplay scoping.** Phases 1, 3, 4 in `roadmap.md`.
-
-**Architectural status — what's solid, what's known-imperfect:**
-
-- Structural integrity is the load-bearing thesis claim. Still works.
-  Facade composition + bus decoupling means adding a second indexer
-  (building registry, biome map, etc.) is a `subscribe()` call, not
-  a refactor.
-- Parts are parametric (one-line `.tres` for new shapes), multi-axis
-  rotation works, material independently selectable at build time.
-- Physics integration: thin parts use `continuous_cd`, fills refuse on
-  top of RigidBody3Ds, terrain edits wake sleeping bodies via
-  bus subscription.
-- Persistence works: build a structure, F5, F9, structure comes back
-  with correct support. Restore-with-saved-support skips the
-  propagation race against lazy SDF streaming.
-- Construction placement snaps `placement_pos.y` to `floor(hit_pos.y)`
-  so parts always sit on cell Y-boundaries.
-- **Performance is CPU-bound** and observably degrades under heavy
-  digging. The debug-cube viz (V toggle) is the biggest contributor
-  when on; with it off, framerate is smooth. Threading + MultiMesh
-  for debug viz are v0.1 work.
-- **SDF seam matching** still deferred to v0.1+ under the "honest
-  physics interaction" design direction.
-- **Intersecting parts do not mutually support each other.** Cross-beam
-  placement is accepted by `ConstructionAction.validate`, but the new
-  beam only sees support through "cell below," not shared cells.
-  Welding/joining is v0.1.
-- **No performance baseline captured before the bus refactor.** Heavy
-  digging *feels* slightly faster post-refactor but wasn't measured.
-  A small instrumentation pass (Time.get_ticks_usec deltas on
-  action.execute) is cheap insurance for the next refactor.
+**Architectural status:** see the "Architectural commitments" list
+in `roadmap.md` (single source). The summary: structural integrity
+is the load-bearing thesis claim and works; bus decoupling means
+adding a second indexer is a `subscribe()` call; falling-debris
+classifies itself each tick into free/partial/full; persistence
+gates on quiescence and trusts saved support values.
 
 ---
 
@@ -119,11 +87,16 @@ falling-debris-integrates-with-terrain all working. Recent landings:
 | 5.5a — Voxel event bus | Complete (`ee80b63`) | Autoload bus, typed events, WeakRef lifetime |
 | 5.5b1 — AdditiveAction base | Complete (`15308bd`) | Verb classification, shared PLAYER_CLEARANCE |
 | 5.5b2 — Honest flatten | Complete (`15308bd`) | Column-based work, symmetric box, per-cell endanger check |
-| 5.5b3 — Voxel-aware preview UI | Complete (this session) | Per-cell highlighting via Action.preview(); two-pass visible/obscured rendering |
+| 5.5b3 — Voxel-aware preview UI | Complete (`d2b7bbd`) | Per-cell highlighting via Action.preview() |
 | 5.5c — Fracture as mesh extraction | Deferred to v0.2 | per roadmap |
 | 5.5d — Multi-grid foundation | Deferred to v0.2/v0.9 | grid_id carried in payloads from day one |
 | 5.5e — Per-channel non-SDF data | Deferred to v0.2/v0.9 | |
-| Fallen-dirt-as-terrain | Complete (this session) | Falling bodies freeze on partial bury, integrate as tracked SDF on full bury |
+| Fallen-dirt-as-terrain | Complete (`250bf13`) | Falling bodies freeze on partial bury, integrate as tracked SDF on full bury |
+| Free part placement (XYZ) | Complete (`9f2e36a`) | Shift+W/A/E + wheel adjusts offset along view axes |
+| New verbs (Raise/Lower/FillVoxel/EmptyVoxel) | Complete (`3ebf5cf`) | Bell-shape + per-voxel surgical |
+| Tools/activities UI | Complete (`3ebf5cf`) | Tab cycles tools, 1-9 picks activity, per-tool memory |
+| Limbo Console + tunables + reset | Complete (`3ebf5cf`) | Backtick toggles; reset rewinds to procedural without losing saves |
+| Grass shader on shallow slopes | Complete (`eedef27`) | Gradient-noise wind animation |
 
 ### In flight
 
@@ -136,148 +109,60 @@ falling-debris-integrates-with-terrain all working. Recent landings:
 | 2c | Closed | Player fall-through fixed via `Action.validate()` refusal |
 | 2a | Closed | Closed by the Phase 5.5b2 column-based flatten — each lateral column now cuts up to the reachable air within radius, not a single sheet |
 
-### Architectural commitments worth not re-litigating
+### Architectural commitments
 
-- **Track Godot 4.6-stable + godot_voxel v1.6.** Pinned in `tools/versions.env`.
-- **Double-precision godot_voxel build from day one.** Non-retrofittable.
-- **No engine forks.** Pull upstream directly.
-- **`godot/modules/voxel` symlink, not `custom_modules`.**
-- **Voxel changes flow through `VoxelEventBus` (autoload).** Actions
-  emit typed events; structural components subscribe. Mutations don't
-  call `StructuralIntegrity` methods directly. Queries
-  (`has_part_cell`, etc.) still do — they're synchronous validation.
-- **Bus subscriptions use WeakRef lifetime.** Each subscription stores
-  `WeakRef(owner) + method name`. Dead subscribers prune lazily on
-  emit. Subscribers can be created and forgotten — no `dispose()`
-  required. Caveat: subscribe with `self.method_name`, not lambdas.
-- **Every event payload carries `grid_id`** even though only one grid
-  exists. Multi-grid (Phase 5.5d) lands without payload churn.
-- **Terrain SDF persists via `VoxelStreamSQLite`** (continuous, no
-  manual save). Structural state persists via snapshot, gated on
-  `is_quiescent()`. Snapshot restore bypasses the propagation queue;
-  saved support values are trusted because save required quiescence.
-- **Facade composition for `StructuralIntegrity`.** A `Node` facade
-  holds three `RefCounted` components (`TerrainSupport`, `PartSupport`,
-  `IntegrityDebug`) plus `CollapseDetector` (peer of `TerrainSupport`).
-  Components hold typed back-references to each other; the facade
-  breaks the cycle in `_exit_tree` to let RefCounteds free cleanly.
-- **Player composes RefCounted helpers.** Movement, camera, build
-  state, action factories, edit-mode catalog — each owns one concern.
-  Helper lambdas capture local refs, not `self`, to avoid the
-  Node ↔ RefCounted ↔ Callable cycle that leaks meshes at exit.
-- **Typed records over dict-as-struct.** `VoxelRecord`, `PartData`,
-  `PendingCollapse`, `PendingFlood` are RefCounted classes. Field
-  access replaces string-keyed dict lookups; iteration variables type
-  correctly.
-- **Worklist-fixpoint propagation for terrain support.** Not generalised
-  until a second customer (fatigue/fluid/temperature) appears.
-- **Per-column bedrock detection (`_lowest_registered_y`).** Distinguishes
-  real bedrock from suspended mass.
-- **Lazy expansion bounded by material decay.** Cascade stops where
-  support reaches `FALL_THRESHOLD`; for STONE that's ~20 cells per
-  chain.
-- **Part support recomputed fresh per frame, sorted bottom-up by `placement_y`.**
-- **Per-cell *stack* of parts (`Array[Node3D]`).** Disambiguated by
-  `placement_y`.
-- **In-limbo semantics.** Parts with dirty dependencies don't
-  accumulate strain.
-- **Action-as-data; targeting at the call site.** Actions take final
-  computed parameters, not raw input.
-- **Refuse-don't-deform extended to physics state.** FillAction refuses
-  on top of RigidBody3D via `intersect_shape`.
-- **Construction placement Y snaps to `floor(hit_pos.y)`.** Parts
-  always sit on cell Y-boundaries.
-- **FIFO dirty queue.** BFS is the right shape for support propagation.
+Moved to `roadmap.md` — single source of truth for the immovable
+design decisions (engine pins, bus shape, persistence model, facade
+composition, typed records, propagation strategy, etc.). When you
+need to know "is X load-bearing?", look there.
 
-### Done this v0.0 cycle
+### Done this v0.0 / v0.1 cycle
 
-Listed roughly in chronological order. Detailed rationale and earlier
-items in git history; commit hashes in parentheses where useful.
+Recent items first. Older entries collapsed to one-liners — git log
+is the authoritative narrative; this list is the cheat sheet.
 
-- Action infrastructure (`scripts/actions/`), refuse-don't-deform principle.
-- Part/Schematic resource hierarchy, parametric dimensions, procedural build.
-- Part-level structural integrity, per-cell stack semantics, direct-supporter
-  selection, material decay propagation.
-- Multi-axis 90° rotation, AABB-driven instance shift.
-- Strain visualisation: emission tracking support color, hover tint,
-  in-limbo pause.
-- Falling-part physics: `continuous_cd`, sleep-wake on terrain change,
-  fill-refuses-on-RigidBody3D.
-- Cave integrity: dig-time registration of exposed cells.
-- Lazy-expansion model with per-column bedrock detection.
-- Register-part dirties terrain neighbours.
-- Material override at construction time (M key cycles).
-- Debug-cube toggle wired to V key.
-- README + LICENSE + dependency-licensing notes.
-- Materials → `.tres` refactor (e00513b).
-- **Cleanup pass** (704af67, 78c398e, then the `cleanup/player-split`
-  fast-forward and `43e0d9c`):
-    - Typed records (`VoxelRecord`, `PartData`, `PendingCollapse`,
-      `PendingFlood`).
-    - `FallingBodyFactory` extracted.
-    - Comment pruning + `docs/architecture.md` created.
-    - `StructuralIntegrity` split into facade + 3 components.
-    - `get_support_color` color-tier table.
-    - `player.gd` split into 5 helpers.
-    - Support classification cascade extracted.
-    - Construction placement snaps Y to cell boundary.
-    - `ConstructionAction.validate` accepts intersection placement.
-- **Persistence** (`a4b95da`): `VoxelStreamSQLite` for terrain;
-  `WorldSnapshot` (var_to_str) for structural + player state. F5 save
-  (quiescence-gated), F9 reload-scene. `TerrainSupport.restore_voxel`
-  bypasses dirty queue using saved support values.
-- **Phase 5.5a — voxel event bus** (`ee80b63`): autoload
-  `VoxelEventBus` with per-cell + channel-wide subscriptions, typed
-  event classes (`scripts/events/`), WeakRef lifetime. Actions emit
-  primitives; integrity components emit derived events. The old
-  `voxel_support_increased` signal and `register_voxel`/`remove_voxel`/
-  `notify_terrain_changed`/`register_exposed_cells`/`register_part`/
-  `remove_part` facade methods are all gone.
-- **Phase 5.5b1+b2** (`15308bd`): `AdditiveAction` base for verbs that
-  can bury the player. `FlattenAction` rewritten with column-based
-  work computation (bucket cells by lateral plane projection; each
-  column's side cuts only if it reaches existing air-or-solid within
-  radius). Symmetric box around `plane_point`. Per-work-cell
-  endanger check catches both "fill into player capsule" and "remove
-  player's support cell."
-- **Fallen-dirt-as-terrain** (this session). Falling rigid bodies
-  carry `cell_offsets` metadata. `StructuralIntegrity._tick_falling_
-  bodies` reclassifies them each physics tick: fully buried →
-  emit `voxel_added` per cell and free; partial → `freeze = true`;
-  un-buried (was frozen but no longer touches solid SDF) → unfreeze.
-  `FillAction` freezes overlapping bodies before mutating SDF so
-  they don't squirt.
-- **Voxel grid overlay** (this session). `scenes/player/voxel_grid_
-  overlay.gd`. G toggles a wireframe MeshInstance3D drawn via
-  ImmediateMesh. 4 Chebyshev shells from the targeted cell, alphas
-  0.9 / 0.6 / 0.3 / 0.1. Helps the player understand voxel boundaries
-  during fill/flatten/dig.
-- **Phase 5.5b3 — voxel-aware action preview** (this session).
-  `ActionPreview` (RefCounted) returned by `Action.preview()` lists
-  the affected cells by intent (air / solid / part) plus a refused
-  flag. `VoxelPreviewRenderer` (world-space, dual ImmediateMesh —
-  visible depth-tested + obscured no-depth-test, faint) draws cell
-  outlines + translucent fills each frame, intent-colored (red /
-  blue / yellow), with refusal lerping toward grey. Wireframes inset
-  0.05 to avoid z-fighting with the Transvoxel surface. Idealised
-  sphere/plane previews dropped from Dig/Fill/Flatten; Build keeps
-  its part-mesh ghost.
-- **Stress-indicator overhaul** (this session). `IntegrityDebug`
-  rewritten on top of an ImmediateMesh pair (visible + obscured)
-  instead of one MeshInstance3D per voxel — the per-cube material
-  poke was the framerate sink. New behaviour: cells with
-  support > 0.30 only render within 6m of the player's raycast hit
-  (spatial filter); cells ≤ 0.30 (orange or worse) always render so
-  failures aren't hidden. Obscured pass off by default; `H` reveals
-  it as corner-bracket markers (3 short stubs per cube corner).
-- **Bus identifier cleanup** (this session). `class_name
-  VoxelEventBusType` on the script; autoload renamed
-  `VoxelEventBusSingleton`. Godot 4 forbids `class_name` colliding
-  with an autoload name, and the GDScript LSP needs the class_name
-  declaration to recognise the identifier. Pure rename — no
-  runtime behaviour change. The class is for type hints
-  (`var bus: VoxelEventBusType`); the singleton is the call site
-  (`VoxelEventBusSingleton.subscribe(...)`).
+**Recent (current cycle)**
+- **Phantom-voxel deregistration fix** (`3ebf5cf`).
+  `terrain_sdf_changed` handler now drops tracked records whose SDF
+  has become air, symmetric with the existing register-on-boundary
+  code.
+- **Tools/activities UI** (`3ebf5cf`). Tab cycles three tools;
+  1-9 picks activity within. None.Probe prints cell diagnostics to
+  the console.
+- **Limbo Console + commands + reset + tunable persistence**
+  (`3ebf5cf`). Submodule pinned v0.7.0. Seven commands. Reset
+  rewinds to procedural defaults without deleting save files.
+  WorldSnapshot V3 (tunables) + V4 (tool_index/activity_indices).
+- **Four new verbs** (`3ebf5cf`): Raise / Lower (bell-shaped) and
+  FillVoxel / EmptyVoxel (surgical).
+- **Free part placement** (`9f2e36a`). Shift+W/A/E + wheel adjusts
+  offset along view axes; Shift suppresses WASD movement universally.
+  Part-stress proximity visibility (matches IntegrityDebug pattern).
+- **Grass shader** (`eedef27`). Slope-based grass/dirt with
+  4-octave gradient-noise wind animation.
+- **Voxel-aware preview UI (5.5b3)** + stress-indicator overhaul
+  (`d2b7bbd`). ActionPreview / VoxelPreviewRenderer; IntegrityDebug
+  rewritten on ImmediateMesh with spatial filter and obscured-pass
+  toggle.
+- **Voxel grid overlay** (`d761cb4`). G key, Chebyshev shells.
+- **Fallen-dirt-as-terrain** (`250bf13`). Falling bodies classify
+  each tick: free / partial-buried (freeze) / full-buried (integrate).
+- **Phase 5.5b1+b2** (`15308bd`): AdditiveAction base + column-based
+  honest flatten.
+- **Phase 5.5a — voxel event bus** (`ee80b63`): autoload,
+  channel-wide + per-cell subscribers, WeakRef lifetime, primitive
+  vs derived event tiers.
+- **Persistence** (`a4b95da`): VoxelStreamSQLite + WorldSnapshot.
+
+**Earlier (pre-bus refactor)**
+- Cleanup pass — typed records, facade-+-components split, player
+  composition, support classification cascade, comment pruning,
+  `docs/architecture.md` created (`704af67`, `78c398e`, `43e0d9c`).
+- Materials → `.tres` refactor (`e00513b`).
+- v0.0 thesis demo — action infrastructure, parts, structural
+  integrity, cave integrity, lazy-expansion + bedrock, falling
+  parts, debug viz, README + LICENSE (multiple commits, see git
+  log).
 
 ### Deferred to v0.1+ (the "can I make it fun?" question)
 
@@ -288,15 +173,11 @@ items in git history; commit hashes in parentheses where useful.
 | Load propagation (top-down weight pass) | Pairs with falling damage and SDF-seam-as-physics |
 | Falling damage (impact breaks parts, crumbles dirt) | Needs a damage model |
 | Hinge-at-boundary collapse | Polish on falling drama |
-| RaiseAction / LowerAction (bell-shape) | Robert-requested; "after we're done with 5.5" |
-| FillVoxelAction / EmptyVoxelAction (per-voxel) | Robert-requested; per-voxel surgical control |
-| Free part placement (off voxel boundaries, all 3 axes) | Robert-flagged as "soon"; currently parts snap to floor(hit_pos.y) and round XZ. Construction is "tantalizingly close to useful" without this. |
-| Rest of part placement control (size, snap modifiers, etc.) | Bundled with above; coming soon |
-| Pick-and-stamp plane orientation | Click an example wall to capture its plane, then use that plane for vertical flatten elsewhere. Currently vertical flatten always faces player. Same UI primitive supports "make a ramp by flattening, stay on that plane for the next clicks." v0.2 polish. |
+| Rest of part-placement control (snap modifiers, rotation snap, in-game resize) | Free placement landed; quality-of-life keys still to come |
+| Pick-and-stamp plane orientation | Click an example wall to capture its plane, reuse for vertical flatten elsewhere. v0.2 polish. |
 | Slow-step movement / "stop at edge" toggle | Don't accidentally run off structures you're building. Edge detection on slopes/curves is the hard part. |
-| Spinning-beam physics quirk | Vertical metal beam, falls, hits ground at angle, picks up angular momentum and gyroscopes off down the hill. Polish-stage observation; keep an eye out for similar physics weirdness. |
-| Grass shader on shallow slopes | Texture for surfaces ≤30° from horizontal, animation-ready for wind. Helps depth perception during testing. Steeper slopes show dirt. Worth investing in on the 5090 testbed. |
-| Stress-overlay SDF-surface coloring | Aspirational — apply support color to the actual Transvoxel surface via shader/material override on VoxelLodTerrain, instead of separate floating wireframes. The current per-cell wireframe overlay is the right MVP. |
+| Spinning-beam physics quirk | Vertical metal beam, falls, hits ground at angle, picks up angular momentum and gyroscopes off down the hill. Polish-stage observation; keep an eye out for similar weirdness. |
+| Stress-overlay SDF-surface coloring | Aspirational — apply support color to the actual Transvoxel surface via shader/material override, instead of separate wireframes. The current per-cell wireframe overlay is the right MVP. |
 | Sub-assemblies + planning mode (Dwarf-Fortress queue) | Significant UI work |
 | Free-form placement with physics settle-to-construction | Architectural change; current grid-aligned demo carries thesis |
 | Snap point authoring UI | Data structure exists; UI is v0.1 |
@@ -340,16 +221,6 @@ items in git history; commit hashes in parentheses where useful.
   supporter` checks the cell below. Likely a coordinate-snap edge in
   the footprint math; defer until the part-placement-controls work
   needs it.
-- **Phantom strained voxels survive deregistration.** Observed after
-  filling and re-digging a mound: stress visualization showed strain
-  in cells with no actual dirt. Rebuilding the mound to include the
-  phantoms and then carving them loose did not bring them down —
-  strain propagation appears to skip cells whose tracked records
-  lingered past their SDF removal. Suspect: an event-ordering bug
-  where `voxel_removed` reaches some subscribers but not the dirty-
-  queue / strain pipeline. Keep an eye out during the tools refactor
-  and any future event-bus work — likely surfaces somewhere along
-  the FillVoxel/EmptyVoxel/dig path.
 - **Obscured stress-overlay overlay slightly tints visible cells too.**
   When `H` is on, the obscured-pass corner brackets render
   unconditionally (no_depth_test), so visible cells get a faint
