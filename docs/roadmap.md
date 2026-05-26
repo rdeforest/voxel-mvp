@@ -49,11 +49,16 @@ choosing voxel over heightmap:
 | Version | Question it answers | Roughly maps to |
 |---------|-------------------|-----------------|
 | 0.0 | Is this as good of an idea as I think it is? | Phases 0, 2, 5 (fast path) |
-| 0.1 | Can I make it fun/performant? | Phases 1, 3, 4, 5.5 (filling in the gameplay) |
-| 0.2 | Can I make it pretty? | Art pass, shader work, audio, polish, fracture fidelity |
-| 0.9 | Can I make it into a real product? | Multiplayer, content depth, settings, QA |
-| 1.0 | Will people pay to get it from Steam? | Open-source + Steam for cloud saves, multiplayer |
+| 0.1 | Can I make it fun/performant? | Phases 1, 3, 4, 5.5, plus honest-destruction + construction-usefulness |
+| 0.5 | Playtester drop | Linux/macOS binaries + brief onboarding + "programmer art intentional" disclaimer |
+| 0.2 | Can I make it pretty? | Art pass, shader work, audio, polish, vehicles |
+| 0.9 | Can I make it into a real product? | Multiplayer, survival, combat, engineering loops |
+| 1.0 | Will people pay to get it from Steam? | Open-source + Steam for cloud saves, matchmaking |
 | 1.1 | Can I make it run on Windows? | Cross-platform builds via cloud CI |
+| 1.x | Wild dreams | Planet-scale, sailing |
+
+(Chronologically v0.5 falls between v0.1 and v0.2 — the number is "halfway
+to 1.0" not "between 0.2 and 0.9." Versions are nominal labels.)
 
 ---
 
@@ -278,13 +283,13 @@ deliberately a tech demo, not a game. Proceed to v0.1.
 **Version target:** 0.1
 
 ### Tasks
-- Biome system: temperature/moisture noise maps → biome selection
-- Minimum 4 biomes: Meadow, Forest, Mountain, Swamp
-- Per-biome terrain parameters: amplitude, frequency, base height, cave density
-- Cave generation using 3D worm noise (continuous with surface — no loading screens)
-- Water plane with basic shader (flat plane at sea level for MVP)
-- Scatter system: trees, rocks, bushes (instanced MultiMeshes)
-- Biome-appropriate vegetation distribution
+- **FEAT001**: Biome system — temperature/moisture noise maps → biome selection
+- **FEAT002**: Minimum 4 biomes — Meadow, Forest, Mountain, Swamp
+- **FEAT003**: Per-biome terrain parameters (amplitude, frequency, base height, cave density)
+- **FEAT004**: Cave generation using 3D worm noise (continuous with surface — no loading screens)
+- **FEAT005**: Water plane with basic shader (flat plane at sea level for MVP)
+- **FEAT006**: Scatter system — trees, rocks, bushes as instanced MultiMeshes
+- **FEAT007**: Biome-appropriate vegetation distribution
 
 ### Claude Code leverage: High
 Noise composition, biome lookup tables, scatter algorithms.
@@ -309,18 +314,13 @@ emerge elsewhere.
 **Version target:** 0.1
 
 ### Tasks
-- Destructible resource nodes: trees, rocks, ore deposits, bushes
-- **Continuous work actions (not click-spam):**
-  - Select tree → choose fall direction → initiate → watch avatar make directional cuts
-  - Select rock face → specify dig depth → initiate → watch avatar mine and pile debris
-  - Interruptible: if a creature attacks, pause task, deal with it, resume
-  - Progress bar / animation showing work completion
-  - Speed depends on tool quality and material hardness
-- Tree falling physics (RigidBody3D, directional based on player choice)
-- Resource drops as collectible items
-- Item data model: ID, name, icon, stack size, category, weight
-- Voxel material types for ore (copper voxel → drops copper when mined)
-- Interaction system: raycast → detect → prompt → execute
+- **FEAT008**: Destructible resource nodes — trees, rocks, ore deposits, bushes
+- **FEAT009**: Continuous work actions — state machine (IDLE → TARGETING → WORKING → INTERRUPTED → RESUMING), progress bar, speed depends on tool/material
+- **FEAT010**: Directional tree felling — notch cut, choose fall direction; tree falling physics
+- **FEAT011**: Resource drops as collectible items
+- **FEAT012**: Item data model — ID, name, icon, stack size, category, weight
+- **FEAT013**: Voxel material types for ore (copper voxel → drops copper when mined)
+- **FEAT014**: Interaction system — raycast → detect → prompt → execute
 
 ### Claude Code leverage: Very high
 Data modeling, item databases, state machines for continuous work actions.
@@ -348,15 +348,16 @@ creature, fight it, then resume mining where you left off.
 **Version target:** 0.1
 
 ### Tasks
-- Grid-based inventory UI with drag-and-drop, stack splitting
-- Equipment slots: weapon, tool (minimal)
-- Hotbar with number key switching
-- Crafting recipe data model (inputs → output + station requirement)
-- Placeable stations: workbench, forge, cooking fire
-- Station UI: available recipes filtered by station type
-- Recipe discovery: all visible, greyed until you have materials
-- 3-tier progression: hand-craft basics → workbench tools → forge metals
-- Item tooltips
+- **FEAT015**: Grid-based inventory UI with drag-and-drop, stack splitting
+- **FEAT016**: Equipment slots (weapon, tool — minimal)
+- **FEAT017**: Hotbar with number-key switching
+- **FEAT018**: Crafting recipe data model (inputs → output + station requirement)
+- **FEAT019**: Placeable stations — workbench, forge, cooking fire
+- **FEAT020**: Station UI — available recipes filtered by station type
+- **FEAT021**: Recipe discovery — all visible, greyed until you have materials
+- **FEAT022**: 3-tier progression — hand-craft basics → workbench tools → forge metals
+- **FEAT023**: Item tooltips
+- **FEAT024**: Building material tiers — wood → stone → iron-reinforced parts
 
 ### Claude Code leverage: Extremely high
 UI-heavy, data-driven, pattern-heavy. Claude Code will demolish this phase.
@@ -458,26 +459,18 @@ Tasks:
 Done when: you can't get buried by your own construction, and the design principle
 "terrain ops should fail honest" is enforced at the verb level.
 
-### Phase 5.5c (deferred to v0.2): Fracture as mesh extraction
+### Phase 5.5c (v0.1, was deferred to v0.2): Fracture as mesh extraction
 
-**Moved out of v0.1.** Rationale: the current flood-fill structural integrity with
-voxel-aligned collapse is fine for "is this fun?" v0.1 work. The mesh-extraction
-fracture is an aesthetics-and-fidelity upgrade, not a gameplay-enabling one. Belongs in
-v0.2 ("can I make it pretty?") with the rest of the visual fidelity work.
+**Moved back into v0.1.** Rationale: testing "is this fun?" requires destruction
+that *feels* honest, not just structurally accurate. Voxel-aligned cubes flying
+off in a collapse read as a programmer-art prototype; mesh-extraction-along-a-
+computed-failure-surface reads as a real world. This is upgrade-as-gameplay,
+not upgrade-as-polish.
 
-Forward-looking sketch (preserved here so the design isn't lost):
-- When structural integrity decides a region has failed, extract that region from the
-  voxel grid as a rigid-body mesh along a *computed failure surface*, not voxel-aligned
-  cubes
-- Re-integrate into voxels when it comes to rest, or stay as a mesh prop if it doesn't
-- This is what unlocks sub-meter fracture precision without sub-meter voxels
-- Roughly what Teardown does — their voxels are 10cm, but fractures don't break on voxel
-  boundaries; they break along computed failure surfaces and re-voxelize the result
-- For determining fracture direction, a localized FEM-style stress tensor calculation
-  (in the affected region only, not globally) gives much better results than flood-fill
-  support values. See the "FEM" note in Known Hard Problems below.
+- **FEAT025**: Mesh-extraction-along-computed-failure-surface — when structural integrity decides a region has failed, extract that region from the voxel grid as a rigid-body mesh along a *computed failure surface*, not voxel-aligned cubes. Re-integrate into voxels when it comes to rest, or stay as a mesh prop if it doesn't. This is what unlocks sub-meter fracture precision without sub-meter voxels — Teardown's trick.
+- **FEAT026**: Localised FEM-style stress tensor — for determining fracture direction (in the affected region only, not globally). See the "FEM" note in Known Hard Problems below. This is what enables material-specific break locations (next section).
 
-### Phase 5.5d (deferred to v0.2 or v0.9): Multi-grid foundation
+### Phase 5.5d (v0.2): Multi-grid foundation
 
 **Moved out of v0.1.** Rationale: nothing in the v0.1 gameplay loop requires multiple
 voxel grids. The first vehicle (cart, boat, eventually locomotive) is v0.2 at the
@@ -504,7 +497,7 @@ Forward-looking sketch (preserved here so the design isn't lost):
   separate grids only when they need an independent transform.** A house is part of the
   main world. A locomotive is its own grid because it moves.
 
-### Phase 5.5e (deferred to v0.2 or v0.9): Per-channel non-SDF data
+### Phase 5.5e (v0.2): Per-channel non-SDF data
 
 **Moved out of v0.1.** Rationale: temperature, moisture, pressure, momentum, and other
 cellular-automata channels are locomotive-era and weather-era concerns. The decision
@@ -524,16 +517,71 @@ Forward-looking sketch:
 
 ---
 
+## Phase 5.5f (v0.1): Honest destruction
+
+Destruction has to *feel* right for the fun question to land. 5.5c gives us the
+visual primitive (mesh-extraction fracture); this phase makes the *where it
+breaks* answer material-aware, and adds the impact and slumping behaviour that
+makes a collapse read as a real event instead of a numeric threshold being
+crossed.
+
+- **FEAT027**: Material-specific break locations:
+  - Stone breaks where strain is greatest (uses FEAT026's stress tensor).
+  - Dirt breaks where insufficiently supported (current threshold-based behaviour; keep).
+  - Wood breaks at the bend / attachment point (cantilever stress).
+- **FEAT028**: Falling damage — impacts crumble dirt further, splinter wood, chip stone. Pairs with FEAT025 (the broken pieces are mesh extractions, not cubes).
+- **FEAT029**: Hinge-at-boundary collapse — material with one strong attachment slumps rather than flies off. Stops the "spinning beam" gyroscope class of physics weirdness.
+
+---
+
+## Phase 5.5g (v0.1): Construction reaching real usefulness
+
+Construction is *tantalizingly close* to useful today. This phase finishes the
+job: parts attach to each other properly, snap behaviour exists for those who
+want it, and you can author assemblies bigger than one part at a time.
+
+- **FEAT030**: Welding / joining — intersecting parts (cross beams) mutually support. Closes the known "vertical beam on cantilever isn't supported" limit.
+- **FEAT031**: Snap-modifier hotkeys — opt-in grid alignment on top of the free placement we already have.
+- **FEAT032**: Rotation snap — finer-than-90° rotations with a snap modifier.
+- **FEAT033**: In-game parametric part resize (KSP-style) — drag handles or chord keys to change a part's dimensions.
+- **FEAT034**: Pick-and-stamp plane orientation — click an example wall to capture its plane; reuse for vertical flatten elsewhere; supports "make a ramp, keep that plane for the next clicks."
+- **FEAT035**: Sub-assemblies + planning mode (DF-queue) — define a multi-part assembly, then place or queue many copies. (Initial scope: hotbar + queue. Full DF-style planning overlay deferred to v0.9.)
+
+---
+
+## Phase 5.5h (v0.1): Quality of life, performance, bugs
+
+- **FEAT036**: Slow-step movement / stop-at-edge toggle — don't run off your construction.
+- **FEAT037**: First-person hands — visible at edit time; per-tool animation. (Avatar art; pairs with the HUD-icon pass.)
+- **FEAT038**: HUD icons — replace text labels for tools/activities/parts/materials. (Art-dependent; see `art-wishlist.md`.)
+- **FEAT039**: Crosshair — mode-aware reticle. (Art.)
+- **FEAT040**: Imperial units display option — user preference.
+- **FEAT041**: Stress-overlay on SDF surface — color the Transvoxel surface via terrain shader instead of floating wireframes. Subsumes the "MultiMesh debug viz" item.
+- **FEAT042**: Per-material strain duration / nature-of-change reset scaling — tuning pass.
+- **FEAT043**: Budget-consumption telemetry — gather frame-time-by-system so the perf budget table below becomes verifiable.
+- **FEAT044**: Perf baseline instrumentation — `Time.get_ticks_usec` deltas on action.execute. Cheap regression detector.
+- **FEAT045**: Replay harness + collapse-detector state machine — deterministic replay against a saved snapshot; natural home for catching collapse-detector edge cases.
+
+Bugs to close in v0.1:
+- **FEAT046**: Vertical-on-horizontal beam support — coordinate-snap edge in `_direct_part_supporter`. Surfaces when welding (FEAT030) lands.
+- **FEAT047**: Spinning-beam physics quirk — investigate the gyroscope behaviour Robert observed.
+
+---
+
 ## v0.1 Checkpoint: "Can I Make It Fun/Performant?"
 
-At this point (~11 weeks part-time from start), you have everything from v0.0 plus biomes,
-resource gathering with continuous work actions, inventory, crafting, the full material
-loop, and the architectural foundation (event bus, construction-mode verbs) needed for
-everything after. No enemies or survival pressure yet, but it's a playable sandbox.
+At this point you have everything from v0.0 plus biomes, resource gathering with
+continuous work actions, inventory + crafting + material tiers, honest mesh-extraction
+fracture with material-specific break locations, construction that's actually
+*useful* (welding, snap modifiers, in-game part resize, pick-and-stamp), and the
+QoL pass (slow-step, first-person hands, HUD icons, perf telemetry). No enemies
+or survival pressure yet, but it's a playable sandbox where the destruction
+feels honest, the construction feels solid, and there's a gameplay loop to test.
 
-**This is the version to show to friends.** Earlier than this, the engine impresses but
-there's nothing to *do*; later than this, the polish-vs-feedback ratio starts favoring
-public release.
+**This is the version to show to friends** (briefly — then drop a v0.5
+playtester build with binaries). Earlier than this, the engine impresses but
+there's nothing to *do*; later than this, the polish-vs-feedback ratio starts
+favoring public release.
 
 **Performance validation:** Profile on your 5090, then test with aggressive quality
 reduction to simulate lower-end hardware. Key metrics: chunk meshing time, frame budget
@@ -543,53 +591,70 @@ at various draw distances, structural integrity computation cost, event bus thro
 
 ## Phases Beyond v0.1 (Scoped But Not Scheduled)
 
+### v0.5: "Playtester drop"
+
+A release milestone between v0.1 (gameplay-feature-complete, programmer art)
+and v0.2 (art pass). Gets feedback *before* sinking art-pass time into things
+playtesters would want changed.
+
+- **FEAT048**: Linux + macOS binary builds via GitHub Actions (cross-platform pipeline gated by this milestone, not v1.0).
+- **FEAT049**: Brief onboarding text — not a full tutorial, just enough to communicate the verbs.
+- **FEAT050**: "Programmer art intentional, focus on play feel" disclaimer baked into the build.
+
 ### v0.2: "Can I Make It Pretty?"
 
-- Art direction pass (establish visual identity distinct from Valheim)
-- Terrain shaders: triplanar texturing, moss/snow accumulation
-- Lighting and atmosphere per biome
-- Building piece models (replace programmer art)
-- Sound design: ambient biomes, footsteps, chopping, mining, structural creaking
-- Tree/vegetation shader wind
-- Water shader (reflections, shoreline foam)
-- UI overhaul
-- **Fracture as mesh extraction (Phase 5.5c)** — sub-voxel fracture surfaces via localized
-  FEM, mesh extraction, rigid-body simulation, re-voxelization
-- **Multi-grid foundation (Phase 5.5d) — first vehicle prototype**, probably a simple cart
-  or rowboat. Not yet the locomotive.
-- **Per-channel non-SDF data (Phase 5.5e) — initial channels** for whatever the first
-  vehicle and the weather system want (probably temperature and a simple wind vector
-  field for atmospheric effects)
+Visual polish + the visual-fidelity items that don't gate gameplay.
+
+- **FEAT051**: Visual identity pass — establish look distinct from Valheim/Enshrouded.
+- **FEAT052**: Terrain textures — replace procedural shader with hand-painted grass / dirt / stone / sand / snow, plus normal maps.
+- **FEAT053**: Triplanar texturing + moss/snow accumulation — slope-/altitude-driven blending.
+- **FEAT054**: Building piece models — replace procedural box meshes with hand-modelled parts (wood grain, stone chiselling, metal forging).
+- **FEAT055**: Tree/vegetation wind shader — animate scattered MultiMesh leaves.
+- **FEAT056**: Water shader — reflections, shoreline foam.
+- **FEAT057**: Lighting + atmosphere per biome — fog colour, sun angle.
+- **FEAT058**: Sky — painted skydome, weather variants, clouds, sun/moon discs.
+- **FEAT059**: VFX pass — dig dust, fill spray, flatten chips, strain crumble, collapse burst, part-break splinters, wind leaves.
+- **FEAT060**: Sound design — footsteps per material, tool sounds, ambient by biome, structural creaks, collapse impact.
+- **FEAT061**: UI overhaul — proper menus, settings screens, polished HUD.
+- **FEAT062**: Phase 5.5d Multi-grid foundation — first vehicle prototype (cart or rowboat). The locomotive is firmly v0.9.
+- **FEAT063**: Phase 5.5e Per-channel non-SDF data — initial channels (probably temperature + a simple wind vector field for atmospheric effects).
 
 ### v0.9: "Can I Make It Into A Real Product?"
 
-- **Multiplayer** (Godot 4's multiplayer API + voxel chunk sync)
-- Survival loop: health, stamina, hunger, food buffs, comfort system
-- Enemy AI and combat (see Pathfinding section below)
-- Boss encounters as progression gates
-- Procedural dungeons (generated cave complexes — no loading screens)
-- Building material tiers (wood → stone → iron-reinforced)
-- Death, respawn, bed placement
-- Save system (player state + modified chunks + structures)
-- Settings menu, keybinding, accessibility
-- **Locomotive-class vehicles** — the boiler / firebox / pressure-driven piston
-  demonstration. Cellular automata for heat and pressure. This is the "wow, *that's* what
-  this engine does" moment that sells the project on its own, and it can only happen once
-  multi-grid, fracture, and channel infrastructure are all mature.
+Survival/MMO-y subsystems.
+
+- **FEAT064**: Multiplayer — Godot 4 multiplayer API + voxel chunk sync.
+- **FEAT065**: Survival loop — health, stamina, hunger, food buffs, comfort.
+- **FEAT066**: Enemy AI + combat — raycast steering for outdoor enemies; 3D nav grid or HPA* for dungeon enemies (see Mob Pathfinding section).
+- **FEAT067**: Boss encounters as progression gates.
+- **FEAT068**: Procedural dungeons — generated cave complexes; no loading screens.
+- **FEAT069**: Death / respawn / bed placement.
+- **FEAT070**: Locomotive-class vehicles — boiler / firebox / pressure-driven pistons. Cellular automata for heat + pressure. The "wow, *that's* what this engine does" demo; depends on multi-grid + fracture + per-channel data all being mature.
+- **FEAT071**: Material fatigue — cumulative strain history. Only meaningful with mobs hammering on structures.
+- **FEAT072**: Settings menu, keybinding, accessibility.
+- **FEAT073**: Snap-point authoring UI — the v0.0 data exists; UI ships here.
+- **FEAT074**: In-game Schematic editor — make new Parts at runtime.
+- **FEAT075**: Workbench radius (Valheim mechanic — build only near workbench). Tentative; may not survive scrutiny.
 
 ### v1.0: "Will People Pay For It On Steam?"
 
-- Steam integration (cloud saves, achievements, multiplayer matchmaking)
-- Tutorial / onboarding
-- Content depth (enough biomes, enemies, bosses, recipes for 40+ hours)
-- QA across Linux and macOS
-- Open-source release (game code), Steam for value-added features
+- **FEAT076**: Steam integration — cloud saves, achievements, matchmaking.
+- **FEAT077**: Tutorial / onboarding (the full version; v0.5 has just text).
+- **FEAT078**: Content depth — enough biomes/enemies/bosses for 40+ hours.
+- **FEAT079**: QA across Linux + macOS.
+- **FEAT080**: Open-source release of the game code (Steam keeps the value-added features).
 
 ### v1.1: "Can I Make It Run On Windows?"
 
-- Cross-compilation via cloud CI (GitHub Actions with Windows runners)
-- Windows-specific testing (graphics driver quirks, filesystem paths)
-- Only worthwhile if Linux/Mac sales demonstrate demand
+- **FEAT081**: Cross-compilation to Windows via GitHub Actions Windows runners.
+- **FEAT082**: Windows-specific testing — driver quirks, filesystem paths.
+
+### v1.x: "Wild dreams"
+
+Larger boundaries to be carved out when we get closer.
+
+- **FEAT083**: Planet-scale world — cube-sphere projection, tectonic generation, real oceans.
+- **FEAT084**: Sailing as a gameplay loop — across-ocean journeys, vessel-vs-vessel combat, navigation.
 
 ---
 
