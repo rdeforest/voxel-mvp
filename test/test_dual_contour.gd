@@ -73,8 +73,10 @@ class TestDualContourSphere:
             var b := _verts[_idx[i + 1]]
             var c := _verts[_idx[i + 2]]
             var face_n := (b - a).cross(c - a)
-            var centroid := (a + b + c) / 3.0   # from sphere centre at origin
-            if face_n.dot(centroid) > 0.0:
+            var centroid := (a + b + c) / 3.0   # ~outward direction from the origin
+            # Godot front faces are clockwise-from-front, so a correctly-wound
+            # outward face's right-hand normal points inward (dot outward < 0).
+            if face_n.dot(centroid) < 0.0:
                 good += 1
         assert_gt(float(good) / float(total), 0.95)
 
@@ -90,11 +92,29 @@ class TestDualContourSharpBox:
     const B := 5.3
 
     var _verts: PackedVector3Array
+    var _idx: PackedInt32Array
 
     func before_all() -> void:
         var sdf := func(p: Vector3) -> float: return SdfShapes.box(p, Vector3.ONE * B)
         var mesh := DualContour.build_mesh(sdf, Vector3i(20, 20, 20), Vector3.ONE * -10.0, 1.0)
-        _verts = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+        var arrays := mesh.surface_get_arrays(0)
+        _verts = arrays[Mesh.ARRAY_VERTEX]
+        _idx   = arrays[Mesh.ARRAY_INDEX]
+
+    func test_faces_point_outward():
+        var good := 0
+        var total := _idx.size() / 3
+        for i in range(0, _idx.size(), 3):
+            var a := _verts[_idx[i]]
+            var b := _verts[_idx[i + 1]]
+            var c := _verts[_idx[i + 2]]
+            var face_n := (b - a).cross(c - a)
+            var centroid := (a + b + c) / 3.0   # ~outward direction from the origin
+            # Godot front faces are CW-from-front: outward face's right-hand
+            # normal points inward, so the dot with outward is negative.
+            if face_n.dot(centroid) < 0.0:
+                good += 1
+        assert_gt(float(good) / float(total), 0.95)
 
     func test_corners_reach_full_extent():
         var max_coord := 0.0
@@ -111,6 +131,24 @@ class TestDualContourSharpBox:
                 n += 1
         assert_gt(n, 5)                         # actually found face vertices
         assert_lt(max_dev, 0.15)               # they sit on the plane, edges included
+
+    func test_on_grid_box_still_winds_outward():
+        # Faces land exactly on integer grid planes (the case that degenerated in
+        # the preview); the surface nudge must keep winding consistent.
+        var sdf := func(p: Vector3) -> float: return SdfShapes.box(p, Vector3.ONE * 6.0)
+        var mesh := DualContour.build_mesh(sdf, Vector3i(20, 20, 20), Vector3.ONE * -10.0, 1.0)
+        var arrays := mesh.surface_get_arrays(0)
+        var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+        var idx: PackedInt32Array     = arrays[Mesh.ARRAY_INDEX]
+        var good := 0
+        var total := idx.size() / 3
+        for i in range(0, idx.size(), 3):
+            var a := verts[idx[i]]
+            var b := verts[idx[i + 1]]
+            var c := verts[idx[i + 2]]
+            if (b - a).cross(c - a).dot((a + b + c) / 3.0) < 0.0:   # Godot CW-from-front
+                good += 1
+        assert_gt(float(good) / float(total), 0.95)
 
     func test_wedge_meshes_without_error():
         var sdf := func(p: Vector3) -> float: return SdfShapes.wedge(p, Vector3.ONE * 5.0)

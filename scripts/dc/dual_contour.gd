@@ -23,6 +23,13 @@ const CELL_RING := [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(0, 0), Vector2i(
 
 const GRAD_EPS := 0.001   # finite-difference step for normals
 
+# DC degenerates when the surface passes exactly through samples (e.g. an axis-
+# aligned box whose faces land on grid planes): the field is 0 at those corners,
+# crossings pin to corners, and cells on the two sides disagree about sign. Nudge
+# exact-surface samples a hair inside so the surface reconstructs cleanly one
+# step out instead of collapsing onto the lattice.
+const SURFACE_NUDGE := -1e-6
+
 
 # sdf: Callable(Vector3) -> float, negative inside. res: cells per axis.
 # Samples corners at origin + Vector3(corner) * cell.
@@ -59,7 +66,8 @@ static func _sample_field(sdf: Callable, res: Vector3i, origin: Vector3, cell: f
         for y in res.y + 1:
             for x in res.x + 1:
                 var corner := Vector3i(x, y, z)
-                field[corner] = float(sdf.call(origin + Vector3(corner) * cell))
+                var v := float(sdf.call(origin + Vector3(corner) * cell))
+                field[corner] = v if v != 0.0 else SURFACE_NUDGE
     return field
 
 static func _corner_offset(i: int) -> Vector3i:
@@ -164,9 +172,11 @@ static func _emit_quad(ring: Array, verts: PackedVector3Array, outward: Vector3,
     var p0 := verts[ring[0]]
     var p1 := verts[ring[1]]
     var p2 := verts[ring[2]]
-    var face_n := (p1 - p0).cross(p2 - p0)
-    var ccw := face_n.dot(outward) >= 0.0
-    if ccw:
-        indices.append_array([ring[0], ring[1], ring[2], ring[0], ring[2], ring[3]])
-    else:
+    # Godot treats clockwise-from-the-front triangles as front faces. The right-
+    # hand normal of [0,1,2] is (p1-p0)x(p2-p0); when it points OUTWARD the ring
+    # reads counter-clockwise from outside (a Godot back face), so reverse it.
+    var rh_outward := (p1 - p0).cross(p2 - p0).dot(outward) >= 0.0
+    if rh_outward:
         indices.append_array([ring[0], ring[2], ring[1], ring[0], ring[3], ring[2]])
+    else:
+        indices.append_array([ring[0], ring[1], ring[2], ring[0], ring[2], ring[3]])
