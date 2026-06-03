@@ -2,6 +2,11 @@
 .godot/
 /android/
 
+# Scratch / build byproducts
+/tmp/
+__pycache__/
+*.pyc
+
 # Vim
 .*.sw?
 .sw?

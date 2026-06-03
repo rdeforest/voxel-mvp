@@ -1,0 +1,15 @@
+# SCons entry for the voxel_dc module. Compiles our sources into Godot; the
+# godot root is on the include path so `modules/voxel/...` headers resolve
+# (via the modules/voxel symlink that tools/build wires up).
+
+Import("env")
+Import("env_modules")
+
+env_voxel_dc = env_modules.Clone()
+
+# godot_voxel's headers select the engine-integration code paths (e.g. the
+# ZN_ALLOC/memnew memory macros) behind ZN_GODOT. We include those headers, so
+# we must compile with the same define godot_voxel's own SCsub sets.
+env_voxel_dc.Append(CPPDEFINES=["ZN_GODOT"])
+
+env_voxel_dc.add_source_files(env.modules_sources, "*.cpp")

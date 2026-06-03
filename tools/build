@@ -181,6 +181,40 @@ if [[ -f "${GODOT_EXCLUDE}" ]] && ! grep -qxF "modules/voxel" "${GODOT_EXCLUDE}"
 	info "added modules/voxel to godot/.git/info/exclude"
 fi
 
+# --- 2c. wire OUR voxel_dc module into the Godot tree -----------------------
+# Our Dual Contouring mesher lives in-repo at engine/voxel_dc and is symlinked
+# in as another module — same vendor-by-symlink approach as godot_voxel above.
+
+step "Wiring voxel_dc module into godot/modules/voxel_dc"
+
+DC_LINK="${GODOT_DIR}/modules/voxel_dc"
+DC_TARGET="${VOXMVP_ROOT}/engine/voxel_dc"
+
+[[ -d "${DC_TARGET}" ]] || die "voxel_dc module sources not found at ${DC_TARGET}"
+
+if [[ -L "${DC_LINK}" ]]; then
+	DC_DEST="$(cd "$(dirname "${DC_LINK}")" && cd "$(readlink "${DC_LINK}")" 2>/dev/null && pwd || true)"
+	if [[ "${DC_DEST}" == "${DC_TARGET}" ]]; then
+		info "symlink already correct: modules/voxel_dc -> ${DC_TARGET}"
+	else
+		die "modules/voxel_dc symlink points somewhere unexpected:
+       points to: ${DC_DEST:-<unresolvable>}
+       expected:  ${DC_TARGET}
+       Remove it and re-run: rm \"${DC_LINK}\""
+	fi
+elif [[ -e "${DC_LINK}" ]]; then
+	die "modules/voxel_dc exists but is not a symlink: ${DC_LINK}
+       Inspect and remove it, then re-run: rm -rf \"${DC_LINK}\""
+else
+	info "creating symlink: modules/voxel_dc -> ${DC_TARGET}"
+	ln -s "${DC_TARGET}" "${DC_LINK}"
+fi
+
+if [[ -f "${GODOT_EXCLUDE}" ]] && ! grep -qxF "modules/voxel_dc" "${GODOT_EXCLUDE}"; then
+	echo "modules/voxel_dc" >> "${GODOT_EXCLUDE}"
+	info "added modules/voxel_dc to godot/.git/info/exclude"
+fi
+
 # --- 3. work out a safe job count ------------------------------------------
 # Godot's compile is memory-bound, not CPU-bound. Rule of thumb: ~1 job per
 # 2 GB RAM, capped at core count, floor of 2 so a small machine still moves.
@@ -236,7 +270,21 @@ VOXEL_COMMIT="$(cd "${GODOT_VOXEL_DIR}" && git rev-parse HEAD)"
 BINARY_PATH="$(platform_binary_path)"
 STAMP_FILE="${GODOT_DIR}/bin/.voxmvp-build-stamp"
 
-stamp_content() {
+# Two stamps with different consequences:
+#   core   = engine refs + scons args + platform. A change here means a
+#            structural rebuild that incremental SCons can't safely survive
+#            (stale .gen.cpp), so it forces `scons --clean` first.
+#   module = a hash of OUR voxel_dc sources. A change here only needs an
+#            incremental rebuild (no clean). Day-to-day F-dev should still run
+#            `scons` directly; this just keeps `tools/build` from skipping our
+#            edits when the engine refs are unchanged.
+if command -v sha256sum >/dev/null 2>&1; then
+	hash_of() { sha256sum | cut -d' ' -f1; }
+else
+	hash_of() { shasum -a 256 | cut -d' ' -f1; }
+fi
+
+core_stamp_content() {
 	printf '%s\n' \
 		"godot=${GODOT_COMMIT}" \
 		"voxel=${VOXEL_COMMIT}" \
@@ -245,29 +293,27 @@ stamp_content() {
 		"binary=$(platform_binary_name)"
 }
 
-WANT_STAMP="$(stamp_content | shasum -a 256 2>/dev/null | cut -d' ' -f1 \
-	|| stamp_content | sha256sum | cut -d' ' -f1)"
+WANT_CORE="$(core_stamp_content | hash_of)"
+WANT_MODULE="$(cat "${DC_TARGET}"/*.cpp "${DC_TARGET}"/*.h "${DC_TARGET}"/SCsub "${DC_TARGET}"/config.py 2>/dev/null | hash_of)"
 
-if [[ -f "${STAMP_FILE}" && -x "${BINARY_PATH}" ]]; then
-	HAVE_STAMP="$(cat "${STAMP_FILE}")"
-	if [[ "${HAVE_STAMP}" == "${WANT_STAMP}" ]]; then
-		info "stamp matches and binary exists — nothing to build"
-		BUILD_NEEDED=0
-		STAMP_MISMATCH=0
-	else
-		info "stamp mismatch — clean rebuild required"
-		BUILD_NEEDED=1
-		# A mismatched stamp means something structural changed (a ref bump,
-		# a precision/arg change, a platform change). Incremental builds don't
-		# reliably survive that — SCons can leave stale .gen.cpp files that
-		# reference the old config. So a mismatch forces `scons --clean` first.
-		STAMP_MISMATCH=1
-	fi
-else
+BUILD_NEEDED=0
+STAMP_MISMATCH=0
+if [[ ! -f "${STAMP_FILE}" || ! -x "${BINARY_PATH}" ]]; then
 	info "no stamp or no binary — build required"
 	BUILD_NEEDED=1
-	# No prior stamp -> nothing to clean. (Fresh tree, or first run.)
-	STAMP_MISMATCH=0
+else
+	HAVE_CORE="$(sed -n '1p' "${STAMP_FILE}")"
+	HAVE_MODULE="$(sed -n '2p' "${STAMP_FILE}")"
+	if [[ "${HAVE_CORE}" != "${WANT_CORE}" ]]; then
+		info "engine stamp mismatch — clean rebuild required"
+		BUILD_NEEDED=1
+		STAMP_MISMATCH=1
+	elif [[ "${HAVE_MODULE}" != "${WANT_MODULE}" ]]; then
+		info "voxel_dc sources changed — incremental rebuild"
+		BUILD_NEEDED=1
+	else
+		info "stamp matches and binary exists — nothing to build"
+	fi
 fi
 
 # --- 5. build ---------------------------------------------------------------
@@ -316,7 +362,7 @@ if [[ "${BUILD_NEEDED}" -eq 1 ]]; then
        The platform_binary_name() mapping in tools/lib.sh may be wrong for
        this machine. Check what landed in ${GODOT_DIR}/bin/ and fix lib.sh."
 
-	echo "${WANT_STAMP}" > "${STAMP_FILE}"
+	printf '%s\n%s\n' "${WANT_CORE}" "${WANT_MODULE}" > "${STAMP_FILE}"
 	info "build complete, stamp written"
 else
 	step "Build up to date — skipping"

@@ -27,8 +27,7 @@ fractal_lacunarity = 1.5
 height_range = 100.0
 noise = SubResource("FastNoiseLite_1fp7r")
 
-[sub_resource type="VoxelMesherTransvoxel" id="VoxelMesherTransvoxel_v5dby"]
-mesh_optimization_enabled = true
+[sub_resource type="VoxelMesherDC" id="VoxelMesherDC_dc"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_terrain"]
 render_priority = 0
@@ -59,7 +58,7 @@ environment = SubResource("Environment_sl2e5")
 [node name="VoxelLodTerrain" type="VoxelLodTerrain" parent="." unique_id=1063642795]
 stream = SubResource("VoxelStreamSQLite_save")
 generator = SubResource("VoxelGeneratorNoise2D_6m72w")
-mesher = SubResource("VoxelMesherTransvoxel_v5dby")
+mesher = SubResource("VoxelMesherDC_dc")
 material = SubResource("ShaderMaterial_terrain")
 
 [node name="Player" parent="." unique_id=1282768710 instance=ExtResource("1_dphjl")]
