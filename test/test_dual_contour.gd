@@ -162,14 +162,34 @@ class TestDualContourSharpBox:
     const B := 5.3
 
     var _verts: PackedVector3Array
+    var _normals: PackedVector3Array
     var _idx: PackedInt32Array
 
     func before_all() -> void:
         var sdf := func(p: Vector3) -> float: return SdfShapes.box(p, Vector3.ONE * B)
         var mesh := DualContour.build_mesh(sdf, Vector3i(20, 20, 20), Vector3.ONE * -10.0, 1.0)
         var arrays := mesh.surface_get_arrays(0)
-        _verts = arrays[Mesh.ARRAY_VERTEX]
-        _idx   = arrays[Mesh.ARRAY_INDEX]
+        _verts   = arrays[Mesh.ARRAY_VERTEX]
+        _normals = arrays[Mesh.ARRAY_NORMAL]
+        _idx     = arrays[Mesh.ARRAY_INDEX]
+
+    func test_edge_shading_is_crisp():
+        # Crease-aware normals: every vertex of a +X-facing triangle carries a
+        # ~+X normal, including the edge vertices. Averaged normals would give
+        # edge vertices a diagonal (~0.71) normal and fail this.
+        var checked := 0
+        var worst := 1.0
+        for i in range(0, _idx.size(), 3):
+            var a := _verts[_idx[i]]
+            var b := _verts[_idx[i + 1]]
+            var c := _verts[_idx[i + 2]]
+            var fn := (c - a).cross(b - a).normalized()   # outward face normal
+            if fn.dot(Vector3.RIGHT) > 0.9:               # a +X face triangle
+                checked += 1
+                for k in 3:
+                    worst = minf(worst, _normals[_idx[i + k]].dot(Vector3.RIGHT))
+        assert_gt(checked, 3)
+        assert_gt(worst, 0.9)
 
     func test_faces_point_outward():
         var good := 0

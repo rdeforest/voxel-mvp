@@ -72,11 +72,12 @@ func _run(sdf: Callable, depth: int, refine: Callable) -> ArrayMesh:
 
     if _verts.is_empty():
         return ArrayMesh.new()
+    var finalized := MeshNormals.with_crease_normals(_verts, _indices, _normals)
     var arrays := []
     arrays.resize(Mesh.ARRAY_MAX)
-    arrays[Mesh.ARRAY_VERTEX] = _verts
-    arrays[Mesh.ARRAY_NORMAL] = _normals
-    arrays[Mesh.ARRAY_INDEX]  = _indices
+    arrays[Mesh.ARRAY_VERTEX] = finalized["verts"]
+    arrays[Mesh.ARRAY_NORMAL] = finalized["normals"]
+    arrays[Mesh.ARRAY_INDEX]  = finalized["indices"]
     var mesh := ArrayMesh.new()
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
     return mesh

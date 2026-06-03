@@ -47,11 +47,14 @@ static func build_mesh(sdf: Callable, res: Vector3i, origin := Vector3.ZERO, cel
     if verts.is_empty():
         return ArrayMesh.new()
 
+    # Crease-aware normals: smooth where the surface is smooth (DC's gradient
+    # normals), hard where it creases (split vertices). See MeshNormals.
+    var finalized := MeshNormals.with_crease_normals(verts, indices, normals)
     var arrays := []
     arrays.resize(Mesh.ARRAY_MAX)
-    arrays[Mesh.ARRAY_VERTEX] = verts
-    arrays[Mesh.ARRAY_NORMAL] = normals
-    arrays[Mesh.ARRAY_INDEX]  = indices
+    arrays[Mesh.ARRAY_VERTEX] = finalized["verts"]
+    arrays[Mesh.ARRAY_NORMAL] = finalized["normals"]
+    arrays[Mesh.ARRAY_INDEX]  = finalized["indices"]
 
     var mesh := ArrayMesh.new()
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)

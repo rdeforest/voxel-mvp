@@ -112,15 +112,22 @@ Each can be picked up cold without holding the rest in your head.
   matching. Depends on A.
 - [ ] **Bite E — Hermite storage extension.** Only if/when crisp
   creases are needed; store point+normal at crossings. May force off
-  godot_voxel storage. Pairs with **crease-aware normal splitting** for
-  hard-edge *shading*: the Bite A/C prototype gives one averaged normal
-  per cell vertex, so a geometrically-sharp edge shades as a soft bevel
-  (Godot interpolates the diagonal normal across the crease). Splitting
-  the shared vertex by face-angle threshold fixes the look; the stored
-  crossing normals are exactly the data to decide where to split.
-  Cosmetic — geometry is already correct — deferred from the prototype.
+  godot_voxel storage. The **crease-aware normal splitting** half (hard-edge
+  *shading*) is **done in the prototype**: `MeshNormals` regroups each vertex's
+  faces by angle — smooth where the surface is smooth, split the shared vertex
+  at a crease — fixing DC's one-averaged-normal-per-cell soft bevel. What
+  remains for Bite E is the *storage* half: godot_voxel stores scalar SDF only,
+  so the engine path must store or recompute point+normal at crossings to feed
+  those crisp normals. Lands with F.
 - [ ] **Bite F — godot_voxel `VoxelMesher` subclass.** Slot A into
   godot_voxel's existing storage/streaming/LOD/collision/threading.
+  **Decision (2026-06-03):** our C++ lives in a *separate module* (not
+  edits to the pinned godot_voxel clone, which `tools/build` checks out
+  detached and refuses-on-dirty). `tools/build` gets extended to symlink/
+  build the extra module; its stamp must also track the module's source so
+  local C++ edits trigger a rebuild (today it hashes only the pinned refs +
+  args). Day-to-day F iteration uses `scons` directly (incremental relink);
+  `tools/build` stays the sync-to-pins ritual.
 
 ## When this lands
 
