@@ -112,7 +112,13 @@ Each can be picked up cold without holding the rest in your head.
   matching. Depends on A.
 - [ ] **Bite E — Hermite storage extension.** Only if/when crisp
   creases are needed; store point+normal at crossings. May force off
-  godot_voxel storage.
+  godot_voxel storage. Pairs with **crease-aware normal splitting** for
+  hard-edge *shading*: the Bite A/C prototype gives one averaged normal
+  per cell vertex, so a geometrically-sharp edge shades as a soft bevel
+  (Godot interpolates the diagonal normal across the crease). Splitting
+  the shared vertex by face-angle threshold fixes the look; the stored
+  crossing normals are exactly the data to decide where to split.
+  Cosmetic — geometry is already correct — deferred from the prototype.
 - [ ] **Bite F — godot_voxel `VoxelMesher` subclass.** Slot A into
   godot_voxel's existing storage/streaming/LOD/collision/threading.
 
