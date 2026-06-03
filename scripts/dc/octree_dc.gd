@@ -42,24 +42,29 @@ class Cell:
         return Vector3(origin) + Vector3.ONE * (size * 0.5)
 
 
-var _sdf:   Callable
+var _field: SdfField
 var _root:  Cell
-var _field: Dictionary = {}
+var _cache: Dictionary = {}
 var _verts:   PackedVector3Array = PackedVector3Array()
 var _normals: PackedVector3Array = PackedVector3Array()
 var _indices: PackedInt32Array   = PackedInt32Array()
 
 
-# sdf: Callable(Vector3)->float. The meshed region is the cube [0, 2^depth]^3 in
-# world units (the SDF positions its shape within that). refine(center, size,
-# depth)->bool gates subdivision beyond the straddle+depth rule (default: always).
+# The meshed region is the cube [0, 2^depth]^3 in world units (the field
+# positions its shape within that). refine(center, size, depth)->bool gates
+# subdivision beyond the depth rule (default: subdivide to max depth).
+
+# Convenience: mesh an analytic SDF callable (wrapped as SdfAnalytic).
 static func build_mesh(sdf: Callable, depth: int, refine := Callable()) -> ArrayMesh:
-    return OctreeDC.new()._run(sdf, depth, refine)
+    return build_field(SdfAnalytic.new(sdf), depth, refine)
+
+static func build_field(field: SdfField, depth: int, refine := Callable()) -> ArrayMesh:
+    return OctreeDC.new()._run(field, depth, refine)
 
 
-func _run(sdf: Callable, depth: int, refine: Callable) -> ArrayMesh:
-    _sdf  = sdf
-    _root = Cell.new(Vector3i.ZERO, 1 << depth)
+func _run(field: SdfField, depth: int, refine: Callable) -> ArrayMesh:
+    _field = field
+    _root  = Cell.new(Vector3i.ZERO, 1 << depth)
     _subdivide(_root, depth, refine)
 
     var leaves: Array = []
@@ -86,12 +91,10 @@ func _run(sdf: Callable, depth: int, refine: Callable) -> ArrayMesh:
 # --- octree build ---
 
 func _sample(lattice: Vector3i) -> float:
-    if _field.has(lattice):
-        return _field[lattice]
-    var v := float(_sdf.call(Vector3(lattice)))
-    if v == 0.0:
-        v = DualContour.SURFACE_NUDGE
-    _field[lattice] = v
+    if _cache.has(lattice):
+        return _cache[lattice]
+    var v := _field.value(Vector3(lattice))
+    _cache[lattice] = v
     return v
 
 func _subdivide(cell: Cell, max_depth: int, refine: Callable) -> void:
@@ -137,7 +140,7 @@ func _build_vertex(leaf: Cell) -> void:
             continue
         var t := fa / (fa - fb)
         var p := Vector3(ca).lerp(Vector3(cb), t)
-        var n := DualContour._gradient(_sdf, p)
+        var n := _field.gradient(p)
         qef.add_plane(p, n)
         nsum += n
     if qef.count() == 0:
@@ -195,7 +198,7 @@ func _try_edge(leaf: Cell, axis: int, u: int, w: int, su: int, sw: int) -> void:
         return
 
     var t := fa / (fa - fb)
-    var outward := DualContour._gradient(_sdf, Vector3(lo).lerp(Vector3(hi), t))
+    var outward := _field.gradient(Vector3(lo).lerp(Vector3(hi), t))
     _emit_poly(ring, outward)
 
 # This leaf owns the edge iff it is a smallest cell around it and, among equal

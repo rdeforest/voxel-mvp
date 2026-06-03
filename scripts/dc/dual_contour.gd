@@ -2,9 +2,9 @@ class_name DualContour
 extends RefCounted
 
 # Bite A of the DC-QEF transition (see docs/roadmap/implementation/14): a plain
-# Dual Contouring mesher over a UNIFORM grid. Scalar field in, ArrayMesh out.
-# No octree, no LOD, no Hermite storage — normals come from finite differences
-# of the sampling callable. Validated against analytic SDFs (smooth sphere).
+# Dual Contouring mesher over a UNIFORM grid. Field in, ArrayMesh out. No octree,
+# no LOD. The field source is pluggable (SdfField): SdfAnalytic for an analytic
+# SDF, SdfBaked for pre-sampled grid data. Validated against analytic SDFs.
 #
 # DC places exactly one vertex per cell, positioned anywhere inside the cell by
 # the QEF (QefSolver) so the surface can sit off-grid. Each grid edge that
@@ -21,34 +21,28 @@ const CELL_EDGES := [
 # Ring of the four cells around a grid edge, as (perp-u, perp-v) offsets.
 const CELL_RING := [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(0, 0), Vector2i(-1, 0)]
 
-const GRAD_EPS := 0.001   # finite-difference step for normals
 
-# DC degenerates when the surface passes exactly through samples (e.g. an axis-
-# aligned box whose faces land on grid planes): the field is 0 at those corners,
-# crossings pin to corners, and cells on the two sides disagree about sign. Nudge
-# exact-surface samples a hair inside so the surface reconstructs cleanly one
-# step out instead of collapsing onto the lattice.
-const SURFACE_NUDGE := -1e-6
-
-
-# sdf: Callable(Vector3) -> float, negative inside. res: cells per axis.
-# Samples corners at origin + Vector3(corner) * cell.
+# Convenience: mesh an analytic SDF callable (wrapped as SdfAnalytic).
 static func build_mesh(sdf: Callable, res: Vector3i, origin := Vector3.ZERO, cell := 1.0) -> ArrayMesh:
-    var field := _sample_field(sdf, res, origin, cell)
+    return build_field(SdfAnalytic.new(sdf), res, origin, cell)
+
+# field: pluggable source. res: cells per axis. Corners at origin + corner * cell.
+static func build_field(field: SdfField, res: Vector3i, origin := Vector3.ZERO, cell := 1.0) -> ArrayMesh:
+    var samples := _sample_field(field, res, origin, cell)
 
     var cell_vertex := {}                     # Vector3i cell -> vertex index
     var verts       := PackedVector3Array()
     var normals     := PackedVector3Array()
-    _build_vertices(sdf, field, res, origin, cell, cell_vertex, verts, normals)
+    _build_vertices(field, samples, res, origin, cell, cell_vertex, verts, normals)
 
     var indices := PackedInt32Array()
-    _build_quads(sdf, field, res, origin, cell, cell_vertex, verts, indices)
+    _build_quads(field, samples, res, origin, cell, cell_vertex, verts, indices)
 
     if verts.is_empty():
         return ArrayMesh.new()
 
-    # Crease-aware normals: smooth where the surface is smooth (DC's gradient
-    # normals), hard where it creases (split vertices). See MeshNormals.
+    # Crease-aware normals: smooth where the surface is smooth (the field's
+    # gradient normals), hard where it creases (split vertices). See MeshNormals.
     var finalized := MeshNormals.with_crease_normals(verts, indices, normals)
     var arrays := []
     arrays.resize(Mesh.ARRAY_MAX)
@@ -63,31 +57,23 @@ static func build_mesh(sdf: Callable, res: Vector3i, origin := Vector3.ZERO, cel
 
 # --- field sampling ---
 
-static func _sample_field(sdf: Callable, res: Vector3i, origin: Vector3, cell: float) -> Dictionary:
-    var field := {}
+static func _sample_field(field: SdfField, res: Vector3i, origin: Vector3, cell: float) -> Dictionary:
+    var samples := {}
     for z in res.z + 1:
         for y in res.y + 1:
             for x in res.x + 1:
                 var corner := Vector3i(x, y, z)
-                var v := float(sdf.call(origin + Vector3(corner) * cell))
-                field[corner] = v if v != 0.0 else SURFACE_NUDGE
-    return field
+                samples[corner] = field.value(origin + Vector3(corner) * cell)
+    return samples
 
 static func _corner_offset(i: int) -> Vector3i:
     return Vector3i(i & 1, (i >> 1) & 1, (i >> 2) & 1)
-
-static func _gradient(sdf: Callable, p: Vector3) -> Vector3:
-    var dx := float(sdf.call(p + Vector3(GRAD_EPS, 0, 0))) - float(sdf.call(p - Vector3(GRAD_EPS, 0, 0)))
-    var dy := float(sdf.call(p + Vector3(0, GRAD_EPS, 0))) - float(sdf.call(p - Vector3(0, GRAD_EPS, 0)))
-    var dz := float(sdf.call(p + Vector3(0, 0, GRAD_EPS))) - float(sdf.call(p - Vector3(0, 0, GRAD_EPS)))
-    var g := Vector3(dx, dy, dz)
-    return g.normalized() if g.length_squared() > 0.0 else Vector3.UP
 
 
 # --- one vertex per surface cell ---
 
 static func _build_vertices(
-        sdf: Callable, field: Dictionary, res: Vector3i, origin: Vector3, cell: float,
+        field: SdfField, samples: Dictionary, res: Vector3i, origin: Vector3, cell: float,
         cell_vertex: Dictionary, verts: PackedVector3Array, normals: PackedVector3Array) -> void:
     for cz in res.z:
         for cy in res.y:
@@ -98,8 +84,8 @@ static func _build_vertices(
                 for edge in CELL_EDGES:
                     var ca: Vector3i = c + _corner_offset(edge[0])
                     var cb: Vector3i = c + _corner_offset(edge[1])
-                    var fa: float = field[ca]
-                    var fb: float = field[cb]
+                    var fa: float = samples[ca]
+                    var fb: float = samples[cb]
                     if (fa < 0.0) == (fb < 0.0):
                         continue
                     if fa == fb:
@@ -108,7 +94,7 @@ static func _build_vertices(
                     var pa := origin + Vector3(ca) * cell
                     var pb := origin + Vector3(cb) * cell
                     var p := pa.lerp(pb, t)
-                    var n := _gradient(sdf, p)
+                    var n := field.gradient(p)
                     qef.add_plane(p, n)
                     nsum += n
                 if qef.count() == 0:
@@ -123,7 +109,7 @@ static func _build_vertices(
 # --- quads across sign-changing grid edges ---
 
 static func _build_quads(
-        sdf: Callable, field: Dictionary, res: Vector3i, origin: Vector3, cell: float,
+        field: SdfField, samples: Dictionary, res: Vector3i, origin: Vector3, cell: float,
         cell_vertex: Dictionary, verts: PackedVector3Array, indices: PackedInt32Array) -> void:
     var res_arr := [res.x, res.y, res.z]
     for axis in 3:
@@ -136,17 +122,17 @@ static func _build_quads(
                 ga[u] = uu
                 for ww in range(1, res_arr[w]):
                     ga[w] = ww
-                    _try_quad(sdf, field, axis, u, w, ga, origin, cell, cell_vertex, verts, indices)
+                    _try_quad(field, samples, axis, u, w, ga, origin, cell, cell_vertex, verts, indices)
 
 static func _try_quad(
-        sdf: Callable, field: Dictionary, axis: int, u: int, w: int, ga: Array,
+        field: SdfField, samples: Dictionary, axis: int, u: int, w: int, ga: Array,
         origin: Vector3, cell: float,
         cell_vertex: Dictionary, verts: PackedVector3Array, indices: PackedInt32Array) -> void:
     var g  := Vector3i(ga[0], ga[1], ga[2])
     var gb := g
     gb[axis] += 1
-    var fa: float = field[g]
-    var fb: float = field[gb]
+    var fa: float = samples[g]
+    var fb: float = samples[gb]
     if (fa < 0.0) == (fb < 0.0):
         return
 
@@ -164,7 +150,7 @@ static func _try_quad(
     var t := fa / (fa - fb) if fa != fb else 0.5
     var pa := origin + Vector3(g) * cell
     var pb := origin + Vector3(gb) * cell
-    var outward := _gradient(sdf, pa.lerp(pb, t))
+    var outward := field.gradient(pa.lerp(pb, t))
 
     _emit_quad(ring, verts, outward, indices)
 
