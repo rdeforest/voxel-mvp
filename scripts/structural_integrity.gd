@@ -65,6 +65,9 @@ func has_part(node: Node3D) -> bool:
 func has_part_cell(pos: Vector3i) -> bool:
     return part_support.has_part_cell(pos)
 
+func get_part_data(node: Node3D) -> PartData:
+    return part_support.part_registry.get(node)
+
 
 # --- Debug ---
 

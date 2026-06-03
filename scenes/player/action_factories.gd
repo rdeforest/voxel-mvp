@@ -3,6 +3,10 @@ extends RefCounted
 
 const EDIT_RADIUS := 3.0
 
+# Magnet reach: a placement snap point within this distance of an existing world
+# snap point pulls the part into coincidence.
+const SNAP_RADIUS := 0.75
+
 var _player:      CharacterBody3D
 var _terrain:     VoxelLodTerrain
 var _integrity:   StructuralIntegrity
@@ -68,8 +72,24 @@ func make_removal(_hit_pos: Vector3, _hit_normal: Vector3) -> Action:
         return null
     return RemovalAction.new(collider, _integrity)
 
+func make_add_snap(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
+    var collider := _raycast.get_collider()
+    if collider == null or not _integrity.has_part(collider):
+        return null
+    return AddSnapAction.new(collider, hit_pos, _proto_snap_points(collider), _integrity)
+
+func make_remove_snap(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
+    var collider := _raycast.get_collider()
+    if collider == null or not _integrity.has_part(collider):
+        return null
+    return RemoveSnapAction.new(collider, hit_pos, SnapPoints.PICK_RADIUS, _proto_snap_points(collider), _integrity)
+
+func _proto_snap_points(node: Node3D) -> Array:
+    var data := _integrity.get_part_data(node)
+    return data.part.snap_points if data != null else []
+
 func make_construction(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
-    var placement_pos := hit_pos + _build_state.placement_offset
+    var placement_pos := build_placement_pos(hit_pos)
     var anchor        := Vector3i(roundi(hit_pos.x), floori(hit_pos.y), roundi(hit_pos.z))
     return ConstructionAction.new(
         _build_state.current_part(),
@@ -81,6 +101,27 @@ func make_construction(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
         _integrity,
         _player,
     )
+
+
+# --- Build placement (shared by make_construction and the ghost preview) ---
+
+# Free placement (hit + accumulated offset), then pulled by the snap magnet
+# toward nearby world snap points. Both the action and the preview ghost call
+# this so they always agree on where the part lands.
+func build_placement_pos(hit_pos: Vector3) -> Vector3:
+    var base := hit_pos + _build_state.placement_offset
+    return base + _snap_delta(base)
+
+func _snap_delta(base_placement_pos: Vector3) -> Vector3:
+    var part: Part = _build_state.current_part()
+    if part.snap_points.is_empty():
+        return Vector3.ZERO
+    var xf    := part.world_transform(_build_state.rotation_basis(), base_placement_pos)
+    var ghost := PackedVector3Array()
+    for p in part.snap_points:
+        ghost.append(xf * p)
+    var world := SnapPoints.all_world(_integrity.part_support.part_registry)
+    return SnapPoints.snap_delta(ghost, world, SNAP_RADIUS)
 
 
 # --- Shared targeting helper (used by make_flatten and the Flatten preview) ---

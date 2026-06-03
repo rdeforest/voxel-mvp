@@ -7,6 +7,7 @@ var get_preview_mesh:     Callable
 var get_preview_material: Callable
 var get_preview_position: Callable
 var get_preview_basis:    Callable  # optional; (hit_pos, hit_normal) -> Basis
+var allows_air_placement: bool = false  # act at a fixed distance when aiming at nothing
 
 func named(                p_name: String)   -> EditMode:
     mode_name            = p_name
@@ -30,4 +31,8 @@ func preview_position(     fn:     Callable) -> EditMode:
 
 func preview_basis(        fn:     Callable) -> EditMode:
     get_preview_basis    = fn
+    return self
+
+func air_placement(        enabled: bool)    -> EditMode:
+    allows_air_placement = enabled
     return self

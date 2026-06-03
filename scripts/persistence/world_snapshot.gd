@@ -1,7 +1,7 @@
 class_name WorldSnapshot
 extends RefCounted
 
-const VERSION := 4
+const VERSION := 5
 
 # Survives scene reloads (static var on a loaded script). Set by the `reset`
 # console command and consumed by world.gd on the next _enter_tree/_ready
@@ -92,13 +92,18 @@ static func _encode_parts(ps: PartSupport) -> Array:
     var out: Array = []
     for node in ps.part_registry:
         var data: PartData = ps.part_registry[node]
-        out.append({
+        var entry := {
             "part_path":   data.part.resource_path,
             "material":    data.material.name,
             "placement_y": data.placement_y,
             "transform":   node.transform,
             "cells":       data.cells,
-        })
+        }
+        # Only forked instances carry own points; unforked ones inherit live
+        # from the prototype, so we persist nothing and let them re-resolve.
+        if SnapPoints.has_own(node):
+            entry["snap_points"] = SnapPoints.own_local(node)
+        out.append(entry)
     return out
 
 
@@ -136,6 +141,10 @@ static func _apply_parts(world: Node, _integrity: StructuralIntegrity, parts: Ar
         var instance      := part.instantiate(material_name)
         instance.transform = entry["transform"]
         world.add_child(instance)
+        # Restore the fork only for instances that had own points; others keep
+        # inheriting from the prototype (no metadata key written).
+        if entry.has("snap_points"):
+            SnapPoints.set_own(instance, entry["snap_points"])
         VoxelEventBusSingleton.emit(
             PartAddedEvent.CHANNEL,
             PartAddedEvent.new(

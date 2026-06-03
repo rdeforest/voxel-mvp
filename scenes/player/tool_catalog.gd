@@ -1,10 +1,11 @@
 class_name ToolCatalog
 extends RefCounted
 
-# Three top-level tools, each holding a list of activity EditModes:
+# Four top-level tools, each holding a list of activity EditModes:
 #   None         — probe-only
 #   Landscape    — Dig, Fill, Flatten, Raise, Lower, FillVoxel, EmptyVoxel
 #   Construction — Build, Remove
+#   Assembly     — Add Snap, Remove Snap (edit a placed part's snap points)
 
 var tools: Array[Tool] = []
 
@@ -85,8 +86,9 @@ func _build_catalog(af: ActionFactories, bs: BuildState) -> Array[Tool]:
             .on_make_action(af.make_construction)                                               \
             .preview_mesh(    func(_hp, _hn): return bs.current_mesh())                         \
             .preview_material(func(_hp, _hn): return build_mat)                                 \
-            .preview_position(func( hp, _hn): return _compute_build_preview_position(hp, bs))   \
-            .preview_basis(   func(_hp, _hn): return bs.rotation_basis()),
+            .preview_position(func( hp, _hn): return _ghost_mesh_position(af.build_placement_pos(hp), bs))   \
+            .preview_basis(   func(_hp, _hn): return bs.rotation_basis())                                    \
+            .air_placement(   true),
 
         EditMode.new()                                          \
             .named("Remove")                                    \
@@ -96,10 +98,27 @@ func _build_catalog(af: ActionFactories, bs: BuildState) -> Array[Tool]:
             .preview_position(func( hp, _hn): return hp),
     ]
 
+    var assembly_activities: Array[EditMode] = [
+        EditMode.new()                                         \
+            .named("Add Snap")                                 \
+            .on_make_action(af.make_add_snap)                  \
+            .preview_mesh(    func(_hp, _hn): return null)     \
+            .preview_material(func(_hp, _hn): return null)     \
+            .preview_position(func( hp, _hn): return hp),
+
+        EditMode.new()                                         \
+            .named("Remove Snap")                              \
+            .on_make_action(af.make_remove_snap)               \
+            .preview_mesh(    func(_hp, _hn): return null)     \
+            .preview_material(func(_hp, _hn): return null)     \
+            .preview_position(func( hp, _hn): return hp),
+    ]
+
     return [
         Tool.new("None",         none_activities),
         Tool.new("Landscape",    landscape_activities),
         Tool.new("Construction", construction_activities),
+        Tool.new("Assembly",     assembly_activities),
     ]
 
 
@@ -113,12 +132,11 @@ static func _make_preview_material(color: Color) -> StandardMaterial3D:
 
 
 # Centered BoxMesh preview: the rotated mesh's Y centroid sits at the
-# MeshInstance3D's global_position.y. Lift it so the rotated bottom face
-# lands at hit_pos + placement_offset (free placement; no cell snap).
-static func _compute_build_preview_position(hp: Vector3, bs: BuildState) -> Vector3:
+# MeshInstance3D's global_position.y. Lift it so the rotated bottom face lands at
+# placement_pos.y. placement_pos is already the snapped free-placement target.
+static func _ghost_mesh_position(placement_pos: Vector3, bs: BuildState) -> Vector3:
     var part      := bs.current_part()
     var rot_basis := bs.rotation_basis()
     var aabb      := AABB(-part.dimensions * 0.5, part.dimensions)
     var rotated   := Transform3D(rot_basis, Vector3.ZERO) * aabb
-    var base      := hp + bs.placement_offset
-    return Vector3(base.x, base.y + rotated.size.y * 0.5, base.z)
+    return Vector3(placement_pos.x, placement_pos.y + rotated.size.y * 0.5, placement_pos.z)

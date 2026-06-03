@@ -63,17 +63,7 @@ func preview() -> ActionPreview:
 
 func execute() -> void:
     var instance := part.instantiate(material_name)
-    # The procedural body's local origin is the unrotated bottom-center. After
-    # rotation, the new bottom and horizontal centroid no longer sit on that
-    # origin — shift the instance so the rotated bottom lands at
-    # placement_pos.y and the rotated centroid is over placement_pos.x/.z.
-    var rotated := _rotated_local_aabb()
-    var shift   := Vector3(
-        -(rotated.position.x + rotated.size.x * 0.5),
-         -rotated.position.y,
-        -(rotated.position.z + rotated.size.z * 0.5)
-    )
-    instance.transform = Transform3D(_basis(), placement_pos + shift)
+    instance.transform = part.world_transform(_basis(), placement_pos)
     terrain.get_parent().add_child(instance)
 
     VoxelEventBusSingleton.emit(

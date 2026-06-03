@@ -5,3 +5,4 @@
 [resource]
 script = ExtResource("1_6wk47")
 dimensions = Vector3(2, 0.1, 0.012)
+snap_points = Array[Vector3]([Vector3(1, 0.05, 0), Vector3(-1, 0.05, 0)])

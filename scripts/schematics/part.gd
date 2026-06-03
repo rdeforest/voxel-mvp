@@ -14,6 +14,22 @@ extends Schematic
 @export var scene:         PackedScene
 
 
+# World transform for an instance placed at placement_pos with the given
+# rotation. The procedural body's local origin is the unrotated bottom-center;
+# after rotation the bottom and horizontal centroid move off that origin, so we
+# shift the origin to put the rotated bottom at placement_pos.y and the rotated
+# centroid over placement_pos.x/.z. Single source for the ghost, the footprint,
+# and the real placement.
+func world_transform(basis: Basis, placement_pos: Vector3) -> Transform3D:
+    var unrot   := AABB(Vector3(-dimensions.x * 0.5, 0.0, -dimensions.z * 0.5), dimensions)
+    var rotated := Transform3D(basis, Vector3.ZERO) * unrot
+    var shift   := Vector3(
+        -(rotated.position.x + rotated.size.x * 0.5),
+         -rotated.position.y,
+        -(rotated.position.z + rotated.size.z * 0.5))
+    return Transform3D(basis, placement_pos + shift)
+
+
 func instantiate(material_override: StringName = &"") -> Node3D:
     if scene != null:
         return scene.instantiate()

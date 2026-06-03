@@ -7,6 +7,7 @@ var action_factories:  ActionFactories
 var tool_catalog:      ToolCatalog
 var _grid_overlay:     Node3D
 var _preview_renderer: Node3D
+var _snap_overlay:     Node3D
 
 var tool_index:        int       = 0
 var _activity_indices: Array[int] = []   # remembered per tool
@@ -25,6 +26,10 @@ var _mouse_button_actions: Dictionary
 @onready var raycast:      RayCast3D           = $Head/RayCast3D
 
 const EDIT_REACH := 20.0
+
+# When an air-placement activity (Build) aims at nothing within reach, float the
+# target this far along the camera ray so parts can be placed over empty space.
+const AIR_PLACE_DISTANCE := 4.0
 
 # Free-placement chord (Build only): hold Shift + (W|A|E), scroll wheel.
 const WHEEL_STEP := 0.05
@@ -46,6 +51,10 @@ func _ready() -> void:
     _preview_renderer = preload("res://scenes/player/voxel_preview_renderer.gd").new()
     _preview_renderer.player = self
     get_parent().add_child.call_deferred(_preview_renderer)
+
+    _snap_overlay = preload("res://scenes/player/snap_point_overlay.gd").new()
+    _snap_overlay.player = self
+    get_parent().add_child.call_deferred(_snap_overlay)
 
     _wire_debug_raycast.call_deferred()
 
@@ -167,19 +176,32 @@ func _physics_process(delta: float) -> void:
 # --- Edit dispatch ---
 
 func _try_edit_terrain() -> void:
-    if not raycast.is_colliding():
-        return
     var activity := current_activity()
     if activity == null:
         return
-    var hit_pos    := raycast.get_collision_point()
-    var hit_normal := raycast.get_collision_normal()
-    var action: Action = activity.make_action.call(hit_pos, hit_normal)
+    var aim := current_target()
+    if aim == null:
+        return
+    var action: Action = activity.make_action.call(aim.position, aim.normal)
     if action == null:
         return
     if action.validate():
         action.execute()
         build_state.reset_offset()
+
+
+# The world point the current activity should act on this frame, or null when
+# there's nothing to act on. Real surface hits win; otherwise air-placement
+# activities (Build) fall back to a fixed distance along the camera ray so parts
+# can be positioned over empty space (then snapped / offset into place).
+func current_target() -> Aim:
+    if raycast.is_colliding():
+        return Aim.new(raycast.get_collision_point(), raycast.get_collision_normal(), true)
+    var activity := current_activity()
+    if activity != null and activity.allows_air_placement:
+        var forward := -camera.global_transform.basis.z
+        return Aim.new(camera.global_position + forward * AIR_PLACE_DISTANCE, Vector3.UP, false)
+    return null
 
 
 # --- Tool / activity UI ---
