@@ -4,7 +4,8 @@ extends Node3D
 # prototype and inspect it with an orbit camera.
 #
 #   drag (left mouse) : orbit        wheel : zoom
-#   1 sphere  2 box  3 wedge  (same mesher, sharp where the field is sharp)
+#   1 sphere  2 box  3 wedge  (uniform DC, sharp where the field is sharp)
+#   4 octree  (adaptive DC: depth-5 left half, depth-4 right; F shows the seam)
 #   F : wireframe
 #
 # Open and run with F6.
@@ -41,7 +42,7 @@ func _ready() -> void:
     add_child(_cam)
     _update_camera()
 
-    print("DC viewer — drag to orbit, wheel to zoom, 1/2/3 shapes, F wireframe")
+    print("DC viewer — drag to orbit, wheel to zoom, 1/2/3/4 shapes, F wireframe")
     _rebuild()
 
 
@@ -71,6 +72,7 @@ func _unhandled_input(event: InputEvent) -> void:
             KEY_1: _shape = 0; _rebuild()
             KEY_2: _shape = 1; _rebuild()
             KEY_3: _shape = 2; _rebuild()
+            KEY_4: _shape = 3; _rebuild()
             KEY_F:
                 _wireframe = not _wireframe
                 get_viewport().debug_draw = (
@@ -86,10 +88,22 @@ func _update_camera() -> void:
 
 
 func _rebuild() -> void:
-    var mesh := DualContour.build_mesh(_current_sdf(), RES, ORIGIN, CELL)
     var surface := get_node_or_null("Surface") as MeshInstance3D
-    if surface != null:
-        surface.mesh = mesh
+    if surface == null:
+        return
+    var mesh: ArrayMesh
+    if _shape == 3:
+        # Adaptive octree, sphere centred at (16,16,16) in [0,32]^3 with a
+        # forced depth-5 / depth-4 seam at x=16; offset back to the origin.
+        var refine := func(c: Vector3, _s: float, d: int) -> bool: return d < (5 if c.x < 16.0 else 4)
+        var sdf := func(p: Vector3) -> float: return p.distance_to(Vector3(16, 16, 16)) - 10.0
+        mesh = OctreeDC.build_mesh(sdf, 5, refine)
+        surface.position = Vector3.ONE * -16.0
+    else:
+        mesh = DualContour.build_mesh(_current_sdf(), RES, ORIGIN, CELL)
+        surface.position = Vector3.ZERO
+    surface.mesh = mesh
+
     var arrays := mesh.surface_get_arrays(0)
     var nverts: int = (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
     var ntris: int  = (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
@@ -103,4 +117,4 @@ func _current_sdf() -> Callable:
         _:  return func(p: Vector3) -> float: return SdfShapes.sphere(p, 8.0)
 
 func _shape_name() -> String:
-    return ["sphere", "box", "wedge"][_shape]
+    return ["sphere", "box", "wedge", "octree"][_shape]
