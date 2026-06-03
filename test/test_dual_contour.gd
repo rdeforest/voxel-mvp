@@ -38,6 +38,76 @@ class TestQefSolver:
         assert_almost_eq(q.solve(Vector3.ZERO, Vector3.ONE), Vector3.ONE * 0.5, Vector3.ONE * 0.0001)
 
 
+# Bite B: ill-conditioned QEF inputs. A flat region gives a rank-1 AᵀA (two zero
+# eigenvalues); a straight crease gives rank-2; near-parallel planes give tiny
+# eigenvalues a naive pseudo-inverse would divide by, flinging the vertex out or
+# producing NaN. The eigenvalue clamp + mass-point bias + cell clamp must keep
+# every result finite and inside the cell, and sensible (on the plane/crease).
+class TestQefRobustness:
+    extends GutTest
+
+    const LO := Vector3.ZERO
+    const HI := Vector3.ONE     # unit cell [0,1]^3
+
+    func _assert_sane(x: Vector3) -> void:
+        assert_true(is_finite(x.x) and is_finite(x.y) and is_finite(x.z), "finite")
+        assert_between(x.x, LO.x, HI.x)
+        assert_between(x.y, LO.y, HI.y)
+        assert_between(x.z, LO.z, HI.z)
+
+    func test_flat_region_is_finite_and_on_the_plane():
+        # Coplanar crossings, all normals +Y -> rank-1 system, tangent
+        # position underdetermined. Must not divide by the two zero eigenvalues.
+        var q := QefSolver.new()
+        q.add_plane(Vector3(0.2, 0.5, 0.3), Vector3(0, 1, 0))
+        q.add_plane(Vector3(0.8, 0.5, 0.1), Vector3(0, 1, 0))
+        q.add_plane(Vector3(0.4, 0.5, 0.9), Vector3(0, 1, 0))
+        var x := q.solve(LO, HI)
+        _assert_sane(x)
+        assert_almost_eq(x.y, 0.5, 0.0001)
+
+    func test_straight_crease_rank2_lands_on_the_edge_line():
+        # +X and +Y faces meeting at the line x=0.7, y=0.3 (edge along z).
+        # Position along z underdetermined.
+        var q := QefSolver.new()
+        q.add_plane(Vector3(0.7, 0.1, 0.2), Vector3(1, 0, 0))
+        q.add_plane(Vector3(0.7, 0.9, 0.8), Vector3(1, 0, 0))
+        q.add_plane(Vector3(0.1, 0.3, 0.4), Vector3(0, 1, 0))
+        q.add_plane(Vector3(0.9, 0.3, 0.6), Vector3(0, 1, 0))
+        var x := q.solve(LO, HI)
+        _assert_sane(x)
+        assert_almost_eq(x.x, 0.7, 0.001)
+        assert_almost_eq(x.y, 0.3, 0.001)
+
+    func test_near_parallel_normals_do_not_blow_up():
+        # Almost-coplanar planes with tiny tilts and slight inconsistency: the
+        # weak directions have ~1e-8 eigenvalues. Without the clamp the offset
+        # along them explodes; with it the vertex stays sane.
+        var q := QefSolver.new()
+        q.add_plane(Vector3(0.1, 0.50, 0.2), Vector3(0.0002, 1, 0).normalized())
+        q.add_plane(Vector3(0.9, 0.52, 0.8), Vector3(0, 1, 0.0002).normalized())
+        q.add_plane(Vector3(0.5, 0.48, 0.5), Vector3(-0.0002, 1, 0).normalized())
+        _assert_sane(q.solve(LO, HI))
+
+    func test_contradictory_far_planes_clamp_into_cell():
+        var q := QefSolver.new()
+        q.add_plane(Vector3(10, 0, 0), Vector3(1, 0, 0))
+        q.add_plane(Vector3(0, 10, 0), Vector3(0, 1, 0))
+        q.add_plane(Vector3(0, 0, 10), Vector3(0, 0, 1))
+        _assert_sane(q.solve(LO, HI))
+
+    func test_perturbed_flat_sweep_always_stays_in_cell():
+        # Deterministic perturbations (no RNG): many near-flat regions, every
+        # solve finite and in-cell.
+        for i in 60:
+            var j := float(i % 9 - 4) * 0.0004
+            var q := QefSolver.new()
+            q.add_plane(Vector3(0.1, 0.5, 0.2), Vector3(j, 1, 0).normalized())
+            q.add_plane(Vector3(0.9, 0.5, 0.8), Vector3(0, 1, j).normalized())
+            q.add_plane(Vector3(0.5, 0.5, 0.5), Vector3(-j, 1, j).normalized())
+            _assert_sane(q.solve(LO, HI))
+
+
 class TestDualContourSphere:
     extends GutTest
 
