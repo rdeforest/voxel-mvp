@@ -24,14 +24,21 @@ func _ready() -> void:
 
 # --- Console commands (Limbo) ---
 
+# LimboConsole is an autoload: its command registry survives scene reloads
+# (F9 load, `reset`), but world._ready runs again on each reload. Guard so we
+# don't re-register and trip "command already registered".
 func _register_console_commands() -> void:
-    LimboConsole.register_command(_cmd_set,        "set",        "Set a terrain shader uniform (float). Usage: set <name> <value>")
-    LimboConsole.register_command(_cmd_reset,      "reset",      "Delete the save (terrain DB + snapshot) and reload to a fresh world.")
-    LimboConsole.register_command(_cmd_quiescent,  "quiescent",  "Print whether the world is quiescent (save-ready).")
-    LimboConsole.register_command(_cmd_parts,      "parts",      "Print the number of tracked parts.")
-    LimboConsole.register_command(_cmd_voxels,     "voxels",     "Print the number of tracked terrain voxels.")
-    LimboConsole.register_command(_cmd_tp,         "tp",         "Teleport the player. Usage: tp <x> <y> <z>")
-    LimboConsole.register_command(_cmd_quit,       "quit_game",  "Exit the game (separate from console's built-in quit).")
+    _add_command(_cmd_set,        "set",        "Set a terrain shader uniform (float). Usage: set <name> <value>")
+    _add_command(_cmd_reset,      "reset",      "Delete the save (terrain DB + snapshot) and reload to a fresh world.")
+    _add_command(_cmd_quiescent,  "quiescent",  "Print whether the world is quiescent (save-ready).")
+    _add_command(_cmd_parts,      "parts",      "Print the number of tracked parts.")
+    _add_command(_cmd_voxels,     "voxels",     "Print the number of tracked terrain voxels.")
+    _add_command(_cmd_tp,         "tp",         "Teleport the player. Usage: tp <x> <y> <z>")
+    _add_command(_cmd_quit,       "quit_game",  "Exit the game (separate from console's built-in quit).")
+
+func _add_command(fn: Callable, cmd_name: String, desc: String) -> void:
+    if not LimboConsole.has_command(cmd_name):
+        LimboConsole.register_command(fn, cmd_name, desc)
 
 func _cmd_set(param: String, value: float) -> void:
     var mat := _terrain.material as ShaderMaterial
