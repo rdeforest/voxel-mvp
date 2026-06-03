@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://d261d54nb0qkw"]
+
+[ext_resource type="Script" uid="uid://bfo14ay2g2ctl" path="res://scenes/dc_preview/dc_preview.gd" id="1_dc"]
+
+[node name="DCPreview" type="Node3D" unique_id=811503121]
+script = ExtResource("1_dc")
