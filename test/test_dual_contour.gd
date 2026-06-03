@@ -77,3 +77,43 @@ class TestDualContourSphere:
             if face_n.dot(centroid) > 0.0:
                 good += 1
         assert_gt(float(good) / float(total), 0.95)
+
+
+# Bite C: the QEF must recover sharp creases, not round them off. A box has flat
+# faces, 90° edges, and 3-plane corners. Edges are placed off-grid (half-extent
+# 5.3) so the mesher has to reconstruct the crease inside cells. An averaging
+# mesher (surface nets) would pull edge/corner vertices inward; the QEF keeps
+# faces flat at the bound and corners out at the full extent.
+class TestDualContourSharpBox:
+    extends GutTest
+
+    const B := 5.3
+
+    var _verts: PackedVector3Array
+
+    func before_all() -> void:
+        var sdf := func(p: Vector3) -> float: return SdfShapes.box(p, Vector3.ONE * B)
+        var mesh := DualContour.build_mesh(sdf, Vector3i(20, 20, 20), Vector3.ONE * -10.0, 1.0)
+        _verts = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+
+    func test_corners_reach_full_extent():
+        var max_coord := 0.0
+        for v in _verts:
+            max_coord = maxf(max_coord, maxf(absf(v.x), maxf(absf(v.y), absf(v.z))))
+        assert_almost_eq(max_coord, B, 0.15)   # not rounded inward
+
+    func test_plus_x_face_is_flat_at_the_bound():
+        var max_dev := 0.0
+        var n := 0
+        for v in _verts:
+            if v.x > 4.5:                       # vertices on/near the +X face
+                max_dev = maxf(max_dev, absf(v.x - B))
+                n += 1
+        assert_gt(n, 5)                         # actually found face vertices
+        assert_lt(max_dev, 0.15)               # they sit on the plane, edges included
+
+    func test_wedge_meshes_without_error():
+        var sdf := func(p: Vector3) -> float: return SdfShapes.wedge(p, Vector3.ONE * 5.0)
+        var mesh := DualContour.build_mesh(sdf, Vector3i(20, 20, 20), Vector3.ONE * -10.0, 1.0)
+        assert_eq(mesh.get_surface_count(), 1)
+        assert_gt((mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), 50)
