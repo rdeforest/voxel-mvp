@@ -259,6 +259,7 @@ func _toggle_wireframe() -> void:
     )
 
 func _quit_game() -> void:
+    TerrainPersistence.flush(terrain)
     get_tree().quit()
 
 
@@ -268,6 +269,7 @@ func _save_game() -> void:
     if not integrity.is_quiescent():
         print("Cannot save: world still settling.")
         return
+    TerrainPersistence.flush(terrain)
     var err := WorldSnapshot.save(SavePaths.SNAPSHOT_FILE, get_parent())
     print("Saved." if err == OK else "Save failed: %s" % err)
 
