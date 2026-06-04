@@ -137,6 +137,7 @@ class TestDualContourSphere:
 
     func test_faces_point_outward():
         var good := 0
+        @warning_ignore("integer_division")
         var total := _idx.size() / 3
         for i in range(0, _idx.size(), 3):
             var a := _verts[_idx[i]]
@@ -149,6 +150,96 @@ class TestDualContourSphere:
             if face_n.dot(centroid) < 0.0:
                 good += 1
         assert_gt(float(good) / float(total), 0.95)
+
+    # A closed surface must be watertight: every edge shared by exactly two
+    # triangles. A see-through hole shows up here as boundary edges. (Zero-area
+    # sliver triangles can exist where adjacent QEF vertices coincide, but they
+    # are topologically load-bearing and visually harmless, so we don't flag them.)
+    func test_smooth_sphere_is_watertight():
+        var audit := _watertight_audit(_verts, _idx)
+        # boundary edges == real see-through holes. (non-manifold edges, audit.y,
+        # come from benign zero-area slivers where adjacent QEF vertices coincide.)
+        assert_eq(audit.x, 0, "boundary edges (holes)")
+
+    # Audit by POSITION, not index: crease-aware normals split a vertex into
+    # several index copies at hard edges (same position, different normal), which
+    # would read as fake boundary edges if counted by index. Welding by position
+    # measures the true surface topology — real holes vs shading splits.
+    static func _watertight_audit(verts: PackedVector3Array, idx: PackedInt32Array) -> Vector2i:
+        var pos_id := {}
+        var remap := PackedInt32Array()
+        remap.resize(verts.size())
+        for i in verts.size():
+            var key := verts[i].snapped(Vector3.ONE * 1e-4)
+            if not pos_id.has(key):
+                pos_id[key] = pos_id.size()
+            remap[i] = pos_id[key]
+        var edge_count := {}
+        for i in range(0, idx.size(), 3):
+            var w := [remap[idx[i]], remap[idx[i + 1]], remap[idx[i + 2]]]
+            for e in [[w[0], w[1]], [w[1], w[2]], [w[2], w[0]]]:
+                var key := Vector2i(mini(e[0], e[1]), maxi(e[0], e[1]))
+                edge_count[key] = edge_count.get(key, 0) + 1
+        var boundary := 0
+        var nonmanifold := 0
+        for k in edge_count:
+            if   edge_count[k] == 1: boundary += 1
+            elif edge_count[k] >  2: nonmanifold += 1
+        return Vector2i(boundary, nonmanifold)
+
+    # A noisy closed surface (terrain-like: varied, locally steep slopes) must
+    # still be watertight. The smooth sphere can't exercise the configurations
+    # that produce the in-game holes; this is closer to the real field.
+    func test_noisy_blob_is_watertight():
+        # Low-frequency bump: features span ~15 voxels, like terrain hills (not a
+        # high-frequency field that would just be under-sampled / aliased).
+        var sdf := func(p: Vector3) -> float:
+            var bump := 2.5 * sin(p.x * 0.42) * cos(p.z * 0.46) + 1.5 * sin(p.y * 0.38)
+            return p.length() - (8.0 + bump)
+        var mesh := DualContour.build_mesh(sdf, Vector3i(36, 36, 36), Vector3.ONE * -18.0, 1.0)
+        var arrays := mesh.surface_get_arrays(0)
+        var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+        var idx: PackedInt32Array     = arrays[Mesh.ARRAY_INDEX]
+        var audit := _watertight_audit(verts, idx)
+        gut.p("NOISY blob: boundary=%d nonmanifold=%d tris=%d" % [audit.x, audit.y, idx.size() / 3])
+        assert_eq(audit.x, 0, "boundary edges (holes) on noisy blob")
+
+    # The winding decision uses the SDF gradient at the crossing. The engine path
+    # computes that gradient over a full voxel step (coarse), which can point the
+    # wrong way at features and flip a quad's facing -> back-face -> culled ->
+    # see-through hole in-game. Mesh a baked field (voxel-resolution gradients,
+    # exactly like the C++ mesher) and assert no triangle faces inward. Ground
+    # truth "outward" is the fine analytic gradient, independent of the mesher.
+    func test_baked_blob_has_no_backfacing_triangles():
+        var sdf := func(p: Vector3) -> float:
+            var bump := 2.5 * sin(p.x * 0.42) * cos(p.z * 0.46) + 1.5 * sin(p.y * 0.38)
+            return p.length() - (8.0 + bump)
+        var origin := Vector3.ONE * -18.0
+        var baked := SdfBaked.bake(SdfAnalytic.new(sdf), origin, 1.0, Vector3i(37, 37, 37))
+        var truth := SdfAnalytic.new(sdf)
+        var arrays := DualContour.build_field(baked, Vector3i(36, 36, 36), origin, 1.0).surface_get_arrays(0)
+        var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+        var idx: PackedInt32Array     = arrays[Mesh.ARRAY_INDEX]
+        var wrong := 0
+        var severe := 0
+        for i in range(0, idx.size(), 3):
+            var a := verts[idx[i]]
+            var b := verts[idx[i + 1]]
+            var c := verts[idx[i + 2]]
+            # Godot front face = clockwise-from-front -> RH normal points INWARD,
+            # so a correctly-wound triangle has cross . outward < 0.
+            var out_dir := truth.gradient((a + b + c) / 3.0)
+            var n := (b - a).cross(c - a)
+            if n.dot(out_dir) <= 1e-6:
+                continue
+            wrong += 1
+            # Severity = cos(angle between the triangle normal and outward). A
+            # clearly-inverted triangle (-> visible hole) has cos well above 0;
+            # near-zero is a grazing/edge-on triangle that culls ~no visible area.
+            if n.length() > 0.0 and n.normalized().dot(out_dir) > 0.3:
+                severe += 1
+        gut.p("BAKED blob back-facing: %d wrong (%d severe) / %d tris" % [wrong, severe, idx.size() / 3])
+        assert_eq(severe, 0, "severely back-facing triangles -> visible see-through holes")
 
 
 # Bite C: the QEF must recover sharp creases, not round them off. A box has flat
@@ -193,6 +284,7 @@ class TestDualContourSharpBox:
 
     func test_faces_point_outward():
         var good := 0
+        @warning_ignore("integer_division")
         var total := _idx.size() / 3
         for i in range(0, _idx.size(), 3):
             var a := _verts[_idx[i]]
@@ -231,6 +323,7 @@ class TestDualContourSharpBox:
         var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
         var idx: PackedInt32Array     = arrays[Mesh.ARRAY_INDEX]
         var good := 0
+        @warning_ignore("integer_division")
         var total := idx.size() / 3
         for i in range(0, idx.size(), 3):
             var a := verts[idx[i]]

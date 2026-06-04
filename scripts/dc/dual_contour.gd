@@ -36,7 +36,7 @@ static func build_field(field: SdfField, res: Vector3i, origin := Vector3.ZERO, 
     _build_vertices(field, samples, res, origin, cell, cell_vertex, verts, normals)
 
     var indices := PackedInt32Array()
-    _build_quads(field, samples, res, origin, cell, cell_vertex, verts, indices)
+    _build_quads(samples, res, cell_vertex, verts, indices)
 
     if verts.is_empty():
         return ArrayMesh.new()
@@ -109,7 +109,7 @@ static func _build_vertices(
 # --- quads across sign-changing grid edges ---
 
 static func _build_quads(
-        field: SdfField, samples: Dictionary, res: Vector3i, origin: Vector3, cell: float,
+        samples: Dictionary, res: Vector3i,
         cell_vertex: Dictionary, verts: PackedVector3Array, indices: PackedInt32Array) -> void:
     var res_arr := [res.x, res.y, res.z]
     for axis in 3:
@@ -122,11 +122,10 @@ static func _build_quads(
                 ga[u] = uu
                 for ww in range(1, res_arr[w]):
                     ga[w] = ww
-                    _try_quad(field, samples, axis, u, w, ga, origin, cell, cell_vertex, verts, indices)
+                    _try_quad(samples, axis, u, w, ga, cell_vertex, verts, indices)
 
 static func _try_quad(
-        field: SdfField, samples: Dictionary, axis: int, u: int, w: int, ga: Array,
-        origin: Vector3, cell: float,
+        samples: Dictionary, axis: int, u: int, w: int, ga: Array,
         cell_vertex: Dictionary, verts: PackedVector3Array, indices: PackedInt32Array) -> void:
     var g  := Vector3i(ga[0], ga[1], ga[2])
     var gb := g
@@ -146,26 +145,22 @@ static func _try_quad(
             return   # incomplete ring (shouldn't happen for a clean field); skip
         ring.append(cell_vertex[key])
 
-    # Outward = field gradient at the edge crossing.
-    var t := fa / (fa - fb) if fa != fb else 0.5
-    var pa := origin + Vector3(g) * cell
-    var pb := origin + Vector3(gb) * cell
-    var outward := field.gradient(pa.lerp(pb, t))
+    # Front faces air. Reverse when the +axis corner is the air side (fb > 0 > fa,
+    # i.e. fb > fa) — decided from the crossing sign, never the gradient.
+    _emit_quad(ring, fb > fa, verts, indices)
 
-    _emit_quad(ring, verts, outward, indices)
-
-# Two triangles for the ring [0,1,2,3]; flip winding so the face normal agrees
-# with `outward` (field gradient), making the surface face air regardless of the
-# ring's traversal direction.
-static func _emit_quad(ring: Array, verts: PackedVector3Array, outward: Vector3, indices: PackedInt32Array) -> void:
-    var p0 := verts[ring[0]]
-    var p1 := verts[ring[1]]
-    var p2 := verts[ring[2]]
-    # Godot treats clockwise-from-the-front triangles as front faces. The right-
-    # hand normal of [0,1,2] is (p1-p0)x(p2-p0); when it points OUTWARD the ring
-    # reads counter-clockwise from outside (a Godot back face), so reverse it.
-    var rh_outward := (p1 - p0).cross(p2 - p0).dot(outward) >= 0.0
-    if rh_outward:
-        indices.append_array([ring[0], ring[2], ring[1], ring[0], ring[3], ring[2]])
+# Triangulate the ring [0,1,2,3]. Two independent decisions:
+#  - Facing: CELL_RING is CCW in (u,w) so the forward order's right-hand normal
+#    points +axis; Godot fronts are clockwise-from-front, so reverse when air is
+#    on the +axis side. `reverse` comes from the crossing sign alone (exact).
+#  - Diagonal: a DC quad is usually non-planar; splitting across the long
+#    diagonal folds one triangle to face inward (-> culled -> hole), so split
+#    along the SHORTER diagonal for the flattest triangulation.
+static func _emit_quad(ring: Array, reverse: bool, verts: PackedVector3Array, indices: PackedInt32Array) -> void:
+    var short02 := verts[ring[0]].distance_squared_to(verts[ring[2]]) <= verts[ring[1]].distance_squared_to(verts[ring[3]])
+    if short02:
+        if reverse: indices.append_array([ring[0], ring[2], ring[1], ring[0], ring[3], ring[2]])
+        else:       indices.append_array([ring[0], ring[1], ring[2], ring[0], ring[2], ring[3]])
     else:
-        indices.append_array([ring[0], ring[1], ring[2], ring[0], ring[2], ring[3]])
+        if reverse: indices.append_array([ring[1], ring[3], ring[2], ring[1], ring[0], ring[3]])
+        else:       indices.append_array([ring[1], ring[2], ring[3], ring[1], ring[3], ring[0]])

@@ -49,6 +49,7 @@ func _assert_hugs(verts: PackedVector3Array, tol: float) -> void:
 
 func _assert_faces_outward(verts: PackedVector3Array, idx: PackedInt32Array) -> void:
     var good := 0
+    @warning_ignore("integer_division")
     var total := idx.size() / 3
     for i in range(0, idx.size(), 3):
         var a := verts[idx[i]]

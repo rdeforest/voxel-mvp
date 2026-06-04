@@ -55,8 +55,15 @@ func solve(cell_min: Vector3, cell_max: Vector3) -> Vector3:
     # Solve AᵀA·(x - c) = Aᵀb - AᵀA·c for the offset from the mass point, so the
     # null space of AᵀA leaves the vertex at the mass point rather than at origin.
     var rhs := _atb - _ata_mul(centroid)
-    var offset := _pseudo_solve(rhs)
-    return (centroid + offset).clamp(cell_min, cell_max)
+    var v := centroid + _pseudo_solve(rhs)
+    # If the solution lands outside the cell it's an unreliable extrapolation
+    # (ill-conditioned feature solve); clamping it to a face still folds quads
+    # against neighbours. Fall back to the mass point, which lies on the crossings
+    # (inside the cell, on the surface) and keeps the quad near-planar.
+    if v.x < cell_min.x or v.y < cell_min.y or v.z < cell_min.z \
+            or v.x > cell_max.x or v.y > cell_max.y or v.z > cell_max.z:
+        return centroid.clamp(cell_min, cell_max)
+    return v
 
 
 # --- internals ---

@@ -106,6 +106,7 @@ func _rebuild() -> void:
 
     var arrays := mesh.surface_get_arrays(0)
     var nverts: int = (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+    @warning_ignore("integer_division")
     var ntris: int  = (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
     print("DC %s: %d vertices, %d triangles" % [_shape_name(), nverts, ntris])
 

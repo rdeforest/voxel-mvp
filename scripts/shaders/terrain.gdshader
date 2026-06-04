@@ -22,6 +22,15 @@ uniform vec2  wave_dir                              = vec2(0.7, 0.3);
 
 uniform float roughness      : hint_range(0.0, 1.0) = 0.9;
 
+// Debug: blend each triangle's per-LOD colour (vertex COLOR from the DC mesher)
+// over the grass/dirt material. 0 = off, 1 = full. Console: set debug_lod 0.3
+uniform float debug_lod      : hint_range(0.0, 1.0) = 0.0;
+
+// Debug: when on, show the surface NORMAL as an unlit colour (xyz -> rgb,
+// [-1,1] mapped to [0,1]). A correct terrain normal is mostly green (+Y up);
+// black/very-dark patches are degenerate normals. Console: set debug_normal 1
+uniform float debug_normal   : hint_range(0.0, 1.0) = 0.0;
+
 varying vec3 v_world_pos;
 varying vec3 v_world_normal;
 
@@ -87,6 +96,12 @@ void fragment() {
 
     vec3 albedo = mix(dirt_color, grass, grass_mask);
 
-    ALBEDO    = albedo;
+    // debug_lod is the blend amount of the per-LOD colour over the material:
+    // 0 = off, 0.3 = subtle tint, 1 = full LOD colour. (console: set debug_lod 0.3)
+    ALBEDO    = mix(albedo, COLOR.rgb, debug_lod);
     ROUGHNESS = roughness;
+
+    // Normal visualiser: unlit, so a bad normal can't hide behind lighting.
+    ALBEDO   = mix(ALBEDO, vec3(0.0), debug_normal);
+    EMISSION = (v_world_normal * 0.5 + 0.5) * debug_normal;
 }

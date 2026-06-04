@@ -1,5 +1,6 @@
 #include "voxel_mesher_dc.h"
 
+#include "core/math/color.h"
 #include "core/templates/local_vector.h"
 #include "modules/voxel/storage/voxel_buffer.h"
 
@@ -27,6 +28,20 @@ const int EDGES[12][2] = {
 };
 // Ring of the four cells around an edge, in (perp-u, perp-v) offsets.
 const int RING[4][2] = { { -1, -1 }, { 0, -1 }, { 0, 0 }, { -1, 0 } };
+
+// Debug palette: per-vertex colour by LOD index, painted by the terrain shader
+// when its debug_lod uniform is on (console: `set debug_lod 1`).
+Color lod_color(int lod) {
+	static const Color palette[6] = {
+		Color(0.30, 0.90, 0.30), // 0 green
+		Color(0.30, 0.80, 0.95), // 1 cyan
+		Color(0.95, 0.90, 0.30), // 2 yellow
+		Color(0.95, 0.55, 0.20), // 3 orange
+		Color(0.90, 0.30, 0.30), // 4 red
+		Color(0.85, 0.45, 0.95), // 5 magenta
+	};
+	return palette[CLAMP(lod, 0, 5)];
+}
 
 // Quadratic Error Function solver (ported from the GDScript prototype): the
 // cell vertex minimizes sum of squared distances to the crossing tangent
@@ -111,7 +126,16 @@ struct Qef {
 				offset += vecs[i] * (vecs[i].dot(rhs) / lam);
 			}
 		}
-		return (centroid + offset).clamp(cmin, cmax);
+		// If the solution lands outside the cell it's an unreliable extrapolation
+		// (ill-conditioned feature solve); clamping to a face still folds quads
+		// against neighbours. Fall back to the mass point, which lies on the
+		// crossings (inside the cell, on the surface) and keeps the quad planar.
+		Vector3 v = centroid + offset;
+		if (v.x < cmin.x || v.y < cmin.y || v.z < cmin.z ||
+				v.x > cmax.x || v.y > cmax.y || v.z > cmax.z) {
+			return centroid.clamp(cmin, cmax);
+		}
+		return v;
 	}
 };
 
@@ -163,7 +187,9 @@ void VoxelMesherDC::build(Output &output, const Input &input) {
 
 	PackedVector3Array verts;
 	PackedVector3Array normals;
+	PackedColorArray colors;
 	PackedInt32Array indices;
+	const Color this_lod_color = lod_color(int(input.lod_index));
 
 	for (int lz = 0; lz <= bs; ++lz) {
 		for (int ly = 0; ly <= bs; ++ly) {
@@ -200,6 +226,7 @@ void VoxelMesherDC::build(Output &output, const Input &input) {
 				cell_vert[cidx(lx, ly, lz)] = verts.size();
 				verts.push_back((vbuf - Vector3(MIN_PADDING, MIN_PADDING, MIN_PADDING)) * scale);
 				normals.push_back(nsum.normalized());
+				colors.push_back(this_lod_color);
 			}
 		}
 	}
@@ -220,7 +247,6 @@ void VoxelMesherDC::build(Output &output, const Input &input) {
 				for (int gw = 1; gw <= bs; ++gw) {
 					int g[3];
 					g[axis] = a; g[u] = gu; g[w] = gw;
-					// Edge endpoints (buffer corners) along `axis`.
 					int A[3] = { g[0] + MIN_PADDING, g[1] + MIN_PADDING, g[2] + MIN_PADDING };
 					int B[3] = { A[0], A[1], A[2] };
 					B[axis] += 1;
@@ -229,7 +255,6 @@ void VoxelMesherDC::build(Output &output, const Input &input) {
 					if ((fa < 0.0f) == (fb < 0.0f) || fa == fb) {
 						continue;
 					}
-					// Four surrounding cells (perp ring), all at axis index a.
 					int ring_v[4];
 					bool ok = true;
 					for (int k = 0; k < 4; ++k) {
@@ -244,19 +269,30 @@ void VoxelMesherDC::build(Output &output, const Input &input) {
 					if (!ok) {
 						continue;
 					}
-					const float t = fa / (fa - fb);
-					Vector3 outward = grad(A[0], A[1], A[2]).lerp(grad(B[0], B[1], B[2]), t);
-					// Godot front faces are clockwise-from-front: when the right-
-					// hand normal of [0,1,2] points outward the ring reads CCW
-					// (a back face), so reverse it.
-					const Vector3 p0 = verts[ring_v[0]], p1 = verts[ring_v[1]], p2 = verts[ring_v[2]];
-					const bool rh_outward = (p1 - p0).cross(p2 - p0).dot(outward) >= 0.0;
-					if (rh_outward) {
-						indices.push_back(ring_v[0]); indices.push_back(ring_v[2]); indices.push_back(ring_v[1]);
-						indices.push_back(ring_v[0]); indices.push_back(ring_v[3]); indices.push_back(ring_v[2]);
+					// Front faces air. RING is CCW in the perp plane, so reverse the winding
+					// when the +axis corner is the air side (fb > fa). Split along the shorter
+					// diagonal so a non-planar quad doesn't fold a triangle inward. Both use
+					// the crossing sign and vertex positions only -- never the gradient, which
+					// at voxel resolution can flip a quad's facing and cull it into a hole.
+					const bool reverse = fb > fa;
+					const bool short02 = verts[ring_v[0]].distance_squared_to(verts[ring_v[2]]) <= verts[ring_v[1]].distance_squared_to(verts[ring_v[3]]);
+					const int *r = ring_v;
+					if (short02) {
+						if (reverse) {
+							indices.push_back(r[0]); indices.push_back(r[2]); indices.push_back(r[1]);
+							indices.push_back(r[0]); indices.push_back(r[3]); indices.push_back(r[2]);
+						} else {
+							indices.push_back(r[0]); indices.push_back(r[1]); indices.push_back(r[2]);
+							indices.push_back(r[0]); indices.push_back(r[2]); indices.push_back(r[3]);
+						}
 					} else {
-						indices.push_back(ring_v[0]); indices.push_back(ring_v[1]); indices.push_back(ring_v[2]);
-						indices.push_back(ring_v[0]); indices.push_back(ring_v[2]); indices.push_back(ring_v[3]);
+						if (reverse) {
+							indices.push_back(r[1]); indices.push_back(r[3]); indices.push_back(r[2]);
+							indices.push_back(r[1]); indices.push_back(r[0]); indices.push_back(r[3]);
+						} else {
+							indices.push_back(r[1]); indices.push_back(r[2]); indices.push_back(r[3]);
+							indices.push_back(r[1]); indices.push_back(r[3]); indices.push_back(r[0]);
+						}
 					}
 				}
 			}
@@ -271,6 +307,7 @@ void VoxelMesherDC::build(Output &output, const Input &input) {
 	surface.arrays.resize(Mesh::ARRAY_MAX);
 	surface.arrays[Mesh::ARRAY_VERTEX] = verts;
 	surface.arrays[Mesh::ARRAY_NORMAL] = normals;
+	surface.arrays[Mesh::ARRAY_COLOR] = colors;
 	surface.arrays[Mesh::ARRAY_INDEX] = indices;
 	output.surfaces.push_back(surface);
 	output.primitive_type = Mesh::PRIMITIVE_TRIANGLES;
