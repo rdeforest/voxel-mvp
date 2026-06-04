@@ -56,13 +56,48 @@ func test_single_block_watertight():
     assert_eq(a["boundary"], 0, "single block has no boundary edges")
 
 
-# Baseline for the F2 transition band: a fine block beside a coarse block of the
-# same field cracks at the shared face. Reported, not asserted — once the additive
-# transition band lands, this test gains the fine+band+coarse meshes and asserts
-# boundary == 0 (the band must drive the seam watertight).
-func test_fine_coarse_seam_is_the_f2_target():
+# Two independent LOD meshes don't align at the shared face — the seam cracks.
+# This is inherent (off-grid DC vertices), and the reason the transition band
+# exists.
+func test_raw_seam_cracks_without_a_band() -> void:
     var fine   := DualContour.build_mesh(_sphere, Vector3i(SEAM, 16, 16), Vector3.ZERO, 1.0)
     var coarse := DualContour.build_mesh(_sphere, Vector3i(SEAM / 2, 8, 8), Vector3(SEAM, 0, 0), 2.0)
     var a := _audit([fine, coarse])
-    gut.p("LOD seam baseline (no band): boundary=%d nonmanifold=%d tris=%d" % [a["boundary"], a["nonmanifold"], a["tris"]])
-    pending("F2: transition band not implemented yet; seam cracks (boundary=%d). Target: 0." % a["boundary"])
+    gut.p("raw seam (no band): boundary=%d nonmanifold=%d" % [a["boundary"], a["nonmanifold"]])
+    assert_gt(a["boundary"], 0, "raw LOD seam must crack (the band's reason to exist)")
+
+# The additive band zippers the fine open loop to the coarse open loop. Welded
+# with both block meshes, the seam must have zero boundary edges.
+func test_band_closes_the_seam() -> void:
+    var fine   := DualContour.build_mesh(_sphere, Vector3i(SEAM, 16, 16), Vector3.ZERO, 1.0)
+    var coarse := DualContour.build_mesh(_sphere, Vector3i(SEAM / 2, 8, 8), Vector3(SEAM, 0, 0), 2.0)
+    var fv: PackedVector3Array = fine.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+    var fi: PackedInt32Array   = fine.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+    var cv: PackedVector3Array = coarse.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+    var ci: PackedInt32Array   = coarse.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+
+    var floops := DcSeam.open_loops(fi)
+    var cloops := DcSeam.open_loops(ci)
+    gut.p("loops: fine=%d coarse=%d" % [floops.size(), cloops.size()])
+    assert_eq(floops.size(), 1, "sphere meets the seam in one fine loop")
+    assert_eq(cloops.size(), 1, "sphere meets the seam in one coarse loop")
+
+    var band := DcSeam.stitch(_loop_pos(fv, floops[0]), _loop_pos(cv, cloops[0]))
+    var a := _audit([fine, _band_mesh(band), coarse])
+    gut.p("with band: boundary=%d nonmanifold=%d" % [a["boundary"], a["nonmanifold"]])
+    assert_eq(a["boundary"], 0, "transition band must close the seam (no boundary edges)")
+
+func _loop_pos(verts: PackedVector3Array, loop: PackedInt32Array) -> PackedVector3Array:
+    var out := PackedVector3Array()
+    for idx in loop:
+        out.append(verts[idx])
+    return out
+
+func _band_mesh(band: Dictionary) -> ArrayMesh:
+    var arrays := []
+    arrays.resize(Mesh.ARRAY_MAX)
+    arrays[Mesh.ARRAY_VERTEX] = band["verts"]
+    arrays[Mesh.ARRAY_INDEX]  = band["indices"]
+    var m := ArrayMesh.new()
+    m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+    return m
