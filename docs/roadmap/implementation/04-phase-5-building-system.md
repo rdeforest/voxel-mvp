@@ -19,8 +19,10 @@ as the terrain itself.
   - Voxel building: place/remove material voxels (walls, floors from
     terrain material).
   - Prefab building: snap-together pieces for doors, roofs, stairs.
-- Building piece catalog (MVP): wall, floor, roof (45°), stairs, door
-  frame.
+- Building piece catalog (MVP):
+  - attachment parts: hinge, angle bracket, ...
+  - mechanical parts: spring, axle, ...
+  - assemblies: wall/floor/ceiling, stairs, door frame, ...
 - Snap point system: pieces detect and align to adjacent pieces.
 - Ghost preview showing placement before confirming.
 - **Structural integrity system (the killer feature):**
