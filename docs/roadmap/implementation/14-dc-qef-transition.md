@@ -129,6 +129,58 @@ Each can be picked up cold without holding the rest in your head.
   args). Day-to-day F iteration uses `scons` directly (incremental relink);
   `tools/build` stays the sync-to-pins ritual.
 
+## Bite F2 — LOD seam transitions (in progress)
+
+**Status (2026-06-03):** F1 (real C++ DC) shipped. Same-LOD seams are
+crack-free (boundary padding makes adjacent same-LOD blocks compute identical
+boundary vertices). Generated-terrain **see-through holes are fixed** — they
+were back-facing triangles, not topology: sign-based winding + shorter-diagonal
+split + in-cell QEF fallback (committed; regression tests in
+`test/test_dual_contour.gd`). The remaining open item is **LOD-boundary cracks**.
+
+**API finding:** the per-block API *does* support transitions. `VoxelMesher`
+`Output` has `transition_surfaces[6]` (one per cube face) and the terrain
+computes a per-block `transition_mask` at runtime (`get_transition_mask` in
+`voxel_lod_terrain_update_task.cpp`) marking faces that border a *coarser*
+neighbour, then shows the matching transition surface. So the fix is additive:
+fill `transition_surfaces[face]`; the main mesh stays full-res (still correct
+for same-LOD neighbours), and the band is shown only when that face is coarse-
+bordering. (This is the Transvoxel render model; *seam-octrees* à la Gildea were
+the thing that didn't fit — they need neighbour-block access.)
+
+**Why it's hard for DC:** DC vertices are off-grid QEF points in cell interiors,
+not on shared edges, so a fine block and a coarse block of the same field place
+*different* boundary vertices — they don't align across resolutions (Transvoxel
+sidesteps this because its vertices are on edges, shared by construction).
+
+**Planned approach — additive transition band (the higher-res block builds it):**
+On a face bordering a coarser neighbour, the fine block emits a band that stitches
+its **full-res seam contour** to the **coarse seam contour**. The fine block can
+reproduce the coarse contour exactly by sampling the field at 2× spacing and
+running the same QEF — so the band's coarse side equals the coarse block's actual
+boundary vertices → watertight after welding. Steps: (1) extract the fine mesh's
+open boundary edges on the face as ordered loop(s); (2) recompute the coarse
+boundary cells' vertices; (3) zipper the two loops into a triangle band → into
+`transition_surfaces[face]`.
+
+**Open question (answer before the C++ port):** padding. Recomputing the coarse
+boundary cells needs samples at 2× spacing around them — roughly 2–3 *coarse*
+cells past the face = 4–6 fine cells, more than today's `MIN/MAX = 2/3`. Either
+widen `set_padding` (grows every block's buffer) or confirm godot_voxel already
+hands enough neighbour margin. Resolve this first.
+
+**Test methodology (established):** `test/test_dc_transition.gd` meshes a fine
+block + a coarse block of one sphere straddling the seam, welds by position, and
+audits boundary edges. Baseline crack today: **64 boundary edges**. The fix flips
+the `pending` seam test to assert `boundary == 0` once the band exists. Same
+reproduce-in-a-test-then-fix loop that made the hole fix safe.
+
+**Build order when resumed:** (a) settle padding; (b) prototype the band in
+GDScript to watertight (`boundary == 0`) on the two-block test; (c) port to
+`engine/voxel_dc/voxel_mesher_dc.cpp` filling `Output.transition_surfaces`;
+(d) verify in-game with the `vdebug active_mesh_blocks` overlay at a real LOD
+boundary.
+
 ## When this lands
 
 - Mechanism rationale graduates into `../../architecture.md`.
