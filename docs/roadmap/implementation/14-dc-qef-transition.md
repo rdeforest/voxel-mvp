@@ -163,23 +163,32 @@ open boundary edges on the face as ordered loop(s); (2) recompute the coarse
 boundary cells' vertices; (3) zipper the two loops into a triangle band → into
 `transition_surfaces[face]`.
 
-**Open question (answer before the C++ port):** padding. Recomputing the coarse
-boundary cells needs samples at 2× spacing around them — roughly 2–3 *coarse*
-cells past the face = 4–6 fine cells, more than today's `MIN/MAX = 2/3`. Either
-widen `set_padding` (grows every block's buffer) or confirm godot_voxel already
-hands enough neighbour margin. Resolve this first.
+**Band algorithm — DONE (GDScript prototype).** `scripts/dc/dc_seam.gd`:
+`open_loops()` extracts a mesh's oriented open-boundary loops; `stitch()` zippers a
+fine loop to a coarse loop into an additive band (winding-matched, nearest-start).
+`test/test_dc_transition.gd` proves it: a fine block + coarse block of one sphere
+goes from **64 boundary edges to 0** when the band is welded in. This is the
+geometry that goes into the engine's `transition_surfaces[face]`.
 
-**Test methodology (established):** `test/test_dc_transition.gd` meshes a fine
-block + a coarse block of one sphere straddling the seam, welds by position, and
-audits boundary edges. Baseline crack today: **64 boundary edges**. The fix flips
-the `pending` seam test to assert `boundary == 0` once the band exists. Same
-reproduce-in-a-test-then-fix loop that made the hole fix safe.
+**Padding decision (2026-06-04): wide padding ("make it work").** The fine block
+will recompute the coarse loop by sampling the field at 2× spacing past the face,
+which needs `MIN/MAX` ≈ `5/5` (up from `2/3`) — so every block's buffer ~doubles
+and meshing is up to ~2× slower (on worker threads), even for the majority of
+blocks not at a LOD boundary. Accepted as the simplest correct port of the proven
+prototype; if the cost bites, optimize later to a **seam pass** (a post-mesh pass
+with neighbour access — exact and pays only at seams, but a restructure against the
+per-block API). Approximate (decimate-own-loop) was rejected — leaves hairline
+cracks.
 
-**Build order when resumed:** (a) settle padding; (b) prototype the band in
-GDScript to watertight (`boundary == 0`) on the two-block test; (c) port to
-`engine/voxel_dc/voxel_mesher_dc.cpp` filling `Output.transition_surfaces`;
-(d) verify in-game with the `vdebug active_mesh_blocks` overlay at a real LOD
-boundary.
+**C++ port plan (not yet started — integration-heavy, only verifiable in-game):**
+1. Bump `set_padding` to ~5/5; confirm same-LOD seams + the hole fix still hold.
+2. Port `open_loops` / `stitch` to the C++ mesher.
+3. For each of the 6 faces: extract the main mesh's open loop on that face;
+   recompute the coarse loop by meshing the coarse cells just past the face (2×
+   spacing, from the widened padding); zipper → `Output.transition_surfaces[face]`.
+   Build all faces unconditionally — godot_voxel shows them per `transition_mask`.
+4. Verify in-game with `vdebug active_mesh_blocks` at a real LOD boundary; watch
+   meshing time for the padding cost.
 
 ## When this lands
 
