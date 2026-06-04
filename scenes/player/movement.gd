@@ -4,16 +4,44 @@ extends RefCounted
 const SPEED         := 8.0
 const JUMP_VELOCITY := 9.0
 
+var fly_enabled := false
+
 var _body:    CharacterBody3D
+var _camera:  Node3D
 var _gravity: float
 
 
-func _init(body: CharacterBody3D) -> void:
+func _init(body: CharacterBody3D, camera: Node3D) -> void:
     _body    = body
+    _camera  = camera
     _gravity = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 
 func tick(delta: float) -> void:
+    if fly_enabled:
+        _tick_fly()
+    else:
+        _tick_ground(delta)
+
+
+# Airplane-style free flight: no gravity, and "forward" follows the full camera
+# aim (pitch included), so you climb and dive by looking up/down — no up/down or
+# crouch keys needed. Still collides (move_and_slide), so you can't pass through
+# terrain. Shift stays reserved as a chord modifier, same as on the ground.
+func _tick_fly() -> void:
+    var move := Vector3.ZERO
+    if not Input.is_key_pressed(KEY_SHIFT):
+        var input_dir := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
+        move = (_camera.global_transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
+
+    if move:
+        _body.velocity = move * SPEED
+    else:
+        _body.velocity = _body.velocity.move_toward(Vector3.ZERO, SPEED)
+    _body.move_and_slide()
+
+
+func _tick_ground(delta: float) -> void:
     if not _body.is_on_floor():
         _body.velocity.y -= _gravity * delta
 

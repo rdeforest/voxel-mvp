@@ -36,7 +36,7 @@ const WHEEL_STEP := 0.05
 
 
 func _ready() -> void:
-    _movement         = PlayerMovement.new(self)
+    _movement         = PlayerMovement.new(self, camera)
     _camera_rig       = CameraRig.new(self, $Head)
     build_state       = BuildState.new()
     action_factories  = ActionFactories.new(self, terrain, integrity, camera, raycast, build_state)
@@ -67,6 +67,7 @@ func _ready() -> void:
         KEY_TAB:          _cycle_tool,
         KEY_Q:            _quit_game,
         KEY_F:            _toggle_wireframe,
+        KEY_X:            _toggle_fly,
         KEY_V:            _toggle_debug_visuals,
         KEY_M:            build_state.cycle_material,
         KEY_R:            build_state.rotate_y,
@@ -229,6 +230,8 @@ func _update_mode_label() -> void:
     if activity != null:
         lines.append("Activity: %s" % activity.mode_name)
     lines.append("Tool:     %s" % t.name)
+    if _movement != null and _movement.fly_enabled:
+        lines.append("Fly:      ON")
     mode_label.text = "\n".join(lines)
 
 
@@ -242,6 +245,10 @@ func _toggle_grid_overlay() -> void:
 
 func _toggle_obscured_stress() -> void:
     integrity.debug.toggle_obscured()
+
+func _toggle_fly() -> void:
+    _movement.fly_enabled = not _movement.fly_enabled
+    _update_mode_label()
 
 func _toggle_wireframe() -> void:
     wireframe_enabled = not wireframe_enabled
