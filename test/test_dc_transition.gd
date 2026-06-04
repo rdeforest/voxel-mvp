@@ -87,6 +87,53 @@ func test_band_closes_the_seam() -> void:
     gut.p("with band: boundary=%d nonmanifold=%d" % [a["boundary"], a["nonmanifold"]])
     assert_eq(a["boundary"], 0, "transition band must close the seam (no boundary edges)")
 
+# In the engine the fine block can't see the whole coarse neighbour — only a few
+# voxels past the face (its padding). This checks how deep a coarse slab must be
+# meshed to reproduce the neighbour's seam loop EXACTLY (same vertices). That
+# depth sets MAX_PADDING for the C++ port: depth d coarse cells -> need samples to
+# fine-x bs + 2d, plus a gradient step -> MAX_PADDING ~= 2d + 2.
+func test_coarse_slab_depth_reproduces_seam_loop() -> void:
+    var full := DualContour.build_mesh(_sphere, Vector3i(SEAM / 2, 8, 8), Vector3(SEAM, 0, 0), 2.0)
+    var full_loop := _min_x_loop(full)
+    var matched := {}
+    for d in [1, 2, 3]:
+        var slab := DualContour.build_mesh(_sphere, Vector3i(d, 8, 8), Vector3(SEAM, 0, 0), 2.0)
+        var slab_loop := _min_x_loop(slab)
+        matched[d] = _same_positions(slab_loop, full_loop)
+        gut.p("coarse slab depth %d: seam loop matches full=%s (slab n=%d, full n=%d)" % [
+            d, matched[d], slab_loop.size(), full_loop.size()])
+    assert_true(matched.get(1, false) or matched.get(2, false),
+        "a shallow coarse slab must reproduce the neighbour's seam loop")
+
+func _min_x_loop(mesh: ArrayMesh) -> PackedVector3Array:
+    var v: PackedVector3Array   = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+    var idx: PackedInt32Array   = mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+    var best := PackedVector3Array()
+    var best_x := INF
+    for loop in DcSeam.open_loops(idx):
+        var pos := _loop_pos(v, loop)
+        var ax := 0.0
+        for p in pos:
+            ax += p.x
+        ax /= maxf(1.0, pos.size())
+        if ax < best_x:
+            best_x = ax
+            best = pos
+    return best
+
+func _same_positions(a: PackedVector3Array, b: PackedVector3Array) -> bool:
+    if a.size() != b.size() or a.size() == 0:
+        return false
+    var sa: Array = []
+    var sb: Array = []
+    for p in a:
+        sa.append(p.snapped(Vector3.ONE * 1e-3))
+    for p in b:
+        sb.append(p.snapped(Vector3.ONE * 1e-3))
+    sa.sort()
+    sb.sort()
+    return sa == sb
+
 func _loop_pos(verts: PackedVector3Array, loop: PackedInt32Array) -> PackedVector3Array:
     var out := PackedVector3Array()
     for idx in loop:
