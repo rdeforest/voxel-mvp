@@ -2,6 +2,7 @@
 
 #include "core/object/class_db.h"
 
+#include "dc_region_reader.h"
 #include "voxel_mesher_dc.h"
 
 // Module name is `voxel_dc`; Godot generates calls to these by that name. It
@@ -11,6 +12,7 @@ void initialize_voxel_dc_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 	ClassDB::register_class<VoxelMesherDC>();
+	ClassDB::register_class<DCRegionReader>();
 }
 
 void uninitialize_voxel_dc_module(ModuleInitializationLevel p_level) {

@@ -8,8 +8,33 @@ Import("env_modules")
 env_voxel_dc = env_modules.Clone()
 
 # godot_voxel's headers select the engine-integration code paths (e.g. the
-# ZN_ALLOC/memnew memory macros) behind ZN_GODOT. We include those headers, so
-# we must compile with the same define godot_voxel's own SCsub sets.
-env_voxel_dc.Append(CPPDEFINES=["ZN_GODOT"])
+# ZN_ALLOC/memnew memory macros) behind ZN_GODOT.
+#
+# CRITICAL ABI MATCH: godot_voxel's common.py:get_sources() appends its
+# VOXEL_ENABLE_* feature defines to its OWN cloned env, not the global one. Those
+# defines gate #ifdef'd *member variables* in headers we include (e.g.
+# VoxelLodTerrain::_instancer, VoxelData::_modifiers). If we compile those headers
+# without the same defines, our view of the class layout is shifted and member
+# access (e.g. get_storage_shared() reading _data) hits the wrong offset ->
+# garbage / crashes. So we must define exactly the same set. They're gated by the
+# same build options (all default-on); env.get(..., True) keeps us in sync.
+_voxel_features = [
+    ("voxel_smooth_meshing", "VOXEL_ENABLE_SMOOTH_MESHING"),
+    ("voxel_modifiers", "VOXEL_ENABLE_MODIFIERS"),
+    ("voxel_sqlite", "VOXEL_ENABLE_SQLITE"),
+    ("voxel_instancer", "VOXEL_ENABLE_INSTANCER"),
+    ("voxel_gpu", "VOXEL_ENABLE_GPU"),
+    ("voxel_basic_generators", "VOXEL_ENABLE_BASIC_GENERATORS"),
+    ("voxel_mesh_sdf", "VOXEL_ENABLE_MESH_SDF"),
+    ("voxel_vox", "VOXEL_ENABLE_VOX"),
+]
+_defines = {"ZN_GODOT": None}
+for _opt, _def in _voxel_features:
+    if env.get(_opt, True):
+        _defines[_def] = 1
+# Mirror get_sources(): modifiers also require smooth meshing + mesh SDF.
+if not env.get("voxel_smooth_meshing", True) or not env.get("voxel_mesh_sdf", True):
+    _defines.pop("VOXEL_ENABLE_MODIFIERS", None)
+env_voxel_dc.Append(CPPDEFINES=_defines)
 
 env_voxel_dc.add_source_files(env.modules_sources, "*.cpp")
