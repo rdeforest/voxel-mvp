@@ -60,12 +60,25 @@ Path-b build order / progress:
   depth-8 octree on the worker. Covers view distance, no undersampling holes,
   edits everywhere, `dcsolo` usable. `log_timings` prints read/mesh ms per
   recenter.
-  - ⏭️ **NEXT: surface-adaptive refine** — biggest remaining perf win. The octree
-    currently subdivides the whole 256m volume to LOD size incl. empty air/under-
-    ground (high leaf count, mesh in the hundreds of ms off-thread). Stop
-    subdividing cells the surface can't cross (|sdf(center)| > size·√3). Then:
-    collision from our mesh, edit-driven re-mesh. Also watch: 4 reads on main per
-    recenter (~8m) — possible small hitch; faint ridges at LOD boundaries.
+- ✅ **#7 C++ mesher (GUI-verified, matches Transvoxel).** `DCOctreeMesher`
+  (`engine/voxel_dc/dc_octree_mesher.cpp`): faithful C++ port of `SdfClipmap` +
+  `OctreeDC` (full subdivision — no adaptive heuristic; C++ speed makes it
+  unneeded). QEF extracted to `dc_qef.h`, shared with `VoxelMesherDC`. Manager
+  meshes via it on the worker. **~44ms vs ~1.4–2.8s GDScript** (~40×). Parity-
+  tested on real terrain (`test_dc_real_terrain.gd`: sound + matches GDScript vert
+  count). GDScript `OctreeDC`/`SdfClipmap` stay as prototype/preview/test mesher.
+  - NOTE: surface-adaptive pruning was abandoned — magnitude-based prune shatters
+    on slopes (the terrain SDF overestimates true distance on slopes, see
+    [[dc-sdf-not-unit-distance]]); sign-based couldn't be proven to fix the live
+    break headless. C++ full subdivision sidesteps it.
+  - NOTE: C++ uses field-gradient normals, no crease-split yet (the GDScript
+    `MeshNormals` step). Fine on terrain; port crease normals if sharp edges on
+    edits/structures read too soft.
+  - ⏭️ **NEXT: make DC the default render** — manager + data-only on at startup,
+    with a console toggle back to godot_voxel. Then: edit-driven re-mesh (re-mesh
+    the affected near region on a `terrain_sdf_changed` edit; whole-clipmap is
+    ~44ms but incremental is snappier). Collision already works (godot_voxel keeps
+    its static body under data-only).
 
 **Console tools to resume:** `dcmanager [on|off]` (the threaded graded bubble),
 `dcsolo [on|off]` (data-only: hide godot_voxel's render), `dclod [lod]` (probe one

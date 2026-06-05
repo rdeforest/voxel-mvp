@@ -116,7 +116,11 @@ func _dispatch(center: Vector3) -> void:
     var dim_v := Vector3i(LEVEL_DIM, LEVEL_DIM, LEVEL_DIM)
     var read_t0 := Time.get_ticks_msec()
     var reader := DCRegionReader.new()
-    var levels: Array[SdfBaked] = []
+    # Parallel arrays describing the clipmap levels for the C++ mesher: per level k,
+    # the SDF data, its lattice origin, and its cell size (LOD k = 2^k).
+    var level_data: Array = []
+    var level_origins := PackedVector3Array()
+    var level_cells := PackedFloat32Array()
     for k in LEVELS:
         var cell := 1 << k
         var half_k := (_LEVEL_CELLS / 2) << k               # lattice half-extent of level k
@@ -125,22 +129,26 @@ func _dispatch(center: Vector3) -> void:
         var data := reader.read_sdf_lod(_terrain, k, world_origin, dim_v)
         if data.size() != LEVEL_DIM * LEVEL_DIM * LEVEL_DIM:
             return                                          # incomplete read; try again next tick
-        levels.append(SdfBaked.new(data, Vector3(lattice_origin), float(cell), dim_v))
-    var clipmap := SdfClipmap.new(levels, center_lattice, float(_LEVEL_CELLS) * 0.5)
+        level_data.append(data)
+        level_origins.append(Vector3(lattice_origin))
+        level_cells.append(float(cell))
     _job_read_ms = Time.get_ticks_msec() - read_t0
     _job_t0      = Time.get_ticks_msec()
     _job_origin  = root_origin
     _job_arrays  = []
     _last_center = center
-    _task_id = WorkerThreadPool.add_task(_mesh_job.bind(clipmap), false, "DC terrain mesh")
+    var half0 := float(_LEVEL_CELLS) * 0.5
+    _task_id = WorkerThreadPool.add_task(
+        _mesh_job.bind(level_data, level_origins, level_cells, center_lattice, half0), false, "DC terrain mesh")
 
 
-# Runs on a worker thread: pure CPU over the immutable clipmap. The refine matches
-# cell size to the clipmap's LOD at each point, so cells and data LOD agree.
-func _mesh_job(clipmap: SdfClipmap) -> void:
-    var refine := func(c: Vector3, s: float, _d: int) -> bool:
-        return s > clipmap.target_cell_size(c)
-    _job_arrays = OctreeDC.build_field_arrays(clipmap, _ROOT_DEPTH, refine)
+# Runs on a worker thread: the C++ DCOctreeMesher builds + meshes one octree over
+# the clipmap. Pure computation over immutable PackedArrays — safe off the main
+# thread (no Node / engine access).
+func _mesh_job(level_data: Array, level_origins: PackedVector3Array, level_cells: PackedFloat32Array,
+        center: Vector3, half0: float) -> void:
+    _job_arrays = DCOctreeMesher.new().mesh_clipmap(
+        level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH)
 
 
 func _finish() -> void:

@@ -2,6 +2,7 @@
 
 #include "core/object/class_db.h"
 
+#include "dc_octree_mesher.h"
 #include "dc_region_reader.h"
 #include "voxel_mesher_dc.h"
 
@@ -13,6 +14,7 @@ void initialize_voxel_dc_module(ModuleInitializationLevel p_level) {
 	}
 	ClassDB::register_class<VoxelMesherDC>();
 	ClassDB::register_class<DCRegionReader>();
+	ClassDB::register_class<DCOctreeMesher>();
 }
 
 void uninitialize_voxel_dc_module(ModuleInitializationLevel p_level) {
