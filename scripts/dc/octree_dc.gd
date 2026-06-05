@@ -13,12 +13,15 @@ extends RefCounted
 #
 # Leaves carry one QEF vertex each (QefSolver); only leaves the surface actually
 # crosses get a vertex. Subdivision is driven by the `refine` predicate
-# (default: subdivide to max depth, i.e. a uniform grid). Distance-based
-# adaptive refinement (cell size graded by distance to the surface) plus the
-# octree-balancing pass it needs are a follow-up.
+# (default: subdivide to max depth, i.e. a uniform grid). Distance-graded refine
+# (finer near a focus, coarser away) works directly.
 #
-# Assumes a balanced/restricted octree (adjacent leaves differ by <= 1 level),
-# which the meshing relies on for crack-free seams.
+# No octree-balancing (2:1 restriction) pass is needed. Because the four cells
+# around each minimal edge are found by point-location, the smallest cell owns the
+# edge and the coarser neighbour(s) are fanned to via the dedup-to-triangle stitch
+# for ANY level difference — not just one. test_octree_dc verifies an abrupt
+# 3-level jump still meshes crack-free. (The canonical face/edge-proc DC needs the
+# balance pass; this point-location variant doesn't.)
 
 const RING := [Vector2i(-1, -1), Vector2i(1, -1), Vector2i(1, 1), Vector2i(-1, 1)]
 const QUERY_EPS := 0.25   # perpendicular offset to land just across an edge (< half the finest cell)

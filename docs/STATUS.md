@@ -33,18 +33,25 @@ Path-b build order / progress:
 - ✅ **#2 worker-thread meshing** — folded into #3's first increment.
   `OctreeDC.build_field_arrays` is the worker-safe (pure-CPU, no RenderingServer)
   half; `build_field` stays the main-thread `ArrayMesh` wrapper.
-- 🔨 **#3 the manager — first increment landed (UNVERIFIED at runtime).**
+- 🔨 **#3 the manager — distance-graded bubble landed (UNVERIFIED at runtime).**
   `DCTerrainManager` (`scripts/dc/dc_terrain_manager.gd`): a Node3D that follows
   the player, reads+bakes a region on the main thread (~0ms cached), meshes it on
-  a `WorkerThreadPool` task, and swaps the `ArrayMesh` in on completion —
-  re-meshing when the player drifts > `RECENTER_DISTANCE`. Toggle with the
-  `dcmanager [on|off]` console command. **Needs a GUI smoke-test** (toggle on,
-  walk around, confirm no hitch + cyan mesh tracks you). This increment meshes a
-  UNIFORM depth-5 (32-voxel) bubble.
-  - ⏭️ **NEXT: distance-graded LOD over a larger vicinity.** Needs OctreeDC's
-    octree-balancing pass — a naive graded `refine` produces >1-level neighbour
-    jumps that break `_owns_edge`'s crack-free seam logic. Then: data-only mode
-    (hide godot_voxel's own render), collision, edit-driven re-mesh.
+  a `WorkerThreadPool` task over the immutable baked field, and swaps the
+  `ArrayMesh` in on completion — re-meshing when the player drifts >
+  `RECENTER_DISTANCE`. Toggle with the `dcmanager [on|off]` console command.
+  Meshes a depth-6 (64-voxel) bubble with a **distance-graded** `refine` (finest
+  near the player, coarsening with distance; `LOD_QUALITY` tunes the falloff).
+  **Needs a GUI smoke-test** (toggle on, walk around: no hitch, cyan mesh tracks
+  you, triangle density falls off with distance).
+  - **No octree-balance pass needed — the earlier assumption was wrong.**
+    OctreeDC's point-location meshing stitches *any* level jump crack-free (the
+    smallest cell owns each edge; coarser neighbours are fanned to). Verified by
+    `test_octree_dc.test_abrupt_level_jump_has_no_interior_cracks` (an abrupt
+    3-level jump on a flat sheet → zero interior cracks). See [[dc-no-balance-pass]].
+  - ⏭️ **NEXT:** data-only mode (hide godot_voxel's own render), then collision,
+    then edit-driven re-mesh. Also: undersampling holes on coarse cells (a
+    length-N axis edge can enter+exit a curved surface between its endpoints) —
+    watch for it on the far/coarse parts of the bubble.
 
 **Console tools to resume:** `dcmanager [on|off]` (the always-on threaded
 manager — the live #3 work), `dcspike` (uniform DC of a region, magenta),

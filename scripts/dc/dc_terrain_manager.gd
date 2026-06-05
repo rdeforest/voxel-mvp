@@ -13,12 +13,13 @@ extends Node3D
 # thread. The finished arrays come back and the ArrayMesh is built on the main
 # thread (RenderingServer upload).
 #
-# This first increment meshes a UNIFORM depth-5 bubble. Distance-graded LOD over a
-# larger vicinity needs OctreeDC's octree-balancing pass (a naive graded refine
-# breaks the crack-free seam logic) and is the next increment.
+# Meshes a distance-graded bubble: finest cells near the follow target, coarsening
+# with distance. OctreeDC's point-location meshing stitches the level transitions
+# crack-free with no balance pass needed.
 
-const ROOT_DEPTH        := 5      # 2^5 = 32-voxel root cube around the follow target
+const ROOT_DEPTH        := 6      # 2^6 = 64-voxel root cube around the follow target
 const RECENTER_DISTANCE := 8.0    # re-mesh once the follow target drifts this far (m)
+const LOD_QUALITY       := 6.0    # target cell size ~= distance / this (smaller = finer farther out)
 
 var _terrain: VoxelLodTerrain
 var _follow:  Node3D
@@ -76,15 +77,22 @@ func _dispatch(center: Vector3) -> void:
     if data.size() != dim * dim * dim:
         return
     var baked := SdfBaked.new(data, Vector3.ZERO, 1.0, Vector3i(dim, dim, dim))
+    # Subdivide finer the closer a cell is to the follow target (in the octree's
+    # local space, where the target sits at the bubble centre). Captures values by
+    # copy — no self/Node reference — so it's safe to call on the worker thread.
+    var focus := center - Vector3(origin)
+    var inv_quality := 1.0 / LOD_QUALITY
+    var refine := func(c: Vector3, s: float, _d: int) -> bool:
+        return s > c.distance_to(focus) * inv_quality
     _job_origin  = origin
     _job_arrays  = []
     _last_center = center
-    _task_id = WorkerThreadPool.add_task(_mesh_job.bind(baked), false, "DC terrain mesh")
+    _task_id = WorkerThreadPool.add_task(_mesh_job.bind(baked, refine), false, "DC terrain mesh")
 
 
 # Runs on a worker thread: pure CPU over the immutable baked field.
-func _mesh_job(baked: SdfBaked) -> void:
-    _job_arrays = OctreeDC.build_field_arrays(baked, ROOT_DEPTH)
+func _mesh_job(baked: SdfBaked, refine: Callable) -> void:
+    _job_arrays = OctreeDC.build_field_arrays(baked, ROOT_DEPTH, refine)
 
 
 func _finish() -> void:
