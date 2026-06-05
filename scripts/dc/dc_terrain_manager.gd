@@ -38,6 +38,7 @@ var _enabled := false
 var _data_only := false
 var _saved_render_mask := 1      # godot_voxel's render layers before we hid them
 var _pending_data_only := false  # hide godot_voxel once our first mesh lands (no startup void)
+var _debug_material: Material    # translucent cyan, used only in debug-overlay mode
 
 var _task_id := -1
 var _job_origin: Vector3i
@@ -56,12 +57,13 @@ func setup(terrain: VoxelLodTerrain, follow: Node3D) -> void:
     _follow  = follow
     _saved_render_mask = terrain.render_layers_mask
     _mesh_instance = MeshInstance3D.new()
-    var mat := StandardMaterial3D.new()
-    mat.albedo_color  = Color(0.2, 1.0, 1.0, 0.55)
-    mat.transparency  = BaseMaterial3D.TRANSPARENCY_ALPHA
-    mat.cull_mode     = BaseMaterial3D.CULL_DISABLED
-    _mesh_instance.material_override = mat
+    var debug_mat := StandardMaterial3D.new()
+    debug_mat.albedo_color = Color(0.2, 1.0, 1.0, 0.55)
+    debug_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+    debug_mat.cull_mode    = BaseMaterial3D.CULL_DISABLED
+    _debug_material = debug_mat
     add_child(_mesh_instance)
+    _apply_render_swap()   # pick the initial mesh material (cyan until we're the default render)
     # Re-mesh on terrain edits too (not just movement), so digs/builds show even
     # with godot_voxel's render hidden. Bound method -> the bus weakrefs us and
     # auto-prunes on scene reload. v1 re-meshes the whole clipmap; incremental
@@ -104,8 +106,14 @@ func start_default() -> void:
 
 
 func _apply_render_swap() -> void:
-    if is_instance_valid(_terrain):
-        _terrain.render_layers_mask = 0 if (_data_only and _enabled) else _saved_render_mask
+    if not is_instance_valid(_terrain):
+        return
+    var as_terrain := _data_only and _enabled
+    _terrain.render_layers_mask = 0 if as_terrain else _saved_render_mask
+    if _mesh_instance != null:
+        # Default render: wear the terrain's real material (grass shader). Debug
+        # overlay (dcmanager without dcsolo): translucent cyan over godot_voxel.
+        _mesh_instance.material_override = _terrain.material if as_terrain else _debug_material
 
 
 func _on_terrain_edit(_event: TerrainSdfChangedEvent) -> void:
