@@ -27,6 +27,9 @@ var _follow:  Node3D
 var _mesh_instance: MeshInstance3D
 var _enabled := false
 
+var _data_only := false
+var _saved_render_mask := 1      # godot_voxel's render layers before we hid them
+
 var _task_id := -1
 var _job_origin: Vector3i
 var _job_arrays: Array = []
@@ -36,6 +39,7 @@ var _last_center := Vector3.INF
 func setup(terrain: VoxelLodTerrain, follow: Node3D) -> void:
     _terrain = terrain
     _follow  = follow
+    _saved_render_mask = terrain.render_layers_mask
     _mesh_instance = MeshInstance3D.new()
     var mat := StandardMaterial3D.new()
     mat.albedo_color  = Color(0.2, 1.0, 1.0, 0.55)
@@ -51,10 +55,29 @@ func set_enabled(on: bool) -> void:
         _last_center = Vector3.INF   # force an immediate re-mesh on next tick
     else:
         _mesh_instance.mesh = null
+    _apply_render_swap()
 
 
 func is_enabled() -> bool:
     return _enabled
+
+
+# Data-only mode: hide godot_voxel's own render (render_layers_mask = 0) so our DC
+# mesh is what shows. Collision/data/streaming/edits stay live (collision is a
+# separate static body, unaffected by the render mask). Only takes effect while
+# the manager is enabled; disabling the manager restores godot_voxel's render.
+func set_data_only(on: bool) -> void:
+    _data_only = on
+    _apply_render_swap()
+
+
+func is_data_only() -> bool:
+    return _data_only
+
+
+func _apply_render_swap() -> void:
+    if is_instance_valid(_terrain):
+        _terrain.render_layers_mask = 0 if (_data_only and _enabled) else _saved_render_mask
 
 
 func _process(_dt: float) -> void:
@@ -112,3 +135,6 @@ func _exit_tree() -> void:
     if _task_id != -1:
         WorkerThreadPool.wait_for_task_completion(_task_id)
         _task_id = -1
+    # Never leave godot_voxel's render hidden behind us.
+    if is_instance_valid(_terrain):
+        _terrain.render_layers_mask = _saved_render_mask

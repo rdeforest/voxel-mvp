@@ -33,30 +33,38 @@ Path-b build order / progress:
 - ✅ **#2 worker-thread meshing** — folded into #3's first increment.
   `OctreeDC.build_field_arrays` is the worker-safe (pure-CPU, no RenderingServer)
   half; `build_field` stays the main-thread `ArrayMesh` wrapper.
-- 🔨 **#3 the manager — distance-graded bubble landed (UNVERIFIED at runtime).**
-  `DCTerrainManager` (`scripts/dc/dc_terrain_manager.gd`): a Node3D that follows
-  the player, reads+bakes a region on the main thread (~0ms cached), meshes it on
-  a `WorkerThreadPool` task over the immutable baked field, and swaps the
-  `ArrayMesh` in on completion — re-meshing when the player drifts >
-  `RECENTER_DISTANCE`. Toggle with the `dcmanager [on|off]` console command.
-  Meshes a depth-6 (64-voxel) bubble with a **distance-graded** `refine` (finest
-  near the player, coarsening with distance; `LOD_QUALITY` tunes the falloff).
-  **Needs a GUI smoke-test** (toggle on, walk around: no hitch, cyan mesh tracks
-  you, triangle density falls off with distance).
-  - **No octree-balance pass needed — the earlier assumption was wrong.**
-    OctreeDC's point-location meshing stitches *any* level jump crack-free (the
-    smallest cell owns each edge; coarser neighbours are fanned to). Verified by
-    `test_octree_dc.test_abrupt_level_jump_has_no_interior_cracks` (an abrupt
-    3-level jump on a flat sheet → zero interior cracks). See [[dc-no-balance-pass]].
-  - ⏭️ **NEXT:** data-only mode (hide godot_voxel's own render), then collision,
-    then edit-driven re-mesh. Also: undersampling holes on coarse cells (a
-    length-N axis edge can enter+exit a curved surface between its endpoints) —
-    watch for it on the far/coarse parts of the bubble.
+- ✅ **#3 the manager — distance-graded bubble (GUI-verified).**
+  `DCTerrainManager` (`scripts/dc/dc_terrain_manager.gd`): follows the player,
+  reads+bakes a region on the main thread, meshes it on a `WorkerThreadPool` task
+  over the immutable baked field, swaps the `ArrayMesh` in on completion,
+  re-meshing past `RECENTER_DISTANCE`. Depth-6 bubble, distance-graded `refine`
+  (`LOD_QUALITY` tunes falloff). `dcmanager [on|off]`. No octree-balance pass
+  needed — point-location meshing stitches any level jump crack-free (see
+  [[dc-no-balance-pass]], guarded by `test_octree_dc`).
+- ✅ **#4 data-only mechanism.** `DCTerrainManager.set_data_only()` flips the
+  terrain's `render_layers_mask` to 0 (hides godot_voxel's render; collision/data/
+  streaming/edits untouched — collision is a separate static body), restores on
+  disable/exit. `dcsolo [on|off]`. *Mechanism only* — looks right once coverage
+  reaches view distance (the clipmap, below).
+- ✅ **#5 edit-inclusive multi-LOD read.** `DCRegionReader.read_sdf_lod(terrain,
+  lod, origin, size)` (C++): generator baseline + overlay of present data-store
+  blocks (edits live there as downsampled mips). LOD0 routes through `copy()`.
+  **Edits render identically at every LOD** (a first-class-citizen invariant —
+  see [[edits-first-class]]). GUI-verified via the `dclod [lod]` probe.
+  - ⏭️ **NEXT: the LOD clipmap.** Build a multi-LOD `SdfField` (nested levels:
+    level 0 = `read_sdf_lod0` near, levels 1..N = `read_sdf_lod` at increasing
+    LOD, each ~2× extent / same sample count) that picks the level by position so
+    `value(p)` stays single-valued → crack-free with the octree. Wire it into the
+    manager so the bubble covers view distance with matched data-LOD per cell (no
+    undersampling holes). Then `dcsolo` is usable. Then: collision from our mesh,
+    edit-driven re-mesh. Watch for faint seams between generator-baseline and
+    stored mips on unedited terrain (fix: overlay only where edits exist).
 
-**Console tools to resume:** `dcmanager [on|off]` (the always-on threaded
-manager — the live #3 work), `dcspike` (uniform DC of a region, magenta),
-`dcoctree` (multi-LOD crack-free octree DC w/ a fine/coarse seam, cyan) — both
-read VoxelData via `DCRegionReader` and render our own mesh; `lod [dist]` (live
+**Console tools to resume:** `dcmanager [on|off]` (the threaded graded bubble),
+`dcsolo [on|off]` (data-only: hide godot_voxel's render), `dclod [lod]` (probe one
+LOD's edit-inclusive read+mesh around you), `dcspike` (uniform DC of a region,
+magenta), `dcoctree` (multi-LOD crack-free octree DC w/ a fine/coarse seam, cyan)
+— all read VoxelData via `DCRegionReader` and render our own mesh; `lod [dist]` (live
 pop-in tuning); `vdebug [flag]` (godot_voxel debug overlays); `set`/`get` (shader
 uniforms incl. `debug_lod` / `debug_normal` visualizers).
 

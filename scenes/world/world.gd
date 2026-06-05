@@ -8,6 +8,7 @@ extends Node3D
 # thread and rendered by us (proves we can mesh+render over godot_voxel's data).
 var _spike_mesh: MeshInstance3D
 var _octree_mesh: MeshInstance3D
+var _lod_probe_mesh: MeshInstance3D
 var _dc_manager: DCTerrainManager
 
 
@@ -55,6 +56,8 @@ func _console_commands() -> Array:
         [_cmd_dcspike,   "dcspike",   "F2 spike: DC-mesh a region around you from VoxelData and render it (magenta)."],
         [_cmd_dcoctree,  "dcoctree",  "F2 spike: octree-DC a region with a fine/coarse seam (multi-LOD, crack-free; cyan)."],
         [_cmd_dcmanager, "dcmanager", "Toggle the DC terrain manager (threaded re-mesh of a bubble around you). Usage: dcmanager [on|off]"],
+        [_cmd_dcsolo,    "dcsolo",    "Data-only mode: hide godot_voxel's render so only our DC mesh shows (enables the manager). Usage: dcsolo [on|off]"],
+        [_cmd_dclod,     "dclod",     "F2 probe: generate+DC-mesh a region at LOD n around you (generator-sourced coarse data). Usage: dclod [lod]"],
         [_cmd_lod,       "lod",       "Get/set terrain lod_distance (higher = LOD boundaries farther = less pop-in). Usage: lod [distance]"],
         [_cmd_reset,     "reset",     "Delete the save (terrain DB + snapshot) and reload to a fresh world."],
         [_cmd_quiescent, "quiescent", "Print whether the world is quiescent (save-ready)."],
@@ -253,6 +256,54 @@ func _cmd_dcmanager(state := "") -> void:
     var on := not _dc_manager.is_enabled() if state == "" else state == "on"
     _dc_manager.set_enabled(on)
     LimboConsole.info("dcmanager: %s" % ("on" if on else "off"))
+
+# Probe: read terrain SDF at LOD n (edit-inclusive: generator baseline + edit mips)
+# and DC-mesh it, to eyeball whether coarse data looks sensible at each LOD (the
+# planned source for the clipmap's far levels). The mesh is built in lattice units
+# and scaled by the LOD step so it lands at the right world size.
+func _cmd_dclod(lod := 1) -> void:
+    const DEPTH := 5                         # 32-cell uniform octree
+    var step := 1 << clampi(lod, 0, 6)
+    var dim := (1 << DEPTH) + 1              # corner samples
+    var extent := (dim - 1) * step          # world size of the region
+    var center := Vector3i(_player.global_position.round())
+    var origin := center - Vector3i(extent / 2, extent / 2, extent / 2)
+    origin = (origin / step) * step          # snap to the LOD grid
+    var t0 := Time.get_ticks_msec()
+    var data := DCRegionReader.new().read_sdf_lod(_terrain, lod, origin, Vector3i(dim, dim, dim))
+    var t_read := Time.get_ticks_msec() - t0
+    if data.size() != dim * dim * dim:
+        LimboConsole.error("dclod: read returned %d (expected %d)" % [data.size(), dim * dim * dim])
+        return
+    var solid := 0
+    for v in data:
+        if v < 0.0:
+            solid += 1
+    var baked := SdfBaked.new(data, Vector3.ZERO, 1.0, Vector3i(dim, dim, dim))
+    var t1 := Time.get_ticks_msec()
+    var mesh := OctreeDC.build_field(baked, DEPTH)
+    var t_mesh := Time.get_ticks_msec() - t1
+    if _lod_probe_mesh == null:
+        _lod_probe_mesh = MeshInstance3D.new()
+        var m := StandardMaterial3D.new()
+        m.albedo_color  = Color(1.0, 0.6, 0.1, 0.6)
+        m.transparency  = BaseMaterial3D.TRANSPARENCY_ALPHA
+        m.cull_mode     = BaseMaterial3D.CULL_DISABLED
+        _lod_probe_mesh.material_override = m
+        add_child(_lod_probe_mesh)
+    _lod_probe_mesh.mesh = mesh
+    _lod_probe_mesh.scale = Vector3.ONE * step
+    _lod_probe_mesh.global_position = Vector3(origin)
+    LimboConsole.info("dclod %d: %dm region, read %dms, mesh %dms — %d solid samples" % [lod, extent, t_read, t_mesh, solid])
+
+# Data-only mode: hide godot_voxel's render so only our DC mesh shows. Turning it
+# on also enables the manager (no point hiding terrain with nothing replacing it).
+func _cmd_dcsolo(state := "") -> void:
+    var on := not _dc_manager.is_data_only() if state == "" else state == "on"
+    if on:
+        _dc_manager.set_enabled(true)
+    _dc_manager.set_data_only(on)
+    LimboConsole.info("dcsolo: %s (godot_voxel render %s)" % [("on" if on else "off"), ("hidden" if on else "shown")])
 
 # Tune LOD pop-in live. lod_distance is the per-level switch distance; larger
 # pushes every LOD boundary farther out (finer detail at range, more blocks).
