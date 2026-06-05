@@ -60,7 +60,7 @@ Path-b build order / progress:
   depth-8 octree on the worker. Covers view distance, no undersampling holes,
   edits everywhere, `dcsolo` usable. `log_timings` prints read/mesh ms per
   recenter.
-- ✅ **#7 C++ mesher (GUI-verified, matches Transvoxel).** `DCOctreeMesher`
+- ✅ **#7 C++ mesher (GUI-verified, matches the per-block VoxelMesherDC render).** `DCOctreeMesher`
   (`engine/voxel_dc/dc_octree_mesher.cpp`): faithful C++ port of `SdfClipmap` +
   `OctreeDC` (full subdivision — no adaptive heuristic; C++ speed makes it
   unneeded). QEF extracted to `dc_qef.h`, shared with `VoxelMesherDC`. Manager
@@ -74,11 +74,20 @@ Path-b build order / progress:
   - NOTE: C++ uses field-gradient normals, no crease-split yet (the GDScript
     `MeshNormals` step). Fine on terrain; port crease normals if sharp edges on
     edits/structures read too soft.
-  - ⏭️ **NEXT: make DC the default render** — manager + data-only on at startup,
-    with a console toggle back to godot_voxel. Then: edit-driven re-mesh (re-mesh
-    the affected near region on a `terrain_sdf_changed` edit; whole-clipmap is
-    ~44ms but incremental is snappier). Collision already works (godot_voxel keeps
-    its static body under data-only).
+- ✅ **#8 DC is the default render (path-b finalized).** `start_default()` in
+  `world._ready` enables the manager and hides godot_voxel's per-block render once
+  our first mesh lands (no startup void); `dcmanager`/`dcsolo` override. Coverage
+  bumped to `LEVELS = 6` (~1024m, ~62ms off-thread) so the far view survives the
+  swap. Edit-driven re-mesh: the manager subscribes `terrain_sdf_changed` and
+  re-meshes so digs/builds show with godot_voxel hidden (whole-clipmap for now).
+  Collision stays on `VoxelMesherDC` (godot_voxel's static body, unaffected by the
+  render mask). In-game **Toast** log (top-right, `scripts/ui/toast.gd`) reports
+  save/load success/failure.
+  - ⏭️ **NEXT (deferred cleanup, not blocking):** single-mesher consolidation —
+    drive collision from our octree mesh so godot_voxel can stop per-block visual
+    meshing (it still meshes hidden blocks = wasted CPU); C++ crease normals (the
+    C++ mesher uses field-gradient normals, may soften sharp edges on built
+    structures); incremental edit re-mesh (vs whole-clipmap ~62ms).
 
 **Console tools to resume:** `dcmanager [on|off]` (the threaded graded bubble),
 `dcsolo [on|off]` (data-only: hide godot_voxel's render), `dclod [lod]` (probe one

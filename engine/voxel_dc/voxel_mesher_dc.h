@@ -1,11 +1,13 @@
 #ifndef VOXEL_MESHER_DC_H
 #define VOXEL_MESHER_DC_H
 
-// Our Dual Contouring mesher as a Godot module, subclassing godot_voxel's
-// VoxelMesher. F0 stage: a plumbing proof — build() emits a cube per surface-
-// straddling block (no DC yet), to validate the module compiles, links against
-// godot_voxel, registers, and is driven by VoxelLodTerrain. F1 replaces build()
-// with real Dual Contouring.
+// Our per-block Dual Contouring mesher, subclassing godot_voxel's VoxelMesher and
+// set as the terrain's mesher in world.tscn. build() does real DC: one QEF vertex
+// per surface cell + quad emission (QEF in dc_qef.h). godot_voxel builds terrain
+// COLLISION from these blocks, so this stays active even when the path-b octree
+// render layer (DCTerrainManager + DCOctreeMesher) draws instead and hides this
+// mesh via render_layers_mask. Per-block DC cracks at LOD boundaries (the F2
+// problem) — which is why the octree layer exists for rendering.
 
 #include "modules/voxel/meshers/voxel_mesher.h"
 

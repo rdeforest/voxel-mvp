@@ -30,7 +30,15 @@ Tests can also be run interactively from the GUT panel inside the editor.
 
 ## Architecture
 
-This is a Godot 4.6 game built with **double-precision** (`precision=double` — cannot be removed; it's compiled into the engine binary for planet-scale coordinates) and the **godot_voxel** module (Transvoxel SDF meshing).
+This is a Godot 4.6 game built with **double-precision** (`precision=double` — cannot be removed; it's compiled into the engine binary for planet-scale coordinates) and the **godot_voxel** module for voxel storage / streaming / LOD / collision. **Terrain meshing is our own Dual Contouring**, not Transvoxel (godot_voxel ships no DC).
+
+### Terrain meshing / rendering (Dual Contouring)
+
+Two DC meshers, both ours (`engine/voxel_dc/`):
+- **`VoxelMesherDC`** — per-block DC, set as the terrain's `mesher` in `world.tscn`. godot_voxel builds terrain **collision** from these blocks. Has LOD-boundary seam cracks (the "F2" problem).
+- **`DCOctreeMesher`** + **`DCTerrainManager`** (`scripts/dc/dc_terrain_manager.gd`) — the "path-b" render layer: meshes the camera vicinity as ONE octree clipmap (crack-free LOD) on a worker thread and **renders that**, hiding godot_voxel's per-block render via `render_layers_mask = 0`. Default-on at startup (`start_default()`); `dcmanager`/`dcsolo` console commands toggle/override. Re-meshes on movement and on `terrain_sdf_changed` edits.
+
+So: **render = `DCOctreeMesher`, collision = `VoxelMesherDC`** (both DC, both ours). Shared QEF solver in `engine/voxel_dc/dc_qef.h`. GDScript `OctreeDC`/`DualContour`/`SdfClipmap` (`scripts/dc/`) are the prototype/preview/test mesher (console probes `dcspike`/`dcoctree`/`dclod`, and `test/`). The single-mesher consolidation (collision from our octree mesh, drop per-block visual meshing) is a deferred cleanup.
 
 ### Scene graph
 
@@ -204,6 +212,10 @@ Player controls in **Construction → Build** activity: `[`/`]` cycle parts, `R/
 **Reset semantics**: sets a `static var WorldSnapshot.reset_pending = true` flag (survives scene reload), then reloads the scene. World's `_enter_tree` sees the flag and detaches the SQLite stream so procedural terrain regenerates; `_ready` skips the snapshot load and clears the flag. F9 afterwards still restores the save normally.
 
 The autoload is committed in path form (`*res://addons/limbo_console/limbo_console.gd`) — safest for a fresh clone that runs the game before opening the editor. The editor may rewrite it to `*uid://dyxornv8vwibg`; with the addon vendored that resolves at runtime too, so either form is fine. If a runtime ever fails again with `Nonexistent function 'register_command' in base 'Nil'`, the autoload UID isn't in `.godot/uid_cache.bin` — delete that file and run `bin/godot --headless --editor --quit` (or just open the editor) to rebuild it, or swap the autoload line back to path form.
+
+### Toast notifications
+
+`Toast` autoload (`scripts/ui/toast.gd`) is a fading top-right log for player-facing success/failure. Call from anywhere: `Toast.success(text)` / `Toast.failure(text)` / `Toast.show_message(text, color)`. Used by save (F5) and load (F9). It never captures input and animates while paused. Note: `print()` goes to stdout (the VS Code **Debug Console** under a `--remote-debug` launch, *not* the integrated terminal) — use Toast for anything the player needs to see.
 
 ## Project State
 

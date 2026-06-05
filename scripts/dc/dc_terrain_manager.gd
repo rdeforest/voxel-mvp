@@ -20,7 +20,7 @@ extends Node3D
 # transition together. OctreeDC's point-location meshing stitches it crack-free with
 # no balance pass needed. See SdfClipmap.
 
-const LEVELS            := 4      # LOD levels (0..3): 256m coverage (32m fine core)
+const LEVELS            := 6      # LOD levels (0..5): 1024m coverage (32m fine core)
 const LEVEL_DIM         := 33     # samples per axis per level; LEVEL_DIM-1 must be a power of 2
 const RECENTER_DISTANCE := 8.0    # re-mesh once the follow target drifts this far (m)
 
@@ -37,6 +37,7 @@ var _enabled := false
 
 var _data_only := false
 var _saved_render_mask := 1      # godot_voxel's render layers before we hid them
+var _pending_data_only := false  # hide godot_voxel once our first mesh lands (no startup void)
 
 var _task_id := -1
 var _job_origin: Vector3i
@@ -61,6 +62,11 @@ func setup(terrain: VoxelLodTerrain, follow: Node3D) -> void:
     mat.cull_mode     = BaseMaterial3D.CULL_DISABLED
     _mesh_instance.material_override = mat
     add_child(_mesh_instance)
+    # Re-mesh on terrain edits too (not just movement), so digs/builds show even
+    # with godot_voxel's render hidden. Bound method -> the bus weakrefs us and
+    # auto-prunes on scene reload. v1 re-meshes the whole clipmap; incremental
+    # (just the edited region) is a later optimization.
+    VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_terrain_edit)
 
 
 func set_enabled(on: bool) -> void:
@@ -89,9 +95,21 @@ func is_data_only() -> bool:
     return _data_only
 
 
+# Make DC the default render: start meshing now, and hide godot_voxel's own render
+# the moment our first mesh lands (so there's no startup gap where neither shows).
+# The dcmanager / dcsolo console commands still override this by hand.
+func start_default() -> void:
+    _pending_data_only = true
+    set_enabled(true)
+
+
 func _apply_render_swap() -> void:
     if is_instance_valid(_terrain):
         _terrain.render_layers_mask = 0 if (_data_only and _enabled) else _saved_render_mask
+
+
+func _on_terrain_edit(_event: TerrainSdfChangedEvent) -> void:
+    _last_center = Vector3.INF   # force a re-mesh so the edit shows next tick
 
 
 func _process(_dt: float) -> void:
@@ -161,6 +179,9 @@ func _finish() -> void:
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _job_arrays)
     _mesh_instance.mesh = mesh
     _mesh_instance.global_position = Vector3(_job_origin)
+    if _pending_data_only:
+        _pending_data_only = false   # first mesh is up — now safe to hide godot_voxel
+        set_data_only(true)
     if log_timings:
         var verts: int = (_job_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
         print("DC clipmap: %d verts — read %d ms (main), mesh %d ms (worker)" % [

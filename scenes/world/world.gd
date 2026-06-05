@@ -29,10 +29,12 @@ func _ready() -> void:
     var resetting := WorldSnapshot.reset_pending
     WorldSnapshot.reset_pending = false
     if not resetting and SavePaths.snapshot_exists():
-        WorldSnapshot.load_into(SavePaths.SNAPSHOT_FILE, self)
+        if WorldSnapshot.load_into(SavePaths.SNAPSHOT_FILE, self):
+            Toast.success("Loaded save.")
     _dc_manager = DCTerrainManager.new()
     add_child(_dc_manager)
     _dc_manager.setup(_terrain, _player)
+    _dc_manager.start_default()   # DC is the default terrain render; dcmanager/dcsolo override
     _register_console_commands()
 
 func _exit_tree() -> void:
