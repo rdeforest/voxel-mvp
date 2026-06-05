@@ -59,10 +59,21 @@ static func build_mesh(sdf: Callable, depth: int, refine := Callable()) -> Array
     return build_field(SdfAnalytic.new(sdf), depth, refine)
 
 static func build_field(field: SdfField, depth: int, refine := Callable()) -> ArrayMesh:
+    var arrays := build_field_arrays(field, depth, refine)
+    if arrays.is_empty():
+        return ArrayMesh.new()
+    var mesh := ArrayMesh.new()
+    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+    return mesh
+
+# Worker-thread safe: pure CPU, no RenderingServer. Returns a Mesh.ARRAY_*-sized
+# array ready for add_surface_from_arrays, or [] for an empty region. The caller
+# does the RenderingServer upload (add_surface_from_arrays) on the main thread.
+static func build_field_arrays(field: SdfField, depth: int, refine := Callable()) -> Array:
     return OctreeDC.new()._run(field, depth, refine)
 
 
-func _run(field: SdfField, depth: int, refine: Callable) -> ArrayMesh:
+func _run(field: SdfField, depth: int, refine: Callable) -> Array:
     _field = field
     _root  = Cell.new(Vector3i.ZERO, 1 << depth)
     _subdivide(_root, depth, refine)
@@ -76,16 +87,14 @@ func _run(field: SdfField, depth: int, refine: Callable) -> ArrayMesh:
             _emit_leaf_edges(leaf)
 
     if _verts.is_empty():
-        return ArrayMesh.new()
+        return []
     var finalized := MeshNormals.with_crease_normals(_verts, _indices, _normals)
     var arrays := []
     arrays.resize(Mesh.ARRAY_MAX)
     arrays[Mesh.ARRAY_VERTEX] = finalized["verts"]
     arrays[Mesh.ARRAY_NORMAL] = finalized["normals"]
     arrays[Mesh.ARRAY_INDEX]  = finalized["indices"]
-    var mesh := ArrayMesh.new()
-    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-    return mesh
+    return arrays
 
 
 # --- octree build ---

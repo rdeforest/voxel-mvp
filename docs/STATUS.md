@@ -30,14 +30,24 @@ Path-b build order / progress:
   `VoxelData::copy`, transient store grab). Required the **SCsub ABI fix** (mirror
   godot_voxel's `VOXEL_ENABLE_*` defines — see [[voxel-dc-abi-defines]]) and
   `cache_generated_blocks = true` in `world._enter_tree` (reads ~450ms → 0ms).
-- ⏭️ **#2 worker-thread meshing — START HERE.** `OctreeDC` runs ~450ms in
-  GDScript on the main thread; move it off-thread (and/or port to C++ later).
-- **#3 the manager** — a Node meshing the camera vicinity as ONE octree (crack-
-  free within one octree; region-to-region seams are why it's one octree for v1),
-  re-meshing as the camera moves; then data-only mode (hide godot_voxel's own
-  render), collision, edit-driven re-mesh.
+- ✅ **#2 worker-thread meshing** — folded into #3's first increment.
+  `OctreeDC.build_field_arrays` is the worker-safe (pure-CPU, no RenderingServer)
+  half; `build_field` stays the main-thread `ArrayMesh` wrapper.
+- 🔨 **#3 the manager — first increment landed (UNVERIFIED at runtime).**
+  `DCTerrainManager` (`scripts/dc/dc_terrain_manager.gd`): a Node3D that follows
+  the player, reads+bakes a region on the main thread (~0ms cached), meshes it on
+  a `WorkerThreadPool` task, and swaps the `ArrayMesh` in on completion —
+  re-meshing when the player drifts > `RECENTER_DISTANCE`. Toggle with the
+  `dcmanager [on|off]` console command. **Needs a GUI smoke-test** (toggle on,
+  walk around, confirm no hitch + cyan mesh tracks you). This increment meshes a
+  UNIFORM depth-5 (32-voxel) bubble.
+  - ⏭️ **NEXT: distance-graded LOD over a larger vicinity.** Needs OctreeDC's
+    octree-balancing pass — a naive graded `refine` produces >1-level neighbour
+    jumps that break `_owns_edge`'s crack-free seam logic. Then: data-only mode
+    (hide godot_voxel's own render), collision, edit-driven re-mesh.
 
-**Console tools to resume:** `dcspike` (uniform DC of a region, magenta),
+**Console tools to resume:** `dcmanager [on|off]` (the always-on threaded
+manager — the live #3 work), `dcspike` (uniform DC of a region, magenta),
 `dcoctree` (multi-LOD crack-free octree DC w/ a fine/coarse seam, cyan) — both
 read VoxelData via `DCRegionReader` and render our own mesh; `lod [dist]` (live
 pop-in tuning); `vdebug [flag]` (godot_voxel debug overlays); `set`/`get` (shader

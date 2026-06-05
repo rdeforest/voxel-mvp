@@ -8,6 +8,7 @@ extends Node3D
 # thread and rendered by us (proves we can mesh+render over godot_voxel's data).
 var _spike_mesh: MeshInstance3D
 var _octree_mesh: MeshInstance3D
+var _dc_manager: DCTerrainManager
 
 
 func _enter_tree() -> void:
@@ -28,6 +29,9 @@ func _ready() -> void:
     WorldSnapshot.reset_pending = false
     if not resetting and SavePaths.snapshot_exists():
         WorldSnapshot.load_into(SavePaths.SNAPSHOT_FILE, self)
+    _dc_manager = DCTerrainManager.new()
+    add_child(_dc_manager)
+    _dc_manager.setup(_terrain, _player)
     _register_console_commands()
 
 func _exit_tree() -> void:
@@ -50,6 +54,7 @@ func _console_commands() -> Array:
         [_cmd_vdebug,    "vdebug",    "Toggle a VoxelLodTerrain debug overlay. Usage: vdebug [flag]; no arg lists flags."],
         [_cmd_dcspike,   "dcspike",   "F2 spike: DC-mesh a region around you from VoxelData and render it (magenta)."],
         [_cmd_dcoctree,  "dcoctree",  "F2 spike: octree-DC a region with a fine/coarse seam (multi-LOD, crack-free; cyan)."],
+        [_cmd_dcmanager, "dcmanager", "Toggle the DC terrain manager (threaded re-mesh of a bubble around you). Usage: dcmanager [on|off]"],
         [_cmd_lod,       "lod",       "Get/set terrain lod_distance (higher = LOD boundaries farther = less pop-in). Usage: lod [distance]"],
         [_cmd_reset,     "reset",     "Delete the save (terrain DB + snapshot) and reload to a fresh world."],
         [_cmd_quiescent, "quiescent", "Print whether the world is quiescent (save-ready)."],
@@ -242,6 +247,12 @@ func _cmd_dcoctree() -> void:
     if mesh.get_surface_count() > 0:
         nverts = (mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
     LimboConsole.info("dcoctree: read %dms, mesh %dms — %d solid, %d verts (fine -X / coarse +X)" % [t_read, t_mesh, solid, nverts])
+
+# Toggle the always-on threaded DC terrain manager (path-b #3). No arg flips it.
+func _cmd_dcmanager(state := "") -> void:
+    var on := not _dc_manager.is_enabled() if state == "" else state == "on"
+    _dc_manager.set_enabled(on)
+    LimboConsole.info("dcmanager: %s" % ("on" if on else "off"))
 
 # Tune LOD pop-in live. lod_distance is the per-level switch distance; larger
 # pushes every LOD boundary farther out (finer detail at range, more blocks).
