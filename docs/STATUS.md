@@ -51,14 +51,21 @@ Path-b build order / progress:
   blocks (edits live there as downsampled mips). LOD0 routes through `copy()`.
   **Edits render identically at every LOD** (a first-class-citizen invariant —
   see [[edits-first-class]]). GUI-verified via the `dclod [lod]` probe.
-  - ⏭️ **NEXT: the LOD clipmap.** Build a multi-LOD `SdfField` (nested levels:
-    level 0 = `read_sdf_lod0` near, levels 1..N = `read_sdf_lod` at increasing
-    LOD, each ~2× extent / same sample count) that picks the level by position so
-    `value(p)` stays single-valued → crack-free with the octree. Wire it into the
-    manager so the bubble covers view distance with matched data-LOD per cell (no
-    undersampling holes). Then `dcsolo` is usable. Then: collision from our mesh,
-    edit-driven re-mesh. Watch for faint seams between generator-baseline and
-    stored mips on unedited terrain (fix: overlay only where edits exist).
+- ✅ **#6 the LOD clipmap (GUI-verified).** `SdfClipmap`
+  (`scripts/dc/sdf_clipmap.gd`): nested levels centred on the player, level k at
+  LOD k covering 2^k the extent / same sample count; `value()` picks the finest
+  level containing the point (single-valued → crack-free), `target_cell_size()`
+  drives the refine so cell size and data LOD transition together. The manager
+  builds it (4 reads on main: 32/64/128/256m at LOD 0/1/2/3) and meshes one
+  depth-8 octree on the worker. Covers view distance, no undersampling holes,
+  edits everywhere, `dcsolo` usable. `log_timings` prints read/mesh ms per
+  recenter.
+  - ⏭️ **NEXT: surface-adaptive refine** — biggest remaining perf win. The octree
+    currently subdivides the whole 256m volume to LOD size incl. empty air/under-
+    ground (high leaf count, mesh in the hundreds of ms off-thread). Stop
+    subdividing cells the surface can't cross (|sdf(center)| > size·√3). Then:
+    collision from our mesh, edit-driven re-mesh. Also watch: 4 reads on main per
+    recenter (~8m) — possible small hitch; faint ridges at LOD boundaries.
 
 **Console tools to resume:** `dcmanager [on|off]` (the threaded graded bubble),
 `dcsolo [on|off]` (data-only: hide godot_voxel's render), `dclod [lod]` (probe one

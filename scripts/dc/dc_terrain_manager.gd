@@ -13,13 +13,21 @@ extends Node3D
 # thread. The finished arrays come back and the ArrayMesh is built on the main
 # thread (RenderingServer upload).
 #
-# Meshes a distance-graded bubble: finest cells near the follow target, coarsening
-# with distance. OctreeDC's point-location meshing stitches the level transitions
-# crack-free with no balance pass needed.
+# Meshes a distance-graded LOD clipmap: nested levels centred on the follow target,
+# level k covering 2^k the extent at 2^k the cell size, each read at LOD k so coarse
+# cells sample coarse data (no undersampling). One octree spans the whole clipmap;
+# the refine matches cell size to the clipmap level so data LOD and cell size
+# transition together. OctreeDC's point-location meshing stitches it crack-free with
+# no balance pass needed. See SdfClipmap.
 
-const ROOT_DEPTH        := 6      # 2^6 = 64-voxel root cube around the follow target
+const LEVELS            := 4      # LOD levels (0..3): 256m coverage (32m fine core)
+const LEVEL_DIM         := 33     # samples per axis per level; LEVEL_DIM-1 must be a power of 2
 const RECENTER_DISTANCE := 8.0    # re-mesh once the follow target drifts this far (m)
-const LOD_QUALITY       := 6.0    # target cell size ~= distance / this (smaller = finer farther out)
+
+# Derived: octree root spans the coarsest level. ROOT = (LEVEL_DIM-1) << (LEVELS-1).
+const _LEVEL_CELLS      := LEVEL_DIM - 1                 # 32
+const _ROOT_DEPTH       := 5 + LEVELS - 1                # log2(32) + (LEVELS-1)
+const _COARSEST_CELL    := 1 << (LEVELS - 1)             # snap granularity
 
 var _terrain: VoxelLodTerrain
 var _follow:  Node3D
@@ -34,6 +42,12 @@ var _task_id := -1
 var _job_origin: Vector3i
 var _job_arrays: Array = []
 var _last_center := Vector3.INF
+var _job_read_ms := 0
+var _job_t0 := 0
+
+# Print per-recenter read/mesh timings to the output (tuning aid). Only fires while
+# the manager is enabled, which is opt-in, so it's quiet in normal play.
+var log_timings := true
 
 
 func setup(terrain: VoxelLodTerrain, follow: Node3D) -> void:
@@ -93,29 +107,40 @@ func _process(_dt: float) -> void:
 
 
 func _dispatch(center: Vector3) -> void:
-    var size   := 1 << ROOT_DEPTH
-    var origin := Vector3i(center.round()) - Vector3i(size / 2, size / 2, size / 2)
-    var dim    := size + 1                       # corner samples
-    var data   := DCRegionReader.new().read_sdf_lod0(_terrain, origin, Vector3i(dim, dim, dim))
-    if data.size() != dim * dim * dim:
-        return
-    var baked := SdfBaked.new(data, Vector3.ZERO, 1.0, Vector3i(dim, dim, dim))
-    # Subdivide finer the closer a cell is to the follow target (in the octree's
-    # local space, where the target sits at the bubble centre). Captures values by
-    # copy — no self/Node reference — so it's safe to call on the worker thread.
-    var focus := center - Vector3(origin)
-    var inv_quality := 1.0 / LOD_QUALITY
-    var refine := func(c: Vector3, s: float, _d: int) -> bool:
-        return s > c.distance_to(focus) * inv_quality
-    _job_origin  = origin
+    var root_size := 1 << _ROOT_DEPTH                       # world extent of the coarsest level
+    # Snap the centre to the coarsest cell so every level's read origin lands on its
+    # own LOD grid (floor-snap, so it's stable across the world origin).
+    var snapped := Vector3i((center / float(_COARSEST_CELL)).floor()) * _COARSEST_CELL
+    var root_origin := snapped - Vector3i(root_size / 2, root_size / 2, root_size / 2)
+    var center_lattice := Vector3.ONE * (root_size / 2)     # follow target, lattice space
+    var dim_v := Vector3i(LEVEL_DIM, LEVEL_DIM, LEVEL_DIM)
+    var read_t0 := Time.get_ticks_msec()
+    var reader := DCRegionReader.new()
+    var levels: Array[SdfBaked] = []
+    for k in LEVELS:
+        var cell := 1 << k
+        var half_k := (_LEVEL_CELLS / 2) << k               # lattice half-extent of level k
+        var lattice_origin := Vector3i(root_size / 2 - half_k, root_size / 2 - half_k, root_size / 2 - half_k)
+        var world_origin := root_origin + lattice_origin
+        var data := reader.read_sdf_lod(_terrain, k, world_origin, dim_v)
+        if data.size() != LEVEL_DIM * LEVEL_DIM * LEVEL_DIM:
+            return                                          # incomplete read; try again next tick
+        levels.append(SdfBaked.new(data, Vector3(lattice_origin), float(cell), dim_v))
+    var clipmap := SdfClipmap.new(levels, center_lattice, float(_LEVEL_CELLS) * 0.5)
+    _job_read_ms = Time.get_ticks_msec() - read_t0
+    _job_t0      = Time.get_ticks_msec()
+    _job_origin  = root_origin
     _job_arrays  = []
     _last_center = center
-    _task_id = WorkerThreadPool.add_task(_mesh_job.bind(baked, refine), false, "DC terrain mesh")
+    _task_id = WorkerThreadPool.add_task(_mesh_job.bind(clipmap), false, "DC terrain mesh")
 
 
-# Runs on a worker thread: pure CPU over the immutable baked field.
-func _mesh_job(baked: SdfBaked, refine: Callable) -> void:
-    _job_arrays = OctreeDC.build_field_arrays(baked, ROOT_DEPTH, refine)
+# Runs on a worker thread: pure CPU over the immutable clipmap. The refine matches
+# cell size to the clipmap's LOD at each point, so cells and data LOD agree.
+func _mesh_job(clipmap: SdfClipmap) -> void:
+    var refine := func(c: Vector3, s: float, _d: int) -> bool:
+        return s > clipmap.target_cell_size(c)
+    _job_arrays = OctreeDC.build_field_arrays(clipmap, _ROOT_DEPTH, refine)
 
 
 func _finish() -> void:
@@ -128,6 +153,10 @@ func _finish() -> void:
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _job_arrays)
     _mesh_instance.mesh = mesh
     _mesh_instance.global_position = Vector3(_job_origin)
+    if log_timings:
+        var verts: int = (_job_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+        print("DC clipmap: %d verts — read %d ms (main), mesh %d ms (worker)" % [
+            verts, _job_read_ms, Time.get_ticks_msec() - _job_t0])
 
 
 func _exit_tree() -> void:
