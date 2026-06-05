@@ -4,9 +4,18 @@ extends Node3D
 @onready var _integrity: StructuralIntegrity = $StructuralIntegrity
 @onready var _player:    CharacterBody3D     = $Player
 
+# F2 path-b spike: our own DC mesh of a region, built from VoxelData on the main
+# thread and rendered by us (proves we can mesh+render over godot_voxel's data).
+var _spike_mesh: MeshInstance3D
+var _octree_mesh: MeshInstance3D
+
 
 func _enter_tree() -> void:
     SavePaths.ensure_dir()
+    # Keep generated data blocks resident (default off) so our region reads hit
+    # cached data instead of re-running the noise generator every time. Set before
+    # the terrain starts generating (parent _enter_tree runs before the child's).
+    $VoxelLodTerrain.cache_generated_blocks = true
     # If a reset is pending, detach the SQLite stream BEFORE the terrain
     # node enters the tree, so it never reads modified blocks from disk.
     # _enter_tree runs parent-first, so we get here before $VoxelLodTerrain
@@ -39,6 +48,9 @@ func _console_commands() -> Array:
         [_cmd_set,       "set",       "Set a terrain shader uniform (float). Usage: set <name> <value>"],
         [_cmd_get,       "get",       "List terrain shader uniforms matching a glob (default *). Usage: get [pattern]"],
         [_cmd_vdebug,    "vdebug",    "Toggle a VoxelLodTerrain debug overlay. Usage: vdebug [flag]; no arg lists flags."],
+        [_cmd_dcspike,   "dcspike",   "F2 spike: DC-mesh a region around you from VoxelData and render it (magenta)."],
+        [_cmd_dcoctree,  "dcoctree",  "F2 spike: octree-DC a region with a fine/coarse seam (multi-LOD, crack-free; cyan)."],
+        [_cmd_lod,       "lod",       "Get/set terrain lod_distance (higher = LOD boundaries farther = less pop-in). Usage: lod [distance]"],
         [_cmd_reset,     "reset",     "Delete the save (terrain DB + snapshot) and reload to a fresh world."],
         [_cmd_quiescent, "quiescent", "Print whether the world is quiescent (save-ready)."],
         [_cmd_parts,     "parts",     "Print the number of tracked parts."],
@@ -143,6 +155,100 @@ func _cmd_reset() -> void:
     WorldSnapshot.reset_pending = true
     LimboConsole.info("Resetting to defaults — saves left intact. F9 to restore.")
     get_tree().reload_current_scene.call_deferred()
+
+# F2 path-b proof: read a region's SDF straight from the terrain's voxel store
+# (main thread, transient VoxelTool — no held ref, the pattern that didn't crash),
+# mesh it with our GDScript DualContour, and render it ourselves. If the magenta
+# surface matches the terrain where you stand, the "own meshing layer over
+# godot_voxel's data" architecture is viable.
+func _cmd_dcspike() -> void:
+    const N := 24
+    var origin := Vector3i(_player.global_position.round()) - Vector3i(N / 2, N / 2, N / 2)
+    var vt := _terrain.get_voxel_tool()
+    vt.set_channel(VoxelBuffer.CHANNEL_SDF)
+
+    var dim := N + 1                       # DC needs corner samples (cells + 1)
+    var data := PackedFloat32Array()
+    data.resize(dim * dim * dim)
+    var i := 0
+    var solid := 0
+    for z in dim:
+        for y in dim:
+            for x in dim:
+                var v := vt.get_voxel_f(origin + Vector3i(x, y, z))
+                data[i] = v
+                if v < 0.0:
+                    solid += 1
+                i += 1
+
+    var baked := SdfBaked.new(data, Vector3(origin), 1.0, Vector3i(dim, dim, dim))
+    var mesh := DualContour.build_field(baked, Vector3i(N, N, N), Vector3(origin), 1.0)
+
+    if _spike_mesh == null:
+        _spike_mesh = MeshInstance3D.new()
+        var m := StandardMaterial3D.new()
+        m.albedo_color = Color(1.0, 0.0, 1.0, 0.55)
+        m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+        m.cull_mode = BaseMaterial3D.CULL_DISABLED
+        _spike_mesh.material_override = m
+        add_child(_spike_mesh)
+    _spike_mesh.mesh = mesh
+
+    var nverts := 0
+    if mesh.get_surface_count() > 0:
+        nverts = (mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+    LimboConsole.info("dcspike: %d^3 at %s — %d solid samples, %d verts" % [N, origin, solid, nverts])
+
+# F2 core proof: octree-DC over a real terrain region with a deliberate LOD seam
+# inside it (full depth in the -X half, one level coarser in the +X half). The
+# SDF is baked once from VoxelData, then meshed with our crack-free adaptive
+# OctreeDC. A seamless cyan surface that changes triangle density across the
+# middle = multi-LOD meshing works on real data — the heart of the new system.
+func _cmd_dcoctree() -> void:
+    const DEPTH := 5
+    var size := 1 << DEPTH                 # 32-voxel root cube
+    var origin := Vector3i(_player.global_position.round()) - Vector3i(size / 2, size / 2, size / 2)
+    var dim := size + 1                     # corner samples
+    var t0 := Time.get_ticks_msec()
+    var data := DCRegionReader.new().read_sdf_lod0(_terrain, origin, Vector3i(dim, dim, dim))
+    var t_read := Time.get_ticks_msec() - t0
+    if data.size() != dim * dim * dim:
+        LimboConsole.error("dcoctree: read returned %d (expected %d)" % [data.size(), dim * dim * dim])
+        return
+    var solid := 0
+    for v in data:
+        if v < 0.0:
+            solid += 1
+    var baked := SdfBaked.new(data, Vector3.ZERO, 1.0, Vector3i(dim, dim, dim))
+
+    var refine := func(center: Vector3, _s: float, depth: int) -> bool:
+        return depth < (DEPTH if center.x < size / 2.0 else DEPTH - 1)
+    var t1 := Time.get_ticks_msec()
+    var mesh := OctreeDC.build_field(baked, DEPTH, refine)
+    var t_mesh := Time.get_ticks_msec() - t1
+
+    if _octree_mesh == null:
+        _octree_mesh = MeshInstance3D.new()
+        var m := StandardMaterial3D.new()
+        m.albedo_color = Color(0.2, 1.0, 1.0, 0.55)
+        m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+        m.cull_mode = BaseMaterial3D.CULL_DISABLED
+        _octree_mesh.material_override = m
+        add_child(_octree_mesh)
+    _octree_mesh.mesh = mesh
+    _octree_mesh.global_position = Vector3(origin)
+
+    var nverts := 0
+    if mesh.get_surface_count() > 0:
+        nverts = (mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+    LimboConsole.info("dcoctree: read %dms, mesh %dms — %d solid, %d verts (fine -X / coarse +X)" % [t_read, t_mesh, solid, nverts])
+
+# Tune LOD pop-in live. lod_distance is the per-level switch distance; larger
+# pushes every LOD boundary farther out (finer detail at range, more blocks).
+func _cmd_lod(distance := -1.0) -> void:
+    if distance > 0.0:
+        _terrain.lod_distance = distance
+    LimboConsole.info("lod_distance = %.1f, lod_count = %d" % [_terrain.lod_distance, _terrain.lod_count])
 
 func _cmd_quiescent() -> void:
     LimboConsole.info("quiescent: %s" % _integrity.is_quiescent())
