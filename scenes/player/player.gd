@@ -267,11 +267,15 @@ func _quit_game() -> void:
 
 func _save_game() -> void:
     if not integrity.is_quiescent():
-        print("Cannot save: world still settling.")
+        Toast.failure("Can't save — world still settling.")
         return
     TerrainPersistence.flush(terrain)
     var err := WorldSnapshot.save(SavePaths.SNAPSHOT_FILE, get_parent())
-    print("Saved." if err == OK else "Save failed: %s" % err)
+    if err == OK:
+        Toast.success("Saved.")
+    else:
+        push_error("Save failed: %s" % error_string(err))
+        Toast.failure("Save failed: %s" % error_string(err))
 
 func _load_game() -> void:
     if not SavePaths.snapshot_exists():
