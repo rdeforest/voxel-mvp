@@ -131,6 +131,15 @@ Each can be picked up cold without holding the rest in your head.
 
 ## Bite F2 — LOD seam transitions (in progress)
 
+> **SUPERSEDED (2026-06-05):** the per-block `transition_surfaces` / wide-padding
+> band plan described in this section was abandoned — real terrain boundary loops
+> span multiple cube faces, which godot_voxel's per-side transition model can't
+> carve up. We pivoted to building **our own meshing/render layer** over
+> godot_voxel's data (path b). Current direction + progress live in
+> `docs/STATUS.md` ("Active thread") and `docs/F2-lod-seam-options.md`. The
+> material below is kept as the record of how we got there (the `dc_seam` loop
+> extraction + zipper it produced are still reusable).
+
 **Status (2026-06-03):** F1 (real C++ DC) shipped. Same-LOD seams are
 crack-free (boundary padding makes adjacent same-LOD blocks compute identical
 boundary vertices). Generated-terrain **see-through holes are fixed** — they

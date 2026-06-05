@@ -8,6 +8,50 @@
 
 ## Resumption Brief
 
+### Active thread (2026-06-05): F2 LOD seams via a custom meshing layer (path b)
+
+Terrain meshing was migrated from Transvoxel to our own **Dual Contouring**
+mesher (`engine/voxel_dc/` C++, `scripts/dc/` GDScript prototypes) for sharp
+features + edit quality. This session: generated-terrain "holes" were back-facing
+triangles (fixed: sign-based winding + shorter-diagonal split + in-cell QEF
+fallback); save/load now flushes terrain edits (`TerrainPersistence.flush`); fly
+mode on **X**. 99 GUT tests pass.
+
+**F2 (LOD-boundary cracks) is the active build.** The per-block
+`transition_surfaces` approach was abandoned — terrain boundary loops span
+multiple cube faces, which godot_voxel's per-side transition model can't carve
+up. Decision (with Robert): build **our own meshing/render layer** over
+godot_voxel's data, keeping it as the data / streaming / edit / collision engine.
+Rationale + options in `docs/F2-lod-seam-options.md` (uncommitted scratch);
+chapter `docs/roadmap/implementation/14-dc-qef-transition.md`.
+
+Path-b build order / progress:
+- ✅ **#1 fast region read** — `DCRegionReader.read_sdf_lod0` (C++, bulk
+  `VoxelData::copy`, transient store grab). Required the **SCsub ABI fix** (mirror
+  godot_voxel's `VOXEL_ENABLE_*` defines — see [[voxel-dc-abi-defines]]) and
+  `cache_generated_blocks = true` in `world._enter_tree` (reads ~450ms → 0ms).
+- ⏭️ **#2 worker-thread meshing — START HERE.** `OctreeDC` runs ~450ms in
+  GDScript on the main thread; move it off-thread (and/or port to C++ later).
+- **#3 the manager** — a Node meshing the camera vicinity as ONE octree (crack-
+  free within one octree; region-to-region seams are why it's one octree for v1),
+  re-meshing as the camera moves; then data-only mode (hide godot_voxel's own
+  render), collision, edit-driven re-mesh.
+
+**Console tools to resume:** `dcspike` (uniform DC of a region, magenta),
+`dcoctree` (multi-LOD crack-free octree DC w/ a fine/coarse seam, cyan) — both
+read VoxelData via `DCRegionReader` and render our own mesh; `lod [dist]` (live
+pop-in tuning); `vdebug [flag]` (godot_voxel debug overlays); `set`/`get` (shader
+uniforms incl. `debug_lod` / `debug_normal` visualizers).
+
+**Uncommitted on purpose:** `scenes/world/world.tscn` (Robert's `lod_distance=96`
+tuning + editor debug-shader defaults), `docs/F2-lod-seam-options.md` (scratch
+decision doc — keep as reference). Deferred items have memories: LOD-boundary
+cracks (this work), [[edit-remesh-padding-gap]], [[distant-shadow-shimmer]].
+
+---
+
+### Older brief (pre-DC-QEF, partly superseded)
+
 *Last updated: Tools/activities UI overhaul, Limbo Console with
 seven commands, four new verbs (Raise/Lower/FillVoxel/EmptyVoxel),
 grass shader, free part placement, part-stress proximity
