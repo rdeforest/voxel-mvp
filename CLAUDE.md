@@ -219,4 +219,6 @@ The autoload is committed in path form (`*res://addons/limbo_console/limbo_conso
 
 ## Project State
 
-See `docs/STATUS.md` for the current resumption brief and `docs/roadmap.md` for the version strategy. The status doc is the authoritative "where are we and what's next."
+**Read `docs/MANIFESTO.md` first** — it is the vision authority (if anything contradicts it, the manifesto wins). Core stance: **infinite programming resources, no half-measures** — design choices are made as if programming effort were unlimited; the only legitimate trade-offs are hardware limits (looks vs performance on real silicon), never "this is more work" or "good enough for now." This *inverts* the general "prefer the boring/minimal solution" instinct for architecture and scope (minimalism still applies to code *expression* — small diffs, no needless complexity — not to ambition). When tempted to propose "as-is," "opt-in," "defer the hard part," or "accept the slower path," that's the Enterprise habit, not the thesis — override it.
+
+Then see `docs/STATUS.md` for the current resumption brief and `docs/roadmap.md` for the version strategy. The status doc is the authoritative "where are we and what's next."

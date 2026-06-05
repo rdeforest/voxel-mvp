@@ -27,6 +27,44 @@ can deliver the proof faster than a team can.
 
 ---
 
+## Infinite programming resources
+
+The deeper thesis, stated as a question: **what kind of game do I get when I'm
+willing to devote infinite programming resources to it?** Design choices here are
+made *as if programming effort were unlimited* — because for the purpose of
+deciding what is *right*, it is. There is no schedule, no budget, no team to
+coordinate. The only finite resource is attention, and attention is spent getting
+things *right*, not getting them *done*.
+
+This is what makes the project more ambitious than anything before it, Dwarf
+Fortress included. Toady is brilliant, but the question he answered was "what can
+one person sustain over decades?" The question here is "what becomes possible if
+you refuse every limitation that comes from resource scarcity — *what if we had no
+limitations at all?*"
+
+### No half-measures
+
+Breaking a change into small, reversible parts is good engineering — keep doing
+it. **Settling for a lesser solution when a no-compromise solution is available is
+not.** These are different things; do not confuse them. Small steps toward the
+right end are correct. A smaller *end* is not.
+
+The only legitimate trade-offs are **hardware limits** — looks versus performance
+on real silicon. Those are physics. A trade-off justified by "this is more
+programming work," "the simpler version is good enough," "let's keep it opt-in,"
+or "we can revisit it later" is illegitimate: it is the Enterprise trap wearing a
+humble face. When two solutions both work and one is a compromise, the compromise
+is wrong even if it is smaller, faster to write, or more familiar.
+
+When Claude Code proposes "as-is," "good enough for now," "accept the slower
+path," or "defer the hard part," that is the habit, not the thesis — override it.
+(It has already happened: a 3-second GDScript mesh proposed as "smooth enough,
+it's off-thread" when a C++ port made it 44ms; the DC render layer proposed as
+"keep it opt-in" when making it the default render was the actual goal. Both were
+corrected by Robert. Catch them before he has to.)
+
+---
+
 ## What this project is NOT
 
 These are the anti-goals. When in doubt, the project is *more* unlike each
