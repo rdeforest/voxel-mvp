@@ -18,12 +18,12 @@ class DCRegionReader : public RefCounted {
 
 public:
 	// Read CHANNEL_SDF over the box [origin, origin + size) at LOD0 into a flat
-	// array in x-fastest order (matching SdfBaked's indexing). Empty on bad args.
+	// array in x-fastest order. Empty on bad args.
 	PackedFloat32Array read_sdf_lod0(Object *p_terrain, Vector3i origin, Vector3i size);
 
 	// Read CHANNEL_SDF at an arbitrary LOD. `origin` is in LOD0/world voxels (pass
 	// a multiple of 1<<lod); `size` is the sample count per axis; each sample spans
-	// 1<<lod world units (use that as SdfBaked's cell size). Edit-inclusive: the
+	// 1<<lod world units (the clipmap level's cell size). Edit-inclusive: the
 	// procedural generator fills the baseline, then any present data-store blocks
 	// at that LOD (where edits live as downsampled mips) overlay it. lod==0 routes
 	// to the LOD0 copy() path. Flat array, x-fastest. Empty on bad args.

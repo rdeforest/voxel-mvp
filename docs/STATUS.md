@@ -52,7 +52,7 @@ Path-b build order / progress:
   re-meshing past `RECENTER_DISTANCE`. Depth-6 bubble, distance-graded `refine`
   (`LOD_QUALITY` tunes falloff). `dcmanager [on|off]`. No octree-balance pass
   needed — point-location meshing stitches any level jump crack-free (see
-  [[dc-no-balance-pass]], guarded by `test_octree_dc`).
+  [[dc-no-balance-pass]], guarded by `test_dc_octree_mesher`).
 - ✅ **#4 data-only mechanism.** `DCTerrainManager.set_data_only()` flips the
   terrain's `render_layers_mask` to 0 (hides godot_voxel's render; collision/data/
   streaming/edits untouched — collision is a separate static body), restores on
@@ -76,9 +76,11 @@ Path-b build order / progress:
   (`engine/voxel_dc/dc_octree_mesher.cpp`): faithful C++ port of `SdfClipmap` +
   `OctreeDC` (full subdivision — no adaptive heuristic; C++ speed makes it
   unneeded). QEF extracted to `dc_qef.h`, shared with `VoxelMesherDC`. Manager
-  meshes via it on the worker. **~44ms vs ~1.4–2.8s GDScript** (~40×). Parity-
-  tested on real terrain (`test_dc_real_terrain.gd`: sound + matches GDScript vert
-  count). GDScript `OctreeDC`/`SdfClipmap` stay as prototype/preview/test mesher.
+  meshes via it on the worker. **~44ms vs ~1.4–2.8s GDScript** (~40×). Tested on
+  real terrain (`test_dc_real_terrain.gd`: sound) and an analytic sphere
+  (`test_dc_octree_mesher.gd`: watertight + crack-free LOD transition). The
+  GDScript prototype meshers have since been **retired** — `scripts/dc/` is now
+  just `dc_terrain_manager.gd`.
   - NOTE: surface-adaptive pruning was abandoned — magnitude-based prune shatters
     on slopes (the terrain SDF overestimates true distance on slopes, see
     [[dc-sdf-not-unit-distance]]); sign-based couldn't be proven to fix the live

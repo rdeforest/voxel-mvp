@@ -10,7 +10,7 @@ using voxel_dc::Qef;
 
 namespace {
 
-// Cube corners by xyz bits (matches DualContour._corner_offset) and the 12 edges.
+// Cube corners by xyz bits, and the 12 edges.
 const int CORNER[8][3] = {
 	{ 0, 0, 0 }, { 1, 0, 0 }, { 0, 1, 0 }, { 1, 1, 0 },
 	{ 0, 0, 1 }, { 1, 0, 1 }, { 0, 1, 1 }, { 1, 1, 1 },
@@ -29,7 +29,7 @@ inline Vector3 to_v3(const Vector3i &v) {
 }
 
 // One baked SDF grid (a clipmap level): trilinear value + central-difference
-// gradient, mirroring SdfBaked. Reads are clamped at the grid edge.
+// gradient. Reads are clamped at the grid edge.
 struct Level {
 	const float *data = nullptr;
 	Vector3 origin;
@@ -102,8 +102,8 @@ struct Cell {
 	bool leaf = true;
 };
 
-// Builds + meshes one octree over a clipmap. Mirrors OctreeDC: subdivide to the
-// clipmap's per-position target size, one QEF vertex per surface leaf, then
+// Builds + meshes one octree over a clipmap: subdivide to the clipmap's
+// per-position target size, one QEF vertex per surface leaf, then
 // minimal-edge meshing with point-location (the smallest cell owns each edge; a
 // coarser neighbour returned twice collapses the quad to a triangle -> seamless).
 struct Octree {

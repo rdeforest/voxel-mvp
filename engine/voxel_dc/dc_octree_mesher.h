@@ -2,11 +2,11 @@
 #define DC_OCTREE_MESHER_H
 
 // Octree Dual Contouring over a multi-LOD clipmap, in C++ for speed. This is the
-// path-b "own meshing layer": DCTerrainManager reads nested baked SDF levels from
-// the terrain, hands them here, and we build ONE adaptive octree spanning the
-// camera vicinity and mesh it crack-free (minimal-edge enumeration with octree
-// point-location). A C++ port of scripts/dc/{sdf_baked,sdf_clipmap,octree_dc}.gd:
-// the GDScript versions stay as the prototype / preview / test mesher.
+// "own meshing layer": DCTerrainManager reads nested baked SDF levels from the
+// terrain, hands them here, and we build ONE adaptive octree spanning the camera
+// vicinity and mesh it crack-free (minimal-edge enumeration with octree
+// point-location). This is the production terrain mesher; covered by
+// test/test_dc_octree_mesher.gd and test/test_dc_real_terrain.gd.
 
 #include "core/object/ref_counted.h"
 #include "core/variant/typed_array.h"

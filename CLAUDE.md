@@ -38,7 +38,7 @@ Two DC meshers, both ours (`engine/voxel_dc/`):
 - **`VoxelMesherDC`** — per-block DC, set as the terrain's `mesher` in `world.tscn`. godot_voxel builds terrain **collision** from these blocks. Has LOD-boundary seam cracks (the "F2" problem).
 - **`DCOctreeMesher`** + **`DCTerrainManager`** (`scripts/dc/dc_terrain_manager.gd`) — the "path-b" render layer: meshes the camera vicinity as ONE octree clipmap (crack-free LOD) on a worker thread and **renders that**, hiding godot_voxel's per-block render via `render_layers_mask = 0`. Default-on at startup (`start_default()`); `dcmanager`/`dcsolo` console commands toggle/override. Re-meshes on movement and on `terrain_sdf_changed` edits.
 
-So: **render = `DCOctreeMesher`, collision = `VoxelMesherDC`** (both DC, both ours). Shared QEF solver in `engine/voxel_dc/dc_qef.h`. GDScript `OctreeDC`/`DualContour`/`SdfClipmap` (`scripts/dc/`) are the prototype/preview/test mesher (console probes `dcspike`/`dcoctree`/`dclod`, and `test/`). The single-mesher consolidation (collision from our octree mesh, drop per-block visual meshing) is a deferred cleanup.
+So: **render = `DCOctreeMesher`, collision = `VoxelMesherDC`** (both DC, both ours, both C++ in `engine/voxel_dc/`). Shared QEF solver in `engine/voxel_dc/dc_qef.h`. `DCOctreeMesher` is covered by `test/test_dc_octree_mesher.gd` (watertight + crack-free LOD transition) and `test/test_dc_real_terrain.gd` (real terrain); `DCRegionReader` by `test/test_dc_region_reader.gd`. The GDScript prototype meshers (`scripts/dc/`) were retired once this C++ path became production; `scripts/dc/` now holds only `dc_terrain_manager.gd`. The single-mesher consolidation (collision from our octree mesh, drop per-block visual meshing) is a deferred cleanup.
 
 ### Scene graph
 

@@ -1,24 +1,24 @@
 class_name DCTerrainManager
 extends Node3D
 
-# F2 path-b #3: our own meshing/render layer over godot_voxel's data. Meshes a
-# cube of terrain around the followed node (the player) with OctreeDC and renders
-# our mesh, re-meshing as the player moves. godot_voxel stays the data / stream /
-# edit / collision engine; this only reads and renders.
+# Our own meshing/render layer over godot_voxel's data. Meshes a cube of terrain
+# around the followed node (the player) with our C++ DCOctreeMesher and renders our
+# mesh, re-meshing as the player moves. godot_voxel stays the data / stream / edit /
+# collision engine; this only reads and renders.
 #
-# Threading: the region read (DCRegionReader, bulk locked C++ copy) and the bake
-# happen on the main thread (~0ms with cache_generated_blocks on). The expensive
-# OctreeDC pass runs on a WorkerThreadPool task over an immutable SdfBaked, so it
-# never hitches the frame and never touches a Node or the engine store from the
-# thread. The finished arrays come back and the ArrayMesh is built on the main
-# thread (RenderingServer upload).
+# Threading: the region read (DCRegionReader, a bulk locked C++ copy) happens on the
+# main thread (~0ms with cache_generated_blocks on). The expensive meshing pass
+# (DCOctreeMesher) runs on a WorkerThreadPool task over immutable PackedFloat32Array
+# levels, so it never hitches the frame and never touches a Node or the engine store
+# from the thread. The finished arrays come back and the ArrayMesh is built on the
+# main thread (RenderingServer upload).
 #
 # Meshes a distance-graded LOD clipmap: nested levels centred on the follow target,
 # level k covering 2^k the extent at 2^k the cell size, each read at LOD k so coarse
 # cells sample coarse data (no undersampling). One octree spans the whole clipmap;
 # the refine matches cell size to the clipmap level so data LOD and cell size
-# transition together. OctreeDC's point-location meshing stitches it crack-free with
-# no balance pass needed. See SdfClipmap.
+# transition together. The mesher's point-location meshing stitches it crack-free
+# with no balance pass needed.
 
 const LEVELS            := 6      # LOD levels (0..5): 1024m coverage (32m fine core)
 const LEVEL_DIM         := 33     # samples per axis per level; LEVEL_DIM-1 must be a power of 2
