@@ -9,6 +9,7 @@ var terrain:            VoxelLodTerrain
 var terrain_support:    TerrainSupport
 var part_support:       PartSupport
 var debug:              IntegrityDebug
+var pbd:                PbdStructure       # set by world.gd; folded into is_quiescent
 
 var _collapse_detector: CollapseDetector
 var _strain_pulse_phase := 0.0
@@ -147,6 +148,7 @@ static func _cell_at(world: Vector3, vt: VoxelTool) -> float:
 func is_quiescent() -> bool:
     if not terrain_support.dirty_queue.is_empty():     return false
     if not _collapse_detector.is_idle():               return false
+    if pbd != null and not pbd.is_settled():           return false
     for child in get_parent().get_children():
         var body := child as RigidBody3D
         if body != null and not body.sleeping:         return false

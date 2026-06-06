@@ -55,6 +55,14 @@ func is_enabled() -> bool:
     return _enabled
 
 
+# Settled = nothing is going to move on its own (gates save / quiescence). A
+# disabled PBD doesn't gate (the old system handles quiescence then).
+func is_settled() -> bool:
+    if not _enabled:
+        return true
+    return not _dirty and (_sim == null or _sim.awake_count() == 0)
+
+
 # Diagnostic snapshot of a cell's place in the live network (for the Probe tool).
 # "anchored" is the answer to "why isn't this falling?": a cell still connected to
 # any pinned anchor is held by definition, however stressed its members look.

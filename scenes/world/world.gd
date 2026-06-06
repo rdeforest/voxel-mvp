@@ -41,6 +41,8 @@ func _ready() -> void:
     _pbd_structure.name = "PbdStructure"   # ActionFactories resolves the probe target by this name
     add_child(_pbd_structure)
     _pbd_structure.setup(_integrity)
+    _integrity.pbd = _pbd_structure
+    _pbd_structure.set_enabled(true)   # PBD is authoritative; the old collapse systems stand down
     _register_console_commands()
 
 func _exit_tree() -> void:
