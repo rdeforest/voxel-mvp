@@ -25,6 +25,10 @@ var _enabled := false
 var _viz_visible := true            # V key toggles the stress-line overlay
 var _dirty := true
 var _headless := false              # no display → skip rendering (dummy renderer chokes on it)
+var _unanchored := false            # built a non-empty network with no anchors (terrain not streamed yet)
+var _retry_timer := 0.0
+
+const ANCHOR_RETRY_SEC := 0.3       # while unanchored, re-derive this often until terrain loads
 
 
 func setup(integrity: StructuralIntegrity) -> void:
@@ -139,9 +143,18 @@ func _physics_process(delta: float) -> void:
         _rebuild()
         _dirty = false
     if _sim != null:
-        _sim.step(delta)
-        if _sim.broke_last_step():
-            _handle_detachment()
+        if _unanchored:
+            # Don't step a network with no anchors — it would free-fall through the
+            # world. On load this means the terrain SDF hasn't streamed in yet, so
+            # re-derive periodically until anchor detection finds ground.
+            _retry_timer += delta
+            if _retry_timer >= ANCHOR_RETRY_SEC:
+                _retry_timer = 0.0
+                _dirty = true
+        else:
+            _sim.step(delta)
+            if _sim.broke_last_step():
+                _handle_detachment()
     Perf.report("PBD (%d nodes)" % (_sim.node_count() if _sim != null else 0), (Time.get_ticks_usec() - t0) / 1000.0)
 
 
@@ -218,3 +231,7 @@ func _rebuild() -> void:
     _sim = r["sim"]
     _cell_of_node = r["cell_of_node"]
     _node_of_cell = r["node_of_cell"]
+    # A non-empty network with no anchors can't be a real settled structure (one
+    # never goes quiescent, so it can't have been saved) — it's the terrain SDF not
+    # yet streamed in. Hold off stepping until anchors appear. See _physics_process.
+    _unanchored = _sim.node_count() > 0 and int(r["anchor_count"]) == 0

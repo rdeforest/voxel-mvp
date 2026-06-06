@@ -31,14 +31,19 @@ const FACE6 := [
 
 # cells: Dictionary[Vector3i, Materials] (material may be null for now).
 # is_natural_terrain: Callable(Vector3i) -> bool.
-# Returns { sim: PbdSim, node_of_cell: Dictionary, cell_of_node: Array[Vector3i] }.
+# Returns { sim, node_of_cell, cell_of_node, anchor_count }. anchor_count == 0 for a
+# non-empty network means no terrain contact was found — on load that's the terrain
+# SDF not having streamed in yet (the caller defers until anchors appear).
 static func build(cells: Dictionary, is_natural_terrain: Callable, cell_size := 1.0) -> Dictionary:
     var sim := PbdSim.new()
     var node_of_cell := {}
     var cell_of_node: Array[Vector3i] = []
 
+    var anchor_count := 0
     for cell in cells:
         var pinned := _anchored(cell, is_natural_terrain)
+        if pinned:
+            anchor_count += 1
         var mass := 0.0 if pinned else _mat(cells[cell]).density
         var world := (Vector3(cell) + Vector3.ONE * 0.5) * cell_size
         node_of_cell[cell] = sim.add_node(world, mass)
@@ -65,7 +70,7 @@ static func build(cells: Dictionary, is_natural_terrain: Callable, cell_size := 
                         minf(ma.compression,     mb.compression),
                         minf(ma.fatigue_seconds, mb.fatigue_seconds))  # most brittle
 
-    return { "sim": sim, "node_of_cell": node_of_cell, "cell_of_node": cell_of_node }
+    return { "sim": sim, "node_of_cell": node_of_cell, "cell_of_node": cell_of_node, "anchor_count": anchor_count }
 
 
 static func _anchored(cell: Vector3i, is_natural_terrain: Callable) -> bool:

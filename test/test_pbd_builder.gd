@@ -51,6 +51,14 @@ func test_node_cell_maps_round_trip():
         assert_eq(cell_of_node[node_of_cell[cell]], cell)
 
 
+func test_anchor_count_reported():
+    # The build's anchor count drives the load-time "terrain not streamed yet" guard.
+    var anchored := PbdNetworkBuilder.build({Vector3i(0, 1, 0): null}, _pred({Vector3i(0, 0, 0): true}))
+    assert_eq(anchored["anchor_count"], 1, "one cell touching terrain → one anchor")
+    var floating := PbdNetworkBuilder.build({Vector3i(5, 5, 5): null}, _pred({}))
+    assert_eq(floating["anchor_count"], 0, "no terrain contact → no anchors")
+
+
 func test_member_strength_from_material():
     var cells := {Vector3i(0, 0, 0): Materials.WOOD, Vector3i(1, 0, 0): Materials.WOOD}
     var sim: PbdSim = PbdNetworkBuilder.build(cells, _pred({}))["sim"]
