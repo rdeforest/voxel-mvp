@@ -134,13 +134,20 @@ func _process(_dt: float) -> void:
     Perf.report("DC mesh (main)", (Time.get_ticks_usec() - t0) / 1000.0)
 
 
+# Integer halving of a non-negative size. The one spot that acknowledges the
+# integer-division warning, so the call sites above read as plain arithmetic.
+static func _half(n: int) -> int:
+    @warning_ignore("integer_division")
+    return n / 2
+
+
 func _dispatch(center: Vector3) -> void:
     var root_size := 1 << _ROOT_DEPTH                       # world extent of the coarsest level
     # Snap the centre to the coarsest cell so every level's read origin lands on its
     # own LOD grid (floor-snap, so it's stable across the world origin).
     var snapped := Vector3i((center / float(_COARSEST_CELL)).floor()) * _COARSEST_CELL
-    var root_origin := snapped - Vector3i(root_size / 2, root_size / 2, root_size / 2)
-    var center_lattice := Vector3.ONE * (root_size / 2)     # follow target, lattice space
+    var root_origin := snapped - Vector3i.ONE * _half(root_size)
+    var center_lattice := Vector3.ONE * _half(root_size)    # follow target, lattice space
     var dim_v := Vector3i(LEVEL_DIM, LEVEL_DIM, LEVEL_DIM)
     var read_t0 := Time.get_ticks_msec()
     var reader := DCRegionReader.new()
@@ -151,8 +158,8 @@ func _dispatch(center: Vector3) -> void:
     var level_cells := PackedFloat32Array()
     for k in LEVELS:
         var cell := 1 << k
-        var half_k := (_LEVEL_CELLS / 2) << k               # lattice half-extent of level k
-        var lattice_origin := Vector3i(root_size / 2 - half_k, root_size / 2 - half_k, root_size / 2 - half_k)
+        var half_k := _half(_LEVEL_CELLS) << k              # lattice half-extent of level k
+        var lattice_origin := Vector3i.ONE * (_half(root_size) - half_k)
         var world_origin := root_origin + lattice_origin
         var data := reader.read_sdf_lod(_terrain, k, world_origin, dim_v)
         if data.size() != LEVEL_DIM * LEVEL_DIM * LEVEL_DIM:
