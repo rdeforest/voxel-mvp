@@ -68,7 +68,7 @@ func _ready() -> void:
         KEY_Q:            _quit_game,
         KEY_F:            _toggle_wireframe,
         KEY_X:            _toggle_fly,
-        KEY_V:            _toggle_debug_visuals,
+        KEY_V:            _toggle_stress_viz,
         KEY_M:            build_state.cycle_material,
         KEY_R:            build_state.rotate_y,
         KEY_T:            build_state.rotate_x,
@@ -76,7 +76,6 @@ func _ready() -> void:
         KEY_BRACKETLEFT:  build_state.prev_part,
         KEY_BRACKETRIGHT: build_state.next_part,
         KEY_G:            _toggle_grid_overlay,
-        KEY_H:            _toggle_obscured_stress,
         KEY_F5:           _save_game,
         KEY_F9:           _load_game,
         KEY_1:            _select_activity.bind(0),
@@ -97,10 +96,10 @@ func _ready() -> void:
     _update_mode_label()
 
 
-# Deferred because StructuralIntegrity constructs its `debug` and
-# `part_support` components in *its* _ready, after Player._ready.
+# Deferred because StructuralIntegrity constructs its `part_support` component in
+# *its* _ready, after Player._ready. (part_support.raycast feeds the old strain-glow
+# proximity test, used only when PBD is disabled.)
 func _wire_debug_raycast() -> void:
-    integrity.debug.raycast        = raycast
     integrity.part_support.raycast = raycast
 
 
@@ -238,14 +237,12 @@ func _update_mode_label() -> void:
 
 # --- Other toggles ---
 
-func _toggle_debug_visuals() -> void:
-    integrity.set_debug_visuals_enabled(not integrity.debug_visuals_enabled)
+func _toggle_stress_viz() -> void:
+    if integrity.pbd != null:
+        integrity.pbd.toggle_viz()
 
 func _toggle_grid_overlay() -> void:
     _grid_overlay.toggle()
-
-func _toggle_obscured_stress() -> void:
-    integrity.debug.toggle_obscured()
 
 func _toggle_fly() -> void:
     _movement.fly_enabled = not _movement.fly_enabled

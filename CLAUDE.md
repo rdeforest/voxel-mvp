@@ -87,7 +87,7 @@ VoxelEventBusSingleton.emit(channel, event)
 
 Channel taxonomy (`scripts/events/*_event.gd`):
 - **Primitive** (emitted by actions): `terrain_sdf_changed`, `voxel_added`, `voxel_removed`, `part_added`, `part_removed`.
-- **Derived** (emitted by integrity components): `voxel_support_changed`, `region_collapsing`, `part_support_changed` (reserved).
+- **Derived** (emitted by integrity components): `region_collapsing`, `part_support_changed` (reserved). (`voxel_support_changed` was removed in Phase 6 with its only consumer, `CollapseDetector`.)
 
 Each event extends `VoxelEvent { grid_id, cells }`. `cells` is the dispatch footprint — the bus indexes per-cell subscribers against it. `grid_id` is in every payload from day one so multi-grid (Phase 5.5d, deferred) lands without payload churn.
 
@@ -97,31 +97,42 @@ Each event extends `VoxelEvent { grid_id, cells }`. `cells` is the dispatch foot
 
 ### Structural integrity system
 
-**`StructuralIntegrity`** (`scripts/structural_integrity.gd`) is a `Node` facade. It composes three `RefCounted` components plus a peer `CollapseDetector`:
+> **Authority note (Phase 6).** The live structural simulation is now **PBD**
+> (`PbdStructure` + the C++ `PbdSim`), enabled by default at world startup — see
+> "PBD structural simulation" below. The classes described in *this* section are
+> the **tracking spine** PBD rides on (`TerrainSupport.voxel_data` /
+> `is_natural_terrain`, `PartSupport.part_registry`) plus the **falling-body
+> lifecycle** PBD reuses. The old *collapse* layer is gone: `CollapseDetector`,
+> `IntegrityDebug`, `PendingCollapse`/`PendingFlood`, and the
+> `voxel_support_changed` event were deleted. `PartSupport`'s own strain/collapse
+> (`tick_strain`) still exists but only runs when PBD is disabled
+> (`part_collapse_enabled`); `TerrainSupport`'s scalar-support propagation stays
+> because PBD's suspended-mass discovery is gated on it.
+
+**`StructuralIntegrity`** (`scripts/structural_integrity.gd`) is a `Node` facade:
 
 ```
 StructuralIntegrity (Node, facade)
-├── terrain_support: TerrainSupport     ← voxel_data, propagation
-├── part_support:    PartSupport        ← part_registry, strain, collapse
-├── debug:           IntegrityDebug     ← debug cubes
-└── _collapse_detector: CollapseDetector (peer of terrain_support)
+├── terrain_support: TerrainSupport     ← voxel_data, is_natural_terrain, propagation (the tracked set PBD reads)
+├── part_support:    PartSupport        ← part_registry, collapse_part (legacy strain off under PBD)
+└── pbd:             PbdStructure        ← set by world.gd; the authoritative sim; folded into is_quiescent
 ```
 
-The facade owns `_physics_process` orchestration, `wake_falling_bodies` (which needs scene-tree access), and `is_quiescent` (for save gating). All other state lives on the components. Mutations come through the bus; the facade only exposes **queries** (`get_support`, `has_part`, `has_part_cell`) and one UI hook (`set_debug_visuals_enabled`). The bus is subscribed in `_ready` for `terrain_sdf_changed` + `part_removed` so the facade can call `wake_falling_bodies` when the world changes.
+The facade owns `_physics_process` orchestration (drain the support fixpoint; tick the legacy part strain only when `part_collapse_enabled`; classify falling bodies), `wake_falling_bodies` (needs scene-tree access), and `is_quiescent` (save gating — now also requires `pbd.is_settled()`). Mutations come through the bus; the facade exposes **queries** (`get_support`, `has_part`, `has_part_cell`). The bus is subscribed in `_ready` for `terrain_sdf_changed` + `part_removed` so the facade can call `wake_falling_bodies` when the world changes.
 
 **`TerrainSupport`** (`scripts/structural/terrain_support.gd`) owns `voxel_data: Dictionary[Vector3i, VoxelRecord]`, `dirty_queue`, and `_lowest_registered_y`. Subscribes channel-wide in `_init` to `voxel_added`, `voxel_removed`, and `terrain_sdf_changed`. A worklist fixpoint drains `dirty_queue` (FIFO, BFS-order) at `PROPAGATION_BUDGET` (200) cells per physics frame via `process_dirty_queue()`. `is_natural_terrain(pos)` requires both untracked-solid AND bedrock — the combination grants `FULL_SUPPORT` to neighbours.
 
 Classification cascade in `_support_from_neighbor` (priority order): tracked voxel → part-occupied → solid-above (skip) → solid-bedrock (FULL) → suspended-mass (lazy-register, skip) → air (skip).
 
-Emits `voxel_support_changed` via the bus when a voxel's recalculated support changes meaningfully. `CollapseDetector` subscribes and uses the event for strain-rewind on support increases.
+The scalar `support` it computes is no longer consumed by a collapse system — it survives only as the **gate for suspended-mass discovery**: `_support_from_neighbor` lazily registers a solid neighbour as a tracked cell when the current cell's support clears `FALL_THRESHOLD`, which is how a dug-out overhang becomes the cells PBD simulates. (Fully retiring the scalar would mean replacing that expansion with a PBD-native criterion — a deliberate future task.)
 
 **`PartSupport`** (`scripts/structural/part_support.gd`) owns `part_registry: Dictionary[Node3D, PartData]`, `_cell_to_part`, `_part_strain`. Part support is recomputed fresh each physics frame in `tick_strain(delta, pulse)`: sort parts ascending by `placement_y`, then for each part find its **direct supporter** (the part with the highest `placement_y < mine` in the part's own cell or the cell below). Direct terrain contact short-circuits to `FULL_SUPPORT`. Tall parts (multi-cell Y span from non-Y rotation) only check support from the bottom row of footprint cells (`_min_y(cells)`). Holds a `raycast` reference (set by player); stress emission only renders when the cursor is within 6m of a part's cells *or* its support has fallen below 0.30 (orange tier).
 
 `PartData.in_limbo` is true when any dependency hasn't settled. `tick_strain` skips strain accumulation while in-limbo.
 
-When strain expires, `_collapse_part` reparents the part's children to a new `RigidBody3D` (`continuous_cd = true`). Visual: `_apply_visual` puts the strain color on `emission` so the part's natural surface color stays visible.
+`collapse_part(node)` reparents the part's children to a new `RigidBody3D` (`continuous_cd = true`) and drops it from the registry — called by the legacy strain timer when PBD is off, **and by `PbdStructure` on detachment** when PBD is on (a part with any cell in an anchorless component drops whole). Visual: `_apply_visual` puts the strain color on `emission`.
 
-**`CollapseDetector`** (`scripts/collapse_detector.gd`) handles *terrain* collapses. Flood-fills connected components of unsupported terrain voxels into pending collapses, runs the strain timer, and on expiry hands the voxels to `FallingBodyFactory.from_voxels()` (`scripts/structural/falling_body_factory.gd`) — which greedy-merges them into axis-aligned boxes and returns a `RigidBody3D`. The detector then carves the cells out of the SDF.
+**Terrain collapse** is PBD's job now (see below). It reuses the same `FallingBodyFactory.from_voxels()` (`scripts/structural/falling_body_factory.gd`) → greedy-merge to axis-aligned boxes → `RigidBody3D`, then carves the cells out of the SDF. The old flood-fill `CollapseDetector` that used to do this was deleted in Phase 6.
 
 **Falling body lifecycle.** `FallingBodyFactory` stashes `cell_offsets` (each origin cell's local-space offset from the body's centroid at collapse time) on the body via `set_meta`. `StructuralIntegrity._tick_falling_bodies()` runs every physics frame: for each body with `cell_offsets`, sample SDF at each cell's current world position (via `body.global_transform * offset`):
 - **All cells in solid SDF (fully buried)** → emit `voxel_added` per cell at its current world-cell, free the body. The fallen mass becomes tracked SDF terrain.
@@ -165,7 +176,7 @@ Multi-axis rotation: `ConstructionAction.rotation: Vector3i` (0–3 per axis). R
 Player controls in **Construction → Build** activity: `[`/`]` cycle parts, `R/T/Y` rotate around Y/X/Z, `M` cycles material, Shift+W/A/E + wheel adjusts offset. Shift+key always suppresses the underlying WASD movement key — Shift+W is a distinct input from W, not "walk + something."
 
 **Debug overlays:**
-- `V` toggles the stress overlay (`IntegrityDebug`). Two-pass renderer: visible-pass wireframe outlines (depth-tested), obscured-pass corner-bracket markers (no depth test, off until `H`). Cells with `support > 0.30` only render within 6m of the raycast hit; cells `≤ 0.30` always render so failures are never hidden.
+- `V` toggles the **PBD stress-line overlay** (`PbdStructure.toggle_viz` → the green→red→whitening member lines). The old `IntegrityDebug` support-cube overlay and its `H` obscured-pass toggle were removed in Phase 6.
 - `H` toggles the obscured-pass corner markers (only visible with `V` on).
 - `G` toggles the voxel grid overlay (wireframes the targeted cell and its Chebyshev neighborhood, helpful for understanding voxel boundaries during flatten/dig/fill).
 - `F` toggles full-scene wireframe.

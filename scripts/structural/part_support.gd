@@ -7,7 +7,7 @@ const GRID_ID          = 0
 
 # Stress emission visibility: parts only glow when the cursor is within
 # PROXIMITY_RADIUS of any of the part's cells, OR support has dropped to
-# the always-show threshold (orange tier or worse). Matches IntegrityDebug.
+# the always-show threshold (orange tier or worse).
 const PROXIMITY_RADIUS := 6.0
 const ALWAYS_SHOW_MAX  := 0.30
 

@@ -132,10 +132,7 @@ func process_dirty_queue() -> void:
         voxel_data[pos].dirty   = false
 
         if absf(new_support - old_support) > VoxelConstants.SUPPORT_EPSILON:
-            dirty_neighbors_of(pos)
-            VoxelEventBusSingleton.emit(
-                VoxelSupportChangedEvent.CHANNEL,
-                VoxelSupportChangedEvent.new(GRID_ID, pos, old_support, new_support))
+            dirty_neighbors_of(pos)   # propagate the change through the support fixpoint
 
         processed += 1
 

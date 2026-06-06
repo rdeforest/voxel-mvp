@@ -5,11 +5,13 @@ extends Node3D
 # C++) from the current tracked voxels (TerrainSupport.voxel_data) + placed parts
 # (PartSupport.part_registry), with anchors from TerrainSupport.is_natural_terrain,
 # steps the solver each physics tick, and renders member stress in-world (once per
-# rendered frame). Rebuilds on any structural edit (bus). Phase 3: AUTHORITATIVE for
-# terrain collapse while enabled — when a member breaks and a component comes loose,
-# it carves those cells out of the SDF and hands them to FallingBodyFactory (the old
-# CollapseDetector stands down via StructuralIntegrity.terrain_collapse_enabled).
-# Toggle: `pbdlive`. Reports its per-tick cost to the Perf overlay.
+# rendered frame). Rebuilds on any structural edit (bus). AUTHORITATIVE while enabled
+# (enabled by default at world startup): when a member breaks and a component comes
+# loose, terrain cells are carved out of the SDF + handed to FallingBodyFactory and
+# detached parts drop whole; the old PartSupport strain/collapse stands down via
+# StructuralIntegrity.part_collapse_enabled (terrain has no old system left).
+# `pbdlive` toggles it; the `V` key toggles the stress-line overlay. Reports its
+# per-tick cost to the Perf overlay.
 
 const GRID_ID := 0
 
@@ -20,6 +22,7 @@ var _node_of_cell: Dictionary = {} # Vector3i cell -> node index (probe lookup)
 var _mesh: ArrayMesh
 var _mi: MeshInstance3D
 var _enabled := false
+var _viz_visible := true            # V key toggles the stress-line overlay
 var _dirty := true
 
 
@@ -39,11 +42,10 @@ func setup(integrity: StructuralIntegrity) -> void:
 
 func set_enabled(on: bool) -> void:
     _enabled = on
-    _mi.visible = on
-    # Take collapse authority while on (the old terrain detector + part strain system
-    # stand down so two systems don't both act); hand it back when off.
+    _mi.visible = on and _viz_visible
+    # Take collapse authority while on (the old PartSupport strain/collapse stands
+    # down so two systems don't both act); hand it back when off.
     if is_instance_valid(_integrity):
-        _integrity.terrain_collapse_enabled = not on
         _integrity.part_collapse_enabled = not on
     if on:
         _dirty = true
@@ -53,6 +55,12 @@ func set_enabled(on: bool) -> void:
 
 func is_enabled() -> bool:
     return _enabled
+
+
+# Show/hide the stress-line overlay without disabling the sim (the V key).
+func toggle_viz() -> void:
+    _viz_visible = not _viz_visible
+    _mi.visible = _enabled and _viz_visible
 
 
 # Settled = nothing is going to move on its own (gates save / quiescence). A
@@ -155,8 +163,8 @@ func _handle_detachment() -> void:
         _rebuild()
 
 
-# Mirrors CollapseDetector._materialize_collapse: spawn a falling body, carve the
-# cells to air, and emit the primitive events so the rest of the world reacts.
+# Spawn a falling body for the detached terrain cells, carve them to air, and emit
+# the primitive events so the rest of the world reacts.
 func _collapse(cells: Array[Vector3i]) -> void:
     var body := FallingBodyFactory.from_voxels(cells)
     get_parent().add_child(body)
@@ -175,7 +183,7 @@ func _collapse(cells: Array[Vector3i]) -> void:
 
 
 func _process(_dt: float) -> void:
-    if _enabled and _sim != null:
+    if _enabled and _viz_visible and _sim != null:
         PbdRenderer.draw(_sim, _mesh)
 
 

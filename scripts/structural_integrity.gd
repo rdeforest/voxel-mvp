@@ -8,17 +8,15 @@ var terrain:            VoxelLodTerrain
 
 var terrain_support:    TerrainSupport
 var part_support:       PartSupport
-var debug:              IntegrityDebug
 var pbd:                PbdStructure       # set by world.gd; folded into is_quiescent
 
-var _collapse_detector: CollapseDetector
 var _strain_pulse_phase := 0.0
 
-# When false, the old collapse systems stand down because PbdStructure has taken
-# over authoritatively. Terrain: support propagation + cell registration still run
-# (PBD reads the tracked set), only the carve is suppressed. Parts: the whole
-# strain/collapse tick is skipped (PBD owns part support + collapse now).
-var terrain_collapse_enabled := true
+# When false, the old PartSupport strain/collapse stands down because PbdStructure
+# owns part support + collapse. PBD sets this off whenever it's enabled. (Terrain
+# collapse has no old system left — PBD is the only path — so there's no terrain
+# flag; the support propagation that PBD's tracked-set expansion rides on still
+# runs unconditionally.)
 var part_collapse_enabled := true
 
 
@@ -27,8 +25,6 @@ func _ready() -> void:
     terrain_support    = TerrainSupport.new(terrain)
     part_support       = PartSupport.new(terrain_support, self)
     terrain_support.bind_part_support(part_support)
-    debug              = IntegrityDebug.new(terrain_support, self)
-    _collapse_detector = CollapseDetector.new(terrain_support, self)
 
     VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_world_mutated)
     VoxelEventBusSingleton.subscribe(PartRemovedEvent.CHANNEL,       _on_world_mutated)
@@ -43,19 +39,16 @@ func _exit_tree() -> void:
 
 func _physics_process(delta: float) -> void:
     var t0 := Time.get_ticks_usec()
+    # Support propagation + cell registration: always — PBD's tracked-set expansion
+    # rides on it (the suspended-mass discovery is gated on the scalar support).
     if not terrain_support.dirty_queue.is_empty():
-        terrain_support.process_dirty_queue()   # support + cell registration: always (PBD reads this)
-    elif terrain_collapse_enabled:
-        _collapse_detector.step()
+        terrain_support.process_dirty_queue()
 
-    _strain_pulse_phase += delta * VoxelConstants.STRAIN_PULSE_HZ * TAU
-    var pulse := 0.5 + 0.5 * sin(_strain_pulse_phase)
-
-    if terrain_collapse_enabled:
-        _collapse_detector.tick_pending(delta)
-    if part_collapse_enabled:
+    if part_collapse_enabled:   # old part system; off whenever PBD is authoritative
+        _strain_pulse_phase += delta * VoxelConstants.STRAIN_PULSE_HZ * TAU
+        var pulse := 0.5 + 0.5 * sin(_strain_pulse_phase)
         part_support.tick_strain(delta, pulse)
-    debug.update(pulse, _collapse_detector.get_straining_voxels())
+
     _tick_falling_bodies()
     Perf.report("Structural", (Time.get_ticks_usec() - t0) / 1000.0)
 
@@ -82,16 +75,6 @@ func get_part_data(node: Node3D) -> PartData:
 
 
 # --- Debug ---
-
-var debug_visuals_enabled: bool:
-    get: return debug.enabled if debug != null else true
-    set(value):
-        if debug != null:
-            debug.set_enabled(value)
-
-func set_debug_visuals_enabled(value: bool) -> void:
-    debug.set_enabled(value)
-
 
 # --- Helpers ---
 
@@ -147,7 +130,6 @@ static func _cell_at(world: Vector3, vt: VoxelTool) -> float:
 
 func is_quiescent() -> bool:
     if not terrain_support.dirty_queue.is_empty():     return false
-    if not _collapse_detector.is_idle():               return false
     if pbd != null and not pbd.is_settled():           return false
     for child in get_parent().get_children():
         var body := child as RigidBody3D
