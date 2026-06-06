@@ -15,7 +15,8 @@ const GRID_ID := 0
 
 var _integrity: StructuralIntegrity
 var _sim: PbdSim
-var _cell_of_node: Array = []   # node index -> Vector3i cell (for the collapse handoff)
+var _cell_of_node: Array = []      # node index -> Vector3i cell (collapse handoff)
+var _node_of_cell: Dictionary = {} # Vector3i cell -> node index (probe lookup)
 var _mesh: ArrayMesh
 var _mi: MeshInstance3D
 var _enabled := false
@@ -51,6 +52,48 @@ func set_enabled(on: bool) -> void:
 
 func is_enabled() -> bool:
     return _enabled
+
+
+# Diagnostic snapshot of a cell's place in the live network (for the Probe tool).
+# "anchored" is the answer to "why isn't this falling?": a cell still connected to
+# any pinned anchor is held by definition, however stressed its members look.
+func probe(cell: Vector3i) -> Dictionary:
+    var out := {"enabled": _enabled}
+    if not _enabled or _sim == null:
+        return out
+    if not _node_of_cell.has(cell):
+        out["in_network"] = false
+        return out
+    var node: int = _node_of_cell[cell]
+    var detached := false
+    for comp in _sim.get_detached_components():
+        if node in comp:
+            detached = true
+            break
+    var members: Array = []
+    var peak_ratio := 0.0
+    var peak_damage := 0.0
+    for k in _sim.member_count():
+        if _sim.member_broken(k):
+            continue
+        if _sim.member_a(k) != node and _sim.member_b(k) != node:
+            continue
+        var f: float = _sim.member_force(k)
+        var limit: float = _sim.member_tension(k) if f >= 0.0 else _sim.member_compression(k)
+        var ratio := absf(f) / maxf(limit, 0.001)
+        var dmg: float = _sim.member_damage(k)
+        peak_ratio = maxf(peak_ratio, ratio)
+        peak_damage = maxf(peak_damage, dmg)
+        members.append({"force": f, "limit": limit, "ratio": ratio, "damage": dmg})
+    out["in_network"] = true
+    out["node"] = node
+    out["pinned"] = _sim.is_pinned(node)
+    out["sleeping"] = _sim.is_sleeping(node)
+    out["anchored"] = not detached
+    out["members"] = members
+    out["peak_ratio"] = peak_ratio
+    out["peak_damage"] = peak_damage
+    return out
 
 
 func _on_structural_change(_event: VoxelEvent) -> void:
@@ -134,3 +177,4 @@ func _rebuild() -> void:
     var r := PbdNetworkBuilder.build(cells, is_natural)
     _sim = r["sim"]
     _cell_of_node = r["cell_of_node"]
+    _node_of_cell = r["node_of_cell"]

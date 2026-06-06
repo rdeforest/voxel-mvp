@@ -330,7 +330,11 @@ void PbdSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("live_member_count"), &PbdSim::live_member_count);
 	ClassDB::bind_method(D_METHOD("get_position", "i"), &PbdSim::get_position);
 	ClassDB::bind_method(D_METHOD("is_pinned", "i"), &PbdSim::is_pinned);
+	ClassDB::bind_method(D_METHOD("member_a", "k"), &PbdSim::member_a);
+	ClassDB::bind_method(D_METHOD("member_b", "k"), &PbdSim::member_b);
 	ClassDB::bind_method(D_METHOD("member_force", "k"), &PbdSim::member_force);
+	ClassDB::bind_method(D_METHOD("member_tension", "k"), &PbdSim::member_tension);
+	ClassDB::bind_method(D_METHOD("member_compression", "k"), &PbdSim::member_compression);
 	ClassDB::bind_method(D_METHOD("member_damage", "k"), &PbdSim::member_damage);
 	ClassDB::bind_method(D_METHOD("member_broken", "k"), &PbdSim::member_broken);
 	ClassDB::bind_method(D_METHOD("broke_last_step"), &PbdSim::broke_last_step);

@@ -38,6 +38,7 @@ func _ready() -> void:
     _dc_manager.setup(_terrain, _player)
     _dc_manager.start_default()   # DC is the default terrain render; dcmanager/dcsolo override
     _pbd_structure = PbdStructure.new()
+    _pbd_structure.name = "PbdStructure"   # ActionFactories resolves the probe target by this name
     add_child(_pbd_structure)
     _pbd_structure.setup(_integrity)
     _register_console_commands()

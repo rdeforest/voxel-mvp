@@ -80,7 +80,11 @@ public:
 	int live_member_count() const;
 	Vector3 get_position(int i) const { return _pos[i]; }
 	bool is_pinned(int i) const { return _inv_mass[i] == 0.0; }
+	int member_a(int k) const { return _ma[k]; }
+	int member_b(int k) const { return _mb[k]; }
 	double member_force(int k) const { return _force[k]; }
+	double member_tension(int k) const { return _tension[k]; }
+	double member_compression(int k) const { return _compression[k]; }
 	double member_damage(int k) const { return _damage[k]; }
 	bool member_broken(int k) const { return _broken[k] != 0; }
 	bool broke_last_step() const { return _broke_last_step; }

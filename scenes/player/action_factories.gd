@@ -13,6 +13,7 @@ var _integrity:   StructuralIntegrity
 var _camera:      Camera3D
 var _raycast:     RayCast3D
 var _build_state: BuildState
+var _pbd:         PbdStructure   # resolved lazily — created by world after the player
 
 
 func _init(
@@ -34,7 +35,14 @@ func _init(
 # --- Factories (one per EditMode) ---
 
 func make_probe(hit_pos: Vector3, hit_normal: Vector3) -> Action:
-    return ProbeAction.new(hit_pos, hit_normal, _terrain, _integrity)
+    return ProbeAction.new(hit_pos, hit_normal, _build_state.placement_offset, _terrain, _integrity, _pbd_structure())
+
+# PbdStructure is added to the world after the player's _ready, so it can't be
+# captured at construction — resolve it on first use and cache.
+func _pbd_structure() -> PbdStructure:
+    if _pbd == null:
+        _pbd = _player.get_parent().get_node_or_null(^"PbdStructure")
+    return _pbd
 
 func make_dig(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var center := hit_pos - hit_normal * (EDIT_RADIUS * 0.5)

@@ -8,6 +8,8 @@ var get_preview_material: Callable
 var get_preview_position: Callable
 var get_preview_basis:    Callable  # optional; (hit_pos, hit_normal) -> Basis
 var allows_air_placement: bool = false  # act at a fixed distance when aiming at nothing
+var uses_placement_offset: bool = false # Shift+W/A/E + wheel nudges the target
+var keep_offset_on_action: bool = false # don't reset the offset after acting (e.g. Probe)
 
 func named(                p_name: String)   -> EditMode:
     mode_name            = p_name
@@ -35,4 +37,12 @@ func preview_basis(        fn:     Callable) -> EditMode:
 
 func air_placement(        enabled: bool)    -> EditMode:
     allows_air_placement = enabled
+    return self
+
+func placement_offset(     enabled: bool)    -> EditMode:
+    uses_placement_offset = enabled
+    return self
+
+func keep_offset(          enabled: bool)    -> EditMode:
+    keep_offset_on_action = enabled
     return self

@@ -151,7 +151,7 @@ func _handle_placement_wheel(event: InputEventMouseButton) -> bool:
     if not Input.is_key_pressed(KEY_SHIFT):
         return false
     var activity := current_activity()
-    if activity == null or activity.mode_name != "Build":
+    if activity == null or not activity.uses_placement_offset:
         return false
     var axis := _placement_chord_axis()
     if axis == Vector3.ZERO:
@@ -188,7 +188,8 @@ func _try_edit_terrain() -> void:
         return
     if action.validate():
         action.execute()
-        build_state.reset_offset()
+        if not activity.keep_offset_on_action:
+            build_state.reset_offset()
 
 
 # The world point the current activity should act on this frame, or null when

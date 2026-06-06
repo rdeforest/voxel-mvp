@@ -26,7 +26,9 @@ func _build_catalog(af: ActionFactories, bs: BuildState) -> Array[Tool]:
             .on_make_action(af.make_probe)                        \
             .preview_mesh(    func(_hp, _hn): return null)        \
             .preview_material(func(_hp, _hn): return null)        \
-            .preview_position(func( hp, _hn): return hp),
+            .preview_position(func( hp, _hn): return hp)          \
+            .placement_offset(true)                               \
+            .keep_offset(true),
     ]
 
     var landscape_activities: Array[EditMode] = [
@@ -88,7 +90,8 @@ func _build_catalog(af: ActionFactories, bs: BuildState) -> Array[Tool]:
             .preview_material(func(_hp, _hn): return build_mat)                                 \
             .preview_position(func( hp, _hn): return _ghost_mesh_position(af.build_placement_pos(hp), bs))   \
             .preview_basis(   func(_hp, _hn): return bs.rotation_basis())                                    \
-            .air_placement(   true),
+            .air_placement(   true)                                                                          \
+            .placement_offset(true),
 
         EditMode.new()                                          \
             .named("Remove")                                    \
