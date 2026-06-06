@@ -11,12 +11,16 @@ extends RefCounted
 #
 # Pure: takes the tracked set + an is_natural_terrain predicate, returns the network
 # plus node↔cell maps. No scene/terrain access here, so it's headless-testable.
-# Per-material strength/mass is a Phase-7 concern; defaults for now.
+# Node mass = material density; each member takes the WEAKEST LINK of its two
+# endpoints (min limits, softest compliance, shortest fatigue τ).
 
-const DEFAULT_MASS       := 1.0
-const DEFAULT_COMPLIANCE := 1.0e-7      # near-rigid
-const DEFAULT_TENSION    := 200.0       # axial force limit
-const DEFAULT_COMPRESSION := 200.0
+# A neutral Materials carries the @export defaults (density 1, tension/compression
+# 200, compliance 1e-7, fatigue 1.25s) — the substitute when a cell has no material
+# (only in headless tests; real cells always carry one).
+static var _FALLBACK: Materials = Materials.new()
+
+static func _mat(m: Materials) -> Materials:
+    return m if m != null else _FALLBACK
 
 const FACE6 := [
     Vector3i(1, 0, 0), Vector3i(-1, 0, 0),
@@ -35,13 +39,14 @@ static func build(cells: Dictionary, is_natural_terrain: Callable, cell_size := 
 
     for cell in cells:
         var pinned := _anchored(cell, is_natural_terrain)
-        var mass := 0.0 if pinned else DEFAULT_MASS
+        var mass := 0.0 if pinned else _mat(cells[cell]).density
         var world := (Vector3(cell) + Vector3.ONE * 0.5) * cell_size
         node_of_cell[cell] = sim.add_node(world, mass)
         cell_of_node.append(cell)
 
     for cell in cells:
         var a: int = node_of_cell[cell]
+        var ma := _mat(cells[cell])
         for dz in [-1, 0, 1]:
             for dy in [-1, 0, 1]:
                 for dx in [-1, 0, 1]:
@@ -53,7 +58,12 @@ static func build(cells: Dictionary, is_natural_terrain: Callable, cell_size := 
                     var b: int = node_of_cell[nb]
                     if a >= b:
                         continue   # each unordered pair once
-                    sim.add_member(a, b, DEFAULT_COMPLIANCE, DEFAULT_TENSION, DEFAULT_COMPRESSION)
+                    var mb := _mat(cells[nb])
+                    sim.add_member(a, b,
+                        maxf(ma.compliance,      mb.compliance),       # softest gives
+                        minf(ma.tension,         mb.tension),          # weakest link
+                        minf(ma.compression,     mb.compression),
+                        minf(ma.fatigue_seconds, mb.fatigue_seconds))  # most brittle
 
     return { "sim": sim, "node_of_cell": node_of_cell, "cell_of_node": cell_of_node }
 

@@ -35,11 +35,13 @@ class PbdSim : public RefCounted {
 	LocalVector<double> _lambda;      // XPBD multiplier, reset per substep
 	LocalVector<double> _force;       // peak signed axial force this step (+tension)
 	LocalVector<double> _damage;      // fatigue accumulator [0,1]; breaks at 1
+	LocalVector<double> _member_inv_tau; // per-member 1/τ; ≤0 → fall back to _fatigue_inv_tau
 	LocalVector<uint8_t> _broken;
 
 	// Fatigue: an overloaded member doesn't snap instantly — damage accrues ∝ overload
 	// and it fails after a delay that shrinks with load (creep), healing if relieved.
-	// _fatigue_inv_tau = 1 / (seconds-to-break at 2× the limit).
+	// _fatigue_inv_tau = 1 / (seconds-to-break at 2× the limit). Global fallback for
+	// members built without a per-material τ (set_fatigue / older callers).
 	double _fatigue_inv_tau = 0.8;
 
 	// Sleeping. A settled node stops integrating + its both-asleep members are
@@ -72,7 +74,7 @@ public:
 	void set_sleep_params(double speed, int after, double wake_strain, double force_frac);
 	void set_fatigue(double seconds_to_break_at_double_load);
 	int add_node(Vector3 p, double mass);
-	int add_member(int a, int b, double compliance, double tension, double compression);
+	int add_member(int a, int b, double compliance, double tension, double compression, double fatigue_at_2x = 0.0);
 	void step(double dt);
 
 	int node_count() const { return int(_pos.size()); }

@@ -56,7 +56,7 @@ int PbdSim::add_node(Vector3 p, double mass) {
 	return i;
 }
 
-int PbdSim::add_member(int a, int b, double compliance, double tension, double compression) {
+int PbdSim::add_member(int a, int b, double compliance, double tension, double compression, double fatigue_at_2x) {
 	int k = int(_ma.size());
 	_ma.push_back(a);
 	_mb.push_back(b);
@@ -67,6 +67,7 @@ int PbdSim::add_member(int a, int b, double compliance, double tension, double c
 	_lambda.push_back(0.0f);
 	_force.push_back(0.0f);
 	_damage.push_back(0.0);
+	_member_inv_tau.push_back(fatigue_at_2x > 0.0 ? 1.0 / fatigue_at_2x : 0.0);
 	_broken.push_back(0);
 	return k;
 }
@@ -191,10 +192,11 @@ void PbdSim::step(double dt) {
 		const double limit = f >= 0.0 ? _tension[k] : _compression[k];
 		if (limit > 0.0) {
 			const double over = Math::abs(f) / limit;
+			const double inv_tau = _member_inv_tau[k] > 0.0 ? _member_inv_tau[k] : _fatigue_inv_tau;
 			if (over > 1.0) {
-				_damage[k] += (over - 1.0) * _fatigue_inv_tau * dt;
+				_damage[k] += (over - 1.0) * inv_tau * dt;
 			} else {
-				_damage[k] = MAX(0.0, _damage[k] - (1.0 - over) * _fatigue_inv_tau * dt);
+				_damage[k] = MAX(0.0, _damage[k] - (1.0 - over) * inv_tau * dt);
 			}
 			if (_damage[k] >= 1.0) {
 				_broken[k] = 1;
@@ -323,7 +325,7 @@ void PbdSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_sleep_params", "speed", "after", "wake_strain", "force_frac"), &PbdSim::set_sleep_params);
 	ClassDB::bind_method(D_METHOD("set_fatigue", "seconds_to_break_at_double_load"), &PbdSim::set_fatigue);
 	ClassDB::bind_method(D_METHOD("add_node", "position", "mass"), &PbdSim::add_node);
-	ClassDB::bind_method(D_METHOD("add_member", "a", "b", "compliance", "tension", "compression"), &PbdSim::add_member);
+	ClassDB::bind_method(D_METHOD("add_member", "a", "b", "compliance", "tension", "compression", "fatigue_at_2x"), &PbdSim::add_member, DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("step", "dt"), &PbdSim::step);
 	ClassDB::bind_method(D_METHOD("node_count"), &PbdSim::node_count);
 	ClassDB::bind_method(D_METHOD("member_count"), &PbdSim::member_count);

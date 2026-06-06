@@ -51,6 +51,39 @@ func test_node_cell_maps_round_trip():
         assert_eq(cell_of_node[node_of_cell[cell]], cell)
 
 
+func test_member_strength_from_material():
+    var cells := {Vector3i(0, 0, 0): Materials.WOOD, Vector3i(1, 0, 0): Materials.WOOD}
+    var sim: PbdSim = PbdNetworkBuilder.build(cells, _pred({}))["sim"]
+    assert_almost_eq(sim.member_tension(0),     Materials.WOOD.tension,     0.5, "member tension from material")
+    assert_almost_eq(sim.member_compression(0), Materials.WOOD.compression, 0.5, "member compression from material")
+
+
+func test_member_uses_weakest_of_two_materials():
+    var cells := {Vector3i(0, 0, 0): Materials.STONE, Vector3i(1, 0, 0): Materials.DIRT}
+    var sim: PbdSim = PbdNetworkBuilder.build(cells, _pred({}))["sim"]
+    assert_almost_eq(sim.member_tension(0), minf(Materials.STONE.tension, Materials.DIRT.tension), 0.5,
+        "a member is as strong as its weaker endpoint (dirt here)")
+
+
+# Same geometry, different material → different fate. Wood has high specific tensile
+# strength (light + decent tension) so it cantilevers; dirt is weak and crumbles.
+func _beam(material: Materials, length: int) -> PbdSim:
+    var cells := {}
+    for x in range(0, length + 1):
+        cells[Vector3i(x, 0, 0)] = material
+        cells[Vector3i(x, 1, 0)] = material
+    return PbdNetworkBuilder.build(cells, _pred({Vector3i(-1, 0, 0): true, Vector3i(-1, 1, 0): true}))["sim"]
+
+func test_material_strength_changes_collapse():
+    var wood := _beam(Materials.WOOD, 3)
+    var dirt := _beam(Materials.DIRT, 3)
+    for _i in 600:
+        wood.step(1.0 / 60.0)
+        dirt.step(1.0 / 60.0)
+    assert_eq(wood.live_member_count(), wood.member_count(), "wood cantilever holds")
+    assert_lt(dirt.live_member_count(), dirt.member_count(), "dirt cantilever crumbles")
+
+
 func test_built_column_settles_under_solver():
     var cells := {}
     for y in range(1, 5):
