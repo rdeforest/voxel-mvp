@@ -10,6 +10,7 @@ var _spike_mesh: MeshInstance3D
 var _octree_mesh: MeshInstance3D
 var _lod_probe_mesh: MeshInstance3D
 var _dc_manager: DCTerrainManager
+var _pbd_demo: PbdDemo
 
 
 func _enter_tree() -> void:
@@ -60,6 +61,7 @@ func _console_commands() -> Array:
         [_cmd_dcmanager, "dcmanager", "Toggle the DC terrain manager (threaded re-mesh of a bubble around you). Usage: dcmanager [on|off]"],
         [_cmd_dcsolo,    "dcsolo",    "Data-only mode: hide godot_voxel's render so only our DC mesh shows (enables the manager). Usage: dcsolo [on|off]"],
         [_cmd_dclod,     "dclod",     "F2 probe: generate+DC-mesh a region at LOD n around you (generator-sourced coarse data). Usage: dclod [lod]"],
+        [_cmd_pbddemo,   "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [_cmd_lod,       "lod",       "Get/set terrain lod_distance (higher = LOD boundaries farther = less pop-in). Usage: lod [distance]"],
         [_cmd_reset,     "reset",     "Delete the save (terrain DB + snapshot) and reload to a fresh world."],
         [_cmd_quiescent, "quiescent", "Print whether the world is quiescent (save-ready)."],
@@ -252,6 +254,22 @@ func _cmd_dcoctree() -> void:
     if mesh.get_surface_count() > 0:
         nverts = (mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
     LimboConsole.info("dcoctree: read %dms, mesh %dms — %d solid, %d verts (fine -X / coarse +X)" % [t_read, t_mesh, solid, nverts])
+
+# Spawn a live PBD structural-physics demo in front of the player (stress-coloured
+# lines; watch it sag and snap). Re-run to reset.
+func _cmd_pbddemo(kind := "cantilever", size := 12) -> void:
+    var fwd := -_player.global_transform.basis.z
+    var base := Vector3i((_player.global_position + fwd * 6.0 + Vector3.UP * 4.0).round())
+    var net: PbdNetwork
+    match kind:
+        "bridge": net = PbdDemo.bridge(base, size)
+        "tower":  net = PbdDemo.tower(base, size)
+        _:        net = PbdDemo.cantilever(base, size)
+    if _pbd_demo == null:
+        _pbd_demo = PbdDemo.new()
+        add_child(_pbd_demo)
+    _pbd_demo.set_network(net)
+    LimboConsole.info("pbddemo: %s size %d (%d members)" % [kind, size, net.member_count()])
 
 # Toggle the always-on threaded DC terrain manager (path-b #3). No arg flips it.
 func _cmd_dcmanager(state := "") -> void:
