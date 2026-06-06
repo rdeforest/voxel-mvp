@@ -61,6 +61,7 @@ environment = SubResource("Environment_sl2e5")
 stream = SubResource("VoxelStreamSQLite_save")
 generator = SubResource("VoxelGeneratorNoise2D_6m72w")
 mesher = SubResource("VoxelMesherDC_dc")
+generate_collisions = false
 view_distance = 1024
 lod_count = 8
 lod_distance = 96.0

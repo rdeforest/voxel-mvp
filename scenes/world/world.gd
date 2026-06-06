@@ -5,6 +5,7 @@ extends Node3D
 @onready var _player:    CharacterBody3D     = $Player
 
 var _dc_manager: DCTerrainManager
+var _dc_collision: DCCollisionManager
 var _pbd_demo: PbdDemo
 var _pbd_structure: PbdStructure
 
@@ -42,6 +43,11 @@ func _ready() -> void:
     add_child(_dc_manager)
     _dc_manager.setup(_terrain, _player)
     _dc_manager.start_default()   # DC is the default terrain render; dcmanager/dcsolo override
+    # Body-driven JIT terrain collision from our DC mesher; godot_voxel collision is
+    # off (world.tscn generate_collisions = false), so this is the only terrain body.
+    _dc_collision = DCCollisionManager.new()
+    add_child(_dc_collision)
+    _dc_collision.setup(_terrain, _player)
     _pbd_structure = PbdStructure.new()
     _pbd_structure.name = "PbdStructure"   # ActionFactories resolves the probe target by this name
     add_child(_pbd_structure)
