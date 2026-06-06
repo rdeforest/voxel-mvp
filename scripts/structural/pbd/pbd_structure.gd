@@ -27,6 +27,7 @@ var _dirty := true
 var _headless := false              # no display → skip rendering (dummy renderer chokes on it)
 var _unanchored := false            # built a non-empty network with no anchors (terrain not streamed yet)
 var _retry_timer := 0.0
+var _active := false                # inactive until WorldReadyEvent — don't sim a half-loaded world
 
 const ANCHOR_RETRY_SEC := 0.3       # while unanchored, re-derive this often until terrain loads
 
@@ -44,6 +45,7 @@ func setup(integrity: StructuralIntegrity) -> void:
             TerrainSdfChangedEvent.CHANNEL, VoxelAddedEvent.CHANNEL, VoxelRemovedEvent.CHANNEL,
             PartAddedEvent.CHANNEL, PartRemovedEvent.CHANNEL]:
         VoxelEventBusSingleton.subscribe(channel, _on_structural_change)
+    VoxelEventBusSingleton.subscribe(WorldReadyEvent.CHANNEL, _on_world_ready)
 
 
 func set_enabled(on: bool) -> void:
@@ -134,9 +136,13 @@ func probe(cell: Vector3i) -> Dictionary:
 func _on_structural_change(_event: VoxelEvent) -> void:
     _dirty = true
 
+func _on_world_ready(_event: VoxelEvent) -> void:
+    _active = true
+    _dirty = true   # build now that the terrain SDF (and thus anchors) exists
+
 
 func _physics_process(delta: float) -> void:
-    if not _enabled:
+    if not _enabled or not _active:
         return
     var t0 := Time.get_ticks_usec()
     if _dirty:

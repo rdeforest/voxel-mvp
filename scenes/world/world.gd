@@ -13,6 +13,16 @@ var _dc_manager: DCTerrainManager
 var _pbd_demo: PbdDemo
 var _pbd_structure: PbdStructure
 
+# World-ready gate: gameplay + physics systems start inactive and resume on a
+# WorldReadyEvent, so nothing acts on a half-streamed world. We poll the terrain
+# (is_area_editable around the player) rather than pausing it — pausing the
+# terrain would stall the very streaming we're waiting on. A timeout backstops a
+# bad probe so the game can never freeze forever.
+var _world_ready := false
+var _ready_wait := 0.0
+const READY_PROBE_RADIUS := 8.0      # cells around the player that must be loaded
+const WORLD_READY_TIMEOUT := 10.0    # seconds; fire anyway past this
+
 
 func _enter_tree() -> void:
     SavePaths.ensure_dir()
@@ -49,6 +59,28 @@ func _exit_tree() -> void:
     # Drop our console commands before this world is freed (scene reload / quit)
     # so LimboConsole never holds a callable bound to a freed object.
     _unregister_console_commands()
+
+
+func _process(delta: float) -> void:
+    if _world_ready:
+        return
+    _ready_wait += delta
+    var timed_out := _ready_wait >= WORLD_READY_TIMEOUT
+    if not _terrain_loaded_around_player() and not timed_out:
+        return
+    _world_ready = true
+    if timed_out:
+        push_warning("world_ready fired on timeout — terrain may not be fully streamed")
+    VoxelEventBusSingleton.emit(WorldReadyEvent.CHANNEL, WorldReadyEvent.new())
+
+# True once the terrain DATA (not just mesh) around the player has streamed in —
+# the point at which gravity, edits, and PBD anchoring can trust the SDF.
+func _terrain_loaded_around_player() -> bool:
+    if _player == null or _terrain == null:
+        return false
+    var vt := _terrain.get_voxel_tool()
+    var origin := _player.global_position - Vector3.ONE * READY_PROBE_RADIUS
+    return vt.is_area_editable(AABB(origin, Vector3.ONE * (READY_PROBE_RADIUS * 2.0)))
 
 
 # --- Console commands (Limbo) ---

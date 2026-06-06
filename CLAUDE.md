@@ -88,6 +88,9 @@ VoxelEventBusSingleton.emit(channel, event)
 Channel taxonomy (`scripts/events/*_event.gd`):
 - **Primitive** (emitted by actions): `terrain_sdf_changed`, `voxel_added`, `voxel_removed`, `part_added`, `part_removed`.
 - **Derived** (emitted by integrity components): `region_collapsing`, `part_support_changed` (reserved). (`voxel_support_changed` was removed in Phase 6 with its only consumer, `CollapseDetector`.)
+- **Lifecycle**: `world_ready` (global, channel-wide; no cells). See "World-ready gate" below.
+
+**World-ready gate.** Gameplay + physics must not act on a half-streamed world (player falling through ungrown ground; PBD anchoring against an SDF that hasn't loaded). So `player.gd`, `StructuralIntegrity`, and `PbdStructure` start `_active = false` and gate their `_physics_process` until they receive `WorldReadyEvent`. `world.gd._process` polls the terrain (`get_voxel_tool().is_area_editable(box around the player)`) each frame and emits `world_ready` once the data has streamed in — with a `WORLD_READY_TIMEOUT` backstop so a bad probe can't freeze the game. The terrain node is **never** gated (pausing it would stall the very streaming we wait on). Subscribers must exist before the event fires (all current ones are built at world startup). PBD additionally keeps a per-structure anchor guard (`_unanchored`) for a structure that spans beyond the loaded area.
 
 Each event extends `VoxelEvent { grid_id, cells }`. `cells` is the dispatch footprint — the bus indexes per-cell subscribers against it. `grid_id` is in every payload from day one so multi-grid (Phase 5.5d, deferred) lands without payload churn.
 

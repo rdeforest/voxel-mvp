@@ -19,6 +19,10 @@ var _strain_pulse_phase := 0.0
 # runs unconditionally.)
 var part_collapse_enabled := true
 
+# Inactive until the world finishes loading (WorldReadyEvent) — don't classify
+# support or tick falling bodies against a half-streamed SDF.
+var _active := false
+
 
 func _ready() -> void:
     terrain            = get_parent().get_node("VoxelLodTerrain")
@@ -28,6 +32,7 @@ func _ready() -> void:
 
     VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_world_mutated)
     VoxelEventBusSingleton.subscribe(PartRemovedEvent.CHANNEL,       _on_world_mutated)
+    VoxelEventBusSingleton.subscribe(WorldReadyEvent.CHANNEL,        _on_world_ready)
 
 func _exit_tree() -> void:
     # Break the TerrainSupport ↔ PartSupport reference cycle so the
@@ -38,6 +43,8 @@ func _exit_tree() -> void:
 
 
 func _physics_process(delta: float) -> void:
+    if not _active:
+        return
     var t0 := Time.get_ticks_usec()
     # Support propagation + cell registration: always — PBD's tracked-set expansion
     # rides on it (the suspended-mass discovery is gated on the scalar support).
@@ -57,6 +64,9 @@ func _physics_process(delta: float) -> void:
 
 func _on_world_mutated(_event: VoxelEvent) -> void:
     wake_falling_bodies()
+
+func _on_world_ready(_event: VoxelEvent) -> void:
+    _active = true
 
 
 # --- Queries (kept; not bus-routed) ---

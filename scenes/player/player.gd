@@ -15,6 +15,11 @@ var _activity_indices: Array[int] = []   # remembered per tool
 
 var wireframe_enabled := false
 
+# Inactive until the world finishes loading (WorldReadyEvent): no gravity/movement
+# (so we don't fall through ground that hasn't grown yet) and no edits. Look still
+# works. Set true on the event.
+var _active := false
+
 var _key_actions:          Dictionary
 var _mouse_button_actions: Dictionary
 
@@ -59,6 +64,8 @@ func _ready() -> void:
 
     _help_overlay = HelpOverlay.new()
     add_child(_help_overlay)
+
+    VoxelEventBusSingleton.subscribe(WorldReadyEvent.CHANNEL, _on_world_ready)
 
     _wire_debug_raycast.call_deferred()
 
@@ -179,12 +186,19 @@ func _placement_chord_axis() -> Vector3:
 # --- Per-frame ---
 
 func _physics_process(delta: float) -> void:
+    if not _active:
+        return
     _movement.tick(delta)
+
+func _on_world_ready(_event: VoxelEvent) -> void:
+    _active = true
 
 
 # --- Edit dispatch ---
 
 func _try_edit_terrain() -> void:
+    if not _active:
+        return
     var activity := current_activity()
     if activity == null:
         return
