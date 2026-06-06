@@ -103,6 +103,34 @@ func test_short_cantilever_holds_long_breaks():
     assert_lt(long_sim.live_member_count(), long_sim.member_count(), "long cantilever fails")
 
 
+func test_detached_component_detected():
+    var sim := PbdSim.new()
+    var anchor := sim.add_node(Vector3(0, 0, 0), 0.0)
+    var connected := sim.add_node(Vector3(1, 0, 0), 1.0)
+    sim.add_member(anchor, connected, STIFF, STRONG, STRONG)
+    var fa := sim.add_node(Vector3(5, 0, 0), 1.0)   # a separate group, no path to an anchor
+    var fb := sim.add_node(Vector3(6, 0, 0), 1.0)
+    sim.add_member(fa, fb, STIFF, STRONG, STRONG)
+    var comps := sim.get_detached_components()
+    assert_eq(comps.size(), 1, "one anchorless component")
+    var comp: PackedInt32Array = comps[0]
+    assert_eq(comp.size(), 2)
+    assert_true(fa in comp and fb in comp, "the floating pair is the detached component")
+
+
+func test_break_detaches_component():
+    var sim := PbdSim.new()
+    var anchor := sim.add_node(Vector3(0, 0, 0), 0.0)
+    var hang := sim.add_node(Vector3(0, -1, 0), 50.0)
+    sim.add_member(anchor, hang, 1.0e-4, 0.02, STRONG)   # weak in tension
+    assert_eq(sim.get_detached_components().size(), 0, "connected before the break")
+    _settle(sim, 120)
+    assert_eq(sim.live_member_count(), 0, "member broke")
+    var comps := sim.get_detached_components()
+    assert_eq(comps.size(), 1, "the hung node detached when its member broke")
+    assert_eq(comps[0][0], hang)
+
+
 func test_no_explosion_at_high_stiffness():
     # At extreme stiffness the solver must stay finite + bounded (not diverge to
     # huge values / NaN). Unbreakable members + a braced, anchored structure so the

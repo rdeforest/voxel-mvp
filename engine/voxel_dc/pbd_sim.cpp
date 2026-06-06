@@ -2,8 +2,17 @@
 
 #include "core/math/color.h"
 #include "core/math/math_funcs.h"
+#include "core/templates/hash_map.h"
 #include "core/typedefs.h"
 #include "core/variant/variant.h"
+
+static int uf_find(LocalVector<int> &parent, int x) {
+	while (parent[x] != x) {
+		parent[x] = parent[parent[x]];
+		x = parent[x];
+	}
+	return x;
+}
 
 void PbdSim::configure(Vector3 gravity, int substeps, int iterations, double damping) {
 	_gravity = gravity;
@@ -113,6 +122,7 @@ void PbdSim::step(double dt) {
 		}
 	}
 
+	_broke_last_step = false;
 	for (int k = 0; k < mc; ++k) {
 		if (_broken[k]) {
 			continue;
@@ -120,8 +130,59 @@ void PbdSim::step(double dt) {
 		const double f = _force[k];
 		if (f > _tension[k] || f < -_compression[k]) {
 			_broken[k] = 1;
+			_broke_last_step = true;
 		}
 	}
+}
+
+Array PbdSim::get_detached_components() const {
+	Array out;
+	const int n = int(_pos.size());
+	if (n == 0) {
+		return out;
+	}
+	LocalVector<int> parent;
+	parent.resize(n);
+	for (int i = 0; i < n; ++i) {
+		parent[i] = i;
+	}
+	for (int k = 0; k < int(_ma.size()); ++k) {
+		if (_broken[k]) {
+			continue;
+		}
+		int ra = uf_find(parent, _ma[k]);
+		int rb = uf_find(parent, _mb[k]);
+		if (ra != rb) {
+			parent[ra] = rb;
+		}
+	}
+	HashMap<int, bool> anchored; // component root -> contains a pinned node
+	for (int i = 0; i < n; ++i) {
+		int r = uf_find(parent, i);
+		bool *e = anchored.getptr(r);
+		if (e == nullptr) {
+			anchored.insert(r, _inv_mass[i] == 0.0);
+		} else if (_inv_mass[i] == 0.0) {
+			*e = true;
+		}
+	}
+	HashMap<int, PackedInt32Array> comps;
+	for (int i = 0; i < n; ++i) {
+		int r = uf_find(parent, i);
+		if (anchored[r]) {
+			continue;
+		}
+		PackedInt32Array *c = comps.getptr(r);
+		if (c == nullptr) {
+			comps.insert(r, PackedInt32Array());
+			c = comps.getptr(r);
+		}
+		c->push_back(i);
+	}
+	for (const KeyValue<int, PackedInt32Array> &kv : comps) {
+		out.push_back(kv.value);
+	}
+	return out;
 }
 
 Dictionary PbdSim::get_stress_geometry() const {
@@ -158,5 +219,7 @@ void PbdSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_pinned", "i"), &PbdSim::is_pinned);
 	ClassDB::bind_method(D_METHOD("member_force", "k"), &PbdSim::member_force);
 	ClassDB::bind_method(D_METHOD("member_broken", "k"), &PbdSim::member_broken);
+	ClassDB::bind_method(D_METHOD("broke_last_step"), &PbdSim::broke_last_step);
+	ClassDB::bind_method(D_METHOD("get_detached_components"), &PbdSim::get_detached_components);
 	ClassDB::bind_method(D_METHOD("get_stress_geometry"), &PbdSim::get_stress_geometry);
 }

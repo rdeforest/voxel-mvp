@@ -5,16 +5,22 @@ extends Node3D
 # C++) from the current tracked voxels (TerrainSupport.voxel_data) + placed parts
 # (PartSupport.part_registry), with anchors from TerrainSupport.is_natural_terrain,
 # steps the solver each physics tick, and renders member stress in-world (once per
-# rendered frame). Rebuilds on any structural edit (bus). Phase 2: VIZ-ONLY /
-# non-authoritative — it does not carve or collapse; the existing system stays in
-# charge. Toggle: `pbdlive`. Reports its per-tick cost to the Perf overlay.
+# rendered frame). Rebuilds on any structural edit (bus). Phase 3: AUTHORITATIVE for
+# terrain collapse while enabled — when a member breaks and a component comes loose,
+# it carves those cells out of the SDF and hands them to FallingBodyFactory (the old
+# CollapseDetector stands down via StructuralIntegrity.terrain_collapse_enabled).
+# Toggle: `pbdlive`. Reports its per-tick cost to the Perf overlay.
+
+const GRID_ID := 0
 
 var _integrity: StructuralIntegrity
 var _sim: PbdSim
+var _cell_of_node: Array = []   # node index -> Vector3i cell (for the collapse handoff)
 var _mesh: ArrayMesh
 var _mi: MeshInstance3D
 var _enabled := false
 var _dirty := true
+var _awaiting_rebuild := false  # carved this frame; skip detection until the network rebuilds
 
 
 func setup(integrity: StructuralIntegrity) -> void:
@@ -34,6 +40,10 @@ func setup(integrity: StructuralIntegrity) -> void:
 func set_enabled(on: bool) -> void:
     _enabled = on
     _mi.visible = on
+    # Take terrain-collapse authority while on (the old detector stands down so the
+    # two don't both carve); hand it back when off.
+    if is_instance_valid(_integrity):
+        _integrity.terrain_collapse_enabled = not on
     if on:
         _dirty = true
     else:
@@ -57,7 +67,49 @@ func _physics_process(delta: float) -> void:
         _dirty = false
     if _sim != null:
         _sim.step(delta)
+        if _sim.broke_last_step() and not _awaiting_rebuild:
+            _handle_detachment()
     Perf.report("PBD (%d nodes)" % (_sim.node_count() if _sim != null else 0), (Time.get_ticks_usec() - t0) / 1000.0)
+
+
+# A member broke; any component that's now anchorless is falling. Carve its terrain
+# cells out of the SDF and hand them to the existing falling-body pipeline (reused),
+# then rebuild the network without them. (Part cells in a detached component are left
+# to the part system for now — they aren't SDF.)
+func _handle_detachment() -> void:
+    var ts := _integrity.terrain_support
+    var collapsed := false
+    for comp in _sim.get_detached_components():
+        var cells: Array[Vector3i] = []
+        for idx in comp:
+            var cell: Vector3i = _cell_of_node[idx]
+            if ts.voxel_data.has(cell):
+                cells.append(cell)
+        if not cells.is_empty():
+            _collapse(cells)
+            collapsed = true
+    if collapsed:
+        _dirty = true
+        _awaiting_rebuild = true
+
+
+# Mirrors CollapseDetector._materialize_collapse: spawn a falling body, carve the
+# cells to air, and emit the primitive events so the rest of the world reacts.
+func _collapse(cells: Array[Vector3i]) -> void:
+    var body := FallingBodyFactory.from_voxels(cells)
+    get_parent().add_child(body)
+    VoxelEventBusSingleton.emit(RegionCollapsingEvent.CHANNEL, RegionCollapsingEvent.new(GRID_ID, cells))
+    var vt: VoxelTool = _integrity.terrain_support.terrain.get_voxel_tool()
+    vt.channel = VoxelBuffer.CHANNEL_SDF
+    vt.mode = VoxelTool.MODE_REMOVE
+    var lo := Vector3(cells[0])
+    var hi := lo + Vector3.ONE
+    for v in cells:
+        vt.set_voxel_f(v, VoxelConstants.SDF_AIR)
+        VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(GRID_ID, v))
+        lo = lo.min(Vector3(v))
+        hi = hi.max(Vector3(v) + Vector3.ONE)
+    VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL, TerrainSdfChangedEvent.new(GRID_ID, lo, hi - lo))
 
 
 func _process(_dt: float) -> void:
@@ -76,4 +128,7 @@ func _rebuild() -> void:
         for c in data.cells:
             cells[c] = data.material
     var is_natural := func(c: Vector3i) -> bool: return ts.is_natural_terrain(c)
-    _sim = PbdNetworkBuilder.build(cells, is_natural)["sim"]
+    var r := PbdNetworkBuilder.build(cells, is_natural)
+    _sim = r["sim"]
+    _cell_of_node = r["cell_of_node"]
+    _awaiting_rebuild = false

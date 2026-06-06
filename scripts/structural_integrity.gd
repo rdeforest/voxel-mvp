@@ -13,6 +13,11 @@ var debug:              IntegrityDebug
 var _collapse_detector: CollapseDetector
 var _strain_pulse_phase := 0.0
 
+# When false, the terrain CollapseDetector stands down (PbdStructure has taken over
+# terrain collapse, authoritatively). Support propagation + cell registration still
+# run (PBD reads the tracked set); only the old collapse/carve is suppressed.
+var terrain_collapse_enabled := true
+
 
 func _ready() -> void:
     terrain            = get_parent().get_node("VoxelLodTerrain")
@@ -36,14 +41,15 @@ func _exit_tree() -> void:
 func _physics_process(delta: float) -> void:
     var t0 := Time.get_ticks_usec()
     if not terrain_support.dirty_queue.is_empty():
-        terrain_support.process_dirty_queue()
-    else:
+        terrain_support.process_dirty_queue()   # support + cell registration: always (PBD reads this)
+    elif terrain_collapse_enabled:
         _collapse_detector.step()
 
     _strain_pulse_phase += delta * VoxelConstants.STRAIN_PULSE_HZ * TAU
     var pulse := 0.5 + 0.5 * sin(_strain_pulse_phase)
 
-    _collapse_detector.tick_pending(delta)
+    if terrain_collapse_enabled:
+        _collapse_detector.tick_pending(delta)
     part_support.tick_strain(delta, pulse)
     debug.update(pulse, _collapse_detector.get_straining_voxels())
     _tick_falling_bodies()

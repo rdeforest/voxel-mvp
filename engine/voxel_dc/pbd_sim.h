@@ -12,6 +12,7 @@
 #include "core/object/ref_counted.h"
 #include "core/templates/local_vector.h"
 #include "core/math/vector3.h"
+#include "core/variant/array.h"
 #include "core/variant/dictionary.h"
 
 class PbdSim : public RefCounted {
@@ -39,6 +40,7 @@ class PbdSim : public RefCounted {
 	int _substeps = 4;
 	int _iterations = 8;
 	double _damping = 0.99;
+	bool _broke_last_step = false;
 
 public:
 	void configure(Vector3 gravity, int substeps, int iterations, double damping);
@@ -53,6 +55,12 @@ public:
 	bool is_pinned(int i) const { return _inv_mass[i] == 0.0; }
 	double member_force(int k) const { return _force[k]; }
 	bool member_broken(int k) const { return _broken[k] != 0; }
+	bool broke_last_step() const { return _broke_last_step; }
+
+	// Connected components (over live members) that contain NO pinned anchor —
+	// structure that has come loose and is falling. Array of PackedInt32Array (node
+	// indices per component). Empty while everything is still anchored.
+	Array get_detached_components() const;
 
 	// { verts: PackedVector3Array (line pairs), colors: PackedColorArray } for live
 	// members, coloured green→red by force/limit. One call per draw.
