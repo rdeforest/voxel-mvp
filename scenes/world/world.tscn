@@ -42,6 +42,8 @@ shader_parameter/wave_amount = 0.4
 shader_parameter/hue_amount = 0.18
 shader_parameter/wave_dir = Vector2(0.7, 0.3)
 shader_parameter/roughness = 0.9
+shader_parameter/debug_lod = 0.0
+shader_parameter/debug_normal = 0.0
 
 [node name="World" type="Node3D" unique_id=99934390]
 script = ExtResource("3_world")
@@ -59,6 +61,9 @@ environment = SubResource("Environment_sl2e5")
 stream = SubResource("VoxelStreamSQLite_save")
 generator = SubResource("VoxelGeneratorNoise2D_6m72w")
 mesher = SubResource("VoxelMesherDC_dc")
+view_distance = 1024
+lod_count = 8
+lod_distance = 96.0
 material = SubResource("ShaderMaterial_terrain")
 
 [node name="Player" parent="." unique_id=1282768710 instance=ExtResource("1_dphjl")]
