@@ -8,46 +8,17 @@ directly; they emit *events* on a bus. The tracking layer and the PBD simulation
 both listen, and when PBD collapses something it emits the *same kind* of edit
 events, so a collapse flows back through the bus exactly like a player edit did.
 
-```mermaid
-flowchart TD
-    click["Player click"] --> factory["ActionFactories<br/>build an Action"]
-    factory --> action["Action: validate / execute<br/>Dig · Fill · Flatten · Construction · …"]
+**Diagram source:** [`system-data-flow.drawio`](system-data-flow.drawio) — open
+with the *Draw.io Integration* VS Code extension to view and rearrange it
+(drag-and-drop). To get an inline image here, *Save As* `…​.drawio.svg` (or
+export an SVG) from the editor and embed it below:
 
-    action -->|"primitive events"| bus(["VoxelEventBus<br/>spatial pub/sub"])
+<!-- ![System data-flow](system-data-flow.drawio.svg) -->
 
-    subgraph PBD["PBD — authoritative structural sim"]
-        pbd["PbdStructure<br/>rebuild on edit · step per tick"]
-        builder["PbdNetworkBuilder<br/>cells → nodes, mass = density<br/>members = weakest-link strength<br/>anchors from is_natural_terrain"]
-        sim["PbdSim — C++ XPBD<br/>substepped solve → axial force<br/>fatigue / creep → breakage<br/>per-node sleeping"]
-        pbd --> builder --> sim
-    end
-
-    bus --> ts["TerrainSupport<br/>voxel_data = tracked cells<br/>is_natural_terrain = anchors<br/>suspended-mass discovery"]
-    bus --> ps["PartSupport<br/>part_registry = placed parts"]
-    bus -->|"mark dirty"| pbd
-
-    ts -.->|"tracked cells + anchors"| builder
-    ps -.->|"part cells"| builder
-
-    sim -->|"break → anchorless component"| detach{"Detachment"}
-    detach -->|"terrain cells"| carve["FallingBodyFactory<br/>+ carve SDF to air"]
-    detach -->|"whole part"| dropp["PartSupport.collapse_part<br/>→ RigidBody3D"]
-
-    carve -->|"voxel_removed · terrain_sdf_changed"| bus
-    carve --> body["Falling RigidBody3D"]
-    dropp --> body
-    body --> ftick["StructuralIntegrity._tick_falling_bodies<br/>buried → reintegrate · free → physics"]
-    ftick -->|"voxel_added"| bus
-
-    action --> terrain["VoxelLodTerrain — SDF"]
-    carve --> terrain
-    terrain --> vis["DCOctreeMesher<br/>visual mesh, crack-free LOD"]
-    terrain --> col["VoxelMesherDC<br/>per-block collision"]
-
-    gate["world.gd · world-ready gate<br/>is_area_editable around player"] -.->|"activate"| pbd
-    gate -.->|"activate"| ts
-    gate -.->|"activate"| play["Player movement + edits"]
-```
+Colour key: blue = input/actions · yellow = event bus · green = tracking spine ·
+purple = PBD sim · orange = collapse / falling bodies (the orange edges are the
+**feedback loop** — a collapse re-emits edit events) · grey = terrain + render ·
+teal = world-ready gate.
 
 ### Walkthrough
 

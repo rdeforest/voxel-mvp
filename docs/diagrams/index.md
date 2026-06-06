@@ -1,8 +1,10 @@
 # Diagrams
 
 Visual maps of how the game's systems fit together — one diagram per file.
-Rendered with [Mermaid](https://mermaid.js.org/) (plain text → renders on GitHub
-and in most markdown previewers; in VS Code use a Mermaid preview extension).
+Authored in [draw.io / diagrams.net](https://www.diagrams.net/): each `.drawio`
+file is the editable source (install the *Draw.io Integration* VS Code extension
+for drag-and-drop). For an inline image in a `.md` page, *Save As* `…​.drawio.svg`
+or export an SVG from the editor and embed it.
 
 Companion to: `CLAUDE.md` (where code lives), `docs/architecture.md` (mechanism
 rationale), `docs/roadmap` (version strategy).

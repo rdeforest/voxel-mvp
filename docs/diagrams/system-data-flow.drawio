@@ -1,0 +1,120 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram name="System data-flow" id="sysflow">
+    <mxGraphModel dx="1100" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- PBD group background (drawn first so it sits behind its nodes) -->
+        <mxCell id="pbdgrp" value="PBD — authoritative structural sim" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;verticalAlign=top;fontStyle=2;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="160" width="300" height="300" as="geometry" />
+        </mxCell>
+
+        <!-- Input / actions -->
+        <mxCell id="play" value="Player movement + edits" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="-230" y="170" width="180" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="click" value="Player click" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="70" y="40" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="factory" value="ActionFactories" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="70" y="100" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="action" value="Action — validate / execute&#10;(Dig · Fill · Flatten · Construction)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="50" y="170" width="200" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Event bus (hub) -->
+        <mxCell id="bus" value="VoxelEventBus&#10;(spatial pub/sub)" style="shape=stadium;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="40" y="270" width="220" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Tracking spine -->
+        <mxCell id="ts" value="TerrainSupport&#10;tracked cells · anchors · suspended-mass" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="20" y="370" width="240" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ps" value="PartSupport&#10;part_registry (placed parts)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="20" y="460" width="240" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- PBD nodes -->
+        <mxCell id="pbd" value="PbdStructure&#10;rebuild on edit · step per tick" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="360" y="195" width="260" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="builder" value="PbdNetworkBuilder&#10;cells → nodes (mass=density),&#10;members (weakest-link), anchors" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="360" y="270" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="sim" value="PbdSim (C++ XPBD)&#10;substepped solve → axial force&#10;fatigue/creep → breakage · sleeping" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="360" y="360" width="260" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Collapse / falling -->
+        <mxCell id="detach" value="Detachment" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="700" y="365" width="130" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="carve" value="FallingBodyFactory&#10;+ carve SDF to air" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="660" y="480" width="210" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="dropp" value="PartSupport.collapse_part&#10;→ RigidBody3D" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="900" y="480" width="220" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="body" value="Falling RigidBody3D" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="790" y="580" width="200" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="ftick" value="_tick_falling_bodies&#10;buried → reintegrate · free → physics" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="760" y="650" width="260" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Terrain + render -->
+        <mxCell id="terrain" value="VoxelLodTerrain (SDF)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="360" y="500" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="vis" value="DCOctreeMesher&#10;visual (crack-free LOD)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="300" y="580" width="240" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="col" value="VoxelMesherDC&#10;per-block collision" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="560" y="580" width="240" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- World-ready gate -->
+        <mxCell id="gate" value="world.gd · world-ready gate&#10;is_area_editable around player" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b0e3e6;strokeColor=#0e8088;" vertex="1" parent="1">
+          <mxGeometry x="-240" y="280" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Edges -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="click" target="factory"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="factory" target="action"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" value="primitive events" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="action" target="bus"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="bus" target="ts"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="bus" target="ps"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" value="mark dirty" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="bus" target="pbd"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="pbd" target="builder"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="builder" target="sim"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e9" value="tracked cells + anchors" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;fontSize=10;" edge="1" parent="1" source="ts" target="builder"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" value="part cells" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;fontSize=10;" edge="1" parent="1" source="ps" target="builder"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e11" value="break → anchorless component" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="sim" target="detach"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" value="terrain cells" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="detach" target="carve"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e13" value="whole part" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="detach" target="dropp"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e14" value="voxel_removed / terrain_sdf_changed" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#d79b00;fontColor=#d79b00;fontSize=10;" edge="1" parent="1" source="carve" target="bus"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="carve" target="body"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e16" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="dropp" target="body"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e17" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="body" target="ftick"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e18" value="voxel_added" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#d79b00;fontColor=#d79b00;fontSize=10;" edge="1" parent="1" source="ftick" target="bus"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e19" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="action" target="terrain"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e20" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="carve" target="terrain"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e21" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="terrain" target="vis"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e22" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="terrain" target="col"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e23" value="activate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#0e8088;fontColor=#0e8088;fontSize=10;" edge="1" parent="1" source="gate" target="pbd"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e24" value="activate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#0e8088;fontColor=#0e8088;fontSize=10;" edge="1" parent="1" source="gate" target="ts"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e25" value="activate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#0e8088;fontColor=#0e8088;fontSize=10;" edge="1" parent="1" source="gate" target="play"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
