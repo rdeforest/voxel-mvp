@@ -42,6 +42,16 @@ void PbdSim::wake_all() {
 	}
 }
 
+void PbdSim::sleep_all() {
+	for (uint32_t i = 0; i < _sleeping.size(); ++i) {
+		if (_inv_mass[i] > 0.0) {
+			_sleeping[i] = 1;
+			_vel[i] = Vector3();
+		}
+	}
+	_awake_count = 0;
+}
+
 int PbdSim::add_node(Vector3 p, double mass) {
 	int i = int(_pos.size());
 	_pos.push_back(p);
@@ -343,6 +353,7 @@ void PbdSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("awake_count"), &PbdSim::awake_count);
 	ClassDB::bind_method(D_METHOD("is_sleeping", "i"), &PbdSim::is_sleeping);
 	ClassDB::bind_method(D_METHOD("wake_all"), &PbdSim::wake_all);
+	ClassDB::bind_method(D_METHOD("sleep_all"), &PbdSim::sleep_all);
 	ClassDB::bind_method(D_METHOD("get_detached_components"), &PbdSim::get_detached_components);
 	ClassDB::bind_method(D_METHOD("get_stress_geometry"), &PbdSim::get_stress_geometry);
 }

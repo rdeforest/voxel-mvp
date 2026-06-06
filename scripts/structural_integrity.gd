@@ -128,6 +128,22 @@ func _integrate_buried_body(body: RigidBody3D, offsets: Array[Vector3], transfor
 static func _cell_at(world: Vector3, vt: VoxelTool) -> float:
     return vt.get_voxel_f(Vector3i(floori(world.x), floori(world.y), floori(world.z)))
 
+# Force the world to a settled state so a save is never blocked: drain the support
+# fixpoint, sleep the PBD network in place, and sleep every falling body. The save
+# stays honest (a genuinely-settled snapshot) rather than bypassing the gate.
+func force_quiescent() -> void:
+    var guard := 0
+    while not terrain_support.dirty_queue.is_empty() and guard < 100000:
+        terrain_support.process_dirty_queue()
+        guard += 1
+    if pbd != null:
+        pbd.force_settle()
+    for child in get_parent().get_children():
+        var body := child as RigidBody3D
+        if body != null:
+            body.sleeping = true
+
+
 func is_quiescent() -> bool:
     if not terrain_support.dirty_queue.is_empty():     return false
     if pbd != null and not pbd.is_settled():           return false

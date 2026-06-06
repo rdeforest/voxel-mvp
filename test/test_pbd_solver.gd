@@ -147,6 +147,19 @@ func test_settled_structure_sleeps_and_freezes():
     assert_eq(sim.get_position(tip), before, "asleep nodes don't move (step is a no-op)")
 
 
+func test_sleep_all_force_settles():
+    var sim := PbdSim.new()
+    var rows := _cantilever(sim, 3, 1.0e6, 1.0e6)
+    _settle(sim, 10)
+    assert_gt(sim.awake_count(), 0, "still settling")
+    sim.sleep_all()
+    assert_eq(sim.awake_count(), 0, "force-slept in place")
+    var tip: int = rows[1][3]
+    var before := sim.get_position(tip)
+    sim.step(DT)
+    assert_eq(sim.get_position(tip), before, "stays frozen after sleep_all")
+
+
 func test_wake_all_reactivates():
     var sim := PbdSim.new()
     _cantilever(sim, 2, 1.0e6, 1.0e6)

@@ -71,6 +71,18 @@ func is_settled() -> bool:
     return not _dirty and (_sim == null or _sim.awake_count() == 0)
 
 
+# Force the network to rest right now (for the `settle` save-unblock command):
+# fold in any pending rebuild, then sleep every node where it stands.
+func force_settle() -> void:
+    if not _enabled:
+        return
+    if _dirty:
+        _rebuild()
+        _dirty = false
+    if _sim != null:
+        _sim.sleep_all()
+
+
 # Diagnostic snapshot of a cell's place in the live network (for the Probe tool).
 # "anchored" is the answer to "why isn't this falling?": a cell still connected to
 # any pinned anchor is held by definition, however stressed its members look.

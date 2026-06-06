@@ -74,6 +74,7 @@ func _console_commands() -> Array:
         [_cmd_lod,       "lod",       "Get/set terrain lod_distance (higher = LOD boundaries farther = less pop-in). Usage: lod [distance]"],
         [_cmd_reset,     "reset",     "Delete the save (terrain DB + snapshot) and reload to a fresh world."],
         [_cmd_quiescent, "quiescent", "Print whether the world is quiescent (save-ready)."],
+        [_cmd_settle,    "settle",    "Force the world to rest so a save is never blocked (drains support, sleeps PBD + falling bodies)."],
         [_cmd_parts,     "parts",     "Print the number of tracked parts."],
         [_cmd_voxels,    "voxels",    "Print the number of tracked terrain voxels."],
         [_cmd_tp,        "tp",        "Teleport the player. Usage: tp <x> <y> <z>"],
@@ -355,6 +356,10 @@ func _cmd_lod(distance := -1.0) -> void:
 
 func _cmd_quiescent() -> void:
     LimboConsole.info("quiescent: %s" % _integrity.is_quiescent())
+
+func _cmd_settle() -> void:
+    _integrity.force_quiescent()
+    LimboConsole.info("settled — quiescent: %s" % _integrity.is_quiescent())
 
 func _cmd_parts() -> void:
     LimboConsole.info("parts: %d" % _integrity.part_support.part_registry.size())

@@ -94,6 +94,7 @@ public:
 	int awake_count() const { return _awake_count; }
 	bool is_sleeping(int i) const { return _sleeping[i] != 0; }
 	void wake_all();
+	void sleep_all();   // force every dynamic node asleep (force-quiesce for save)
 
 	// Connected components (over live members) that contain NO pinned anchor —
 	// structure that has come loose and is falling. Array of PackedInt32Array (node
