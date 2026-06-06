@@ -8,6 +8,7 @@ var tool_catalog:      ToolCatalog
 var _grid_overlay:     Node3D
 var _preview_renderer: Node3D
 var _snap_overlay:     Node3D
+var _help_overlay:     HelpOverlay
 
 var tool_index:        int       = 0
 var _activity_indices: Array[int] = []   # remembered per tool
@@ -55,6 +56,9 @@ func _ready() -> void:
     _snap_overlay = preload("res://scenes/player/snap_point_overlay.gd").new()
     _snap_overlay.player = self
     get_parent().add_child.call_deferred(_snap_overlay)
+
+    _help_overlay = HelpOverlay.new()
+    add_child(_help_overlay)
 
     _wire_debug_raycast.call_deferred()
 
@@ -126,6 +130,11 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_key_pressed(event: InputEventKey) -> void:
     if event.is_action_pressed("ui_cancel"):
         Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+        return
+    # `?` toggles the keybinding chart. Match the resolved character (layout-
+    # agnostic), with Shift+/ as a fallback if unicode isn't populated.
+    if event.unicode == 0x3F or (event.keycode == KEY_SLASH and event.shift_pressed):
+        _help_overlay.toggle()
         return
     if _key_actions.has(event.keycode):
         _key_actions[event.keycode].call()
