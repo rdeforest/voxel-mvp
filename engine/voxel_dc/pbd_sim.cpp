@@ -21,12 +21,34 @@ void PbdSim::configure(Vector3 gravity, int substeps, int iterations, double dam
 	_damping = damping;
 }
 
+void PbdSim::set_sleep_params(double speed, int after, double wake_strain, double force_frac) {
+	_sleep_speed = MAX(0.0, speed);
+	_sleep_after = MAX(1, after);
+	_wake_strain = MAX(0.0, wake_strain);
+	_sleep_force_frac = CLAMP(force_frac, 0.0, 1.0);
+}
+
+void PbdSim::wake_all() {
+	for (uint32_t i = 0; i < _sleeping.size(); ++i) {
+		if (_inv_mass[i] > 0.0 && _sleeping[i]) {
+			_sleeping[i] = 0;
+			_still[i] = 0;
+			++_awake_count;
+		}
+	}
+}
+
 int PbdSim::add_node(Vector3 p, double mass) {
 	int i = int(_pos.size());
 	_pos.push_back(p);
 	_vel.push_back(Vector3());
 	_prev.push_back(p);
 	_inv_mass.push_back(mass <= 0.0 ? 0.0 : 1.0 / mass);
+	_sleeping.push_back(0);
+	_still.push_back(0);
+	if (mass > 0.0) {
+		++_awake_count;
+	}
 	return i;
 }
 
@@ -57,34 +79,54 @@ int PbdSim::live_member_count() const {
 void PbdSim::step(double dt) {
 	const int mc = int(_ma.size());
 	const int nc = int(_pos.size());
+	if (_awake_count == 0) {
+		return; // fully settled: nothing dynamic is awake
+	}
 	const double h = dt / double(_substeps);
 	const double inv_h2 = 1.0 / (h * h);
 
+	_wake_req.resize(nc);
+	_hot.resize(nc);
+	for (int i = 0; i < nc; ++i) {
+		_wake_req[i] = 0;
+		_hot[i] = 0;
+	}
+
+	// Active members carry the work: anything with an awake dynamic endpoint. A
+	// both-asleep (or fully-pinned) member is skipped — that's the saving. Reset
+	// peak force only on active members so asleep members keep their last (still
+	// accurate) holding force for the stress viz.
+	_active.clear();
 	for (int k = 0; k < mc; ++k) {
-		_force[k] = 0.0f;
+		if (_broken[k]) {
+			continue;
+		}
+		if (_awake_dyn(_ma[k]) || _awake_dyn(_mb[k])) {
+			_active.push_back(k);
+			_force[k] = 0.0;
+		}
 	}
 
 	for (int s = 0; s < _substeps; ++s) {
 		for (int i = 0; i < nc; ++i) {
-			if (_inv_mass[i] == 0.0f) {
+			if (!_awake_dyn(i)) {
 				continue;
 			}
 			_prev[i] = _pos[i];
 			_vel[i] += _gravity * h;
 			_pos[i] += _vel[i] * h;
 		}
-		for (int k = 0; k < mc; ++k) {
-			_lambda[k] = 0.0;
+		for (uint32_t ai = 0; ai < _active.size(); ++ai) {
+			_lambda[_active[ai]] = 0.0;
 		}
 		for (int it = 0; it < _iterations; ++it) {
-			for (int k = 0; k < mc; ++k) {
-				if (_broken[k]) {
-					continue;
-				}
+			for (uint32_t ai = 0; ai < _active.size(); ++ai) {
+				const int k = _active[ai];
 				const int a = _ma[k];
 				const int b = _mb[k];
-				const double wa = _inv_mass[a];
-				const double wb = _inv_mass[b];
+				// Asleep / pinned endpoints act as infinite mass (rigid anchors).
+				const double wa = _awake_dyn(a) ? _inv_mass[a] : 0.0;
+				const double wb = _awake_dyn(b) ? _inv_mass[b] : 0.0;
 				const double w = wa + wb;
 				if (w == 0.0) {
 					continue;
@@ -102,19 +144,26 @@ void PbdSim::step(double dt) {
 				const Vector3 corr = n * dlambda;
 				_pos[a] -= corr * wa;
 				_pos[b] += corr * wb;
+				// An awake node straining a shared member wakes its sleeping neighbour.
+				if (Math::abs(c) > _wake_strain) {
+					if (_inv_mass[a] > 0.0 && _sleeping[a]) {
+						_wake_req[a] = 1;
+					}
+					if (_inv_mass[b] > 0.0 && _sleeping[b]) {
+						_wake_req[b] = 1;
+					}
+				}
 			}
 		}
 		for (int i = 0; i < nc; ++i) {
-			if (_inv_mass[i] == 0.0) {
+			if (!_awake_dyn(i)) {
 				continue;
 			}
 			_vel[i] = (_pos[i] - _prev[i]) / h * _damping;
 		}
 		// The XPBD multiplier is the constraint force: f = -lambda / h^2 (+tension).
-		for (int k = 0; k < mc; ++k) {
-			if (_broken[k]) {
-				continue;
-			}
+		for (uint32_t ai = 0; ai < _active.size(); ++ai) {
+			const int k = _active[ai];
 			const double f = -_lambda[k] * inv_h2;
 			if (Math::abs(f) > Math::abs(_force[k])) {
 				_force[k] = f;
@@ -122,15 +171,58 @@ void PbdSim::step(double dt) {
 		}
 	}
 
+	// Breakage (active members only — asleep ones are sub-limit by construction).
+	// A break wakes its endpoints so load redistributes / freed mass falls. Mark
+	// near-limit endpoints "hot" so an overstressed-but-rigid node stays awake.
 	_broke_last_step = false;
-	for (int k = 0; k < mc; ++k) {
-		if (_broken[k]) {
-			continue;
-		}
+	for (uint32_t ai = 0; ai < _active.size(); ++ai) {
+		const int k = _active[ai];
+		const int a = _ma[k];
+		const int b = _mb[k];
 		const double f = _force[k];
 		if (f > _tension[k] || f < -_compression[k]) {
 			_broken[k] = 1;
 			_broke_last_step = true;
+			if (_inv_mass[a] > 0.0) {
+				_wake_req[a] = 1;
+			}
+			if (_inv_mass[b] > 0.0) {
+				_wake_req[b] = 1;
+			}
+			continue;
+		}
+		const double limit = f >= 0.0 ? _tension[k] : _compression[k];
+		if (limit > 0.0 && Math::abs(f) >= _sleep_force_frac * limit) {
+			_hot[a] = 1;
+			_hot[b] = 1;
+		}
+	}
+
+	for (int i = 0; i < nc; ++i) {
+		if (_wake_req[i] && _sleeping[i]) {
+			_sleeping[i] = 0;
+			_still[i] = 0;
+			++_awake_count;
+		}
+	}
+
+	// Sleep the slow, unstressed awake nodes.
+	for (int i = 0; i < nc; ++i) {
+		if (!_awake_dyn(i)) {
+			continue;
+		}
+		if (_hot[i]) {
+			_still[i] = 0;
+			continue;
+		}
+		if (_vel[i].length() < _sleep_speed) {
+			if (++_still[i] >= _sleep_after) {
+				_sleeping[i] = 1;
+				_vel[i] = Vector3();
+				--_awake_count;
+			}
+		} else {
+			_still[i] = 0;
 		}
 	}
 }
@@ -209,6 +301,7 @@ Dictionary PbdSim::get_stress_geometry() const {
 
 void PbdSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("configure", "gravity", "substeps", "iterations", "damping"), &PbdSim::configure);
+	ClassDB::bind_method(D_METHOD("set_sleep_params", "speed", "after", "wake_strain", "force_frac"), &PbdSim::set_sleep_params);
 	ClassDB::bind_method(D_METHOD("add_node", "position", "mass"), &PbdSim::add_node);
 	ClassDB::bind_method(D_METHOD("add_member", "a", "b", "compliance", "tension", "compression"), &PbdSim::add_member);
 	ClassDB::bind_method(D_METHOD("step", "dt"), &PbdSim::step);
@@ -220,6 +313,9 @@ void PbdSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("member_force", "k"), &PbdSim::member_force);
 	ClassDB::bind_method(D_METHOD("member_broken", "k"), &PbdSim::member_broken);
 	ClassDB::bind_method(D_METHOD("broke_last_step"), &PbdSim::broke_last_step);
+	ClassDB::bind_method(D_METHOD("awake_count"), &PbdSim::awake_count);
+	ClassDB::bind_method(D_METHOD("is_sleeping", "i"), &PbdSim::is_sleeping);
+	ClassDB::bind_method(D_METHOD("wake_all"), &PbdSim::wake_all);
 	ClassDB::bind_method(D_METHOD("get_detached_components"), &PbdSim::get_detached_components);
 	ClassDB::bind_method(D_METHOD("get_stress_geometry"), &PbdSim::get_stress_geometry);
 }

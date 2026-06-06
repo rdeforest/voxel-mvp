@@ -131,6 +131,51 @@ func test_break_detaches_component():
     assert_eq(comps[0][0], hang)
 
 
+func test_settled_structure_sleeps_and_freezes():
+    # A braced, anchored cantilever settles, then every dynamic node sleeps and the
+    # whole sim goes quiescent (awake_count 0) — a settled structure costs nothing.
+    # High limit so no member is near it: this isolates sleeping from the force gate
+    # (a node carrying near-limit load deliberately stays awake — tested separately).
+    var sim := PbdSim.new()
+    var rows := _cantilever(sim, 3, 1.0e6, 1.0e6)
+    _settle(sim, 600)
+    assert_eq(sim.awake_count(), 0, "settled structure fully asleep")
+    var tip: int = rows[1][3]
+    var before := sim.get_position(tip)
+    sim.step(DT)
+    assert_eq(sim.get_position(tip), before, "asleep nodes don't move (step is a no-op)")
+
+
+func test_wake_all_reactivates():
+    var sim := PbdSim.new()
+    _cantilever(sim, 2, 1.0e6, 1.0e6)
+    _settle(sim, 600)
+    assert_eq(sim.awake_count(), 0, "asleep first")
+    sim.wake_all()
+    assert_gt(sim.awake_count(), 0, "wake_all re-activates the dynamic nodes")
+
+
+func test_overstressed_rigid_member_still_breaks():
+    # The trap: a near-rigid overloaded member barely moves, so a velocity-only sleep
+    # rule would sleep it and it would never break. The force gate must keep it awake.
+    var sim := PbdSim.new()
+    var anchor := sim.add_node(Vector3(0, 0, 0), 0.0)
+    var hang := sim.add_node(Vector3(0, -1, 0), 50.0)
+    sim.add_member(anchor, hang, STIFF, 0.02, STRONG)   # near-rigid AND weak in tension
+    _settle(sim, 200)
+    assert_eq(sim.live_member_count(), 0, "rigid overloaded member broke instead of sleeping")
+
+
+func test_break_wakes_freed_mass():
+    var sim := PbdSim.new()
+    var anchor := sim.add_node(Vector3(0, 0, 0), 0.0)
+    var hang := sim.add_node(Vector3(0, -1, 0), 50.0)
+    sim.add_member(anchor, hang, 1.0e-4, 0.02, STRONG)
+    _settle(sim, 120)
+    assert_eq(sim.live_member_count(), 0, "broke")
+    assert_gt(sim.awake_count(), 0, "freed mass is awake (falling), not frozen asleep")
+
+
 func test_no_explosion_at_high_stiffness():
     # At extreme stiffness the solver must stay finite + bounded (not diverge to
     # huge values / NaN). Unbreakable members + a braced, anchored structure so the

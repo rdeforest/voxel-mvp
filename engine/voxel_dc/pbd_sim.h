@@ -36,14 +36,34 @@ class PbdSim : public RefCounted {
 	LocalVector<double> _force;       // peak signed axial force this step (+tension)
 	LocalVector<uint8_t> _broken;
 
+	// Sleeping. A settled node stops integrating + its both-asleep members are
+	// skipped, so a quiescent structure costs nothing. A node may sleep only when
+	// it is BOTH slow AND not carrying near-limit load — otherwise a rigid,
+	// overstressed member (which barely moves) would sleep and never break.
+	LocalVector<uint8_t> _sleeping;
+	LocalVector<int32_t> _still;      // consecutive low-motion steps
+	int _awake_count = 0;             // awake dynamic nodes; step() is a no-op at 0
+	double _sleep_speed = 0.02;       // m/s below which a node counts as still
+	int _sleep_after = 24;            // still steps before sleeping (~0.4s @ 60Hz)
+	double _wake_strain = 0.02;       // constraint error (m) that wakes a strained neighbour
+	double _sleep_force_frac = 0.5;   // a node stays awake while a member exceeds this × limit
+
+	// Per-step scratch (capacity reused across steps; not part of the model).
+	LocalVector<int32_t> _active;     // member indices with ≥1 awake endpoint
+	LocalVector<uint8_t> _wake_req;   // per-node wake request, applied at end of step
+	LocalVector<uint8_t> _hot;        // per-node: incident member near its limit this step
+
 	Vector3 _gravity = Vector3(0.0, -9.8, 0.0);
 	int _substeps = 4;
 	int _iterations = 8;
 	double _damping = 0.99;
 	bool _broke_last_step = false;
 
+	bool _awake_dyn(int i) const { return _inv_mass[i] > 0.0 && _sleeping[i] == 0; }
+
 public:
 	void configure(Vector3 gravity, int substeps, int iterations, double damping);
+	void set_sleep_params(double speed, int after, double wake_strain, double force_frac);
 	int add_node(Vector3 p, double mass);
 	int add_member(int a, int b, double compliance, double tension, double compression);
 	void step(double dt);
@@ -56,6 +76,10 @@ public:
 	double member_force(int k) const { return _force[k]; }
 	bool member_broken(int k) const { return _broken[k] != 0; }
 	bool broke_last_step() const { return _broke_last_step; }
+
+	int awake_count() const { return _awake_count; }
+	bool is_sleeping(int i) const { return _sleeping[i] != 0; }
+	void wake_all();
 
 	// Connected components (over live members) that contain NO pinned anchor —
 	// structure that has come loose and is falling. Array of PackedInt32Array (node
