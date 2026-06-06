@@ -24,10 +24,12 @@ var _mi: MeshInstance3D
 var _enabled := false
 var _viz_visible := true            # V key toggles the stress-line overlay
 var _dirty := true
+var _headless := false              # no display → skip rendering (dummy renderer chokes on it)
 
 
 func setup(integrity: StructuralIntegrity) -> void:
     _integrity = integrity
+    _headless = DisplayServer.get_name() == "headless"
     _mesh = ArrayMesh.new()
     _mi = MeshInstance3D.new()
     _mi.mesh = _mesh
@@ -195,6 +197,8 @@ func _collapse(cells: Array[Vector3i]) -> void:
 
 
 func _process(_dt: float) -> void:
+    if _headless:
+        return   # no RenderingServer to draw into (and the dummy one crashes on it)
     if _enabled and _viz_visible and _sim != null:
         PbdRenderer.draw(_sim, _mesh)
 
