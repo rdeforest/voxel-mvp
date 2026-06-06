@@ -8,22 +8,34 @@
 
 ## Resumption Brief
 
-### Active thread (2026-06-05): F2 LOD seams via a custom meshing layer (path b)
+### Active thread (2026-06-05): PBD structural physics (Poly Bridge ∪ World of Goo)
 
-Terrain meshing was migrated from Transvoxel to our own **Dual Contouring**
-mesher (`engine/voxel_dc/` C++, `scripts/dc/` GDScript prototypes) for sharp
-features + edit quality. This session: generated-terrain "holes" were back-facing
-triangles (fixed: sign-based winding + shorter-diagonal split + in-cell QEF
-fallback); save/load now flushes terrain edits (`TerrainPersistence.flush`); fly
-mode on **X**. 99 GUT tests pass.
+**Plan:** `~/.claude/plans/i-m-confused-the-mesher-virtual-popcorn.md` (approved).
+Replace the cellular support/collapse core (`TerrainSupport` + `PartSupport` +
+`CollapseDetector`) with a real breakable **mass-spring sim via Position-Based
+Dynamics (XPBD)**: members carry tension+compression and fail over a limit;
+cantilevers/bridges built too far out (not held below or pulled above) fail
+emergently. One particle per tracked cell, auto cross-braced; natural terrain =
+pinned anchors; detached chunks → existing `FallingBodyFactory` + falling-body
+lifecycle (reused). Phased, with the PBD system running **parallel / viz-only
+until it reaches parity**, then a switch-flip + delete (don't delete 3 working
+systems before parity). Headless GUT per phase. See the plan for phases 1–7.
 
-**F2 (LOD-boundary cracks) is the active build.** The per-block
-`transition_surfaces` approach was abandoned — terrain boundary loops span
-multiple cube faces, which godot_voxel's per-side transition model can't carve
-up. Decision (with Robert): build **our own meshing/render layer** over
-godot_voxel's data, keeping it as the data / streaming / edit / collision engine.
-Rationale + options in `docs/F2-lod-seam-options.md` (uncommitted scratch);
-chapter `docs/roadmap/implementation/14-dc-qef-transition.md`.
+**Two deferred voxel decisions made this session (recorded, NOT this thread):**
+- Voxel substrate → **adaptive-density octree**; godot_voxel is **not sacred**
+  (replaceable where it limits us). See [[adaptive-octree-substrate]] /
+  `docs/roadmap/design/03-dc-qef-geometry.md` §"Decisions taken".
+- **Parts-as-voxels** (imprint parts into SDF + material channel; one field/mesher/
+  integrity) rides on that octree — deferred until we return to voxel work.
+
+### Done: F2 LOD seams via our own meshing layer (path b) — DC is the default render
+
+Terrain meshing migrated Transvoxel → our **Dual Contouring** (`VoxelMesherDC`
+per-block for collision; `DCOctreeMesher` C++ octree-clipmap for the render). The
+path-b "own meshing/render layer" is complete: `DCTerrainManager` renders a
+crack-free LOD clipmap (C++, ~44–62ms off-thread) as the default terrain render,
+edit-driven re-mesh, with a `dcsolo`/`dcmanager` console fallback to godot_voxel.
+Build order #1–#8 below.
 
 Path-b build order / progress:
 - ✅ **#1 fast region read** — `DCRegionReader.read_sdf_lod0` (C++, bulk

@@ -311,6 +311,14 @@ march) is the expensive part — ship without it first.
   *published academic papers* (Ju et al. DC/QEF; Lorensen & Cline MC)
   — clean-room. Do NOT decompile the old VF3 blob.
 - Start build vocabulary fat (logs, stone blocks), not thin lumber.
+- **(2026-06-05) Commit to the adaptive-density octree** as the substrate (fine
+  cells only where there's detail; coarse/empty elsewhere — §"Adaptive density").
+  godot_voxel's fixed-block storage can't carry this, and **godot_voxel is not
+  sacred** — we step off it (up to replacing its storage) wherever it limits the
+  vision; keep what doesn't get in the way. **Parts-as-voxels** (imprint parts into
+  the SDF + material channel — one field, one mesher, one integrity system) rides on
+  this octree and is **deferred** until we return to voxel work. (The interim
+  structural thread is the PBD physics sim, which is substrate-agnostic.)
 
 > **Patent note:** A patent covers only what its *claims* recite.
 > DC+QEF (Ju/Losasso/Schaefer/Warren 2002), Marching Cubes, isosurface
