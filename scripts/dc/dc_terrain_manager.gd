@@ -123,13 +123,15 @@ func _on_terrain_edit(_event: TerrainSdfChangedEvent) -> void:
 func _process(_dt: float) -> void:
     if not _enabled or _follow == null:
         return
+    var t0 := Time.get_ticks_usec()
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()
-        return
-    var center := _follow.global_position
-    if center.distance_to(_last_center) > RECENTER_DISTANCE:
-        _dispatch(center)
+    else:
+        var center := _follow.global_position
+        if center.distance_to(_last_center) > RECENTER_DISTANCE:
+            _dispatch(center)
+    Perf.report("DC mesh (main)", (Time.get_ticks_usec() - t0) / 1000.0)
 
 
 func _dispatch(center: Vector3) -> void:

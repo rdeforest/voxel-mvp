@@ -55,12 +55,14 @@ func _on_structural_change(_event: VoxelEvent) -> void:
 func _physics_process(delta: float) -> void:
     if not _enabled:
         return
+    var t0 := Time.get_ticks_usec()
     if _dirty:
         _rebuild()
         _dirty = false
     if _net != null:
         _solver.step(_net, delta)
         PbdRenderer.draw(_net, _im)
+    Perf.report("PBD (%d nodes)" % (_net.node_count() if _net != null else 0), (Time.get_ticks_usec() - t0) / 1000.0)
 
 
 func _rebuild() -> void:

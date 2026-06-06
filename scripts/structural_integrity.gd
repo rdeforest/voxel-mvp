@@ -34,6 +34,7 @@ func _exit_tree() -> void:
 
 
 func _physics_process(delta: float) -> void:
+    var t0 := Time.get_ticks_usec()
     if not terrain_support.dirty_queue.is_empty():
         terrain_support.process_dirty_queue()
     else:
@@ -46,6 +47,7 @@ func _physics_process(delta: float) -> void:
     part_support.tick_strain(delta, pulse)
     debug.update(pulse, _collapse_detector.get_straining_voxels())
     _tick_falling_bodies()
+    Perf.report("Structural", (Time.get_ticks_usec() - t0) / 1000.0)
 
 
 # --- Bus handlers ---

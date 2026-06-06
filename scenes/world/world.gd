@@ -67,6 +67,7 @@ func _console_commands() -> Array:
         [_cmd_dclod,     "dclod",     "F2 probe: generate+DC-mesh a region at LOD n around you (generator-sourced coarse data). Usage: dclod [lod]"],
         [_cmd_pbddemo,   "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [_cmd_pbdlive,   "pbdlive",   "Toggle live PBD stress viz over your REAL structures (viz-only). Usage: pbdlive [on|off]"],
+        [_cmd_perf,      "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
         [_cmd_lod,       "lod",       "Get/set terrain lod_distance (higher = LOD boundaries farther = less pop-in). Usage: lod [distance]"],
         [_cmd_reset,     "reset",     "Delete the save (terrain DB + snapshot) and reload to a fresh world."],
         [_cmd_quiescent, "quiescent", "Print whether the world is quiescent (save-ready)."],
@@ -275,6 +276,12 @@ func _cmd_pbddemo(kind := "cantilever", size := 12) -> void:
         add_child(_pbd_demo)
     _pbd_demo.set_network(net)
     LimboConsole.info("pbddemo: %s size %d (%d members)" % [kind, size, net.member_count()])
+
+# Toggle the performance overlay (FPS + per-subsystem ms). No arg flips it.
+func _cmd_perf(state := "") -> void:
+    var on := not Perf.is_shown() if state == "" else state == "on"
+    Perf.set_shown(on)
+    LimboConsole.info("perf: %s" % ("on" if on else "off"))
 
 # Toggle live PBD stress viz over the player's real structures (viz-only). No arg flips.
 func _cmd_pbdlive(state := "") -> void:
