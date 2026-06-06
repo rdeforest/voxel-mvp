@@ -20,7 +20,6 @@ var _mesh: ArrayMesh
 var _mi: MeshInstance3D
 var _enabled := false
 var _dirty := true
-var _awaiting_rebuild := false  # carved this frame; skip detection until the network rebuilds
 
 
 func setup(integrity: StructuralIntegrity) -> void:
@@ -67,7 +66,7 @@ func _physics_process(delta: float) -> void:
         _dirty = false
     if _sim != null:
         _sim.step(delta)
-        if _sim.broke_last_step() and not _awaiting_rebuild:
+        if _sim.broke_last_step():
             _handle_detachment()
     Perf.report("PBD (%d nodes)" % (_sim.node_count() if _sim != null else 0), (Time.get_ticks_usec() - t0) / 1000.0)
 
@@ -88,9 +87,13 @@ func _handle_detachment() -> void:
         if not cells.is_empty():
             _collapse(cells)
             collapsed = true
+    # Rebuild NOW, not next tick: _collapse already erased these cells from
+    # voxel_data (synchronous bus emit), so the detached nodes vanish from the
+    # network this frame instead of free-falling as stale green lines for a frame
+    # (250ms at 4fps). The freshly-built sim won't report broke_last_step until a
+    # real break, so this can't re-enter.
     if collapsed:
-        _dirty = true
-        _awaiting_rebuild = true
+        _rebuild()
 
 
 # Mirrors CollapseDetector._materialize_collapse: spawn a falling body, carve the
@@ -131,4 +134,3 @@ func _rebuild() -> void:
     var r := PbdNetworkBuilder.build(cells, is_natural)
     _sim = r["sim"]
     _cell_of_node = r["cell_of_node"]
-    _awaiting_rebuild = false
