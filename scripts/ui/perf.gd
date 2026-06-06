@@ -11,6 +11,7 @@ const SMOOTH := 0.15           # EMA factor for readability
 var _times: Dictionary = {}    # label -> {ms: float, frame: int}
 var _label: Label
 var _shown := false
+var _last_physics_frame := 0
 
 
 func _ready() -> void:
@@ -59,8 +60,13 @@ func _process(_dt: float) -> void:
         return
     var fps := Engine.get_frames_per_second()
     var frame_ms := 1000.0 / maxf(fps, 0.001)
-    var lines: Array[String] = ["FPS %.1f   (%.1f ms/frame)" % [fps, frame_ms]]
     var now := Engine.get_process_frames()
+    var ticks := Engine.get_physics_frames() - _last_physics_frame
+    _last_physics_frame = Engine.get_physics_frames()
+    var lines: Array[String] = [
+        "FPS %.1f   (%.1f ms/frame)" % [fps, frame_ms],
+        "phys %d ticks/frame" % ticks,   # >1 = physics over budget, catching up
+    ]
     var labels := _times.keys()
     labels.sort()
     for label in labels:

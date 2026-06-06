@@ -1,9 +1,10 @@
 class_name PbdRenderer
 extends RefCounted
 
-# Draws a PbdNetwork's live members into an ImmediateMesh as lines coloured by
-# axial-force ratio (green = slack → red = at the member's limit) — the Poly-Bridge
-# stress view. Shared by PbdDemo and the live PbdStructure.
+# Renders a PbdSim's live members as stress-coloured lines (green = slack → red = at
+# the member's force limit, the Poly-Bridge view). The per-member loop + colour ramp
+# live in C++ (PbdSim.get_stress_geometry); here we just hand the verts+colours to an
+# ArrayMesh in a single add_surface_from_arrays — no per-member GDScript round-trips.
 
 static func make_material() -> StandardMaterial3D:
     var m := StandardMaterial3D.new()
@@ -13,24 +14,13 @@ static func make_material() -> StandardMaterial3D:
     return m
 
 
-static func draw(net: PbdNetwork, im: ImmediateMesh) -> void:
-    im.clear_surfaces()
-    if net == null or net.member_count() == 0:
+static func draw(sim: PbdSim, mesh: ArrayMesh) -> void:
+    mesh.clear_surfaces()
+    if sim == null or sim.live_member_count() == 0:
         return
-    im.surface_begin(Mesh.PRIMITIVE_LINES)
-    for k in net.member_count():
-        if net.m_broken[k] != 0:
-            continue
-        var col := stress_color(net, k)
-        im.surface_set_color(col)
-        im.surface_add_vertex(net.pos[net.m_a[k]])
-        im.surface_set_color(col)
-        im.surface_add_vertex(net.pos[net.m_b[k]])
-    im.surface_end()
-
-
-static func stress_color(net: PbdNetwork, k: int) -> Color:
-    var f := net.m_force[k]
-    var limit: float = net.m_tension[k] if f >= 0.0 else net.m_compression[k]
-    var r := clampf(absf(f) / maxf(limit, 0.001), 0.0, 1.0)
-    return Color(r, 1.0 - r, 0.0)
+    var g := sim.get_stress_geometry()
+    var arrays := []
+    arrays.resize(Mesh.ARRAY_MAX)
+    arrays[Mesh.ARRAY_VERTEX] = g["verts"]
+    arrays[Mesh.ARRAY_COLOR] = g["colors"]
+    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)

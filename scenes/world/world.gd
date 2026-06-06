@@ -266,16 +266,16 @@ func _cmd_dcoctree() -> void:
 func _cmd_pbddemo(kind := "cantilever", size := 12) -> void:
     var fwd := -_player.global_transform.basis.z
     var base := Vector3i((_player.global_position + fwd * 6.0 + Vector3.UP * 4.0).round())
-    var net: PbdNetwork
+    var sim: PbdSim
     match kind:
-        "bridge": net = PbdDemo.bridge(base, size)
-        "tower":  net = PbdDemo.tower(base, size)
-        _:        net = PbdDemo.cantilever(base, size)
+        "bridge": sim = PbdDemo.bridge(base, size)
+        "tower":  sim = PbdDemo.tower(base, size)
+        _:        sim = PbdDemo.cantilever(base, size)
     if _pbd_demo == null:
         _pbd_demo = PbdDemo.new()
         add_child(_pbd_demo)
-    _pbd_demo.set_network(net)
-    LimboConsole.info("pbddemo: %s size %d (%d members)" % [kind, size, net.member_count()])
+    _pbd_demo.set_sim(sim)
+    LimboConsole.info("pbddemo: %s size %d (%d members)" % [kind, size, sim.member_count()])
 
 # Toggle the performance overlay (FPS + per-subsystem ms). No arg flips it.
 func _cmd_perf(state := "") -> void:

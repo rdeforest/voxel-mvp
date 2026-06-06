@@ -27,9 +27,9 @@ const FACE6 := [
 
 # cells: Dictionary[Vector3i, Materials] (material may be null for now).
 # is_natural_terrain: Callable(Vector3i) -> bool.
-# Returns { network: PbdNetwork, node_of_cell: Dictionary, cell_of_node: Array[Vector3i] }.
+# Returns { sim: PbdSim, node_of_cell: Dictionary, cell_of_node: Array[Vector3i] }.
 static func build(cells: Dictionary, is_natural_terrain: Callable, cell_size := 1.0) -> Dictionary:
-    var net := PbdNetwork.new()
+    var sim := PbdSim.new()
     var node_of_cell := {}
     var cell_of_node: Array[Vector3i] = []
 
@@ -37,7 +37,7 @@ static func build(cells: Dictionary, is_natural_terrain: Callable, cell_size := 
         var pinned := _anchored(cell, is_natural_terrain)
         var mass := 0.0 if pinned else DEFAULT_MASS
         var world := (Vector3(cell) + Vector3.ONE * 0.5) * cell_size
-        node_of_cell[cell] = net.add_node(world, mass)
+        node_of_cell[cell] = sim.add_node(world, mass)
         cell_of_node.append(cell)
 
     for cell in cells:
@@ -53,9 +53,9 @@ static func build(cells: Dictionary, is_natural_terrain: Callable, cell_size := 
                     var b: int = node_of_cell[nb]
                     if a >= b:
                         continue   # each unordered pair once
-                    net.add_member(a, b, DEFAULT_COMPLIANCE, DEFAULT_TENSION, DEFAULT_COMPRESSION)
+                    sim.add_member(a, b, DEFAULT_COMPLIANCE, DEFAULT_TENSION, DEFAULT_COMPRESSION)
 
-    return { "network": net, "node_of_cell": node_of_cell, "cell_of_node": cell_of_node }
+    return { "sim": sim, "node_of_cell": node_of_cell, "cell_of_node": cell_of_node }
 
 
 static func _anchored(cell: Vector3i, is_natural_terrain: Callable) -> bool:
