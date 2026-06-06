@@ -16,11 +16,7 @@ func _ready() -> void:
     _im = ImmediateMesh.new()
     var mi := MeshInstance3D.new()
     mi.mesh = _im
-    var mat := StandardMaterial3D.new()
-    mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-    mat.vertex_color_use_as_albedo = true
-    mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-    mi.material_override = mat
+    mi.material_override = PbdRenderer.make_material()
     add_child(mi)
 
 
@@ -32,30 +28,7 @@ func _physics_process(delta: float) -> void:
     if _net == null:
         return
     _solver.step(_net, delta)
-    _redraw()
-
-
-func _redraw() -> void:
-    _im.clear_surfaces()
-    if _net.member_count() == 0:
-        return
-    _im.surface_begin(Mesh.PRIMITIVE_LINES)
-    for k in _net.member_count():
-        if _net.m_broken[k] != 0:
-            continue
-        var col := _stress_color(k)
-        _im.surface_set_color(col)
-        _im.surface_add_vertex(_net.pos[_net.m_a[k]])
-        _im.surface_set_color(col)
-        _im.surface_add_vertex(_net.pos[_net.m_b[k]])
-    _im.surface_end()
-
-
-func _stress_color(k: int) -> Color:
-    var f := _net.m_force[k]
-    var limit: float = _net.m_tension[k] if f >= 0.0 else _net.m_compression[k]
-    var r := clampf(absf(f) / maxf(limit, 0.001), 0.0, 1.0)
-    return Color(r, 1.0 - r, 0.0)   # green (slack) → yellow → red (at limit)
+    PbdRenderer.draw(_net, _im)
 
 
 # --- structure builders (anchors are virtual "natural terrain" cells) ---

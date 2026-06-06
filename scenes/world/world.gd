@@ -11,6 +11,7 @@ var _octree_mesh: MeshInstance3D
 var _lod_probe_mesh: MeshInstance3D
 var _dc_manager: DCTerrainManager
 var _pbd_demo: PbdDemo
+var _pbd_structure: PbdStructure
 
 
 func _enter_tree() -> void:
@@ -36,6 +37,9 @@ func _ready() -> void:
     add_child(_dc_manager)
     _dc_manager.setup(_terrain, _player)
     _dc_manager.start_default()   # DC is the default terrain render; dcmanager/dcsolo override
+    _pbd_structure = PbdStructure.new()
+    add_child(_pbd_structure)
+    _pbd_structure.setup(_integrity)
     _register_console_commands()
 
 func _exit_tree() -> void:
@@ -62,6 +66,7 @@ func _console_commands() -> Array:
         [_cmd_dcsolo,    "dcsolo",    "Data-only mode: hide godot_voxel's render so only our DC mesh shows (enables the manager). Usage: dcsolo [on|off]"],
         [_cmd_dclod,     "dclod",     "F2 probe: generate+DC-mesh a region at LOD n around you (generator-sourced coarse data). Usage: dclod [lod]"],
         [_cmd_pbddemo,   "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
+        [_cmd_pbdlive,   "pbdlive",   "Toggle live PBD stress viz over your REAL structures (viz-only). Usage: pbdlive [on|off]"],
         [_cmd_lod,       "lod",       "Get/set terrain lod_distance (higher = LOD boundaries farther = less pop-in). Usage: lod [distance]"],
         [_cmd_reset,     "reset",     "Delete the save (terrain DB + snapshot) and reload to a fresh world."],
         [_cmd_quiescent, "quiescent", "Print whether the world is quiescent (save-ready)."],
@@ -270,6 +275,12 @@ func _cmd_pbddemo(kind := "cantilever", size := 12) -> void:
         add_child(_pbd_demo)
     _pbd_demo.set_network(net)
     LimboConsole.info("pbddemo: %s size %d (%d members)" % [kind, size, net.member_count()])
+
+# Toggle live PBD stress viz over the player's real structures (viz-only). No arg flips.
+func _cmd_pbdlive(state := "") -> void:
+    var on := not _pbd_structure.is_enabled() if state == "" else state == "on"
+    _pbd_structure.set_enabled(on)
+    LimboConsole.info("pbdlive: %s" % ("on" if on else "off"))
 
 # Toggle the always-on threaded DC terrain manager (path-b #3). No arg flips it.
 func _cmd_dcmanager(state := "") -> void:
