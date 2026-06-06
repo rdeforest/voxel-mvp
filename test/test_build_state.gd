@@ -36,17 +36,19 @@ class TestBuildStateRotationAndCycling:
     func before_each() -> void:
         bs = BuildState.new()
 
-    func test_rotation_wraps_at_4():
-        for i in 5:
+    func test_rotation_steps_and_wraps_at_360():
+        # 24 steps of 15° == a full turn back to 0.
+        for i in 25:
             bs.rotate_y()
-        assert_eq(bs.rotation.y, 1, "5 quarter turns around Y == 1 quarter turn")
+        assert_almost_eq(bs.rotation.y, BuildState.ROTATION_STEP, 0.001, "25 steps == one step past a full turn")
 
     func test_three_axes_independent():
         bs.rotate_y()
         bs.rotate_y()
         bs.rotate_x()
         bs.rotate_z()
-        assert_eq(bs.rotation, Vector3i(1, 2, 1))
+        var s := BuildState.ROTATION_STEP
+        assert_eq(bs.rotation, Vector3(s, 2.0 * s, s))
 
     func test_part_cycle_wraps():
         var initial_name := bs.part_name()

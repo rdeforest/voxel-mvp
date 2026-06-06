@@ -169,11 +169,11 @@ Detailed mechanism rationale (in-limbo, lazy-expansion bounds, strain rewind, pa
 
 Current catalog (`assets/parts/<name>/<name>.tres`): board, plank, stud, beam — all parametric rectangular Parts that differ only in `dimensions`. Adding a new wood Part is a one-line `.tres`.
 
-Multi-axis rotation: `ConstructionAction.rotation: Vector3i` (0–3 per axis). Rotation is around the body's local origin (the unrotated bottom-center); after rotation, the instance is shifted so the rotated bottom lands at `placement_pos.y` and the rotated horizontal centroid sits over `placement_pos.x/.z`. Use `Transform3D(basis, Vector3.ZERO) * aabb` for AABB rotation (Godot doesn't define `Basis * AABB`).
+Multi-axis rotation: `ConstructionAction.rotation: Vector3` — continuous **degrees** per axis (X, Y, Z); `BuildState` accumulates them in `ROTATION_STEP` (15°) increments via `rotate_x/y/z`, so you can build at angles (ramps, angled trusses), not just quarter-turns. Rotation is around the body's local origin (the unrotated bottom-center); after rotation, the instance is shifted so the rotated bottom lands at `placement_pos.y` and the rotated horizontal centroid sits over `placement_pos.x/.z`. Use `Transform3D(basis, Vector3.ZERO) * aabb` for AABB rotation (Godot doesn't define `Basis * AABB`).
 
 **Placement is free** along all three axes — `ConstructionAction.placement_pos = hit_pos + BuildState.placement_offset`. The offset accumulates from Shift+W/A/E + wheel ticks (camera-relative axes, WHEEL_STEP = 0.05m). The offset resets on each successful placement and on tool cycle.
 
-Player controls in **Construction → Build** activity: `[`/`]` cycle parts, `R/T/Y` rotate around Y/X/Z, `M` cycles material, Shift+W/A/E + wheel adjusts offset. Shift+key always suppresses the underlying WASD movement key — Shift+W is a distinct input from W, not "walk + something."
+Player controls in **Construction → Build** activity: `[`/`]` cycle parts, `R/T/Y` rotate around Y/X/Z in 15° steps (HUD shows the current angle), `M` cycles material, Shift+W/A/E + wheel adjusts offset. Shift+key always suppresses the underlying WASD movement key — Shift+W is a distinct input from W, not "walk + something."
 
 **Debug overlays:**
 - `V` toggles the **PBD stress-line overlay** (`PbdStructure.toggle_viz` → the green→red→whitening member lines). The old `IntegrityDebug` support-cube overlay and its `H` obscured-pass toggle were removed in Phase 6.

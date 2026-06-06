@@ -227,6 +227,8 @@ func _update_mode_label() -> void:
     if activity != null and activity.mode_name == "Build":
         lines.append("Material: %s" % build_state.current_material())
         lines.append("Part:     %s" % build_state.part_name())
+        var r := build_state.rotation
+        lines.append("Rotation: %d°, %d°, %d°" % [r.x, r.y, r.z])
     if activity != null:
         lines.append("Activity: %s" % activity.mode_name)
     lines.append("Tool:     %s" % t.name)

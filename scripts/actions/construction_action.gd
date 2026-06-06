@@ -6,7 +6,7 @@ const GRID_ID = 0
 var part:          Part
 var placement_pos: Vector3    # world position for the rotated bottom-center
 var world_anchor:  Vector3i   # voxel-grid cell for the click point
-var rotation:      Vector3i   # 0-3 per axis (X, Y, Z), each step = 90°
+var rotation:      Vector3    # per-axis rotation in degrees (X, Y, Z), continuous
 var material_name: StringName # overrides part.material_name when non-empty
 var terrain:       VoxelLodTerrain
 var integrity:     StructuralIntegrity   # query path only (has_part_cell)
@@ -19,7 +19,7 @@ func _init(
     p_part:     Part,
     p_pos:      Vector3,
     p_anchor:   Vector3i,
-    p_rotation: Vector3i,
+    p_rotation: Vector3,
     p_material: StringName,
     p_terrain:  VoxelLodTerrain,
     p_integ:    StructuralIntegrity,
@@ -80,9 +80,9 @@ func execute() -> void:
 
 func _basis() -> Basis:
     var b := Basis.IDENTITY
-    b = b.rotated(Vector3.RIGHT,   rotation.x * PI * 0.5)
-    b = b.rotated(Vector3.UP,      rotation.y * PI * 0.5)
-    b = b.rotated(Vector3.FORWARD, rotation.z * PI * 0.5)
+    b = b.rotated(Vector3.RIGHT,   deg_to_rad(rotation.x))
+    b = b.rotated(Vector3.UP,      deg_to_rad(rotation.y))
+    b = b.rotated(Vector3.FORWARD, deg_to_rad(rotation.z))
     return b
 
 # AABB of the part in local space (bottom-anchored at Y=0, centered in X/Z),
