@@ -40,10 +40,11 @@ func setup(integrity: StructuralIntegrity) -> void:
 func set_enabled(on: bool) -> void:
     _enabled = on
     _mi.visible = on
-    # Take terrain-collapse authority while on (the old detector stands down so the
-    # two don't both carve); hand it back when off.
+    # Take collapse authority while on (the old terrain detector + part strain system
+    # stand down so two systems don't both act); hand it back when off.
     if is_instance_valid(_integrity):
         _integrity.terrain_collapse_enabled = not on
+        _integrity.part_collapse_enabled = not on
     if on:
         _dirty = true
     else:
@@ -114,12 +115,13 @@ func _physics_process(delta: float) -> void:
     Perf.report("PBD (%d nodes)" % (_sim.node_count() if _sim != null else 0), (Time.get_ticks_usec() - t0) / 1000.0)
 
 
-# A member broke; any component that's now anchorless is falling. Carve its terrain
-# cells out of the SDF and hand them to the existing falling-body pipeline (reused),
-# then rebuild the network without them. (Part cells in a detached component are left
-# to the part system for now — they aren't SDF.)
+# A member broke; any component that's now anchorless is falling. Terrain cells get
+# carved + handed to the falling-body pipeline; any Part with a detached cell drops
+# whole (a part is an atomic Node3D — it can't half-fall). Then rebuild.
 func _handle_detachment() -> void:
     var ts := _integrity.terrain_support
+    var ps := _integrity.part_support
+    var detached_parts := {}   # Node3D -> true (dedup; a part spans many cells)
     var collapsed := false
     for comp in _sim.get_detached_components():
         var cells: Array[Vector3i] = []
@@ -127,14 +129,20 @@ func _handle_detachment() -> void:
             var cell: Vector3i = _cell_of_node[idx]
             if ts.voxel_data.has(cell):
                 cells.append(cell)
+            else:
+                for part in ps.parts_at_cell(cell):
+                    detached_parts[part] = true
         if not cells.is_empty():
             _collapse(cells)
             collapsed = true
-    # Rebuild NOW, not next tick: _collapse already erased these cells from
-    # voxel_data (synchronous bus emit), so the detached nodes vanish from the
-    # network this frame instead of free-falling as stale green lines for a frame
-    # (250ms at 4fps). The freshly-built sim won't report broke_last_step until a
-    # real break, so this can't re-enter.
+    for part in detached_parts:
+        ps.collapse_part(part)
+        collapsed = true
+    # Rebuild NOW, not next tick: _collapse erased the terrain cells from voxel_data
+    # and collapse_part dropped the parts from the registry (both synchronous), so the
+    # detached nodes vanish from the network this frame instead of free-falling as
+    # stale green lines for a frame (250ms at 4fps). The freshly-built sim won't
+    # report broke_last_step until a real break, so this can't re-enter.
     if collapsed:
         _rebuild()
 

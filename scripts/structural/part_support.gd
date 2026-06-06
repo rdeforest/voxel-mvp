@@ -80,6 +80,10 @@ func best_support_at(cell: Vector3i) -> float:
         best = maxf(best, part_registry[part_node].support)
     return best
 
+# Parts occupying a cell (usually 0 or 1; intersection placement allows >1).
+func parts_at_cell(cell: Vector3i) -> Array:
+    return _cell_to_part.get(cell, [])
+
 
 # --- Per-frame ---
 
@@ -108,7 +112,7 @@ func tick_strain(delta: float, pulse: float) -> void:
             if _part_strain[node] >= VoxelConstants.STRAIN_DURATION_SEC:
                 to_collapse.append(node)
     for node in to_collapse:
-        _collapse_part(node)
+        collapse_part(node)
 
 func _is_part_near_pointer(data: PartData, pointer: Vector3) -> bool:
     var r2 := PROXIMITY_RADIUS * PROXIMITY_RADIUS
@@ -208,7 +212,12 @@ func _apply_visual(node: Node3D, support: float, strain_progress: float, pulse: 
         mat.emission                   = StructuralIntegrity.get_support_color(support)
         mat.emission_energy_multiplier = 0.5 + strain_progress * pulse * 0.6
 
-func _collapse_part(node: Node3D) -> void:
+# Reparent a part's meshes to a fresh falling RigidBody3D and drop it from the
+# registry. Driven by the old strain timer OR, when PBD is authoritative, by
+# PbdStructure on detachment.
+func collapse_part(node: Node3D) -> void:
+    if not part_registry.has(node):
+        return
     _apply_visual(node, FULL_SUPPORT, 0.0, 0.0, false)
 
     var data := part_registry[node]

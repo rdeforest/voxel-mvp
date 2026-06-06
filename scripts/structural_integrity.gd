@@ -13,10 +13,12 @@ var debug:              IntegrityDebug
 var _collapse_detector: CollapseDetector
 var _strain_pulse_phase := 0.0
 
-# When false, the terrain CollapseDetector stands down (PbdStructure has taken over
-# terrain collapse, authoritatively). Support propagation + cell registration still
-# run (PBD reads the tracked set); only the old collapse/carve is suppressed.
+# When false, the old collapse systems stand down because PbdStructure has taken
+# over authoritatively. Terrain: support propagation + cell registration still run
+# (PBD reads the tracked set), only the carve is suppressed. Parts: the whole
+# strain/collapse tick is skipped (PBD owns part support + collapse now).
 var terrain_collapse_enabled := true
+var part_collapse_enabled := true
 
 
 func _ready() -> void:
@@ -50,7 +52,8 @@ func _physics_process(delta: float) -> void:
 
     if terrain_collapse_enabled:
         _collapse_detector.tick_pending(delta)
-    part_support.tick_strain(delta, pulse)
+    if part_collapse_enabled:
+        part_support.tick_strain(delta, pulse)
     debug.update(pulse, _collapse_detector.get_straining_voxels())
     _tick_falling_bodies()
     Perf.report("Structural", (Time.get_ticks_usec() - t0) / 1000.0)
