@@ -1,15 +1,6 @@
-# Diagrams
+# System data-flow
 
-Visual maps of how the game's systems fit together. Rendered with
-[Mermaid](https://mermaid.js.org/) (plain text → renders on GitHub and in most
-markdown previewers; in VS Code use a Mermaid preview extension).
-
-Companion to: `CLAUDE.md` (where code lives), `docs/architecture.md` (mechanism
-rationale), `docs/roadmap` (version strategy).
-
----
-
-## System data-flow
+[← Diagrams index](index.md)
 
 The big picture: **how a click becomes physics, and how physics becomes terrain
 again.** The shape to notice is the **feedback loop** — edits don't call systems
