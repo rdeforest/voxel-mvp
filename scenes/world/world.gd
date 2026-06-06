@@ -4,11 +4,6 @@ extends Node3D
 @onready var _integrity: StructuralIntegrity = $StructuralIntegrity
 @onready var _player:    CharacterBody3D     = $Player
 
-# F2 path-b spike: our own DC mesh of a region, built from VoxelData on the main
-# thread and rendered by us (proves we can mesh+render over godot_voxel's data).
-var _spike_mesh: MeshInstance3D
-var _octree_mesh: MeshInstance3D
-var _lod_probe_mesh: MeshInstance3D
 var _dc_manager: DCTerrainManager
 var _pbd_demo: PbdDemo
 var _pbd_structure: PbdStructure
@@ -54,6 +49,16 @@ func _ready() -> void:
     _integrity.pbd = _pbd_structure
     _pbd_structure.set_enabled(true)   # PBD is authoritative; the old collapse systems stand down
     _register_console_commands()
+    # Pull the OS window forward and take keyboard focus on launch, so an F5 from
+    # the editor doesn't leave keystrokes landing in the script. Deferred so the
+    # window is mapped before we ask. Under focus-follows-mouse the WM still hands
+    # focus back to whatever the pointer is over, so this only sticks if the game
+    # spawns under the cursor.
+    _grab_os_focus.call_deferred()
+
+func _grab_os_focus() -> void:
+    DisplayServer.window_move_to_foreground()
+    get_window().grab_focus()
 
 func _exit_tree() -> void:
     # Drop our console commands before this world is freed (scene reload / quit)
@@ -95,11 +100,8 @@ func _console_commands() -> Array:
         [_cmd_set,       "set",       "Set a terrain shader uniform (float). Usage: set <name> <value>"],
         [_cmd_get,       "get",       "List terrain shader uniforms matching a glob (default *). Usage: get [pattern]"],
         [_cmd_vdebug,    "vdebug",    "Toggle a VoxelLodTerrain debug overlay. Usage: vdebug [flag]; no arg lists flags."],
-        [_cmd_dcspike,   "dcspike",   "F2 spike: DC-mesh a region around you from VoxelData and render it (magenta)."],
-        [_cmd_dcoctree,  "dcoctree",  "F2 spike: octree-DC a region with a fine/coarse seam (multi-LOD, crack-free; cyan)."],
         [_cmd_dcmanager, "dcmanager", "Toggle the DC terrain manager (threaded re-mesh of a bubble around you). Usage: dcmanager [on|off]"],
         [_cmd_dcsolo,    "dcsolo",    "Data-only mode: hide godot_voxel's render so only our DC mesh shows (enables the manager). Usage: dcsolo [on|off]"],
-        [_cmd_dclod,     "dclod",     "F2 probe: generate+DC-mesh a region at LOD n around you (generator-sourced coarse data). Usage: dclod [lod]"],
         [_cmd_pbddemo,   "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [_cmd_pbdlive,   "pbdlive",   "Toggle live PBD stress viz over your REAL structures (viz-only). Usage: pbdlive [on|off]"],
         [_cmd_perf,      "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
@@ -210,93 +212,6 @@ func _cmd_reset() -> void:
     LimboConsole.info("Resetting to defaults — saves left intact. F9 to restore.")
     get_tree().reload_current_scene.call_deferred()
 
-# F2 path-b proof: read a region's SDF straight from the terrain's voxel store
-# (main thread, transient VoxelTool — no held ref, the pattern that didn't crash),
-# mesh it with our GDScript DualContour, and render it ourselves. If the magenta
-# surface matches the terrain where you stand, the "own meshing layer over
-# godot_voxel's data" architecture is viable.
-func _cmd_dcspike() -> void:
-    const N := 24
-    var origin := Vector3i(_player.global_position.round()) - Vector3i(N / 2, N / 2, N / 2)
-    var vt := _terrain.get_voxel_tool()
-    vt.set_channel(VoxelBuffer.CHANNEL_SDF)
-
-    var dim := N + 1                       # DC needs corner samples (cells + 1)
-    var data := PackedFloat32Array()
-    data.resize(dim * dim * dim)
-    var i := 0
-    var solid := 0
-    for z in dim:
-        for y in dim:
-            for x in dim:
-                var v := vt.get_voxel_f(origin + Vector3i(x, y, z))
-                data[i] = v
-                if v < 0.0:
-                    solid += 1
-                i += 1
-
-    var baked := SdfBaked.new(data, Vector3(origin), 1.0, Vector3i(dim, dim, dim))
-    var mesh := DualContour.build_field(baked, Vector3i(N, N, N), Vector3(origin), 1.0)
-
-    if _spike_mesh == null:
-        _spike_mesh = MeshInstance3D.new()
-        var m := StandardMaterial3D.new()
-        m.albedo_color = Color(1.0, 0.0, 1.0, 0.55)
-        m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-        m.cull_mode = BaseMaterial3D.CULL_DISABLED
-        _spike_mesh.material_override = m
-        add_child(_spike_mesh)
-    _spike_mesh.mesh = mesh
-
-    var nverts := 0
-    if mesh.get_surface_count() > 0:
-        nverts = (mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
-    LimboConsole.info("dcspike: %d^3 at %s — %d solid samples, %d verts" % [N, origin, solid, nverts])
-
-# F2 core proof: octree-DC over a real terrain region with a deliberate LOD seam
-# inside it (full depth in the -X half, one level coarser in the +X half). The
-# SDF is baked once from VoxelData, then meshed with our crack-free adaptive
-# OctreeDC. A seamless cyan surface that changes triangle density across the
-# middle = multi-LOD meshing works on real data — the heart of the new system.
-func _cmd_dcoctree() -> void:
-    const DEPTH := 5
-    var size := 1 << DEPTH                 # 32-voxel root cube
-    var origin := Vector3i(_player.global_position.round()) - Vector3i(size / 2, size / 2, size / 2)
-    var dim := size + 1                     # corner samples
-    var t0 := Time.get_ticks_msec()
-    var data := DCRegionReader.new().read_sdf_lod0(_terrain, origin, Vector3i(dim, dim, dim))
-    var t_read := Time.get_ticks_msec() - t0
-    if data.size() != dim * dim * dim:
-        LimboConsole.error("dcoctree: read returned %d (expected %d)" % [data.size(), dim * dim * dim])
-        return
-    var solid := 0
-    for v in data:
-        if v < 0.0:
-            solid += 1
-    var baked := SdfBaked.new(data, Vector3.ZERO, 1.0, Vector3i(dim, dim, dim))
-
-    var refine := func(center: Vector3, _s: float, depth: int) -> bool:
-        return depth < (DEPTH if center.x < size / 2.0 else DEPTH - 1)
-    var t1 := Time.get_ticks_msec()
-    var mesh := OctreeDC.build_field(baked, DEPTH, refine)
-    var t_mesh := Time.get_ticks_msec() - t1
-
-    if _octree_mesh == null:
-        _octree_mesh = MeshInstance3D.new()
-        var m := StandardMaterial3D.new()
-        m.albedo_color = Color(0.2, 1.0, 1.0, 0.55)
-        m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-        m.cull_mode = BaseMaterial3D.CULL_DISABLED
-        _octree_mesh.material_override = m
-        add_child(_octree_mesh)
-    _octree_mesh.mesh = mesh
-    _octree_mesh.global_position = Vector3(origin)
-
-    var nverts := 0
-    if mesh.get_surface_count() > 0:
-        nverts = (mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
-    LimboConsole.info("dcoctree: read %dms, mesh %dms — %d solid, %d verts (fine -X / coarse +X)" % [t_read, t_mesh, solid, nverts])
-
 # Spawn a live PBD structural-physics demo in front of the player (stress-coloured
 # lines; watch it sag and snap). Re-run to reset.
 func _cmd_pbddemo(kind := "cantilever", size := 12) -> void:
@@ -330,45 +245,6 @@ func _cmd_dcmanager(state := "") -> void:
     var on := not _dc_manager.is_enabled() if state == "" else state == "on"
     _dc_manager.set_enabled(on)
     LimboConsole.info("dcmanager: %s" % ("on" if on else "off"))
-
-# Probe: read terrain SDF at LOD n (edit-inclusive: generator baseline + edit mips)
-# and DC-mesh it, to eyeball whether coarse data looks sensible at each LOD (the
-# planned source for the clipmap's far levels). The mesh is built in lattice units
-# and scaled by the LOD step so it lands at the right world size.
-func _cmd_dclod(lod := 1) -> void:
-    const DEPTH := 5                         # 32-cell uniform octree
-    var step := 1 << clampi(lod, 0, 6)
-    var dim := (1 << DEPTH) + 1              # corner samples
-    var extent := (dim - 1) * step          # world size of the region
-    var center := Vector3i(_player.global_position.round())
-    var origin := center - Vector3i(extent / 2, extent / 2, extent / 2)
-    origin = (origin / step) * step          # snap to the LOD grid
-    var t0 := Time.get_ticks_msec()
-    var data := DCRegionReader.new().read_sdf_lod(_terrain, lod, origin, Vector3i(dim, dim, dim))
-    var t_read := Time.get_ticks_msec() - t0
-    if data.size() != dim * dim * dim:
-        LimboConsole.error("dclod: read returned %d (expected %d)" % [data.size(), dim * dim * dim])
-        return
-    var solid := 0
-    for v in data:
-        if v < 0.0:
-            solid += 1
-    var baked := SdfBaked.new(data, Vector3.ZERO, 1.0, Vector3i(dim, dim, dim))
-    var t1 := Time.get_ticks_msec()
-    var mesh := OctreeDC.build_field(baked, DEPTH)
-    var t_mesh := Time.get_ticks_msec() - t1
-    if _lod_probe_mesh == null:
-        _lod_probe_mesh = MeshInstance3D.new()
-        var m := StandardMaterial3D.new()
-        m.albedo_color  = Color(1.0, 0.6, 0.1, 0.6)
-        m.transparency  = BaseMaterial3D.TRANSPARENCY_ALPHA
-        m.cull_mode     = BaseMaterial3D.CULL_DISABLED
-        _lod_probe_mesh.material_override = m
-        add_child(_lod_probe_mesh)
-    _lod_probe_mesh.mesh = mesh
-    _lod_probe_mesh.scale = Vector3.ONE * step
-    _lod_probe_mesh.global_position = Vector3(origin)
-    LimboConsole.info("dclod %d: %dm region, read %dms, mesh %dms — %d solid samples" % [lod, extent, t_read, t_mesh, solid])
 
 # Data-only mode: hide godot_voxel's render so only our DC mesh shows. Turning it
 # on also enables the manager (no point hiding terrain with nothing replacing it).
