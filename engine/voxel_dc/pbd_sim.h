@@ -34,7 +34,13 @@ class PbdSim : public RefCounted {
 	LocalVector<double> _compression; // max compressive force
 	LocalVector<double> _lambda;      // XPBD multiplier, reset per substep
 	LocalVector<double> _force;       // peak signed axial force this step (+tension)
+	LocalVector<double> _damage;      // fatigue accumulator [0,1]; breaks at 1
 	LocalVector<uint8_t> _broken;
+
+	// Fatigue: an overloaded member doesn't snap instantly — damage accrues ∝ overload
+	// and it fails after a delay that shrinks with load (creep), healing if relieved.
+	// _fatigue_inv_tau = 1 / (seconds-to-break at 2× the limit).
+	double _fatigue_inv_tau = 0.8;
 
 	// Sleeping. A settled node stops integrating + its both-asleep members are
 	// skipped, so a quiescent structure costs nothing. A node may sleep only when
@@ -64,6 +70,7 @@ class PbdSim : public RefCounted {
 public:
 	void configure(Vector3 gravity, int substeps, int iterations, double damping);
 	void set_sleep_params(double speed, int after, double wake_strain, double force_frac);
+	void set_fatigue(double seconds_to_break_at_double_load);
 	int add_node(Vector3 p, double mass);
 	int add_member(int a, int b, double compliance, double tension, double compression);
 	void step(double dt);
@@ -74,6 +81,7 @@ public:
 	Vector3 get_position(int i) const { return _pos[i]; }
 	bool is_pinned(int i) const { return _inv_mass[i] == 0.0; }
 	double member_force(int k) const { return _force[k]; }
+	double member_damage(int k) const { return _damage[k]; }
 	bool member_broken(int k) const { return _broken[k] != 0; }
 	bool broke_last_step() const { return _broke_last_step; }
 

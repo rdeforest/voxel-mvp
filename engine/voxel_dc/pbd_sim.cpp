@@ -28,6 +28,10 @@ void PbdSim::set_sleep_params(double speed, int after, double wake_strain, doubl
 	_sleep_force_frac = CLAMP(force_frac, 0.0, 1.0);
 }
 
+void PbdSim::set_fatigue(double seconds_to_break_at_double_load) {
+	_fatigue_inv_tau = 1.0 / MAX(1.0e-6, seconds_to_break_at_double_load);
+}
+
 void PbdSim::wake_all() {
 	for (uint32_t i = 0; i < _sleeping.size(); ++i) {
 		if (_inv_mass[i] > 0.0 && _sleeping[i]) {
@@ -62,6 +66,7 @@ int PbdSim::add_member(int a, int b, double compliance, double tension, double c
 	_compression.push_back(compression);
 	_lambda.push_back(0.0f);
 	_force.push_back(0.0f);
+	_damage.push_back(0.0);
 	_broken.push_back(0);
 	return k;
 }
@@ -171,30 +176,41 @@ void PbdSim::step(double dt) {
 		}
 	}
 
-	// Breakage (active members only — asleep ones are sub-limit by construction).
-	// A break wakes its endpoints so load redistributes / freed mass falls. Mark
-	// near-limit endpoints "hot" so an overstressed-but-rigid node stays awake.
+	// Fatigue + breakage (active members only — asleep ones are sub-limit by
+	// construction). Overload accrues damage ∝ (overload) and the member fails at
+	// damage 1; relieved members heal. A break wakes its endpoints so load
+	// redistributes / freed mass falls. Endpoints near the limit OR carrying any
+	// damage stay "hot" (awake) so an overstressed-but-rigid member can't sleep
+	// through its own failure.
 	_broke_last_step = false;
 	for (uint32_t ai = 0; ai < _active.size(); ++ai) {
 		const int k = _active[ai];
 		const int a = _ma[k];
 		const int b = _mb[k];
 		const double f = _force[k];
-		if (f > _tension[k] || f < -_compression[k]) {
-			_broken[k] = 1;
-			_broke_last_step = true;
-			if (_inv_mass[a] > 0.0) {
-				_wake_req[a] = 1;
-			}
-			if (_inv_mass[b] > 0.0) {
-				_wake_req[b] = 1;
-			}
-			continue;
-		}
 		const double limit = f >= 0.0 ? _tension[k] : _compression[k];
-		if (limit > 0.0 && Math::abs(f) >= _sleep_force_frac * limit) {
-			_hot[a] = 1;
-			_hot[b] = 1;
+		if (limit > 0.0) {
+			const double over = Math::abs(f) / limit;
+			if (over > 1.0) {
+				_damage[k] += (over - 1.0) * _fatigue_inv_tau * dt;
+			} else {
+				_damage[k] = MAX(0.0, _damage[k] - (1.0 - over) * _fatigue_inv_tau * dt);
+			}
+			if (_damage[k] >= 1.0) {
+				_broken[k] = 1;
+				_broke_last_step = true;
+				if (_inv_mass[a] > 0.0) {
+					_wake_req[a] = 1;
+				}
+				if (_inv_mass[b] > 0.0) {
+					_wake_req[b] = 1;
+				}
+				continue;
+			}
+			if (over >= _sleep_force_frac || _damage[k] > 0.05) {
+				_hot[a] = 1;
+				_hot[b] = 1;
+			}
 		}
 	}
 
@@ -287,7 +303,10 @@ Dictionary PbdSim::get_stress_geometry() const {
 		const double f = _force[k];
 		const double limit = f >= 0.0 ? _tension[k] : _compression[k];
 		const double r = CLAMP(Math::abs(f) / MAX(limit, 0.001), 0.0, 1.0);
-		const Color col(float(r), float(1.0 - r), 0.0f);
+		// Green→red by load, then whiten toward failure: damage telegraphs the
+		// grace window so the player can see what's about to snap.
+		const double d = CLAMP(_damage[k], 0.0, 1.0);
+		const Color col = Color(float(r), float(1.0 - r), 0.0f).lerp(Color(1, 1, 1), float(d));
 		verts.push_back(_pos[_ma[k]]);
 		colors.push_back(col);
 		verts.push_back(_pos[_mb[k]]);
@@ -302,6 +321,7 @@ Dictionary PbdSim::get_stress_geometry() const {
 void PbdSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("configure", "gravity", "substeps", "iterations", "damping"), &PbdSim::configure);
 	ClassDB::bind_method(D_METHOD("set_sleep_params", "speed", "after", "wake_strain", "force_frac"), &PbdSim::set_sleep_params);
+	ClassDB::bind_method(D_METHOD("set_fatigue", "seconds_to_break_at_double_load"), &PbdSim::set_fatigue);
 	ClassDB::bind_method(D_METHOD("add_node", "position", "mass"), &PbdSim::add_node);
 	ClassDB::bind_method(D_METHOD("add_member", "a", "b", "compliance", "tension", "compression"), &PbdSim::add_member);
 	ClassDB::bind_method(D_METHOD("step", "dt"), &PbdSim::step);
@@ -311,6 +331,7 @@ void PbdSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_position", "i"), &PbdSim::get_position);
 	ClassDB::bind_method(D_METHOD("is_pinned", "i"), &PbdSim::is_pinned);
 	ClassDB::bind_method(D_METHOD("member_force", "k"), &PbdSim::member_force);
+	ClassDB::bind_method(D_METHOD("member_damage", "k"), &PbdSim::member_damage);
 	ClassDB::bind_method(D_METHOD("member_broken", "k"), &PbdSim::member_broken);
 	ClassDB::bind_method(D_METHOD("broke_last_step"), &PbdSim::broke_last_step);
 	ClassDB::bind_method(D_METHOD("awake_count"), &PbdSim::awake_count);

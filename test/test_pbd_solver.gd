@@ -98,6 +98,7 @@ func test_short_cantilever_holds_long_breaks():
     assert_true(_finite(short_sim))
 
     var long_sim := PbdSim.new()
+    long_sim.set_fatigue(0.1)   # accelerate creep so the test doesn't wait out the ~second default
     _cantilever(long_sim, 16, limit, limit)
     _settle(long_sim, 400)
     assert_lt(long_sim.live_member_count(), long_sim.member_count(), "long cantilever fails")
@@ -174,6 +175,39 @@ func test_break_wakes_freed_mass():
     _settle(sim, 120)
     assert_eq(sim.live_member_count(), 0, "broke")
     assert_gt(sim.awake_count(), 0, "freed mass is awake (falling), not frozen asleep")
+
+
+# Same overloaded member, two fatigue time-constants: the shorter τ must break
+# sooner. Proves breakage is a load-dependent delay (creep), not instantaneous.
+func _steps_to_break(tau: float) -> int:
+    var sim := PbdSim.new()
+    sim.set_fatigue(tau)
+    var anchor := sim.add_node(Vector3(0, 0, 0), 0.0)
+    var hang := sim.add_node(Vector3(0, -1, 0), 8.0)   # ~1.5× the tension limit
+    sim.add_member(anchor, hang, STIFF, 50.0, STRONG)
+    for i in 2000:
+        sim.step(DT)
+        if sim.live_member_count() == 0:
+            return i
+    return -1
+
+
+func test_fatigue_delay_scales_with_tau():
+    var fast := _steps_to_break(0.3)
+    var slow := _steps_to_break(2.0)
+    assert_gt(fast, 0, "overloaded member eventually breaks (short τ)")
+    assert_gt(slow, 0, "overloaded member eventually breaks (long τ)")
+    assert_lt(fast, slow, "a longer fatigue τ delays the break — the grace window")
+
+
+func test_under_limit_does_not_fatigue():
+    var sim := PbdSim.new()
+    var anchor := sim.add_node(Vector3(0, 0, 0), 0.0)
+    var hang := sim.add_node(Vector3(0, -1, 0), 3.0)   # ~0.6× the limit — comfortably under
+    sim.add_member(anchor, hang, STIFF, 50.0, STRONG)
+    _settle(sim, 600)
+    assert_eq(sim.live_member_count(), 1, "an under-limit member never fails")
+    assert_lt(sim.member_damage(0), 0.05, "no fatigue accrues below the limit")
 
 
 func test_no_explosion_at_high_stiffness():
