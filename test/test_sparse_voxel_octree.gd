@@ -46,6 +46,34 @@ func test_storage_is_sparse() -> void:
     assert_gt(leaves, 0)
 
 
+func test_meshes_watertight() -> void:
+    var t := SparseVoxelOctree.new()
+    t.setup(Vector3.ZERO, ROOT)
+    t.imprint_sphere(CENTER, RADIUS, 0.5, 1)
+    var m := t.mesh()
+    var verts: PackedVector3Array = m[Mesh.ARRAY_VERTEX]
+    var idx:   PackedInt32Array   = m[Mesh.ARRAY_INDEX]
+    var counts := {}
+    for i in range(0, idx.size(), 3):
+        for e in [[idx[i], idx[i + 1]], [idx[i + 1], idx[i + 2]], [idx[i + 2], idx[i]]]:
+            var k := Vector2i(mini(e[0], e[1]), maxi(e[0], e[1]))
+            counts[k] = counts.get(k, 0) + 1
+    var boundary := 0
+    var nonmanifold := 0
+    for k in counts:
+        if counts[k] == 1:   boundary += 1
+        elif counts[k] > 2:  nonmanifold += 1
+    var worst := 0.0
+    for v in verts:
+        worst = maxf(worst, absf(v.distance_to(CENTER) - RADIUS))
+    gut.p("C++ mesh: verts=%d tris=%d boundary=%d nonmanifold=%d max_off=%.3f" % [
+        verts.size(), idx.size() / 3, boundary, nonmanifold, worst])
+    assert_gt(idx.size() / 3, 100, "tessellated")
+    assert_eq(boundary, 0, "watertight")
+    assert_eq(nonmanifold, 0, "manifold")
+    assert_lt(worst, 0.5, "hugs the sphere")
+
+
 func test_box_imprint() -> void:
     var t := SparseVoxelOctree.new()
     t.setup(Vector3.ZERO, ROOT)
