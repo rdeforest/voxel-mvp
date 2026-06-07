@@ -128,3 +128,64 @@ func test_no_lod_boundary_slivers():
             if absf(cheb - 8.0) < 1.5:
                 boundary_slivers += 1
     assert_lte(boundary_slivers, 1, "near-vertical slivers straddling the LOD boundary (geomorph regression)")
+
+
+# Finite-difference gradient of the FINE-level baked field (outward = +SDF direction).
+var _fine: PackedFloat32Array
+func _fg(x: int, y: int, z: int) -> float:
+    x = clampi(x, 0, DIM - 1); y = clampi(y, 0, DIM - 1); z = clampi(z, 0, DIM - 1)
+    return _fine[x + DIM * (y + DIM * z)]
+func _fval(p: Vector3) -> float:
+    var x0 := floori(p.x); var y0 := floori(p.y); var z0 := floori(p.z)
+    var fx := p.x - x0; var fy := p.y - y0; var fz := p.z - z0
+    var c00 := lerpf(_fg(x0,y0,z0),   _fg(x0+1,y0,z0),   fx)
+    var c10 := lerpf(_fg(x0,y0+1,z0), _fg(x0+1,y0+1,z0), fx)
+    var c01 := lerpf(_fg(x0,y0,z0+1), _fg(x0+1,y0,z0+1), fx)
+    var c11 := lerpf(_fg(x0,y0+1,z0+1),_fg(x0+1,y0+1,z0+1),fx)
+    return lerpf(lerpf(c00,c10,fy), lerpf(c01,c11,fy), fz)
+func _fgrad(p: Vector3) -> Vector3:
+    return Vector3(_fval(p+Vector3(1,0,0))-_fval(p-Vector3(1,0,0)),
+                   _fval(p+Vector3(0,1,0))-_fval(p-Vector3(0,1,0)),
+                   _fval(p+Vector3(0,0,1))-_fval(p-Vector3(0,0,1)))
+
+# Winding consistency: every triangle's geometric normal must point the SAME way
+# relative to the field gradient (Godot's convention here is geom-normal anti-parallel
+# to the outward +SDF gradient). A triangle wound the other way is a back-face -> culled
+# -> the see-through artifact. Counts the minority (reversed) triangles, on the 2-level
+# clipmap where geomorph's gradient() change is in play.
+func test_winding_consistency_2level():
+    _fine = _bake_lod(WORLD_ORIGIN, 0)
+    var coarse := _bake_lod(WORLD_ORIGIN + Vector3i(-16, -16, -16), 1)
+    var center := Vector3(16, 16, 16)
+    var arrays := DCOctreeMesher.new().mesh_clipmap(
+            [_fine, coarse], DIM,
+            PackedVector3Array([Vector3.ZERO, Vector3(-16, -16, -16)]),
+            PackedFloat32Array([1.0, 2.0]), center, 8.0, DEPTH)
+    var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+    var idx:   PackedInt32Array   = arrays[Mesh.ARRAY_INDEX]
+    var pos := 0; var neg := 0; var reversed_at_boundary := 0
+    for i in range(0, idx.size(), 3):
+        var a := verts[idx[i]]; var b := verts[idx[i+1]]; var c := verts[idx[i+2]]
+        var gn := (b-a).cross(c-a)
+        if gn.length() < 1e-5: continue
+        var ctr := (a+b+c)/3.0
+        var g := _fgrad(ctr)
+        if g.length() < 1e-6: continue
+        var s := gn.normalized().dot(g.normalized())
+        if s > 0.0: pos += 1
+        else: neg += 1
+    # Majority is the correct convention; minority = reversed. Re-scan to locate the minority.
+    var minority_is_pos := pos < neg
+    for i in range(0, idx.size(), 3):
+        var a := verts[idx[i]]; var b := verts[idx[i+1]]; var c := verts[idx[i+2]]
+        var gn := (b-a).cross(c-a)
+        if gn.length() < 1e-5: continue
+        var ctr := (a+b+c)/3.0
+        var g := _fgrad(ctr)
+        if g.length() < 1e-6: continue
+        var s := gn.normalized().dot(g.normalized())
+        if (s > 0.0) == minority_is_pos:
+            var cheb: float = maxf(maxf(absf(ctr.x-center.x), absf(ctr.y-center.y)), absf(ctr.z-center.z))
+            if absf(cheb - 8.0) < 2.0: reversed_at_boundary += 1
+    gut.p("--- winding: %d vs %d (minority=reversed=%d); reversed within 2.0 of LOD boundary=%d ---" % [pos, neg, mini(pos,neg), reversed_at_boundary])
+    assert_eq(mini(pos, neg), 0, "reversed-winding (back-face/see-through) triangles — was 2 at the LOD seam before per-triangle flip")

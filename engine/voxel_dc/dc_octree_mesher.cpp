@@ -318,24 +318,25 @@ struct Octree {
 		return true;
 	}
 
-	void emit_poly(const int ring[], int rc, const Vector3 &outward) {
-		Vector3 p0 = verts[ring[0]], p1 = verts[ring[1]], p2 = verts[ring[2]];
-		// Godot CW-from-front: reverse when the right-hand normal points outward.
-		bool flip = (p1 - p0).cross(p2 - p0).dot(outward) >= 0.0;
-		if (rc == 3) {
-			if (flip) {
-				indices.push_back(ring[0]); indices.push_back(ring[2]); indices.push_back(ring[1]);
-			} else {
-				indices.push_back(ring[0]); indices.push_back(ring[1]); indices.push_back(ring[2]);
-			}
+	// Emit one triangle wound so its front face points `outward` (Godot is CW-from-front,
+	// so reverse when the right-hand normal already points outward).
+	void emit_tri(int i0, int i1, int i2, const Vector3 &outward) {
+		Vector3 n = (verts[i1] - verts[i0]).cross(verts[i2] - verts[i0]);
+		if (n.dot(outward) >= 0.0) {
+			indices.push_back(i0); indices.push_back(i2); indices.push_back(i1);
 		} else {
-			if (flip) {
-				indices.push_back(ring[0]); indices.push_back(ring[2]); indices.push_back(ring[1]);
-				indices.push_back(ring[0]); indices.push_back(ring[3]); indices.push_back(ring[2]);
-			} else {
-				indices.push_back(ring[0]); indices.push_back(ring[1]); indices.push_back(ring[2]);
-				indices.push_back(ring[0]); indices.push_back(ring[2]); indices.push_back(ring[3]);
-			}
+			indices.push_back(i0); indices.push_back(i1); indices.push_back(i2);
+		}
+	}
+
+	// Decide winding PER TRIANGLE, not once for the whole quad: a quad spanning a LOD
+	// size jump is non-planar, so a single flip decision leaves one of its two triangles
+	// back-facing — a culled, see-through gap. Orienting each triangle to `outward`
+	// independently keeps the surface consistently wound across the seam.
+	void emit_poly(const int ring[], int rc, const Vector3 &outward) {
+		emit_tri(ring[0], ring[1], ring[2], outward);
+		if (rc == 4) {
+			emit_tri(ring[0], ring[2], ring[3], outward);
 		}
 	}
 
