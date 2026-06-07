@@ -30,6 +30,7 @@ var size:     float
 var children: Array[VoxelOctree] = []   # 8 when internal; empty when leaf-or-unwritten
 var corners:  PackedFloat32Array        # 8 corner SDF values; empty = unwritten
 var material: int = 0
+var vertex:   int = -1                  # mesh-vertex index (set by OctreeMesher)
 
 
 func _init(p_origin := Vector3.ZERO, p_size := 1.0) -> void:
@@ -82,6 +83,17 @@ func leaf_count() -> int:
             n += ch.leaf_count()
         return n
     return 0 if corners.is_empty() else 1
+
+
+# The written leaf containing world point `p`, or null if `p` is outside / unwritten.
+func find_leaf(p: Vector3) -> VoxelOctree:
+    if p.x < origin.x or p.y < origin.y or p.z < origin.z:
+        return null
+    if p.x >= origin.x + size or p.y >= origin.y + size or p.z >= origin.z + size:
+        return null
+    if not children.is_empty():
+        return children[_child_index(p)].find_leaf(p)
+    return self if not corners.is_empty() else null
 
 
 # Append every written leaf (fine surface leaves and bulk uniform leaves) to `out`.
