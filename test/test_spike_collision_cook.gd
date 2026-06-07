@@ -73,3 +73,6 @@ func test_cook_cost_16():
 
 func test_cook_cost_32():
     _measure(32)
+
+func test_cook_cost_64():
+    _measure(64)   # coherent player region size for VISION #2 (covers ~24m aim reach)
