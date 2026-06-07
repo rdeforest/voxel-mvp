@@ -74,6 +74,42 @@ func test_meshes_watertight() -> void:
     assert_lt(worst, 0.5, "hugs the sphere")
 
 
+func _boundary(m: Array) -> int:
+    var idx: PackedInt32Array = m[Mesh.ARRAY_INDEX]
+    var counts := {}
+    for i in range(0, idx.size(), 3):
+        for e in [[idx[i], idx[i + 1]], [idx[i + 1], idx[i + 2]], [idx[i + 2], idx[i]]]:
+            var k := Vector2i(mini(e[0], e[1]), maxi(e[0], e[1]))
+            counts[k] = counts.get(k, 0) + 1
+    var b := 0
+    for k in counts:
+        if counts[k] == 1:
+            b += 1
+    return b
+
+
+func test_stamp_union_watertight() -> void:
+    var t := SparseVoxelOctree.new()
+    t.setup(Vector3.ZERO, ROOT)
+    t.imprint_sphere(Vector3(8, 8, 8), 4.0, 0.5, 1)
+    t.stamp_sphere(Vector3(11, 8, 8), 2.0, 0.5, 2, 0)        # 0 = UNION
+    assert_lt(t.sample(Vector3(8, 8, 8)), 0.0, "A still solid")
+    assert_eq(t.material_at(Vector3(8, 8, 8)), 1, "A keeps material")
+    assert_lt(t.sample(Vector3(12.5, 8, 8)), 0.0, "B added")
+    assert_eq(t.material_at(Vector3(12.5, 8, 8)), 2, "B wears stamp material")
+    assert_eq(_boundary(t.mesh()), 0, "merged blob watertight")
+
+
+func test_stamp_subtract_watertight() -> void:
+    var t := SparseVoxelOctree.new()
+    t.setup(Vector3.ZERO, ROOT)
+    t.imprint_sphere(Vector3(8, 8, 8), 4.0, 0.5, 1)
+    t.stamp_sphere(Vector3(8, 8, 8), 1.5, 0.5, 0, 1)         # 1 = SUBTRACT
+    assert_gt(t.sample(Vector3(8, 8, 8)), 0.0, "carved core is air")
+    assert_lt(t.sample(Vector3(5.5, 8, 8)), 0.0, "shell stays solid")
+    assert_eq(_boundary(t.mesh()), 0, "shell + cavity watertight")
+
+
 func test_box_imprint() -> void:
     var t := SparseVoxelOctree.new()
     t.setup(Vector3.ZERO, ROOT)

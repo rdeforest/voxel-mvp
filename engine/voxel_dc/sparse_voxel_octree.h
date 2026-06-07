@@ -23,6 +23,13 @@ public:
 	void imprint_sphere(Vector3 center, double radius, double min_leaf, int material);
 	void imprint_box(Vector3 center, Vector3 size, double min_leaf, int material);
 
+	// Combine a brush into the EXISTING field in place: op 0 = UNION (add solid),
+	// 1 = SUBTRACT (carve). Existing leaves keep their corners (just combined); coarse
+	// leaves subdivide (inheriting the parent field) only where the brush adds detail.
+	void stamp_sphere(Vector3 center, double radius, double min_leaf, int material, int op);
+	void stamp_box(Vector3 center, Vector3 size, double min_leaf, int material, int op);
+	void stamp(const voxel_dc::Field &f, double min_leaf, int material, int op);
+
 	double sample(Vector3 p) const; // SDF; large positive (EMPTY) where unwritten
 	int material_at(Vector3 p) const;
 	int leaf_count() const; // written leaves — the storage measure
@@ -58,6 +65,8 @@ private:
 
 	int _new_node(const Vector3 &o, double s);
 	void _imprint_node(int idx, const voxel_dc::Field &f, double min_leaf, int material);
+	void _stamp_node(int idx, const voxel_dc::Field &f, double min_leaf, int material, int op);
+	void _subdivide_inherit(int idx);
 	int _leaf_at(const Vector3 &p) const;       // assumes p in root
 	int _find_leaf(const Vector3 &p) const;      // bounds-checked; -1 outside root
 	int _child_index(int idx, const Vector3 &p) const;
