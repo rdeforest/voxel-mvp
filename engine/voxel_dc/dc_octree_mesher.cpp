@@ -75,17 +75,33 @@ struct Clipmap {
 		return n - 1;
 	}
 
+	// Geomorphed sample: blend level k into level k+1 across the OUTER HALF of level k's
+	// band, so the field is CONTINUOUS across every LOD boundary (at the boundary the
+	// blend equals level k+1, which is exactly what the next band uses at its inner edge).
+	// A hard level switch steps the surface where the coarse mip drops detail the fine
+	// level has, and the crack-free stitch bridges that step with near-vertical slivers;
+	// blending removes the step. Still single-valued in position -> still crack-free.
 	double value(const Vector3 &p) const {
-		return levels[level_index(p)].at(p);
+		int k = level_index(p);
+		double v = levels[k].at(p);
+		if (k + 1 < int(levels.size())) {
+			double d = MAX(Math::abs(p.x - center.x), MAX(Math::abs(p.y - center.y), Math::abs(p.z - center.z)));
+			double boundary = half0 * double(1 << k);
+			double inner = boundary * 0.5; // band is (boundary/2, boundary]
+			if (d > inner) {
+				double t = CLAMP((d - inner) / (boundary - inner), 0.0, 1.0);
+				v = Math::lerp(v, levels[k + 1].at(p), t);
+			}
+		}
+		return v;
 	}
 
 	Vector3 gradient(const Vector3 &p) const {
-		const Level &L = levels[level_index(p)];
-		double h = L.cell;
+		double h = double(1 << level_index(p)); // local cell size
 		Vector3 g(
-				L.at(p + Vector3(h, 0, 0)) - L.at(p - Vector3(h, 0, 0)),
-				L.at(p + Vector3(0, h, 0)) - L.at(p - Vector3(0, h, 0)),
-				L.at(p + Vector3(0, 0, h)) - L.at(p - Vector3(0, 0, h)));
+				value(p + Vector3(h, 0, 0)) - value(p - Vector3(h, 0, 0)),
+				value(p + Vector3(0, h, 0)) - value(p - Vector3(0, h, 0)),
+				value(p + Vector3(0, 0, h)) - value(p - Vector3(0, 0, h)));
 		return g.length_squared() > 0.0 ? g.normalized() : Vector3(0, 1, 0);
 	}
 

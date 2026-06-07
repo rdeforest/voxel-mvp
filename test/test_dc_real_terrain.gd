@@ -77,3 +77,54 @@ func test_cpp_mesher_sound_on_real_terrain():
     var audit := _crack_audit(verts, idx)
     assert_eq(audit["nonmanifold"], 0, "non-manifold edges")
     assert_eq(audit["interior"], 0, "interior boundary edges (cracks)")
+
+
+func _bake_lod(origin: Vector3i, lod: int) -> PackedFloat32Array:
+    var buf := VoxelBuffer.new()
+    buf.create(DIM, DIM, DIM)
+    _generator().generate_block(buf, Vector3(origin), lod)
+    var data := PackedFloat32Array()
+    data.resize(DIM * DIM * DIM)
+    var i := 0
+    for z in DIM:
+        for y in DIM:
+            for x in DIM:
+                data[i] = buf.get_voxel_f(x, y, z, VoxelBuffer.CHANNEL_SDF)
+                i += 1
+    return data
+
+
+# Two-level clipmap on real terrain. The coarse LOD-1 mip drops high-frequency detail
+# the fine LOD-0 level has, so the two surfaces sit at different heights at the level
+# boundary. A hard level switch stepped the surface there and the crack-free stitch
+# bridged the step with near-vertical slivers — thin tilted triangles the grass shader
+# painted as dirt (the dark-flap artifact). Geomorph (Clipmap::value blends the levels
+# continuously across the band) removes the step. Guard: no surface-tilted high-aspect
+# triangles straddling the boundary.
+func test_no_lod_boundary_slivers():
+    var center := Vector3(16, 16, 16)        # surface ~lattice y 16; boundary shell at cheb 8
+    var arrays := DCOctreeMesher.new().mesh_clipmap(
+            [_bake_lod(WORLD_ORIGIN, 0), _bake_lod(WORLD_ORIGIN + Vector3i(-16, -16, -16), 1)], DIM,
+            PackedVector3Array([Vector3.ZERO, Vector3(-16, -16, -16)]),
+            PackedFloat32Array([1.0, 2.0]), center, 8.0, DEPTH)
+    var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+    var norms: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+    var idx:   PackedInt32Array   = arrays[Mesh.ARRAY_INDEX]
+    var boundary_slivers := 0
+    for i in range(0, idx.size(), 3):
+        var a := verts[idx[i]]; var b := verts[idx[i + 1]]; var c := verts[idx[i + 2]]
+        var cross := (b - a).cross(c - a)
+        var area := cross.length() * 0.5
+        if area < 1e-3:
+            continue                          # zero-area degenerates are invisible, separate issue
+        var le: float = maxf(maxf((b - a).length(), (c - b).length()), (a - c).length())
+        var vn := norms[idx[i]] + norms[idx[i + 1]] + norms[idx[i + 2]]
+        var dev := 0.0
+        if vn.length() > 1e-6:
+            dev = rad_to_deg(acos(clampf(absf(cross.normalized().dot(vn.normalized())), 0.0, 1.0)))
+        if le * le / area > 80.0 or dev > 35.0:
+            var ctr := (a + b + c) / 3.0
+            var cheb: float = maxf(maxf(absf(ctr.x - center.x), absf(ctr.y - center.y)), absf(ctr.z - center.z))
+            if absf(cheb - 8.0) < 1.5:
+                boundary_slivers += 1
+    assert_lte(boundary_slivers, 1, "near-vertical slivers straddling the LOD boundary (geomorph regression)")

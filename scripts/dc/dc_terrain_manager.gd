@@ -218,6 +218,9 @@ func _finish() -> void:
     if _job_arrays.is_empty():
         _mesh_instance.mesh = null
         return
+    if _audit_once:
+        _audit_once = false
+        _audit(_job_arrays, _job_origin)
     var mesh := ArrayMesh.new()
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _job_arrays)
     _mesh_instance.mesh = mesh
@@ -229,6 +232,47 @@ func _finish() -> void:
         var verts: int = (_job_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
         print("DC clipmap: %d verts — read %d ms (main), mesh %d ms (worker)" % [
             verts, _job_read_ms, Time.get_ticks_msec() - _job_t0])
+
+
+# --- Debug audit: scan the ACTUAL built mesh for bad triangles (dcaudit console cmd) ---
+# Reports degenerate (zero-area), sliver (high aspect), and tilted (facet normal far from
+# its vertices' normals = a steep facet the grass shader paints dirt) triangles, in world
+# coords, so a live anomaly can be located exactly. One-shot per dcaudit call.
+var _audit_once := false
+
+func audit_next_mesh() -> void:
+    _audit_once = true
+    remesh()
+
+func _audit(arrays: Array, origin: Vector3i) -> void:
+    var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+    var norms: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+    var idx:   PackedInt32Array   = arrays[Mesh.ARRAY_INDEX]
+    var o := Vector3(origin)
+    var bad: Array = []
+    for i in range(0, idx.size(), 3):
+        var a := verts[idx[i]]; var b := verts[idx[i + 1]]; var c := verts[idx[i + 2]]
+        var cross := (b - a).cross(c - a)
+        var area := cross.length() * 0.5
+        var le: float = maxf(maxf((b - a).length(), (c - b).length()), (a - c).length())
+        var aspect := le * le / maxf(area, 1e-9)
+        var dev := 0.0
+        if area > 1e-6:
+            var vn := (norms[idx[i]] + norms[idx[i + 1]] + norms[idx[i + 2]])
+            if vn.length() > 1e-6:
+                dev = rad_to_deg(acos(clampf(absf(cross.normalized().dot(vn.normalized())), 0.0, 1.0)))
+        var degenerate := area < 1e-3
+        var sliver := aspect > 80.0
+        var tilted := dev > 35.0 and area >= 1e-3
+        if degenerate or sliver or tilted:
+            bad.append({"w": (a + b + c) / 3.0 + o, "area": area, "aspect": aspect, "dev": dev,
+                "tag": ("degen" if degenerate else "sliver" if sliver else "tilted")})
+    bad.sort_custom(func(x, y): return x["dev"] + (200.0 if x["aspect"] > 80 else 0.0) > y["dev"] + (200.0 if y["aspect"] > 80 else 0.0))
+    print("dcaudit: %d suspect triangles of %d (origin %s)" % [bad.size(), idx.size() / 3, str(origin)])
+    for i in mini(15, bad.size()):
+        var t = bad[i]
+        print("  [%s] world=%s  area=%.4f aspect=%.1f facet_vs_normals=%.1f deg" % [
+            t["tag"], str(t["w"]), t["area"], t["aspect"], t["dev"]])
 
 
 func _exit_tree() -> void:
