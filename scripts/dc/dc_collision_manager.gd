@@ -21,6 +21,8 @@ const COOK_BUDGET := 8           # tiles cooked per physics tick (each ~0.004 ms
 const LOOKAHEAD   := 0.25        # seconds of velocity to pre-cook ahead of a body
 const BODY_MARGIN := 1.5         # extra m around a body's point when gathering tiles
 const DWELL       := 1.0         # seconds an unused tile lingers before eviction
+const AIM_REACH   := 24.0        # collision must exist where the player aims (raycast targeting)
+const AIM_STEP    := 6.0         # sample spacing along the aim ray
 
 var _terrain: VoxelLodTerrain
 var _player:  CharacterBody3D
@@ -67,10 +69,26 @@ func _physics_process(delta: float) -> void:
 # --- Tile selection: the union of every active body's swept neighbourhood ---
 
 func _needed_tiles() -> Dictionary:
-    var set := {}
+    var tiles := {}
     for body in _active_bodies():
-        _add_tiles_for_aabb(_swept_aabb(body), set)
-    return set
+        _add_tiles_for_aabb(_swept_aabb(body), tiles)
+    _add_aim_ray_tiles(tiles)   # collision where the player AIMS — raycast targeting (dig/probe/build)
+    return tiles
+
+# The dig/probe/build raycast hits physics collision, so terrain the player can aim
+# at must have cooked tiles even if no body is standing there. Walk the camera ray
+# out to interaction reach.
+func _add_aim_ray_tiles(tiles: Dictionary) -> void:
+    var cam := get_viewport().get_camera_3d()
+    if cam == null:
+        return
+    var origin := cam.global_position
+    var dir := -cam.global_transform.basis.z
+    var t := 0.0
+    while t <= AIM_REACH:
+        var p := origin + dir * t
+        _add_tiles_for_aabb(AABB(p - Vector3.ONE * BODY_MARGIN, Vector3.ONE * BODY_MARGIN * 2.0), tiles)
+        t += AIM_STEP
 
 func _active_bodies() -> Array:
     var bodies: Array = []
@@ -94,13 +112,13 @@ func _swept_aabb(body: Node3D) -> AABB:
     var hi := pos.max(ahead) + Vector3.ONE * BODY_MARGIN
     return AABB(lo, hi - lo)
 
-func _add_tiles_for_aabb(aabb: AABB, set: Dictionary) -> void:
+func _add_tiles_for_aabb(aabb: AABB, tiles: Dictionary) -> void:
     var lo := (aabb.position / float(TILE)).floor()
     var hi := ((aabb.position + aabb.size) / float(TILE)).floor()
     for x in range(int(lo.x), int(hi.x) + 1):
         for y in range(int(lo.y), int(hi.y) + 1):
             for z in range(int(lo.z), int(hi.z) + 1):
-                set[Vector3i(x, y, z)] = true
+                tiles[Vector3i(x, y, z)] = true
 
 func _age_and_evict(needed: Dictionary, delta: float) -> void:
     var evict: Array = []
