@@ -55,7 +55,15 @@ func _physics_process(delta: float) -> void:
     var active := _active_bodies()   # player first
     var cooked := 0
     for body in active:
-        var size := PLAYER_REGION if body == _player else DEBRIS_REGION
+        var is_player: bool = body == _player
+        # A debris already inside another region (usually the player's) needs no
+        # region of its own — two coincident collision meshes under one body make it
+        # jitter and never sleep.
+        if not is_player and _covered_by_other(body):
+            if _regions.has(body):
+                _free_region(body)
+            continue
+        var size := PLAYER_REGION if is_player else DEBRIS_REGION
         var rec: Variant = _regions.get(body)
         var needs := rec == null
         if not needs:
@@ -69,6 +77,16 @@ func _physics_process(delta: float) -> void:
     _evict_stale(active, delta)
     Perf.report("DC collision (%d regions)" % _regions.size(), (Time.get_ticks_usec() - t0) / 1000.0)
 
+
+func _covered_by_other(body: Node3D) -> bool:
+    var p := body.global_position
+    for other in _regions:
+        if other == body:
+            continue
+        var r: Dictionary = _regions[other]
+        if AABB(Vector3(r["origin"]), Vector3.ONE * float(r["size"])).has_point(p):
+            return true
+    return false
 
 func _active_bodies() -> Array:
     var bodies: Array = []

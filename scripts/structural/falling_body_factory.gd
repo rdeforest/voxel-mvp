@@ -15,8 +15,11 @@ static func from_voxels(voxels: Array[Vector3i]) -> RigidBody3D:
     var boxes    := _greedy_merge(_set_of(voxels))
 
     var body := RigidBody3D.new()
-    body.position = centroid
-    body.mass     = float(voxels.size())
+    body.position      = centroid
+    body.mass          = float(voxels.size())
+    body.continuous_cd = true   # fast debris vs the (thick) cooked terrain shape
+    body.angular_damp  = 1.0    # settle on uneven terrain instead of rocking forever
+    body.linear_damp   = 0.1
     body.set_meta("cell_offsets", _cell_offsets(voxels, centroid))
 
     for box in boxes:

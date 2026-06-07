@@ -226,6 +226,8 @@ func collapse_part(node: Node3D) -> void:
     var body := RigidBody3D.new()
     body.mass          = mass
     body.continuous_cd = true
+    body.angular_damp  = 1.0    # settle instead of jittering on the terrain shape
+    body.linear_damp   = 0.1
     node.get_parent().add_child(body)
     body.global_transform = node.global_transform
     for child in node.get_children():
