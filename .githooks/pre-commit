@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#
+# Non-blocking style alert: flags over-long files/functions in staged .gd/.cpp/.h.
+# Pairs with the review-each-chunk discipline (the human review is the gate; this is
+# the safety net). Never blocks a commit; `git commit --no-verify` skips all hooks.
+#
+# Enabled via `git config core.hooksPath .githooks` (committed so it travels with the
+# repo; each clone runs that once — tools/build could set it, or do it by hand).
+
+root="$(git rev-parse --show-toplevel)"
+files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(gd|cpp|h)$' || true)
+[ -n "$files" ] && python3 "$root/tools/check-style" $files
+exit 0   # alert only — see the review-each-chunk standard

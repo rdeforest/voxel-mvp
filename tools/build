@@ -23,6 +23,11 @@ set -euo pipefail
 
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Wire the committed git hooks (non-blocking style alert) once per clone.
+if [ "$(git -C "${TOOLS_DIR}" config core.hooksPath || true)" != ".githooks" ]; then
+	git -C "${TOOLS_DIR}" config core.hooksPath .githooks
+fi
+
 # shellcheck source=/dev/null
 source "${TOOLS_DIR}/versions.env"
 # shellcheck source=/dev/null

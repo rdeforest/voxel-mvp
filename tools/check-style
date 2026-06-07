@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Style alert: flag over-long files and functions in GDScript / C++ sources.
+
+Pairs with the review-each-chunk discipline — this is the automated safety net, not
+the gate (the pre-commit hook prints but doesn't block; --no-verify bypasses anyway).
+
+Usage: tools/check-style [files...]   (no args -> all tracked .gd/.cpp/.h)
+Budgets are deliberately generous so the alert means "this is genuinely big", not noise.
+"""
+
+import re
+import subprocess
+import sys
+
+FILE_MAX = 350
+FUNC_MAX = 50
+
+CONTROL = {"if", "for", "while", "switch", "else", "do", "return", "catch", "sizeof"}
+NON_FUNC_HEAD = ("struct", "class", "namespace", "enum", "union", "typedef")
+
+
+def gd_functions(lines):
+    """(name, line, length) per GDScript function: body = blank-or-indented lines."""
+    out, i, n = [], 0, len(lines)
+    while i < n:
+        m = re.match(r"^(static\s+)?func\s+(\w+)", lines[i])
+        if not m:
+            i += 1
+            continue
+        j = i + 1
+        while j < n and (lines[j].strip() == "" or lines[j][:1] in " \t"):
+            j += 1
+        out.append((m.group(2), i + 1, j - i))
+        i = j
+    return out
+
+
+def _header_before(lines, brace_i):
+    """Signature text leading up to an opening brace, back to the prior statement."""
+    parts = []
+    for k in range(brace_i, max(-1, brace_i - 8), -1):
+        text = lines[k].split("//")[0]
+        parts.append(text)
+        if k != brace_i and re.search(r"[;{}]", text):
+            break
+    return " ".join(reversed(parts))
+
+
+def _is_function(header):
+    head = header.strip().lstrip("}").strip()
+    if "(" not in head or ")" not in head:
+        return False
+    first = re.match(r"(\w+)", head)
+    if first and (first.group(1) in CONTROL or head.startswith(NON_FUNC_HEAD)):
+        return False
+    return True
+
+
+def cpp_functions(lines):
+    """(name, line, length) per brace block whose header looks like a function."""
+    out, stack, n = [], [], len(lines)
+    for i in range(n):
+        for ch in lines[i].split("//")[0]:
+            if ch == "{":
+                stack.append((i, _header_before(lines, i)))
+            elif ch == "}" and stack:
+                open_i, header = stack.pop()
+                length = i - open_i + 1
+                if length <= FUNC_MAX or not _is_function(header):
+                    continue
+                m = re.search(r"(\w+)\s*\(", header)
+                name = m.group(1) if m else "?"
+                if name not in CONTROL:
+                    out.append((name, open_i + 1, length))
+    return out
+
+
+def check(path):
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    funcs = gd_functions(lines) if path.endswith(".gd") else cpp_functions(lines)
+    hits = []
+    if len(lines) > FILE_MAX:
+        hits.append(f"  {path}: FILE {len(lines)} lines (> {FILE_MAX})")
+    for name, line, length in funcs:
+        if length > FUNC_MAX:
+            hits.append(f"  {path}:{line}  {name}() {length} lines (> {FUNC_MAX})")
+    return hits
+
+
+def main(argv):
+    paths = argv or subprocess.run(
+        ["git", "ls-files", "*.gd", "*.cpp", "*.h"], capture_output=True, text=True
+    ).stdout.split()
+    paths = [p for p in paths if not p.startswith("addons/")]   # vendored third-party
+    hits = [h for p in paths for h in check(p)]
+    if hits:
+        print("\n\033[33mSTYLE ALERT\033[0m — over budget (review/refactor; not blocking):")
+        print("\n".join(hits))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
