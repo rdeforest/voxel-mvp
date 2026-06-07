@@ -24,6 +24,12 @@ public:
 	// origin = level_origins[k]; cell size = level_cells[k]. Clipmap centre
 	// `center`; level-0 half-extent `half0` (level k half-extent = half0 * 2^k).
 	// The octree root is the cube [0, 2^depth]^3.
+	// error_driven: refine by screen-space error instead of distance bands. A node
+	// stops subdividing (coarsens) once its QEF fit error, projected to screen, is
+	// below eps_px — so flat regions mesh coarse, detail stays fine. camera is the
+	// viewpoint in lattice space; proj = viewport_height / (2*tan(fov/2)) (so screen
+	// error = world_error * proj / distance). The data resolution (clipmap level) is
+	// still the floor — error-refine only coarsens, never exceeds available data.
 	Array mesh_clipmap(
 			const TypedArray<PackedFloat32Array> &level_data,
 			int dim,
@@ -31,7 +37,11 @@ public:
 			const PackedFloat32Array &level_cells,
 			Vector3 center,
 			double half0,
-			int depth);
+			int depth,
+			Vector3 camera = Vector3(),
+			double proj = 0.0,
+			double eps_px = 0.0,
+			bool error_driven = false);
 
 protected:
 	static void _bind_methods();

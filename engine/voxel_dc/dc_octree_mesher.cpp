@@ -110,10 +110,40 @@ struct Octree {
 	Clipmap clip;
 	int root_size = 0;
 	int max_depth = 0;
+	Vector3 camera;          // viewpoint in lattice space (error-driven refine)
+	double proj = 0.0;       // viewport_height / (2*tan(fov/2))
+	double eps_px = 0.0;     // screen-space error threshold (px)
+	bool error_driven = false;
 	LocalVector<Cell> cells;
 	PackedVector3Array verts;
 	PackedVector3Array normals;
 	PackedInt32Array indices;
+
+	// RMS QEF fit error of one vertex for the surface crossing this node's cube, in
+	// world units; -1 if the node has no surface crossing. The error-driven LOD signal.
+	double node_error(const Vector3i &o, int s) const {
+		Qef qef;
+		for (int e = 0; e < 12; ++e) {
+			const int *pa = CORNER[EDGES[e][0]];
+			const int *pb = CORNER[EDGES[e][1]];
+			Vector3i ca = o + Vector3i(pa[0], pa[1], pa[2]) * s;
+			Vector3i cb = o + Vector3i(pb[0], pb[1], pb[2]) * s;
+			double fa = clip.value(to_v3(ca));
+			double fb = clip.value(to_v3(cb));
+			if ((fa < 0.0) == (fb < 0.0) || fa == fb) {
+				continue;
+			}
+			double t = fa / (fa - fb);
+			Vector3 p = to_v3(ca).lerp(to_v3(cb), t);
+			qef.add_plane(p, clip.gradient(p));
+		}
+		if (qef.count == 0) {
+			return -1.0;
+		}
+		Vector3 cmin = to_v3(o);
+		Vector3 cmax = cmin + Vector3(1, 1, 1) * double(s);
+		return Math::sqrt(qef.residual(qef.solve(cmin, cmax)) / double(qef.count));
+	}
 
 	int build(const Vector3i &origin, int size, int depth) {
 		int idx = int(cells.size());
@@ -130,7 +160,19 @@ struct Octree {
 		}
 		Vector3 center = to_v3(origin) + Vector3(1, 1, 1) * (size * 0.5);
 		if (double(size) <= clip.target_cell_size(center)) {
-			return idx;
+			return idx; // at the data resolution floor — can't refine further
+		}
+		// Error-driven: stop (coarsen) once one vertex represents the surface here to
+		// within eps_px on screen. Nodes with no crossing fall through to distance
+		// behaviour (subdivide to the data floor) so sub-cell features aren't missed.
+		if (error_driven) {
+			double we = node_error(origin, size);
+			if (we >= 0.0) {
+				double dist = MAX((center - camera).length(), 1e-3);
+				if (we * proj / dist <= eps_px) {
+					return idx;
+				}
+			}
 		}
 		int half = size >> 1;
 		cells[idx].leaf = false; // index-access only; cells may reallocate during recursion
@@ -328,7 +370,11 @@ Array DCOctreeMesher::mesh_clipmap(
 		const PackedFloat32Array &level_cells,
 		Vector3 center,
 		double half0,
-		int depth) {
+		int depth,
+		Vector3 camera,
+		double proj,
+		double eps_px,
+		bool error_driven) {
 	Array out;
 	const int n = level_data.size();
 	if (n == 0 || dim < 2 || level_origins.size() != n || level_cells.size() != n || depth < 1) {
@@ -344,6 +390,10 @@ Array DCOctreeMesher::mesh_clipmap(
 	Octree oct;
 	oct.root_size = 1 << depth;
 	oct.max_depth = depth;
+	oct.camera = camera;
+	oct.proj = proj;
+	oct.eps_px = eps_px;
+	oct.error_driven = error_driven;
 	oct.clip.center = center;
 	oct.clip.half0 = half0;
 	oct.clip.levels.resize(n);
@@ -375,6 +425,8 @@ Array DCOctreeMesher::mesh_clipmap(
 
 void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(
-			D_METHOD("mesh_clipmap", "level_data", "dim", "level_origins", "level_cells", "center", "half0", "depth"),
-			&DCOctreeMesher::mesh_clipmap);
+			D_METHOD("mesh_clipmap", "level_data", "dim", "level_origins", "level_cells", "center", "half0", "depth",
+					"camera", "proj", "eps_px", "error_driven"),
+			&DCOctreeMesher::mesh_clipmap,
+			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false));
 }

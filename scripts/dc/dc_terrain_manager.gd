@@ -51,6 +51,13 @@ var _job_t0 := 0
 # the manager is enabled, which is opt-in, so it's quiet in normal play.
 var log_timings := true
 
+# Error-driven LOD: refine by screen-space error (~eps_px) instead of distance bands.
+# Default OFF — the top-down corner-QEF metric over-coarsens (undersamples curvature,
+# holes flat regions); a bottom-up measured-error approach is the redesign. `dcerror`
+# toggles it on to experiment.
+var error_driven := false
+var eps_px := 1.0
+
 
 func setup(terrain: VoxelLodTerrain, follow: Node3D) -> void:
     _terrain = terrain
@@ -82,6 +89,10 @@ func set_enabled(on: bool) -> void:
 
 func is_enabled() -> bool:
     return _enabled
+
+# Force a re-mesh on the next tick (after a live LOD-param change).
+func remesh() -> void:
+    _last_center = Vector3.INF
 
 
 # Data-only mode: hide godot_voxel's own render (render_layers_mask = 0) so our DC
@@ -173,17 +184,28 @@ func _dispatch(center: Vector3) -> void:
     _job_arrays  = []
     _last_center = center
     var half0 := float(_LEVEL_CELLS) * 0.5
+    # Capture the camera (main thread) for error-driven LOD: viewpoint in lattice
+    # space + the perspective projection factor (px per world unit at unit distance).
+    var camera_lattice := center_lattice
+    var proj := 0.0
+    var cam := get_viewport().get_camera_3d()
+    if cam != null:
+        camera_lattice = cam.global_position - Vector3(root_origin)
+        var vp_h := float(get_viewport().get_visible_rect().size.y)
+        proj = vp_h / (2.0 * tan(deg_to_rad(cam.fov) * 0.5))
     _task_id = WorkerThreadPool.add_task(
-        _mesh_job.bind(level_data, level_origins, level_cells, center_lattice, half0), false, "DC terrain mesh")
+        _mesh_job.bind(level_data, level_origins, level_cells, center_lattice, half0,
+            camera_lattice, proj, eps_px, error_driven), false, "DC terrain mesh")
 
 
 # Runs on a worker thread: the C++ DCOctreeMesher builds + meshes one octree over
 # the clipmap. Pure computation over immutable PackedArrays — safe off the main
 # thread (no Node / engine access).
 func _mesh_job(level_data: Array, level_origins: PackedVector3Array, level_cells: PackedFloat32Array,
-        center: Vector3, half0: float) -> void:
+        center: Vector3, half0: float, camera: Vector3, proj: float, eps: float, err: bool) -> void:
     _job_arrays = DCOctreeMesher.new().mesh_clipmap(
-        level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH)
+        level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH,
+        camera, proj, eps, err)
 
 
 func _finish() -> void:

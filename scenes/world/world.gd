@@ -112,6 +112,8 @@ func _console_commands() -> Array:
         [_cmd_vdebug,    "vdebug",    "Toggle a VoxelLodTerrain debug overlay. Usage: vdebug [flag]; no arg lists flags."],
         [_cmd_dcmanager, "dcmanager", "Toggle the DC terrain manager (threaded re-mesh of a bubble around you). Usage: dcmanager [on|off]"],
         [_cmd_dcsolo,    "dcsolo",    "Data-only mode: hide godot_voxel's render so only our DC mesh shows (enables the manager). Usage: dcsolo [on|off]"],
+        [_cmd_dcerror,   "dcerror",   "Toggle error-driven terrain LOD (screen-space error vs distance bands). Usage: dcerror [on|off]"],
+        [_cmd_dceps,     "dceps",     "Set the error-driven LOD threshold in px (lower = more detail). Usage: dceps <px>"],
         [_cmd_pbddemo,   "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [_cmd_pbdlive,   "pbdlive",   "Toggle live PBD stress viz over your REAL structures (viz-only). Usage: pbdlive [on|off]"],
         [_cmd_perf,      "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
@@ -264,6 +266,17 @@ func _cmd_dcsolo(state := "") -> void:
         _dc_manager.set_enabled(true)
     _dc_manager.set_data_only(on)
     LimboConsole.info("dcsolo: %s (godot_voxel render %s)" % [("on" if on else "off"), ("hidden" if on else "shown")])
+
+func _cmd_dcerror(state := "") -> void:
+    var on := not _dc_manager.error_driven if state == "" else state == "on"
+    _dc_manager.error_driven = on
+    _dc_manager.remesh()
+    LimboConsole.info("dcerror: %s (eps %.2f px)" % [("on" if on else "off"), _dc_manager.eps_px])
+
+func _cmd_dceps(px: float) -> void:
+    _dc_manager.eps_px = maxf(0.01, px)
+    _dc_manager.remesh()
+    LimboConsole.info("dceps: %.2f px" % _dc_manager.eps_px)
 
 # Tune LOD pop-in live. lod_distance is the per-level switch distance; larger
 # pushes every LOD boundary farther out (finer detail at range, more blocks).

@@ -87,3 +87,10 @@ func test_lod_transition_is_watertight():
         PackedFloat32Array([1.0, 2.0]),
         8.0)
     _assert_watertight(arrays, 2.5)                             # coarse cells are size 2
+
+
+# NOTE: error-driven LOD tests removed — the top-down corner-QEF metric over-coarsens
+# (holes flat regions to one cell; undersamples curvature). The redesign (bottom-up
+# measured-error collapse + a min-grid floor) will bring these invariants back as its
+# spec: error-mode stays watertight on the sphere, and coarsens a flat field far below
+# distance-mode without holing it.

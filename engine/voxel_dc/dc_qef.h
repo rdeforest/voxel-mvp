@@ -17,6 +17,7 @@ struct Qef {
 	double a00 = 0, a01 = 0, a02 = 0, a11 = 0, a12 = 0, a22 = 0;
 	Vector3 atb;
 	Vector3 mass;
+	double btb = 0; // sum of d^2; lets us evaluate the residual at the solved vertex
 	int count = 0;
 
 	void add_plane(const Vector3 &p, const Vector3 &n_in) {
@@ -26,7 +27,16 @@ struct Qef {
 		a11 += n.y * n.y; a12 += n.y * n.z; a22 += n.z * n.z;
 		atb += n * d;
 		mass += p;
+		btb += d * d;
 		++count;
+	}
+
+	// Sum of squared distances from v to the crossing planes: ||A v - b||^2 =
+	// v·(A^T A)v - 2 v·(A^T b) + b·b. ~0 when one vertex fits the surface in the cell
+	// (flat or a clean edge/corner); large when the surface is too complex for one
+	// vertex — the geometric-error signal for adaptive LOD.
+	double residual(const Vector3 &v) const {
+		return MAX(0.0, v.dot(ata_mul(v)) - 2.0 * v.dot(atb) + btb);
 	}
 
 	Vector3 ata_mul(const Vector3 &v) const {
