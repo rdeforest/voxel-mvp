@@ -3,6 +3,7 @@ extends CharacterBody3D
 var _movement:         PlayerMovement
 var _camera_rig:       CameraRig
 var build_state:       BuildState
+var csg_state:         CsgState
 var action_factories:  ActionFactories
 var tool_catalog:      ToolCatalog
 var _grid_overlay:     Node3D
@@ -45,10 +46,12 @@ func _ready() -> void:
     _movement         = PlayerMovement.new(self, camera)
     _camera_rig       = CameraRig.new(self, $Head)
     build_state       = BuildState.new()
-    action_factories  = ActionFactories.new(self, terrain, integrity, camera, raycast, build_state)
-    tool_catalog      = ToolCatalog.new(action_factories, build_state)
+    csg_state         = CsgState.new()
+    action_factories  = ActionFactories.new(self, terrain, integrity, camera, raycast, build_state, csg_state)
+    tool_catalog      = ToolCatalog.new(action_factories, build_state, csg_state)
     _activity_indices.resize(tool_catalog.tools.size())   # all zero
     build_state.changed.connect(_update_mode_label)
+    csg_state.changed.connect(_update_mode_label)
 
     _grid_overlay = preload("res://scenes/player/voxel_grid_overlay.gd").new()
     _grid_overlay.raycast = raycast
@@ -80,10 +83,12 @@ func _ready() -> void:
         KEY_F:            _toggle_wireframe,
         KEY_X:            _toggle_fly,
         KEY_V:            _toggle_stress_viz,
-        KEY_M:            build_state.cycle_material,
-        KEY_R:            build_state.rotate_y,
-        KEY_T:            build_state.rotate_x,
-        KEY_Y:            build_state.rotate_z,
+        KEY_M:            _edit_cycle_material,
+        KEY_R:            _edit_rotate_y,
+        KEY_T:            _edit_rotate_x,
+        KEY_Y:            _edit_rotate_z,
+        KEY_C:            _csg_cycle_axis,
+        KEY_B:            _csg_toggle_op,
         KEY_BRACKETLEFT:  build_state.prev_part,
         KEY_BRACKETRIGHT: build_state.next_part,
         KEY_G:            _toggle_grid_overlay,
@@ -104,6 +109,7 @@ func _ready() -> void:
         MOUSE_BUTTON_LEFT: _try_edit_terrain,
     }
 
+    _sync_csg_shape()
     _update_mode_label()
 
 
@@ -154,8 +160,24 @@ func _on_mouse_button_pressed(event: InputEventMouseButton) -> void:
         return
     if _handle_placement_wheel(event):
         return
+    if _handle_csg_resize_wheel(event):
+        return
     if _mouse_button_actions.has(event.button_index):
         _mouse_button_actions[event.button_index].call()
+
+# Bare scroll-wheel (no Shift) grows/shrinks the active CSG axis. Shift+wheel is
+# claimed first by _handle_placement_wheel for the placement offset, so the two
+# don't collide.
+func _handle_csg_resize_wheel(event: InputEventMouseButton) -> bool:
+    if current_tool().name != "CSG" or Input.is_key_pressed(KEY_SHIFT):
+        return false
+    if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+        csg_state.grow(1.0)
+        return true
+    if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+        csg_state.grow(-1.0)
+        return true
+    return false
 
 # Returns true if the event was consumed as a placement-adjust wheel tick.
 func _handle_placement_wheel(event: InputEventMouseButton) -> bool:
@@ -233,6 +255,7 @@ func current_target() -> Aim:
 func _cycle_tool() -> void:
     tool_index = (tool_index + 1) % tool_catalog.tools.size()
     build_state.reset_offset()
+    _sync_csg_shape()
     _update_mode_label()
 
 func _select_activity(idx: int) -> void:
@@ -241,7 +264,41 @@ func _select_activity(idx: int) -> void:
         return
     _activity_indices[tool_index] = idx
     build_state.reset_offset()
+    _sync_csg_shape()
     _update_mode_label()
+
+
+# --- Editing-state routing (Construction uses BuildState, CSG uses CsgState) ---
+
+func _uses_csg() -> bool:
+    return current_tool().name == "CSG"
+
+func _edit_cycle_material() -> void:
+    csg_state.cycle_material() if _uses_csg() else build_state.cycle_material()
+
+func _edit_rotate_y() -> void:
+    csg_state.rotate_y() if _uses_csg() else build_state.rotate_y()
+
+func _edit_rotate_x() -> void:
+    csg_state.rotate_x() if _uses_csg() else build_state.rotate_x()
+
+func _edit_rotate_z() -> void:
+    csg_state.rotate_z() if _uses_csg() else build_state.rotate_z()
+
+func _csg_cycle_axis() -> void:
+    if _uses_csg():
+        csg_state.cycle_axis()
+
+func _csg_toggle_op() -> void:
+    if _uses_csg():
+        csg_state.toggle_op()
+
+# Keep the CSG state's active shape in step with the selected activity, so the
+# ghost, resize, and stamp all act on the shape the activity names.
+func _sync_csg_shape() -> void:
+    var a := current_activity()
+    if a != null and a.csg_shape >= 0:
+        csg_state.set_shape(a.csg_shape)
 
 func _update_mode_label() -> void:
     var lines: Array[String] = []
@@ -252,6 +309,13 @@ func _update_mode_label() -> void:
         lines.append("Part:     %s" % build_state.part_name())
         var r := build_state.rotation
         lines.append("Rotation: %d°, %d°, %d°" % [r.x, r.y, r.z])
+    if activity != null and t.name == "CSG":
+        lines.append("Size:     %s" % csg_state.resize_label())
+        lines.append("Resize:   %s   (wheel; C cycles)" % csg_state.active_axis_label())
+        lines.append("Material: %s" % csg_state.current_material())
+        var cr := csg_state.rotation
+        lines.append("Rotation: %d°, %d°, %d°" % [cr.x, cr.y, cr.z])
+        lines.append("Op:       %s   (B toggles)" % csg_state.op_label())
     if activity != null:
         lines.append("Activity: %s" % activity.mode_name)
     lines.append("Tool:     %s" % t.name)

@@ -10,15 +10,18 @@ extends RefCounted
 var tools: Array[Tool] = []
 
 
-func _init(action_factories: ActionFactories, build_state: BuildState) -> void:
-    tools = _build_catalog(action_factories, build_state)
+func _init(action_factories: ActionFactories, build_state: BuildState, csg_state: CsgState) -> void:
+    tools = _build_catalog(action_factories, build_state, csg_state)
 
 
-# Lambdas below close over the local `af`, `bs` and mesh/material vars
+# Lambdas below close over the local `af`, `bs`, `cs` and mesh/material vars
 # rather than over `self`. Capturing self would create a cycle that
 # prevents the RefCounted catalog from freeing when the player exits.
-func _build_catalog(af: ActionFactories, bs: BuildState) -> Array[Tool]:
+func _build_catalog(af: ActionFactories, bs: BuildState, cs: CsgState) -> Array[Tool]:
     var build_mat := _make_preview_material(Color(1.0, 1.0, 0.5, 0.4))
+    var csg_add   := _make_preview_material(Color(0.4, 1.0, 0.5, 0.35))   # green  — union
+    var csg_sub   := _make_preview_material(Color(1.0, 0.4, 0.35, 0.35))  # red    — difference
+    var csg_mat   := func(): return csg_add if cs.op == CsgState.Op.ADD else csg_sub
 
     var none_activities: Array[EditMode] = [
         EditMode.new()                                            \
@@ -117,12 +120,37 @@ func _build_catalog(af: ActionFactories, bs: BuildState) -> Array[Tool]:
             .preview_position(func( hp, _hn): return hp),
     ]
 
+    var csg_activities: Array[EditMode] = [
+        _csg_mode("Box",      CsgSdf.Shape.BOX,      af, cs, csg_mat),
+        _csg_mode("Cylinder", CsgSdf.Shape.CYLINDER, af, cs, csg_mat),
+        _csg_mode("Sphere",   CsgSdf.Shape.SPHERE,   af, cs, csg_mat),
+    ]
+
     return [
         Tool.new("None",         none_activities),
         Tool.new("Landscape",    landscape_activities),
         Tool.new("Construction", construction_activities),
         Tool.new("Assembly",     assembly_activities),
+        Tool.new("CSG",          csg_activities),
     ]
+
+
+# One CSG activity. The ghost is the live primitive mesh at the placement point,
+# rotated by the CSG basis, tinted by op (green add / red subtract), with an
+# arrow marking the axis the resize wheel currently grows. air_placement lets you
+# stamp an isolated shape in mid-air to audit the mesh against a clean field.
+static func _csg_mode(p_name: String, shape: int, af: ActionFactories, cs: CsgState, csg_mat: Callable) -> EditMode:
+    return EditMode.new()                                            \
+        .named(p_name)                                               \
+        .shape(shape)                                                \
+        .on_make_action(af.make_csg)                                 \
+        .preview_mesh(    func(_hp, _hn): return cs.current_mesh())  \
+        .preview_material(func(_hp, _hn): return csg_mat.call())     \
+        .preview_position(func( hp, _hn): return af.csg_placement_pos(hp))  \
+        .preview_basis(   func(_hp, _hn): return cs.rotation_basis())       \
+        .axis_arrow(      func():         return cs.axis_dir())             \
+        .air_placement(   true)                                            \
+        .placement_offset(true)
 
 
 static func _make_preview_material(color: Color) -> StandardMaterial3D:

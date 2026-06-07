@@ -13,6 +13,7 @@ var _integrity:   StructuralIntegrity
 var _camera:      Camera3D
 var _raycast:     RayCast3D
 var _build_state: BuildState
+var _csg_state:   CsgState
 var _pbd:         PbdStructure   # resolved lazily — created by world after the player
 
 
@@ -23,6 +24,7 @@ func _init(
     camera:      Camera3D,
     raycast:     RayCast3D,
     build_state: BuildState,
+    csg_state:   CsgState,
 ) -> void:
     _player      = player
     _terrain     = terrain
@@ -30,6 +32,7 @@ func _init(
     _camera      = camera
     _raycast     = raycast
     _build_state = build_state
+    _csg_state   = csg_state
 
 
 # --- Factories (one per EditMode) ---
@@ -95,6 +98,27 @@ func make_remove_snap(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
 func _proto_snap_points(node: Node3D) -> Array:
     var data := _integrity.get_part_data(node)
     return data.part.snap_points if data != null else []
+
+# One factory for all three CSG shapes — the active shape lives in CsgState
+# (synced from the selected activity). The primitive is centred at the hit point
+# plus the shared placement offset and rotated by the CSG rotation basis.
+func make_csg(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
+    var origin := csg_placement_pos(hit_pos)
+    var xform  := Transform3D(_csg_state.rotation_basis(), origin)
+    return CsgAction.new(
+        _csg_state.shape,
+        _csg_state.dims(),
+        xform,
+        _csg_state.op,
+        _csg_state.current_material(),
+        _terrain,
+        _player,
+    )
+
+# Shared by make_csg and the ghost preview so the stamp and the ghost agree.
+func csg_placement_pos(hit_pos: Vector3) -> Vector3:
+    return hit_pos + _build_state.placement_offset
+
 
 func make_construction(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
     var placement_pos := build_placement_pos(hit_pos)

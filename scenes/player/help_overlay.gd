@@ -15,9 +15,18 @@ const ROWS := [
     ["Shift",             "Walk in place (suppress movement) — chord modifier"],
 
     ["Tools"],
-    ["Tab",               "Cycle tool: None / Landscape / Construction / Assembly"],
+    ["Tab",               "Cycle tool: None / Landscape / Construction / Assembly / CSG"],
     ["1 – 9",             "Pick an activity within the current tool"],
     ["Left-click",        "Use the current activity"],
+
+    ["CSG  (CSG → Box / Cylinder / Sphere)"],
+    ["1 / 2 / 3",         "Box / Cylinder / Sphere"],
+    ["Wheel",             "Grow / shrink the active resize axis"],
+    ["C",                 "Cycle resize axis (X / Y / Z, or radius / height)"],
+    ["R / T / Y",         "Rotate around Y / X / Z (15° steps)"],
+    ["M",                 "Cycle material"],
+    ["B",                 "Toggle add / subtract"],
+    ["Shift+W/A/E + wheel", "Nudge placement: depth / left-right / up-down"],
 
     ["Build  (Construction → Build)"],
     ["[  /  ]",           "Previous / next part"],

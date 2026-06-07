@@ -7,9 +7,11 @@ var get_preview_mesh:     Callable
 var get_preview_material: Callable
 var get_preview_position: Callable
 var get_preview_basis:    Callable  # optional; (hit_pos, hit_normal) -> Basis
+var get_axis_arrow:       Callable  # optional; () -> Vector3 local-axis dir (ZERO = no arrow)
 var allows_air_placement: bool = false  # act at a fixed distance when aiming at nothing
 var uses_placement_offset: bool = false # Shift+W/A/E + wheel nudges the target
 var keep_offset_on_action: bool = false # don't reset the offset after acting (e.g. Probe)
+var csg_shape:            int  = -1     # CsgSdf.Shape for CSG activities; -1 = not a CSG mode
 
 func named(                p_name: String)   -> EditMode:
     mode_name            = p_name
@@ -33,6 +35,14 @@ func preview_position(     fn:     Callable) -> EditMode:
 
 func preview_basis(        fn:     Callable) -> EditMode:
     get_preview_basis    = fn
+    return self
+
+func axis_arrow(           fn:     Callable) -> EditMode:
+    get_axis_arrow       = fn
+    return self
+
+func shape(                p_shape: int)     -> EditMode:
+    csg_shape            = p_shape
     return self
 
 func air_placement(        enabled: bool)    -> EditMode:
