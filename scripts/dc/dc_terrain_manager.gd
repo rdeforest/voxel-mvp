@@ -207,13 +207,7 @@ func _dispatch(center: Vector3) -> void:
         var vp_h := float(get_viewport().get_visible_rect().size.y)
         proj = vp_h / (2.0 * tan(deg_to_rad(cam.fov) * 0.5))
     if dump_next:
-        dump_next = false
-        _dump_armed = true
-        _dump_dict = {
-            "level_data": level_data, "origins": level_origins, "cells": level_cells, "dim": LEVEL_DIM,
-            "center": center_lattice, "camera": camera_lattice, "half0": half0, "depth": _ROOT_DEPTH,
-            "proj": proj, "eps": eps_px, "err": error_driven, "root_origin": root_origin,
-        }
+        _arm_dump(level_data, level_origins, level_cells, center_lattice, camera_lattice, half0, proj, root_origin)
     _task_id = WorkerThreadPool.add_task(
         _mesh_job.bind(level_data, level_origins, level_cells, center_lattice, half0,
             camera_lattice, proj, eps_px, error_driven, root_origin,
@@ -234,6 +228,17 @@ func _mesh_job(level_data: Array, level_origins: PackedVector3Array, level_cells
 # Diagnostic (dcdump): write this dispatch's mesher INPUT (clipmap SDF + params) paired
 # with the OUTPUT mesh it produced, so the exact case can be replayed and audited
 # headlessly — and the displayed mesh inspected directly (Mesh.ARRAY_* arrays).
+func _arm_dump(level_data: Array, origins: PackedVector3Array, cells: PackedFloat32Array,
+        center: Vector3, camera: Vector3, half0: float, proj: float, root_origin: Vector3i) -> void:
+    dump_next = false
+    _dump_armed = true
+    _dump_dict = {
+        "level_data": level_data, "origins": origins, "cells": cells, "dim": LEVEL_DIM,
+        "center": center, "camera": camera, "half0": half0, "depth": _ROOT_DEPTH,
+        "proj": proj, "eps": eps_px, "err": error_driven, "root_origin": root_origin,
+    }
+
+
 func _dump_write() -> void:
     _dump_armed = false
     _dump_dict["mesh"] = _job_arrays
