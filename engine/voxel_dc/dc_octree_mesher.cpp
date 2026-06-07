@@ -96,10 +96,20 @@ struct Clipmap {
 	// A hard level switch steps the surface where the coarse mip drops detail the fine
 	// level has, and the crack-free stitch bridges that step with near-vertical slivers;
 	// blending removes the step. Still single-valued in position -> still crack-free.
+	//
+	// EXCEPT the finest level (k==0) is kept PURE: its blend factor depends on
+	// distance-from-camera, so blending coarse LOD1 data into the fine band makes a
+	// close object's field — and thus its mesh — change as the camera orbits it (the
+	// "< 10 m structure shifts with view angle" bug). The whole build region lives in
+	// level 0, so it must read pure fine data, identical from every angle. Geomorph
+	// still smooths the coarser, farther transitions (k>=1) where the camera-distance
+	// dependence isn't noticeable. (The proper fix — one fine field + error-collapse,
+	// no discrete LOD levels near the player — retires geomorph entirely; substrate
+	// Phase A. This keeps the finest band stable until then.)
 	double value(const Vector3 &p) const {
 		int k = level_index(p);
 		double v = levels[k].at(p);
-		if (k + 1 < int(levels.size())) {
+		if (k > 0 && k + 1 < int(levels.size())) {
 			double d = MAX(Math::abs(p.x - center.x), MAX(Math::abs(p.y - center.y), Math::abs(p.z - center.z)));
 			double boundary = half0 * double(1 << k);
 			double inner = boundary * 0.5; // band is (boundary/2, boundary]
