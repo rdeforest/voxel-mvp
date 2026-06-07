@@ -28,6 +28,27 @@ bin/godot --path . --headless -s addons/gut/gut_cmdln.gd -gdir=res://test/ -gsel
 
 Tests can also be run interactively from the GUT panel inside the editor.
 
+### Editor ↔ external-edit workflow (avoid the clobber)
+
+The Godot **editor GUI** and external edits (VS Code, Claude, the CLI) both write
+project files, and the editor wins on save: it re-saves any `.tscn` it has open and
+**silently reverts external `.tscn` edits**, regenerates `.import`/`.uid`/`.godot/`,
+and pops "files changed on disk" dialogs. This has already invalidated a play
+session (a `generate_collisions = false` edit was eaten → double collision →
+phantom "targeting bug"). Protocol:
+
+- **Keep the editor GUI closed during co-dev.** Run/test the game via VS Code's
+  godot-tools debug (F5, `--remote-debug` → output in the Debug Console) or
+  `bin/godot --path .` — neither needs the editor GUI open.
+- **Open the editor GUI only for deliberate visual scene work**, as an isolated
+  mode switch: commit/stash pending changes first; when done, close it and reload
+  any externally-changed files. Don't leave it open in the background.
+- **Prefer code over `.tscn`** for settings Claude/CLI set (e.g.
+  `generate_collisions` is set in `world._enter_tree`, not the scene) — `.gd` files
+  are edited in VS Code, outside the editor's save path, so they don't collide.
+- Claude's class-cache regen (`bin/godot --headless --editor --quit`, needed after
+  adding a `class_name`) writes `.godot/` — run it only with the editor GUI closed.
+
 ## Architecture
 
 This is a Godot 4.6 game built with **double-precision** (`precision=double` — cannot be removed; it's compiled into the engine binary for planet-scale coordinates) and the **godot_voxel** module for voxel storage / streaming / LOD / collision. **Terrain meshing is our own Dual Contouring**, not Transvoxel (godot_voxel ships no DC).
