@@ -6,6 +6,7 @@ extends Node3D
 
 var _dc_manager: DCTerrainManager
 var _dc_collision: DCCollisionManager
+var _awake_overlay: AwakeOverlay
 var _pbd_demo: PbdDemo
 var _pbd_structure: PbdStructure
 
@@ -52,6 +53,9 @@ func _ready() -> void:
     _dc_collision = DCCollisionManager.new()
     add_child(_dc_collision)
     _dc_collision.setup(_terrain, _player)
+    _awake_overlay = AwakeOverlay.new()
+    add_child(_awake_overlay)
+    _awake_overlay.setup(self)
     _pbd_structure = PbdStructure.new()
     _pbd_structure.name = "PbdStructure"   # ActionFactories resolves the probe target by this name
     add_child(_pbd_structure)
@@ -117,6 +121,7 @@ func _console_commands() -> Array:
         [_cmd_pbddemo,   "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [_cmd_pbdlive,   "pbdlive",   "Toggle live PBD stress viz over your REAL structures (viz-only). Usage: pbdlive [on|off]"],
         [_cmd_perf,      "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
+        [_cmd_awake,     "awake",     "Highlight awake physics bodies (debris / collapsed parts) with a box. Usage: awake [on|off]"],
         [_cmd_lod,       "lod",       "Get/set terrain lod_distance (higher = LOD boundaries farther = less pop-in). Usage: lod [distance]"],
         [_cmd_reset,     "reset",     "Delete the save (terrain DB + snapshot) and reload to a fresh world."],
         [_cmd_quiescent, "quiescent", "Print whether the world is quiescent (save-ready)."],
@@ -277,6 +282,11 @@ func _cmd_dceps(px: float) -> void:
     _dc_manager.eps_px = maxf(0.01, px)
     _dc_manager.remesh()
     LimboConsole.info("dceps: %.2f px" % _dc_manager.eps_px)
+
+func _cmd_awake(state := "") -> void:
+    var on := not _awake_overlay.is_enabled() if state == "" else state == "on"
+    _awake_overlay.set_enabled(on)
+    LimboConsole.info("awake highlight: %s" % ("on" if on else "off"))
 
 # Tune LOD pop-in live. lod_distance is the per-level switch distance; larger
 # pushes every LOD boundary farther out (finer detail at range, more blocks).
