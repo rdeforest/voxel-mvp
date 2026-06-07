@@ -13,10 +13,13 @@ rationale), `docs/roadmap` (version strategy).
 
 | Diagram | What it shows | Audience |
 |---------|---------------|----------|
-| [System data-flow](system-data-flow.md) | How a click becomes physics and physics becomes terrain again — the event-driven feedback loop across actions, tracking, PBD, collapse, and rendering. | You · devs |
+| [System data-flow](system-data-flow.md) | How a click becomes physics and physics becomes terrain again — the event-driven feedback loop across actions, tracking, PBD, collapse, and rendering. | devs |
 
 ### Planned
 
-- **PBD solver pipeline** — the per-tick core: build → XPBD solve → axial force → fatigue → break → detachment → collapse, with sleeping as the perf gate.
-- **Conceptual physics** — the Poly-Bridge ∪ World-of-Goo idea for a general audience: tension/compression, force-based breakage, fatigue grace, specific tensile strength, emergent anchors/suspension.
-- **Lifecycles + rendering** — falling-body states, the world-ready gate, save/quiescence; and the DC-render vs per-block-collision terrain split.
+| Diagram | What it shows | Audience |
+|---------|---------------|----------|
+| [PBD solver pipeline](pbd-solver-pipeline.md) | The per-tick core: build → XPBD solve → axial force → fatigue → break → detachment → collapse, with sleeping as the perf gate. | devs |
+| [Conceptual physics](physics-concepts.md) | the Poly-Bridge ∪ World-of-Goo idea for a general audience: tension/compression, force-based breakage, fatigue grace, specific tensile strength, emergent anchors/suspension. | potential project collaborators |
+| [Lifecycles + rendering](lifecycles.md) | Falling-body states, the world-ready gate, save/quiescence; and the DC-render vs per-block-collision terrain split. | devs |
+| [Class diagram](class-diagram.md) | All the classes we created, plus the Godot and godot_voxel classes they talk to, and their relationships. | devs |
