@@ -84,6 +84,15 @@ func leaf_count() -> int:
     return 0 if corners.is_empty() else 1
 
 
+# Append every written leaf (fine surface leaves and bulk uniform leaves) to `out`.
+func collect_leaves(out: Array) -> void:
+    if not children.is_empty():
+        for ch in children:
+            ch.collect_leaves(out)
+    elif not corners.is_empty():
+        out.append(self)
+
+
 # --- Internals ---
 
 func _subdivide() -> void:
