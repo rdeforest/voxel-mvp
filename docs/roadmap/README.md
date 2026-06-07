@@ -59,6 +59,9 @@ they ship, their rationale graduates into `docs/architecture.md`.
   — the click-spam replacement.
 - [`design/09-world-setting.md`](design/09-world-setting.md) — creative
   direction; not Norse mythology.
+- [`design/10-adaptive-octree-substrate.md`](design/10-adaptive-octree-substrate.md)
+  — the persistent world-fixed octree substrate (Phase A render / Phase B data);
+  fixes LOD seams + view-dependence, foundation for parts-as-voxels.
 
 ## Section 3 — Implementation
 

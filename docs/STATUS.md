@@ -40,9 +40,18 @@ fix is the unified octree over **fine data** with error-collapse for the triangl
 then a coarse cell derives its vertex+normal from accumulated fine QEF data, sits on the
 fine surface, and seams dissolve. This is the SAME substrate **parts-as-voxels** rides on
 (`docs/roadmap/design/03-dc-qef-geometry.md` §"Decisions taken"; [[adaptive-octree-substrate]]).
-**No design doc written yet** — next session starts with the substrate design pass
-(persistent world-fixed octree, fine-data sourcing/streaming, incremental remesh; this also
-absorbs "phase B" of the persistent octree and the clipmap retirement).
+**Design doc written (2026-06-07): `docs/roadmap/design/10-adaptive-octree-substrate.md`** —
+persistent world-fixed octree, fine-data sourcing, accumulated-QEF coarse vertices, SDF+material
+per leaf, incremental remesh; staged **Phase A** (render substrate over godot_voxel data — fixes
+seams + view-dependence, validatable with the CSG tool) → **Phase B** (data substrate; godot_voxel
+removal; parts-as-voxels). Approved A-first. **Next: implement Phase A** — start A1 (world-fixed
+octree store) + A3 (collapse-metric fix; the `sqrt(residual/count)` averaging is the thin-feature
+bug, [[dc-thin-feature-collapse-bug]]).
+
+Also landed (2026-06-07): the **CSG primitive tool** + **per-voxel material channel** (8-bit
+CHANNEL_INDICES; the DC mesher emits per-vertex material colour, id 0 = natural/slope-shaded) —
+the SDF ground-truth instrument for validating the new mesher. See [[csg-validation-tool]]. The
+world was reset for the format change (old saves backed up `*.pre-material-bak`).
 
 **Tier framing for parts-as-voxels** (from the scoping convo): Tier 1 = fat parts (logs/
 stone blocks) imprinted at the current 1m grid + a material channel (contained, no substrate
