@@ -45,6 +45,68 @@ void SparseVoxelOctree::imprint_array(const PackedFloat32Array &data, int dim, V
 	_imprint_node(0, f, min_leaf, 0);
 }
 
+void SparseVoxelOctree::imprint_sphere_graded(Vector3 center, double radius, Vector3 focus,
+		double near_leaf, double band, int material) {
+	if (nodes.is_empty()) {
+		return;
+	}
+	const Vector3 ro = nodes[0].origin;
+	const double rs = nodes[0].size;
+	nodes.clear();
+	_new_node(ro, rs);
+	_imprint_graded(0, voxel_dc::SphereField(center, radius), focus, near_leaf, band, material);
+}
+
+// Like _imprint_node, but the data floor at a node is `near_leaf` doubled once per `band`
+// of distance from `focus` — fine near the viewer, coarse far.
+void SparseVoxelOctree::_imprint_graded(int idx, const voxel_dc::Field &f, const Vector3 &focus,
+		double near_leaf, double band, int material) {
+	const Vector3 o = nodes[idx].origin;
+	const double s = nodes[idx].size;
+	const Vector3 center = o + Vector3(1, 1, 1) * (s * 0.5);
+	const double fc = f.sample(center);
+	if (Math::abs(fc) > s * 0.8660254) {
+		Node &n = nodes[idx];
+		n.has_corners = true;
+		n.material = fc < 0.0 ? uint8_t(material) : 0;
+		for (int i = 0; i < 8; ++i) {
+			n.corners[i] = float(fc);
+		}
+		return;
+	}
+	double target = near_leaf;
+	double r = band;
+	const double dist = (center - focus).length();
+	while (dist > r) {
+		target *= 2.0;
+		r *= 2.0;
+	}
+	if (s <= target * 1.0000001) {
+		float cs[8];
+		for (int i = 0; i < 8; ++i) {
+			cs[i] = float(f.sample(corner(o, s, i)));
+		}
+		Node &n = nodes[idx];
+		n.has_corners = true;
+		n.material = uint8_t(material);
+		for (int i = 0; i < 8; ++i) {
+			n.corners[i] = cs[i];
+		}
+		return;
+	}
+	const double half = s * 0.5;
+	int ch[8];
+	for (int i = 0; i < 8; ++i) {
+		ch[i] = _new_node(o + Vector3(CB[i][0], CB[i][1], CB[i][2]) * half, half);
+	}
+	for (int i = 0; i < 8; ++i) {
+		nodes[idx].children[i] = ch[i];
+	}
+	for (int i = 0; i < 8; ++i) {
+		_imprint_graded(ch[i], f, focus, near_leaf, band, material);
+	}
+}
+
 // Surface beyond the node's circumradius -> one uniform-sign leaf (bulk, O(1)); at the
 // data floor -> a fine leaf with corner samples; otherwise subdivide and recurse.
 void SparseVoxelOctree::_imprint_node(int idx, const voxel_dc::Field &f, double min_leaf, int material) {
@@ -214,6 +276,7 @@ void SparseVoxelOctree::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("imprint_sphere", "center", "radius", "min_leaf", "material"), &SparseVoxelOctree::imprint_sphere);
 	ClassDB::bind_method(D_METHOD("imprint_box", "center", "size", "min_leaf", "material"), &SparseVoxelOctree::imprint_box);
 	ClassDB::bind_method(D_METHOD("imprint_array", "data", "dim", "origin", "cell", "min_leaf"), &SparseVoxelOctree::imprint_array);
+	ClassDB::bind_method(D_METHOD("imprint_sphere_graded", "center", "radius", "focus", "near_leaf", "band", "material"), &SparseVoxelOctree::imprint_sphere_graded);
 	ClassDB::bind_method(D_METHOD("stamp_sphere", "center", "radius", "min_leaf", "material", "op"), &SparseVoxelOctree::stamp_sphere);
 	ClassDB::bind_method(D_METHOD("stamp_box", "center", "size", "min_leaf", "material", "op"), &SparseVoxelOctree::stamp_box);
 	ClassDB::bind_method(D_METHOD("sample", "p"), &SparseVoxelOctree::sample);

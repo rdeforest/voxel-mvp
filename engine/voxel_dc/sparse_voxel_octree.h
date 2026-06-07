@@ -43,6 +43,13 @@ public:
 
 	void imprint(const voxel_dc::Field &f, double min_leaf, int material); // C++ entry
 
+	// Distance-graded imprint: leaf size near `focus` is `near_leaf`, doubling every
+	// `band` of distance — so one octree spans the whole view, fine where you look,
+	// coarse far away (what makes a world-spanning octree affordable). Crack-free across
+	// the size jumps by construction (the mesher's point-location stitch).
+	void imprint_sphere_graded(Vector3 center, double radius, Vector3 focus,
+			double near_leaf, double band, int material);
+
 protected:
 	static void _bind_methods();
 
@@ -68,6 +75,8 @@ private:
 
 	int _new_node(const Vector3 &o, double s);
 	void _imprint_node(int idx, const voxel_dc::Field &f, double min_leaf, int material);
+	void _imprint_graded(int idx, const voxel_dc::Field &f, const Vector3 &focus,
+			double near_leaf, double band, int material);
 	void _stamp_node(int idx, const voxel_dc::Field &f, double min_leaf, int material, int op);
 	void _subdivide_inherit(int idx);
 	int _leaf_at(const Vector3 &p) const;       // assumes p in root
