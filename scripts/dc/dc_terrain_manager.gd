@@ -55,10 +55,11 @@ var log_timings := true
 # Error-driven LOD: coarsen by screen-space error (~eps_px) instead of distance bands.
 # The mesher builds to the data floor then collapses bottom-up wherever one vertex fits
 # the real fine surface within eps_px on screen (DCOctreeMesher::accumulate) — flat
-# regions go coarse, curved stay fine, crack-free. Headless-proven watertight + hole-free
-# (test_dc_octree_mesher). Default OFF pending live eps tuning on real terrain (pop on
-# recenter, thin features); `dcerror`/`dceps` toggle and tune it.
-var error_driven := false
+# regions go coarse, curved stay fine, crack-free, and a coarse cell derives its vertex
+# from accumulated FINE QEF so it sits on the fine surface (seams dissolve). Default ON
+# since the collapse metric was fixed (undivided residual — thin features veto their own
+# collapse, no more flapping; substrate Phase A). `dcerror`/`dceps` toggle and tune it.
+var error_driven := true
 # Screen-error collapse threshold. Since the collapse metric is the UNDIVIDED QEF
 # residual (not per-plane RMS — see DCOctreeMesher::accumulate), this is a larger
 # scale than a literal pixel count; ~8 coarsens curved terrain well while thin

@@ -119,6 +119,33 @@ hysteresis state, which is already a world-keyed `HashSet`). Edits dirty a bound
 region; only affected nodes re-mesh (retiring the whole-clipmap ~62 ms rebuild). Camera
 movement refines/coarsens at the margins, not a full rebuild.
 
+## Finding (2026-06-07): the cells are already world-aligned
+
+Tracing the live code while starting A1: `dc_terrain_manager` snaps the clipmap
+centre to `_COARSEST_CELL` (32 m) and `root_origin` is always a multiple of 32, so
+every leaf (size ≤ 32) already sits on a world-aligned grid. A fixed feature does
+**not** shift cells as you move — the "world-fixed cell grid" half of A1 is, in
+effect, already true. What actually causes the view-dependence is narrower:
+
+1. **Discrete LOD bands.** Data resolution drops with distance-from-camera (LOD0
+   only within ~16 m; ~8 m data by ~200 m), and the band boundaries snap in 32 m
+   steps, so a feature pops as you cross one. A structure far out is genuinely
+   meshed from downsampled data.
+2. **Flapping specifically** = the collapse-metric averaging bug (now fixed, A3) +
+   LOD size-step seams (geomorph + per-triangle winding already mitigate).
+3. **Hard limit:** fine data far out is memory-bound (LOD0 over a 200 m radius ≈
+   256 MB). Distant structures stay coarse — that's normal LOD. The goal is
+   *clean-coarse*, not *flapping-coarse*.
+
+**So A1 is reframed.** Rather than "world-fix the grid" (done), the substantive work
+is: (a) make error-driven collapse the **default LOD mechanism** so coarse cells
+derive from accumulated *fine* QEF and sit on the fine surface — done now that A3
+made collapse safe (`error_driven` default ON); (b) the genuinely-remaining decision
+is the **fine-data budget** (A2) — how far out fine data extends, a memory/perf
+tradeoff that sets how far structures stay crisp; (c) persistent store + incremental
+remesh (A4) is now a *perf* optimisation (retire the 8 m-recenter full rebuild), not
+the visual fix. B is unchanged.
+
 ## Phase A — render substrate over godot_voxel data
 
 **Goal:** the persistent world-fixed octree is the render layer; godot_voxel stays the
