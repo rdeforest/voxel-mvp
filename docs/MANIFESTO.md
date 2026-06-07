@@ -162,6 +162,17 @@ of these, the change is wrong.
    pressure, momentum can be more — possibly at different resolutions.
    Roles and identities ("this is a wall belonging to player X's house")
    live in sidecar indexes, not in the voxel data itself.
+8. **Correctness first; do not optimize until the framerate actually
+   drops below 30.** This project demonstrates *ambition and feasibility*,
+   not benchmarks. Worker-thread time, mesh latency, re-read cost, memory
+   — none of it justifies sacrificing correctness or simplicity
+   preemptively. A slow-but-correct path ships; a fast-but-wrong one is a
+   regression. "This is expensive" is never a reason to not build the
+   ambitious thing — build it correctly, measure the *framerate*, and only
+   then, if it's actually below 30, optimize. (Cautionary tale: a DC
+   surface-prune was built to "fix" an off-thread 792 ms mesh that never
+   touched framerate — and it broke watertightness. Pure self-inflicted
+   wound.)
 
 ---
 

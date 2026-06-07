@@ -128,6 +128,7 @@ func _console_commands() -> Array:
         [_cmd_dcsolo,    "dcsolo",    "Data-only mode: hide godot_voxel's render so only our DC mesh shows (enables the manager). Usage: dcsolo [on|off]"],
         [_cmd_dcerror,   "dcerror",   "Toggle error-driven terrain LOD (screen-space error vs distance bands). Usage: dcerror [on|off]"],
         [_cmd_dceps,     "dceps",     "Set the error-driven LOD threshold in px (lower = more detail). Usage: dceps <px>"],
+        [_cmd_dcdump,    "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [_cmd_dcaudit,   "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
         [_cmd_pbddemo,   "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [_cmd_pbdlive,   "pbdlive",   "Toggle live PBD stress viz over your REAL structures (viz-only). Usage: pbdlive [on|off]"],
@@ -293,6 +294,11 @@ func _cmd_dceps(px: float) -> void:
     _dc_manager.eps_px = maxf(0.01, px)
     _dc_manager.remesh()
     LimboConsole.info("dceps: %.2f px" % _dc_manager.eps_px)
+
+func _cmd_dcdump() -> void:
+    _dc_manager.dump_next = true
+    _dc_manager.remesh()
+    LimboConsole.info("dcdump: writing user://dcdump.dat on next re-mesh")
 
 func _cmd_dcaudit() -> void:
     _dc_manager.audit_current_mesh()

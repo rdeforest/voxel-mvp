@@ -20,14 +20,14 @@ extends Node3D
 # transition together. The mesher's point-location meshing stitches it crack-free
 # with no balance pass needed.
 
-const LEVELS            := 6      # LOD levels (0..5): 1024m coverage (32m fine core)
-const LEVEL_DIM         := 33     # samples per axis per level; LEVEL_DIM-1 must be a power of 2
+const LEVELS            := 5      # LOD levels (0..4): 1024m coverage (64m fine core)
+const LEVEL_DIM         := 65     # samples per axis per level; LEVEL_DIM-1 must be a power of 2
 const RECENTER_DISTANCE := 8.0    # re-mesh once the follow target drifts this far (m)
 
 # Derived: octree root spans the coarsest level. ROOT = (LEVEL_DIM-1) << (LEVELS-1).
-const _LEVEL_CELLS      := LEVEL_DIM - 1                 # 32
-const _ROOT_DEPTH       := 5 + LEVELS - 1                # log2(32) + (LEVELS-1)
-const _COARSEST_CELL    := 1 << (LEVELS - 1)             # snap granularity
+const _LEVEL_CELLS      := LEVEL_DIM - 1                 # 64
+const _ROOT_DEPTH       := 6 + LEVELS - 1                # log2(64) + (LEVELS-1)
+const _COARSEST_CELL    := 1 << (LEVELS - 1)             # snap granularity (16m)
 
 var _terrain: VoxelLodTerrain
 var _follow:  Node3D
@@ -60,6 +60,9 @@ var log_timings := true
 # since the collapse metric was fixed (undivided residual — thin features veto their own
 # collapse, no more flapping; substrate Phase A). `dcerror`/`dceps` toggle and tune it.
 var error_driven := true
+var dump_next := false   # diagnostic: capture the next dispatch's input + output (dcdump cmd)
+var _dump_armed := false
+var _dump_dict := {}
 # Screen-error collapse threshold. Since the collapse metric is the UNDIVIDED QEF
 # residual (not per-plane RMS — see DCOctreeMesher::accumulate), this is a larger
 # scale than a literal pixel count; ~8 coarsens curved terrain well while thin
@@ -203,6 +206,14 @@ func _dispatch(center: Vector3) -> void:
         camera_lattice = cam.global_position - Vector3(root_origin)
         var vp_h := float(get_viewport().get_visible_rect().size.y)
         proj = vp_h / (2.0 * tan(deg_to_rad(cam.fov) * 0.5))
+    if dump_next:
+        dump_next = false
+        _dump_armed = true
+        _dump_dict = {
+            "level_data": level_data, "origins": level_origins, "cells": level_cells, "dim": LEVEL_DIM,
+            "center": center_lattice, "camera": camera_lattice, "half0": half0, "depth": _ROOT_DEPTH,
+            "proj": proj, "eps": eps_px, "err": error_driven, "root_origin": root_origin,
+        }
     _task_id = WorkerThreadPool.add_task(
         _mesh_job.bind(level_data, level_origins, level_cells, center_lattice, half0,
             camera_lattice, proj, eps_px, error_driven, root_origin,
@@ -220,9 +231,25 @@ func _mesh_job(level_data: Array, level_origins: PackedVector3Array, level_cells
         camera, proj, eps, err, world_origin, level_indices, palette)
 
 
+# Diagnostic (dcdump): write this dispatch's mesher INPUT (clipmap SDF + params) paired
+# with the OUTPUT mesh it produced, so the exact case can be replayed and audited
+# headlessly — and the displayed mesh inspected directly (Mesh.ARRAY_* arrays).
+func _dump_write() -> void:
+    _dump_armed = false
+    _dump_dict["mesh"] = _job_arrays
+    _dump_dict["mesh_origin"] = _job_origin
+    var f := FileAccess.open("user://dcdump.dat", FileAccess.WRITE)
+    f.store_var(_dump_dict, true)
+    f.close()
+    _dump_dict = {}
+    print("dcdump written: ", ProjectSettings.globalize_path("user://dcdump.dat"))
+
+
 func _finish() -> void:
     WorkerThreadPool.wait_for_task_completion(_task_id)
     _task_id = -1
+    if _dump_armed:
+        _dump_write()
     if _job_arrays.is_empty():
         _mesh_instance.mesh = null
         return
