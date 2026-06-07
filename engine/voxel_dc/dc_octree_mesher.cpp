@@ -231,7 +231,15 @@ struct Octree {
 		Vector3 cmin = to_v3(cells[idx].origin);
 		Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
 		Vector3 v = sum.solve(cmin, cmax);
-		double we = Math::sqrt(sum.residual(v) / double(sum.count));
+		// Collapse error = the L2 residual of the accumulated QEF at the merged vertex,
+		// NOT divided by plane count. The old /count averaged a thin feature's few
+		// high-residual planes into the many ZERO-residual planes of the flat surface
+		// around it, so a big cell collapsed over a spire and the surface flapped /
+		// vanished. Undivided, flat planes contribute exactly 0 (they don't dilute), so
+		// the residual reflects the feature's own error: ~0 on flat/cliff/gently-curved
+		// regions, spiking where one vertex can't represent a feature -> the feature
+		// vetoes its own collapse. Distance LOD is still handled by proj/dist below.
+		double we = Math::sqrt(sum.residual(v));
 		Vector3 center = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
 		double dist = MAX((center - camera).length(), 1e-3);
 		double screen_err = we * proj / dist;

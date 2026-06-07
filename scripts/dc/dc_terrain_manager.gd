@@ -59,7 +59,11 @@ var log_timings := true
 # (test_dc_octree_mesher). Default OFF pending live eps tuning on real terrain (pop on
 # recenter, thin features); `dcerror`/`dceps` toggle and tune it.
 var error_driven := false
-var eps_px := 1.0
+# Screen-error collapse threshold. Since the collapse metric is the UNDIVIDED QEF
+# residual (not per-plane RMS — see DCOctreeMesher::accumulate), this is a larger
+# scale than a literal pixel count; ~8 coarsens curved terrain well while thin
+# features veto their own collapse. Tune live with `dceps`.
+var eps_px := 8.0
 
 
 func setup(terrain: VoxelLodTerrain, follow: Node3D) -> void:
