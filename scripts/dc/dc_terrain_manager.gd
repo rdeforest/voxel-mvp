@@ -218,9 +218,6 @@ func _finish() -> void:
     if _job_arrays.is_empty():
         _mesh_instance.mesh = null
         return
-    if _audit_once:
-        _audit_once = false
-        _audit(_job_arrays, _job_origin)
     var mesh := ArrayMesh.new()
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _job_arrays)
     _mesh_instance.mesh = mesh
@@ -234,15 +231,16 @@ func _finish() -> void:
             verts, _job_read_ms, Time.get_ticks_msec() - _job_t0])
 
 
-# --- Debug audit: scan the ACTUAL built mesh for bad triangles (dcaudit console cmd) ---
+# --- Debug audit: scan the CURRENTLY DISPLAYED mesh for bad triangles (dcaudit cmd) ---
 # Reports degenerate (zero-area), sliver (high aspect), and tilted (facet normal far from
 # its vertices' normals = a steep facet the grass shader paints dirt) triangles, in world
-# coords, so a live anomaly can be located exactly. One-shot per dcaudit call.
-var _audit_once := false
-
-func audit_next_mesh() -> void:
-    _audit_once = true
-    remesh()
+# coords, so a live anomaly can be located exactly. Pure observer — it reads the mesh
+# that's on screen and does NOT re-mesh (a rebuild can mask a stale-mesh artifact).
+func audit_current_mesh() -> void:
+    if _mesh_instance == null or _mesh_instance.mesh == null or _mesh_instance.mesh.get_surface_count() == 0:
+        print("dcaudit: no DC mesh on screen")
+        return
+    _audit(_mesh_instance.mesh.surface_get_arrays(0), Vector3i(_mesh_instance.global_position))
 
 func _audit(arrays: Array, origin: Vector3i) -> void:
     var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]

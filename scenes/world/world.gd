@@ -285,8 +285,8 @@ func _cmd_dceps(px: float) -> void:
     LimboConsole.info("dceps: %.2f px" % _dc_manager.eps_px)
 
 func _cmd_dcaudit() -> void:
-    _dc_manager.audit_next_mesh()
-    LimboConsole.info("dcaudit: re-meshing; suspect triangles printed to stdout (Debug Console)")
+    _dc_manager.audit_current_mesh()
+    LimboConsole.info("dcaudit: scanned the on-screen mesh; suspect triangles printed to stdout (Debug Console)")
 
 func _cmd_awake(state := "") -> void:
     var on := not _awake_overlay.is_enabled() if state == "" else state == "on"
