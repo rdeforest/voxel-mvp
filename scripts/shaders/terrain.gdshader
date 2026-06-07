@@ -96,6 +96,13 @@ void fragment() {
 
     vec3 albedo = mix(dirt_color, grass, grass_mask);
 
+    // Per-voxel material (from the DC mesher's CHANNEL_INDICES sampling): COLOR.a
+    // near 0 marks a vertex carrying an explicit material colour (a CSG stamp), so
+    // use COLOR.rgb instead of slope shading. a near 1 (natural terrain, and the
+    // default for meshes that emit no vertex colour) keeps the grass/dirt look.
+    float material_mask = 1.0 - step(0.5, COLOR.a);
+    albedo = mix(albedo, COLOR.rgb, material_mask);
+
     // debug_lod is the blend amount of the per-LOD colour over the material:
     // 0 = off, 0.3 = subtle tint, 1 = full LOD colour. (console: set debug_lod 0.3)
     ALBEDO    = mix(albedo, COLOR.rgb, debug_lod);

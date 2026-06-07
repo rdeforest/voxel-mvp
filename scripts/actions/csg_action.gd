@@ -85,6 +85,16 @@ func execute() -> void:
         elif entry[2] and not entry[3]:
             VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(GRID_ID, cell))
 
+    # Tag the newly-solid voxels with the material id (CHANNEL_INDICES, 8-bit).
+    # The DC mesher reads it back and the terrain shader colours by it. Carved
+    # cells become air, so they get no material.
+    var idx := MaterialPalette.index_of(material)
+    vt.channel = VoxelBuffer.CHANNEL_INDICES
+    for entry in _work:
+        if entry[3]:
+            vt.set_voxel(entry[0], idx)
+    vt.channel = VoxelBuffer.CHANNEL_SDF
+
     var box := _world_box()
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,

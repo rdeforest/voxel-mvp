@@ -29,6 +29,13 @@ public:
 	// to the LOD0 copy() path. Flat array, x-fastest. Empty on bad args.
 	PackedFloat32Array read_sdf_lod(Object *p_terrain, int lod, Vector3i origin, Vector3i size);
 
+	// Read CHANNEL_INDICES (per-voxel material id, 8-bit) over the same box/LOD as
+	// read_sdf_lod, as a flat byte array (x-fastest), one id per sample. 0 = natural
+	// (un-stamped) terrain. LOD0 uses copy(); LOD>0 reads the procedural baseline as
+	// 0 (the generator writes no material) then overlays edited blocks' downsampled
+	// (nearest-neighbour, so ids survive) mips. Empty on bad args.
+	PackedByteArray read_indices_lod(Object *p_terrain, int lod, Vector3i origin, Vector3i size);
+
 protected:
 	static void _bind_methods();
 };

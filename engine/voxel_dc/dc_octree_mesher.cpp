@@ -32,6 +32,7 @@ inline Vector3 to_v3(const Vector3i &v) {
 // gradient. Reads are clamped at the grid edge.
 struct Level {
 	const float *data = nullptr;
+	const uint8_t *idx = nullptr; // optional CHANNEL_INDICES bytes, same layout as data
 	Vector3 origin;
 	double cell = 1.0;
 	int dim = 0;
@@ -41,6 +42,20 @@ struct Level {
 		y = CLAMP(y, 0, dim - 1);
 		z = CLAMP(z, 0, dim - 1);
 		return double(data[x + dim * (y + dim * z)]);
+	}
+
+	// Nearest material id at a world point (ids are discrete — no interpolation).
+	int index_nearest(const Vector3 &world) const {
+		if (idx == nullptr) {
+			return 0;
+		}
+		int x = int(Math::round((world.x - origin.x) / cell));
+		int y = int(Math::round((world.y - origin.y) / cell));
+		int z = int(Math::round((world.z - origin.z) / cell));
+		x = CLAMP(x, 0, dim - 1);
+		y = CLAMP(y, 0, dim - 1);
+		z = CLAMP(z, 0, dim - 1);
+		return int(idx[x + dim * (y + dim * z)]);
 	}
 
 	double at(const Vector3 &world) const {
@@ -108,6 +123,10 @@ struct Clipmap {
 	double target_cell_size(const Vector3 &p) const {
 		return double(1 << level_index(p));
 	}
+
+	int index_at(const Vector3 &p) const {
+		return levels[level_index(p)].index_nearest(p);
+	}
 };
 
 struct Cell {
@@ -139,9 +158,12 @@ struct Octree {
 	HashSet<Vector4i> *prev_collapse = nullptr; // last frame's collapsed world-nodes (read)
 	HashSet<Vector4i> *curr_collapse = nullptr; // this frame's collapsed world-nodes (write)
 	static constexpr double HYST = 2.5;          // stay-collapsed slack: subdivide only past eps*HYST
+	bool emit_color = false;       // sample material ids and emit per-vertex colours
+	PackedColorArray palette;      // material id -> albedo (index 0 = natural)
 	LocalVector<Cell> cells;
 	PackedVector3Array verts;
 	PackedVector3Array normals;
+	PackedColorArray colors;       // per-vertex material colour (rgb); a=0 material, a=1 natural
 	PackedInt32Array indices;
 
 	// A leaf's QEF, built from the 12 cube edges that cross the isosurface (the cell's
@@ -281,9 +303,23 @@ struct Octree {
 		const Qef &qef = cells[idx].qef;
 		Vector3 cmin = to_v3(cells[idx].origin);
 		Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
+		Vector3 v = qef.solve(cmin, cmax);
+		Vector3 n = qef.nsum.length_squared() > 0.0 ? qef.nsum.normalized() : Vector3(0, 1, 0);
 		cells[idx].vertex = int(verts.size());
-		verts.push_back(qef.solve(cmin, cmax));
-		normals.push_back(qef.nsum.length_squared() > 0.0 ? qef.nsum.normalized() : Vector3(0, 1, 0));
+		verts.push_back(v);
+		normals.push_back(n);
+		if (emit_color) {
+			// Sample the solid voxel just behind the surface: the normal points
+			// outward, so step inward to land in the cell that carries the id.
+			int id = clip.index_at(v - n * 0.5);
+			if (id > 0 && id < int(palette.size())) {
+				const Color &c = palette[id];
+				colors.push_back(Color(c.r, c.g, c.b, 0.0)); // a=0 -> explicit material colour
+			} else {
+				colors.push_back(Color(0, 0, 0, 1.0)); // a=1 -> natural (slope-shaded; also the
+													   // default for meshes with no colour array)
+			}
+		}
 	}
 
 	static bool origin_less(const Vector3i &a, const Vector3i &b) {
@@ -435,7 +471,9 @@ Array DCOctreeMesher::mesh_clipmap(
 		double proj,
 		double eps_px,
 		bool error_driven,
-		Vector3i lattice_world_origin) {
+		Vector3i lattice_world_origin,
+		const TypedArray<PackedByteArray> &level_indices,
+		const PackedColorArray &palette) {
 	Array out;
 	const int n = level_data.size();
 	if (n == 0 || dim < 2 || level_origins.size() != n || level_cells.size() != n || depth < 1) {
@@ -446,9 +484,14 @@ Array DCOctreeMesher::mesh_clipmap(
 	// Hold the level arrays for the call so their data pointers stay valid.
 	LocalVector<PackedFloat32Array> held;
 	held.resize(n);
+	LocalVector<PackedByteArray> held_idx;
+	held_idx.resize(n);
 	const int64_t per_level = int64_t(dim) * dim * dim;
+	const bool with_indices = level_indices.size() == n && palette.size() > 0;
 
 	Octree oct;
+	oct.emit_color = with_indices;
+	oct.palette = palette;
 	oct.root_size = 1 << depth;
 	oct.max_depth = depth;
 	oct.camera = camera;
@@ -472,6 +515,12 @@ Array DCOctreeMesher::mesh_clipmap(
 		lv.origin = level_origins[k];
 		lv.cell = level_cells[k];
 		lv.dim = dim;
+		if (with_indices) {
+			held_idx[k] = level_indices[k];
+			if (held_idx[k].size() == per_level) {
+				lv.idx = held_idx[k].ptr();
+			}
+		}
 		oct.clip.levels[k] = lv;
 	}
 
@@ -490,6 +539,9 @@ Array DCOctreeMesher::mesh_clipmap(
 	out.resize(Mesh::ARRAY_MAX);
 	out[Mesh::ARRAY_VERTEX] = oct.verts;
 	out[Mesh::ARRAY_NORMAL] = oct.normals;
+	if (!oct.colors.is_empty()) {
+		out[Mesh::ARRAY_COLOR] = oct.colors;
+	}
 	out[Mesh::ARRAY_INDEX] = oct.indices;
 	return out;
 }
@@ -497,7 +549,8 @@ Array DCOctreeMesher::mesh_clipmap(
 void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("mesh_clipmap", "level_data", "dim", "level_origins", "level_cells", "center", "half0", "depth",
-					"camera", "proj", "eps_px", "error_driven", "lattice_world_origin"),
+					"camera", "proj", "eps_px", "error_driven", "lattice_world_origin", "level_indices", "palette"),
 			&DCOctreeMesher::mesh_clipmap,
-			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(Vector3i()));
+			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(Vector3i()),
+			DEFVAL(TypedArray<PackedByteArray>()), DEFVAL(PackedColorArray()));
 }

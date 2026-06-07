@@ -22,6 +22,9 @@ void DCRegionReader::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("read_sdf_lod", "terrain", "lod", "origin", "size"),
 			&DCRegionReader::read_sdf_lod);
+	ClassDB::bind_method(
+			D_METHOD("read_indices_lod", "terrain", "lod", "origin", "size"),
+			&DCRegionReader::read_indices_lod);
 }
 
 PackedFloat32Array DCRegionReader::read_sdf_lod0(Object *p_terrain, Vector3i origin, Vector3i size) {
@@ -109,6 +112,82 @@ PackedFloat32Array DCRegionReader::read_sdf_lod(Object *p_terrain, int lod, Vect
 			}
 		}
 		grid.unlock_read();
+	}
+
+	return out;
+}
+
+PackedByteArray DCRegionReader::read_indices_lod(Object *p_terrain, int lod, Vector3i origin, Vector3i size) {
+	PackedByteArray out;
+	VoxelLodTerrain *vlt = Object::cast_to<VoxelLodTerrain>(p_terrain);
+	if (vlt == nullptr) {
+		ERR_PRINT("DCRegionReader: terrain is not a VoxelLodTerrain");
+		return out;
+	}
+	if (size.x <= 0 || size.y <= 0 || size.z <= 0 || lod < 0) {
+		ERR_PRINT("DCRegionReader: bad size/lod");
+		return out;
+	}
+
+	std::shared_ptr<VoxelData> data = vlt->get_storage_shared();
+	if (data == nullptr || lod >= int(data->get_lod_count())) {
+		ERR_PRINT("DCRegionReader: no VoxelData or lod out of range");
+		return out;
+	}
+
+	const VoxelFormat format = data->get_format();
+	VoxelBuffer buffer(VoxelBuffer::ALLOCATOR_DEFAULT);
+	buffer.create(size, &format);
+
+	// LOD0: bulk-copy the indices channel (fills unloaded cells from defaults = 0).
+	// LOD>0: copy() is LOD0-only, so the baseline stays the channel default (0 =
+	// natural); edits overlay below.
+	if (lod == 0) {
+		data->copy(origin, buffer, uint32_t(1) << VoxelBuffer::CHANNEL_INDICES, false);
+	}
+
+	const int64_t count = int64_t(size.x) * int64_t(size.y) * int64_t(size.z);
+	out.resize(count);
+	uint8_t *w = out.ptrw();
+	int64_t i = 0;
+	for (int z = 0; z < size.z; ++z) {
+		for (int y = 0; y < size.y; ++y) {
+			for (int x = 0; x < size.x; ++x) {
+				w[i++] = uint8_t(buffer.get_voxel(x, y, z, VoxelBuffer::CHANNEL_INDICES));
+			}
+		}
+	}
+
+	// Overlay edited blocks at LOD>0. The grid stores downsampled mips of edits;
+	// integer channels mip nearest-neighbour, so a stamped material id survives the
+	// mip. VoxelDataGrid has no integer getter, so look the block up by hand (the
+	// same block-location try_get_voxel_f does) and read CHANNEL_INDICES directly.
+	if (lod > 0) {
+		const int step = 1 << lod;
+		const Box3i world_box(origin, Vector3i(size.x * step, size.y * step, size.z * step));
+		VoxelDataGrid grid;
+		data->get_blocks_grid(grid, world_box, uint32_t(lod));
+		if (grid.has_any_block()) {
+			const unsigned int po2 = grid.get_block_size_po2();
+			const int bmask = (1 << po2) - 1;
+			const Vector3i base(origin.x >> lod, origin.y >> lod, origin.z >> lod);
+			grid.lock_read();
+			i = 0;
+			for (int z = 0; z < size.z; ++z) {
+				for (int y = 0; y < size.y; ++y) {
+					for (int x = 0; x < size.x; ++x) {
+						const Vector3i p = base + Vector3i(x, y, z);
+						VoxelBuffer *block = grid.get_block_no_lock(Vector3i(p.x >> po2, p.y >> po2, p.z >> po2));
+						if (block != nullptr) {
+							const Vector3i rpos(p.x & bmask, p.y & bmask, p.z & bmask);
+							w[i] = uint8_t(block->get_voxel(rpos, VoxelBuffer::CHANNEL_INDICES));
+						}
+						++i;
+					}
+				}
+			}
+			grid.unlock_read();
+		}
 	}
 
 	return out;

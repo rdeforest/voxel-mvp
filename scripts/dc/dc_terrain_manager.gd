@@ -168,6 +168,7 @@ func _dispatch(center: Vector3) -> void:
     # Parallel arrays describing the clipmap levels for the C++ mesher: per level k,
     # the SDF data, its lattice origin, and its cell size (LOD k = 2^k).
     var level_data: Array = []
+    var level_indices: Array = []                           # per-level CHANNEL_INDICES (material ids)
     var level_origins := PackedVector3Array()
     var level_cells := PackedFloat32Array()
     for k in LEVELS:
@@ -179,6 +180,7 @@ func _dispatch(center: Vector3) -> void:
         if data.size() != LEVEL_DIM * LEVEL_DIM * LEVEL_DIM:
             return                                          # incomplete read; try again next tick
         level_data.append(data)
+        level_indices.append(reader.read_indices_lod(_terrain, k, world_origin, dim_v))
         level_origins.append(Vector3(lattice_origin))
         level_cells.append(float(cell))
     _job_read_ms = Time.get_ticks_msec() - read_t0
@@ -198,7 +200,8 @@ func _dispatch(center: Vector3) -> void:
         proj = vp_h / (2.0 * tan(deg_to_rad(cam.fov) * 0.5))
     _task_id = WorkerThreadPool.add_task(
         _mesh_job.bind(level_data, level_origins, level_cells, center_lattice, half0,
-            camera_lattice, proj, eps_px, error_driven, root_origin), false, "DC terrain mesh")
+            camera_lattice, proj, eps_px, error_driven, root_origin,
+            level_indices, MaterialPalette.colors()), false, "DC terrain mesh")
 
 
 # Runs on a worker thread: the C++ DCOctreeMesher builds + meshes one octree over
@@ -206,10 +209,10 @@ func _dispatch(center: Vector3) -> void:
 # thread (no Node / engine access).
 func _mesh_job(level_data: Array, level_origins: PackedVector3Array, level_cells: PackedFloat32Array,
         center: Vector3, half0: float, camera: Vector3, proj: float, eps: float, err: bool,
-        world_origin: Vector3i) -> void:
+        world_origin: Vector3i, level_indices: Array, palette: PackedColorArray) -> void:
     _job_arrays = _mesher.mesh_clipmap(
         level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH,
-        camera, proj, eps, err, world_origin)
+        camera, proj, eps, err, world_origin, level_indices, palette)
 
 
 func _finish() -> void:

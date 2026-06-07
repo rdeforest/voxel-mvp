@@ -43,6 +43,14 @@ public:
 	// still the floor — error-refine only coarsens, never exceeds available data.
 	// lattice_world_origin: world coords of lattice (0,0,0); makes the hysteresis keys
 	// world-stable across the clipmap's recenter snap. Only used when error_driven.
+	// level_indices: optional per-level CHANNEL_INDICES bytes (same layout/order as
+	// level_data); palette: material id -> albedo Color (index 0 = natural). When
+	// both are supplied, each output vertex gets an ARRAY_COLOR: rgb = palette[id]
+	// of the solid cell behind the vertex, with a = 0 for an explicit material and
+	// a = 1 for natural terrain. The shader reads alpha to choose the material colour
+	// vs slope-shading; a=1 is also the default for meshes with no colour array, so
+	// godot_voxel's own per-block meshes stay slope-shaded. Empty arrays = no colours
+	// emitted (back-compat with the tests' calls).
 	Array mesh_clipmap(
 			const TypedArray<PackedFloat32Array> &level_data,
 			int dim,
@@ -55,7 +63,9 @@ public:
 			double proj = 0.0,
 			double eps_px = 0.0,
 			bool error_driven = false,
-			Vector3i lattice_world_origin = Vector3i());
+			Vector3i lattice_world_origin = Vector3i(),
+			const TypedArray<PackedByteArray> &level_indices = TypedArray<PackedByteArray>(),
+			const PackedColorArray &palette = PackedColorArray());
 
 protected:
 	static void _bind_methods();

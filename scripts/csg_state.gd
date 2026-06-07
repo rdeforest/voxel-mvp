@@ -29,13 +29,16 @@ var sphere_radius:float   = 3.0
 
 const ROTATION_STEP := 15.0
 
-var _materials:     Array[StringName] = [&"Stone", &"Dirt", &"Sand", &"Wood", &"Metal"]
+var _materials:     Array[StringName] = MaterialPalette.selectable()
 var _material_index:int               = 0
 
 
 # --- Queries ---
 
 func current_material() -> StringName: return _materials[_material_index]
+
+# Palette id written to the voxel's CHANNEL_INDICES (0 = natural, never used here).
+func material_index() -> int: return MaterialPalette.index_of(current_material())
 
 func dims() -> Vector3:
     match shape:

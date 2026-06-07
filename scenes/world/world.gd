@@ -31,6 +31,16 @@ func _enter_tree() -> void:
     # per-block collision. Set in code, not world.tscn: the Godot editor re-saves
     # the scene and silently reverts .tscn edits made externally (it ate this once).
     $VoxelLodTerrain.generate_collisions = false
+    # Per-voxel material: assign a format with an 8-bit INDICES channel. The
+    # default format stores indices at 16-bit packed-mixel4 (default 0x3210, the
+    # 4-material splat encoding) which has no clean single-id zero; 8-bit gives one
+    # material id per voxel with 0 = "natural" (slope-shaded). Set before the
+    # terrain enters the tree (parent _enter_tree runs first) so the channel is
+    # allocated, streamed, and SQLite-persisted. Existing pre-material saves use a
+    # different format and must be reset (`reset`) — accepted when this landed.
+    var fmt := VoxelFormat.new()
+    fmt.set_channel_depth(VoxelBuffer.CHANNEL_INDICES, VoxelBuffer.DEPTH_8_BIT)
+    $VoxelLodTerrain.format = fmt
     # If a reset is pending, detach the SQLite stream BEFORE the terrain
     # node enters the tree, so it never reads modified blocks from disk.
     # _enter_tree runs parent-first, so we get here before $VoxelLodTerrain
