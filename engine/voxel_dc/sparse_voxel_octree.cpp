@@ -36,6 +36,15 @@ void SparseVoxelOctree::imprint_box(Vector3 center, Vector3 size, double min_lea
 	imprint(voxel_dc::BoxField(center, size), min_leaf, material);
 }
 
+void SparseVoxelOctree::imprint_array(const PackedFloat32Array &data, int dim, Vector3 origin, double cell, double min_leaf) {
+	if (data.size() < int64_t(dim) * dim * dim) {
+		return;
+	}
+	setup(origin, double(dim - 1) * cell);
+	const voxel_dc::ArrayField f(data.ptr(), dim, origin, cell);
+	_imprint_node(0, f, min_leaf, 0);
+}
+
 // Surface beyond the node's circumradius -> one uniform-sign leaf (bulk, O(1)); at the
 // data floor -> a fine leaf with corner samples; otherwise subdivide and recurse.
 void SparseVoxelOctree::_imprint_node(int idx, const voxel_dc::Field &f, double min_leaf, int material) {
@@ -204,6 +213,7 @@ void SparseVoxelOctree::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "origin", "size"), &SparseVoxelOctree::setup);
 	ClassDB::bind_method(D_METHOD("imprint_sphere", "center", "radius", "min_leaf", "material"), &SparseVoxelOctree::imprint_sphere);
 	ClassDB::bind_method(D_METHOD("imprint_box", "center", "size", "min_leaf", "material"), &SparseVoxelOctree::imprint_box);
+	ClassDB::bind_method(D_METHOD("imprint_array", "data", "dim", "origin", "cell", "min_leaf"), &SparseVoxelOctree::imprint_array);
 	ClassDB::bind_method(D_METHOD("stamp_sphere", "center", "radius", "min_leaf", "material", "op"), &SparseVoxelOctree::stamp_sphere);
 	ClassDB::bind_method(D_METHOD("stamp_box", "center", "size", "min_leaf", "material", "op"), &SparseVoxelOctree::stamp_box);
 	ClassDB::bind_method(D_METHOD("sample", "p"), &SparseVoxelOctree::sample);

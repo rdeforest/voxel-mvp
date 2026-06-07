@@ -39,6 +39,35 @@ struct BoxField : public Field {
 	}
 };
 
+// A dense SDF grid (what DCRegionReader gives us for procedural terrain), sampled
+// trilinearly — the bridge that lets the octree be built from real terrain. The data
+// pointer must outlive the imprint call. Layout: x-fastest, dim^3; world = origin +
+// lattice * cell. Clamped at the grid edge.
+struct ArrayField : public Field {
+	const float *data;
+	int dim;
+	Vector3 origin;
+	double cell;
+	ArrayField(const float *d, int dm, const Vector3 &o, double c) :
+			data(d), dim(dm), origin(o), cell(c) {}
+	double grid(int x, int y, int z) const {
+		x = CLAMP(x, 0, dim - 1);
+		y = CLAMP(y, 0, dim - 1);
+		z = CLAMP(z, 0, dim - 1);
+		return double(data[x + dim * (y + dim * z)]);
+	}
+	double sample(const Vector3 &p) const override {
+		double lx = (p.x - origin.x) / cell, ly = (p.y - origin.y) / cell, lz = (p.z - origin.z) / cell;
+		int x0 = int(Math::floor(lx)), y0 = int(Math::floor(ly)), z0 = int(Math::floor(lz));
+		double fx = lx - x0, fy = ly - y0, fz = lz - z0;
+		double c00 = Math::lerp(grid(x0, y0, z0), grid(x0 + 1, y0, z0), fx);
+		double c10 = Math::lerp(grid(x0, y0 + 1, z0), grid(x0 + 1, y0 + 1, z0), fx);
+		double c01 = Math::lerp(grid(x0, y0, z0 + 1), grid(x0 + 1, y0, z0 + 1), fx);
+		double c11 = Math::lerp(grid(x0, y0 + 1, z0 + 1), grid(x0 + 1, y0 + 1, z0 + 1), fx);
+		return Math::lerp(Math::lerp(c00, c10, fy), Math::lerp(c01, c11, fy), fz);
+	}
+};
+
 } // namespace voxel_dc
 
 #endif // SDF_FIELD_H

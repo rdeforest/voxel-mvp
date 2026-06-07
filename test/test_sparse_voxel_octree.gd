@@ -110,6 +110,32 @@ func test_stamp_subtract_watertight() -> void:
     assert_eq(_boundary(t.mesh()), 0, "shell + cavity watertight")
 
 
+func test_imprint_from_dense_array() -> void:
+    # The DCRegionReader bridge: build the octree from a dense SDF grid (procedural
+    # terrain), not just an analytic brush. Sphere sampled into a 33^3 grid at 0.5m.
+    var dim := 33
+    var cell := 0.5
+    var data := PackedFloat32Array()
+    data.resize(dim * dim * dim)
+    var i := 0
+    for z in dim:
+        for y in dim:
+            for x in dim:
+                data[i] = (Vector3(x, y, z) * cell).distance_to(CENTER) - RADIUS
+                i += 1
+    var t := SparseVoxelOctree.new()
+    t.imprint_array(data, dim, Vector3.ZERO, cell, cell)
+    assert_lt(t.sample(CENTER), 0.0, "centre solid")
+    var m := t.mesh()
+    var worst := 0.0
+    for v in (m[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+        worst = maxf(worst, absf(v.distance_to(CENTER) - RADIUS))
+    gut.p("from-array: tris=%d max_off=%.3f boundary=%d" % [
+        (m[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3, worst, _boundary(m)])
+    assert_eq(_boundary(m), 0, "terrain-from-array meshes watertight")
+    assert_lt(worst, cell, "hugs the sphere within a cell")
+
+
 func test_box_imprint() -> void:
     var t := SparseVoxelOctree.new()
     t.setup(Vector3.ZERO, ROOT)

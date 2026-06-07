@@ -22,6 +22,9 @@ public:
 	void setup(Vector3 origin, double size); // create the root cube
 	void imprint_sphere(Vector3 center, double radius, double min_leaf, int material);
 	void imprint_box(Vector3 center, Vector3 size, double min_leaf, int material);
+	// Build from a dense SDF grid (e.g. DCRegionReader terrain): root spans the grid,
+	// refines to `min_leaf` at the surface. The bridge from procedural terrain.
+	void imprint_array(const PackedFloat32Array &data, int dim, Vector3 origin, double cell, double min_leaf);
 
 	// Combine a brush into the EXISTING field in place: op 0 = UNION (add solid),
 	// 1 = SUBTRACT (carve). Existing leaves keep their corners (just combined); coarse
