@@ -26,6 +26,10 @@ func _enter_tree() -> void:
     # cached data instead of re-running the noise generator every time. Set before
     # the terrain starts generating (parent _enter_tree runs before the child's).
     $VoxelLodTerrain.cache_generated_blocks = true
+    # Our DCCollisionManager owns terrain collision now — disable godot_voxel's
+    # per-block collision. Set in code, not world.tscn: the Godot editor re-saves
+    # the scene and silently reverts .tscn edits made externally (it ate this once).
+    $VoxelLodTerrain.generate_collisions = false
     # If a reset is pending, detach the SQLite stream BEFORE the terrain
     # node enters the tree, so it never reads modified blocks from disk.
     # _enter_tree runs parent-first, so we get here before $VoxelLodTerrain
