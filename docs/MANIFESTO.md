@@ -162,17 +162,26 @@ of these, the change is wrong.
    pressure, momentum can be more — possibly at different resolutions.
    Roles and identities ("this is a wall belonging to player X's house")
    live in sidecar indexes, not in the voxel data itself.
-8. **Correctness first; do not optimize until the framerate actually
-   drops below 30.** This project demonstrates *ambition and feasibility*,
-   not benchmarks. Worker-thread time, mesh latency, re-read cost, memory
-   — none of it justifies sacrificing correctness or simplicity
-   preemptively. A slow-but-correct path ships; a fast-but-wrong one is a
-   regression. "This is expensive" is never a reason to not build the
-   ambitious thing — build it correctly, measure the *framerate*, and only
-   then, if it's actually below 30, optimize. (Cautionary tale: a DC
-   surface-prune was built to "fix" an off-thread 792 ms mesh that never
-   touched framerate — and it broke watertightness. Pure self-inflicted
-   wound.)
+8. **Correctness first; defer optimization until the framerate actually
+   drops below 30 — but never confuse enabling structure with
+   optimization.** This project demonstrates *ambition and feasibility*,
+   not benchmarks. Worker-thread time, mesh latency, re-read cost — none
+   of it justifies sacrificing correctness preemptively; a slow-but-correct
+   path ships, a fast-but-wrong one is a regression. In six years, 30 fps
+   is 480 fps (hardware doubles ~every 1.5 years), so wall-clock is rarely
+   the thing to chase.
+
+   **The distinction that matters:** a *lossless* structural choice that
+   turns O(world³) into O(details) — the sparse octree (collapse identical
+   leaves) — is **not** an optimization. It's what makes a planet-scale
+   5 mm world *exist at all*, so it is mandatory, never deferrable. The
+   test: does a cost grow with **world size** (a feasibility failure — fix
+   it structurally, now) or merely with **detail, or wall-clock on a worker
+   thread** (fine — leave it)? Memory/storage/I/O that scales with the
+   volume of the world is the first kind. A 792 ms off-thread mesh is the
+   second. (Cautionary tale: a DC surface-prune built to "fix" that
+   off-thread mesh — which never touched framerate — broke watertightness.
+   Pure self-inflicted wound.)
 
 ---
 
