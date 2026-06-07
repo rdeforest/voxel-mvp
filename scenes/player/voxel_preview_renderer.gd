@@ -83,6 +83,8 @@ func _process(_delta: float) -> void:
     if action == null:
         return
     var p := action.preview()
+    if not aim.hit and not mode.acts_on_air:
+        p.refused = true   # air target this mode won't act on (CSG) — show it inert
     if p.is_empty():
         return
     _draw_pass(_visible_im,  p, VISIBLE_ALPHA_LINE,  VISIBLE_ALPHA_FILL,  VISIBLE_ALPHA_AIR)

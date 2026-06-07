@@ -7,9 +7,15 @@ var player: Node  # set by player._ready()
 # LOCAL axis direction the EditMode reports.
 const ARROW_LEN := 3.0
 var _arrow: MeshInstance3D
+var _refused_mat: StandardMaterial3D   # "won't do anything" tint for an inert air ghost
 
 
 func _ready() -> void:
+    _refused_mat = StandardMaterial3D.new()
+    _refused_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+    _refused_mat.albedo_color = Color(0.6, 0.6, 0.6, 0.25)
+    _refused_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+    _refused_mat.cull_mode    = BaseMaterial3D.CULL_DISABLED
     var stick := CylinderMesh.new()
     stick.top_radius    = 0.12
     stick.bottom_radius = 0.12
@@ -40,8 +46,11 @@ func _process(_delta: float) -> void:
         return
 
     visible = true
+    # Inert: an air target this mode won't act on (CSG aiming at nothing). Show the
+    # ghost greyed ("won't do anything") and drop the resize arrow.
+    var inert := not aim.hit and not mode.acts_on_air
     mesh              = mode.get_preview_mesh.call(aim.position, aim.normal)
-    material_override = mode.get_preview_material.call(aim.position, aim.normal)
+    material_override = _refused_mat if inert else mode.get_preview_material.call(aim.position, aim.normal)
     global_position   = mode.get_preview_position.call(aim.position, aim.normal)
 
     if mode.get_preview_basis.is_valid():
@@ -49,7 +58,10 @@ func _process(_delta: float) -> void:
     else:
         global_transform.basis = Basis.IDENTITY
 
-    _update_arrow(mode)
+    if inert:
+        _arrow.visible = false
+    else:
+        _update_arrow(mode)
 
 
 # Orient the resize-axis stick along the EditMode's local axis direction, sitting

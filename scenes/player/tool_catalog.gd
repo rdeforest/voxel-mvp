@@ -137,8 +137,10 @@ func _build_catalog(af: ActionFactories, bs: BuildState, cs: CsgState) -> Array[
 
 # One CSG activity. The ghost is the live primitive mesh at the placement point,
 # rotated by the CSG basis, tinted by op (green add / red subtract), with an
-# arrow marking the axis the resize wheel currently grows. air_placement lets you
-# stamp an isolated shape in mid-air to audit the mesh against a clean field.
+# arrow marking the axis the resize wheel currently grows. CSG only stamps onto a
+# real surface hit: aiming at nothing shows an inert (greyed) ghost floated at 2x
+# the shape's largest dimension (so it doesn't fill the screen) and a click is a
+# no-op (act_on_air false).
 static func _csg_mode(p_name: String, shape: int, af: ActionFactories, cs: CsgState, csg_mat: Callable) -> EditMode:
     return EditMode.new()                                            \
         .named(p_name)                                               \
@@ -150,6 +152,8 @@ static func _csg_mode(p_name: String, shape: int, af: ActionFactories, cs: CsgSt
         .preview_basis(   func(_hp, _hn): return cs.rotation_basis())       \
         .axis_arrow(      func():         return cs.axis_dir())             \
         .air_placement(   true)                                            \
+        .act_on_air(      false)                                           \
+        .air_distance(    func(): return 2.0 * cs.bounding_extent())       \
         .placement_offset(true)
 
 

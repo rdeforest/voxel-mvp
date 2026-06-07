@@ -32,10 +32,12 @@ var _mouse_button_actions: Dictionary
 @onready var terrain:      VoxelLodTerrain     = get_parent().get_node("VoxelLodTerrain")
 @onready var raycast:      RayCast3D           = $Head/RayCast3D
 
-const EDIT_REACH := 20.0
+const EDIT_REACH := 30.0
 
 # When an air-placement activity (Build) aims at nothing within reach, float the
 # target this far along the camera ray so parts can be placed over empty space.
+# A mode can override the distance via EditMode.get_air_distance (CSG floats its
+# ghost at 2x its largest dimension so a big shape doesn't fill the screen).
 const AIR_PLACE_DISTANCE := 4.0
 
 # Free-placement chord (Build only): hold Shift + (W|A|E), scroll wheel.
@@ -227,6 +229,8 @@ func _try_edit_terrain() -> void:
     var aim := current_target()
     if aim == null:
         return
+    if not aim.hit and not activity.acts_on_air:
+        return   # air target with no surface, and this mode won't act on air (CSG) — no-op
     var action: Action = activity.make_action.call(aim.position, aim.normal)
     if action == null:
         return
@@ -246,7 +250,10 @@ func current_target() -> Aim:
     var activity := current_activity()
     if activity != null and activity.allows_air_placement:
         var forward := -camera.global_transform.basis.z
-        return Aim.new(camera.global_position + forward * AIR_PLACE_DISTANCE, Vector3.UP, false)
+        var dist := AIR_PLACE_DISTANCE
+        if activity.get_air_distance.is_valid():
+            dist = maxf(AIR_PLACE_DISTANCE, activity.get_air_distance.call())
+        return Aim.new(camera.global_position + forward * dist, Vector3.UP, false)
     return null
 
 

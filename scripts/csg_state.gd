@@ -73,6 +73,14 @@ func current_mesh() -> Mesh:
             return sm
     return null
 
+# Largest world-space dimension of the current shape (for the air-preview distance).
+func bounding_extent() -> float:
+    match shape:
+        CsgSdf.Shape.BOX:      return maxf(box_size.x, maxf(box_size.y, box_size.z))
+        CsgSdf.Shape.CYLINDER: return maxf(cyl_radius * 2.0, cyl_height)
+        CsgSdf.Shape.SPHERE:   return sphere_radius * 2.0
+    return 1.0
+
 # Local-space direction of the axis the resize wheel currently grows, so the
 # preview can point an arrow at it. A sphere resizes uniformly (no meaningful
 # axis) so it returns ZERO and the arrow hides.
