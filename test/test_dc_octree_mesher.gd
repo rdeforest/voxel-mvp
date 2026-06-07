@@ -54,10 +54,10 @@ func _mesh(level_data: Array, origins: PackedVector3Array, cells: PackedFloat32A
     assert_false(arrays.is_empty(), "mesher produced a surface")
     return arrays
 
-func _assert_watertight(arrays: Array, hug_tol: float) -> void:
+func _assert_watertight(arrays: Array, hug_tol: float, min_verts := 200) -> void:
     var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
     var idx:   PackedInt32Array   = arrays[Mesh.ARRAY_INDEX]
-    assert_gt(verts.size(), 200, "meaningfully tessellated")
+    assert_gt(verts.size(), min_verts, "meaningfully tessellated")
     assert_eq(idx.size() % 3, 0)
     var audit := _edge_audit(idx)
     assert_eq(audit["boundary"], 0, "boundary edges (holes/cracks)")
@@ -133,7 +133,7 @@ func test_error_mode_sphere_watertight():
     var fine := _mesh([data], origins, cells, 1e9)                       # distance mode (baseline)
     var coarse := _mesh_err([data], origins, cells, 1e9, camera, 1.0)
     assert_false(coarse.is_empty(), "error mode produced a surface")
-    _assert_watertight(coarse, 3.5)                                     # looser hug — coarse cells deviate more
+    _assert_watertight(coarse, 3.5, 40)                                # looser hug + lower floor — aggressive collapse, still closed
     var fine_tris: int   = (fine[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
     var coarse_tris: int = (coarse[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
     assert_lt(coarse_tris, fine_tris, "error mode coarsened the curved sphere")
@@ -158,3 +158,37 @@ func test_error_mode_coarsens_flat_without_holing():
     for v in verts:
         max_dev = maxf(max_dev, absf(v.z - PLANE_Z))
     assert_lt(max_dev, 0.5, "coarse vertices still lie on the plane")
+
+
+# --- Collapse hysteresis (persistent state, the anti-popping property) ---
+
+func _err_tris(mesher: DCOctreeMesher, data: PackedFloat32Array, camera: Vector3, eps: float) -> int:
+    var arrays := mesher.mesh_clipmap(
+        [data], DIM, PackedVector3Array([Vector3.ZERO]), PackedFloat32Array([1.0]),
+        CENTER, 1e9, DEPTH, camera, PROJ, eps, true, Vector3i.ZERO)
+    if arrays.is_empty():
+        return 0
+    return (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
+
+func test_collapse_hysteresis_is_sticky():
+    # The popping is a node oscillating collapsed<->subdivided as the camera moves. A
+    # reused mesher remembers last frame's collapse and keeps a collapsed node collapsed
+    # until its error clearly exceeds eps (×HYST=2.5). So: warm the persistent mesher far
+    # away (collapsed), then mesh from half the distance (error ~2x, still inside the
+    # 2.5x band) — it should STAY coarse, where a cold mesh at that distance refines.
+    var data := _level(Vector3.ZERO, 1.0)
+    var far := CENTER + Vector3(0, 0, 220)
+    var near := CENTER + Vector3(0, 0, 110)            # factor 2 < HYST(2.5): inside the band
+
+    var cold := DCOctreeMesher.new()
+    var tris_far  := _err_tris(cold, data, far, 1.0)   # fresh, far
+    var cold2 := DCOctreeMesher.new()
+    var tris_near := _err_tris(cold2, data, near, 1.0) # fresh, near (no history)
+
+    var warm := DCOctreeMesher.new()
+    _err_tris(warm, data, far, 1.0)                    # warm the history at `far` (collapses)
+    var tris_sticky := _err_tris(warm, data, near, 1.0)  # then move to `near` — should stick coarse
+
+    assert_gt(tris_near, tris_far, "near genuinely refines more than far (the LOD differs)")
+    assert_lt(tris_sticky, tris_near, "hysteresis kept it coarser than a cold mesh at the same spot")
+    assert_lte(tris_sticky, tris_far + tris_far / 20, "stayed ~as coarse as the warmed (far) state")

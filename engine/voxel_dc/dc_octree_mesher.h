@@ -8,11 +8,22 @@
 // point-location). This is the production terrain mesher; covered by
 // test/test_dc_octree_mesher.gd and test/test_dc_real_terrain.gd.
 
+#include "core/math/vector4i.h"
 #include "core/object/ref_counted.h"
+#include "core/templates/hash_set.h"
 #include "core/variant/typed_array.h"
 
 class DCOctreeMesher : public RefCounted {
 	GDCLASS(DCOctreeMesher, RefCounted)
+
+	// Persistent across calls (reuse the SAME instance): the world-space nodes that
+	// collapsed last frame, keyed Vector4i(world_origin.xyz, size). Hysteresis reads
+	// this to keep an already-collapsed node collapsed until its error clearly exceeds
+	// the threshold — so cells don't oscillate collapsed<->subdivided as the camera
+	// moves (the LOD popping). Keyed by WORLD origin so the keys survive the clipmap's
+	// periodic recenter snap. Only touched inside mesh_clipmap; one job at a time.
+	HashSet<Vector4i> _prev_collapse;
+	HashSet<Vector4i> _curr_collapse;
 
 public:
 	// Mesh a clipmap of nested baked SDF levels (finest first) into a Mesh.ARRAY_*
@@ -30,6 +41,8 @@ public:
 	// viewpoint in lattice space; proj = viewport_height / (2*tan(fov/2)) (so screen
 	// error = world_error * proj / distance). The data resolution (clipmap level) is
 	// still the floor — error-refine only coarsens, never exceeds available data.
+	// lattice_world_origin: world coords of lattice (0,0,0); makes the hysteresis keys
+	// world-stable across the clipmap's recenter snap. Only used when error_driven.
 	Array mesh_clipmap(
 			const TypedArray<PackedFloat32Array> &level_data,
 			int dim,
@@ -41,7 +54,8 @@ public:
 			Vector3 camera = Vector3(),
 			double proj = 0.0,
 			double eps_px = 0.0,
-			bool error_driven = false);
+			bool error_driven = false,
+			Vector3i lattice_world_origin = Vector3i());
 
 protected:
 	static void _bind_methods();

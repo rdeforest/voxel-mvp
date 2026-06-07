@@ -119,6 +119,10 @@ struct Octree {
 	double eps_px = 0.0;     // screen-space error threshold (px)
 	bool error_driven = false;
 	int max_leaf_size = 0;   // min-grid floor: never collapse above this (a flat world keeps >=2 cells/axis, so it meshes instead of collapsing to one empty cell)
+	Vector3i world_origin;   // world coords of lattice (0,0,0): makes the hysteresis keys world-stable
+	HashSet<Vector4i> *prev_collapse = nullptr; // last frame's collapsed world-nodes (read)
+	HashSet<Vector4i> *curr_collapse = nullptr; // this frame's collapsed world-nodes (write)
+	static constexpr double HYST = 2.5;          // stay-collapsed slack: subdivide only past eps*HYST
 	LocalVector<Cell> cells;
 	PackedVector3Array verts;
 	PackedVector3Array normals;
@@ -147,30 +151,43 @@ struct Octree {
 		return qef;
 	}
 
+	// Recursively orphan a node's whole subtree (mark every descendant non-leaf), so a
+	// collapsed node is the sole leaf over its region regardless of how its descendants
+	// had decided. Leaves have children[i] == -1, so this stops there.
+	void orphan_subtree(int idx) {
+		for (int i = 0; i < 8; ++i) {
+			int ch = cells[idx].children[i];
+			if (ch < 0) {
+				continue;
+			}
+			orphan_subtree(ch);
+			cells[ch].leaf = false;
+		}
+	}
+
 	// Bottom-up pass: give every cell its accumulated QEF (a leaf's own crossings; an
 	// internal node = sum of its children's, so the node carries ALL the fine Hermite
 	// data within it — no coarse-corner undersampling). When error_driven, collapse a
-	// node whose children are all leaves into a single leaf if one vertex fits that
-	// accumulated data within eps_px on screen (and the node isn't above the min-grid
-	// floor). Collapsing orphans the children; point-location meshing stitches the
-	// resulting size jumps crack-free.
+	// node into a single leaf if one vertex fits that accumulated data within the screen
+	// threshold (and the node isn't above the min-grid floor). The threshold is
+	// HYSTERETIC: a node that was collapsed last frame stays collapsed until its error
+	// clearly exceeds eps (×HYST), so cells don't oscillate as the camera moves. The
+	// accumulated QEF's residual already refuses to collapse over real detail, so no
+	// "all children are leaves" gate is needed — collapsing just orphans the subtree;
+	// point-location meshing stitches the resulting size jumps crack-free.
 	void accumulate(int idx) {
 		if (cells[idx].leaf) {
 			cells[idx].qef = leaf_qef(idx);
 			return;
 		}
 		Qef sum;
-		bool all_leaves = true;
 		for (int i = 0; i < 8; ++i) {
 			int ch = cells[idx].children[i];
 			accumulate(ch);
 			sum.add(cells[ch].qef);
-			if (!cells[ch].leaf) {
-				all_leaves = false;
-			}
 		}
 		cells[idx].qef = sum;
-		if (!error_driven || !all_leaves || sum.count == 0 || cells[idx].size > max_leaf_size) {
+		if (!error_driven || sum.count == 0 || cells[idx].size > max_leaf_size) {
 			return;
 		}
 		Vector3 cmin = to_v3(cells[idx].origin);
@@ -179,12 +196,18 @@ struct Octree {
 		double we = Math::sqrt(sum.residual(v) / double(sum.count));
 		Vector3 center = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
 		double dist = MAX((center - camera).length(), 1e-3);
-		if (we * proj / dist > eps_px) {
-			return; // surface too complex here for one vertex — keep the children
+		double screen_err = we * proj / dist;
+		Vector4i key(cells[idx].origin.x + world_origin.x, cells[idx].origin.y + world_origin.y,
+				cells[idx].origin.z + world_origin.z, cells[idx].size);
+		bool was_collapsed = prev_collapse != nullptr && prev_collapse->has(key);
+		double threshold = was_collapsed ? eps_px * HYST : eps_px;
+		if (screen_err > threshold) {
+			return; // too complex here for one vertex (with hysteresis slack if it was collapsed)
 		}
-		cells[idx].leaf = true; // collapse: this node is now the leaf...
-		for (int i = 0; i < 8; ++i) {
-			cells[cells[idx].children[i]].leaf = false; // ...its children are orphaned
+		cells[idx].leaf = true; // collapse: this node is the leaf; its subtree is orphaned
+		orphan_subtree(idx);
+		if (curr_collapse != nullptr) {
+			curr_collapse->insert(key);
 		}
 	}
 
@@ -394,7 +417,8 @@ Array DCOctreeMesher::mesh_clipmap(
 		Vector3 camera,
 		double proj,
 		double eps_px,
-		bool error_driven) {
+		bool error_driven,
+		Vector3i lattice_world_origin) {
 	Array out;
 	const int n = level_data.size();
 	if (n == 0 || dim < 2 || level_origins.size() != n || level_cells.size() != n || depth < 1) {
@@ -414,6 +438,9 @@ Array DCOctreeMesher::mesh_clipmap(
 	oct.proj = proj;
 	oct.eps_px = eps_px;
 	oct.error_driven = error_driven;
+	oct.world_origin = lattice_world_origin;
+	oct.prev_collapse = &_prev_collapse;
+	oct.curr_collapse = &_curr_collapse;
 	oct.clip.center = center;
 	oct.clip.half0 = half0;
 	oct.clip.levels.resize(n);
@@ -433,6 +460,13 @@ Array DCOctreeMesher::mesh_clipmap(
 
 	oct.run();
 
+	// This frame's collapse decisions become next frame's history (and bound the set to
+	// the current window — untouched nodes drop out).
+	if (error_driven) {
+		SWAP(_prev_collapse, _curr_collapse);
+		_curr_collapse.clear();
+	}
+
 	if (oct.verts.is_empty()) {
 		return out;
 	}
@@ -446,7 +480,7 @@ Array DCOctreeMesher::mesh_clipmap(
 void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("mesh_clipmap", "level_data", "dim", "level_origins", "level_cells", "center", "half0", "depth",
-					"camera", "proj", "eps_px", "error_driven"),
+					"camera", "proj", "eps_px", "error_driven", "lattice_world_origin"),
 			&DCOctreeMesher::mesh_clipmap,
-			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false));
+			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(Vector3i()));
 }

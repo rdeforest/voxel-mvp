@@ -40,6 +40,7 @@ var _saved_render_mask := 1      # godot_voxel's render layers before we hid the
 var _pending_data_only := false  # hide godot_voxel once our first mesh lands (no startup void)
 var _debug_material: Material    # translucent cyan, used only in debug-overlay mode
 
+var _mesher := DCOctreeMesher.new()   # reused: holds the persistent collapse-hysteresis state
 var _task_id := -1
 var _job_origin: Vector3i
 var _job_arrays: Array = []
@@ -197,17 +198,18 @@ func _dispatch(center: Vector3) -> void:
         proj = vp_h / (2.0 * tan(deg_to_rad(cam.fov) * 0.5))
     _task_id = WorkerThreadPool.add_task(
         _mesh_job.bind(level_data, level_origins, level_cells, center_lattice, half0,
-            camera_lattice, proj, eps_px, error_driven), false, "DC terrain mesh")
+            camera_lattice, proj, eps_px, error_driven, root_origin), false, "DC terrain mesh")
 
 
 # Runs on a worker thread: the C++ DCOctreeMesher builds + meshes one octree over
 # the clipmap. Pure computation over immutable PackedArrays — safe off the main
 # thread (no Node / engine access).
 func _mesh_job(level_data: Array, level_origins: PackedVector3Array, level_cells: PackedFloat32Array,
-        center: Vector3, half0: float, camera: Vector3, proj: float, eps: float, err: bool) -> void:
-    _job_arrays = DCOctreeMesher.new().mesh_clipmap(
+        center: Vector3, half0: float, camera: Vector3, proj: float, eps: float, err: bool,
+        world_origin: Vector3i) -> void:
+    _job_arrays = _mesher.mesh_clipmap(
         level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH,
-        camera, proj, eps, err)
+        camera, proj, eps, err, world_origin)
 
 
 func _finish() -> void:
