@@ -17,6 +17,7 @@ struct Qef {
 	double a00 = 0, a01 = 0, a02 = 0, a11 = 0, a12 = 0, a22 = 0;
 	Vector3 atb;
 	Vector3 mass;
+	Vector3 nsum;  // sum of plane normals — the vertex's surface normal
 	double btb = 0; // sum of d^2; lets us evaluate the residual at the solved vertex
 	int count = 0;
 
@@ -27,8 +28,17 @@ struct Qef {
 		a11 += n.y * n.y; a12 += n.y * n.z; a22 += n.z * n.z;
 		atb += n * d;
 		mass += p;
+		nsum += n;
 		btb += d * d;
 		++count;
+	}
+
+	// Merge another cell's QEF (additive Hermite data) — the basis of bottom-up
+	// octree simplification: a parent's QEF is the sum of its children's, so its
+	// residual reflects the TRUE fine surface within it (no coarse-corner undersampling).
+	void add(const Qef &o) {
+		a00 += o.a00; a01 += o.a01; a02 += o.a02; a11 += o.a11; a12 += o.a12; a22 += o.a22;
+		atb += o.atb; mass += o.mass; nsum += o.nsum; btb += o.btb; count += o.count;
 	}
 
 	// Sum of squared distances from v to the crossing planes: ||A v - b||^2 =

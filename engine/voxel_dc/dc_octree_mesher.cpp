@@ -100,12 +100,16 @@ struct Cell {
 	int children[8];
 	int vertex = -1;
 	bool leaf = true;
+	Qef qef; // accumulated up the tree (own crossings for a leaf; children's sum otherwise)
 };
 
 // Builds + meshes one octree over a clipmap: subdivide to the clipmap's
-// per-position target size, one QEF vertex per surface leaf, then
-// minimal-edge meshing with point-location (the smallest cell owns each edge; a
-// coarser neighbour returned twice collapses the quad to a triangle -> seamless).
+// per-position target size (the data-resolution floor), then — when error_driven —
+// COLLAPSE bottom-up wherever one vertex represents the surface within eps_px on
+// screen, so flat regions coarsen and curved ones stay fine. One QEF vertex per
+// surviving leaf, then minimal-edge meshing with point-location (the smallest cell
+// owns each edge; a coarser neighbour returned twice collapses the quad to a
+// triangle -> seamless across the size jumps the collapse introduces).
 struct Octree {
 	Clipmap clip;
 	int root_size = 0;
@@ -114,15 +118,18 @@ struct Octree {
 	double proj = 0.0;       // viewport_height / (2*tan(fov/2))
 	double eps_px = 0.0;     // screen-space error threshold (px)
 	bool error_driven = false;
+	int max_leaf_size = 0;   // min-grid floor: never collapse above this (a flat world keeps >=2 cells/axis, so it meshes instead of collapsing to one empty cell)
 	LocalVector<Cell> cells;
 	PackedVector3Array verts;
 	PackedVector3Array normals;
 	PackedInt32Array indices;
 
-	// RMS QEF fit error of one vertex for the surface crossing this node's cube, in
-	// world units; -1 if the node has no surface crossing. The error-driven LOD signal.
-	double node_error(const Vector3i &o, int s) const {
+	// A leaf's QEF, built from the 12 cube edges that cross the isosurface (the cell's
+	// own Hermite data at its own size).
+	Qef leaf_qef(int idx) const {
 		Qef qef;
+		Vector3i o = cells[idx].origin;
+		int s = cells[idx].size;
 		for (int e = 0; e < 12; ++e) {
 			const int *pa = CORNER[EDGES[e][0]];
 			const int *pb = CORNER[EDGES[e][1]];
@@ -137,12 +144,48 @@ struct Octree {
 			Vector3 p = to_v3(ca).lerp(to_v3(cb), t);
 			qef.add_plane(p, clip.gradient(p));
 		}
-		if (qef.count == 0) {
-			return -1.0;
+		return qef;
+	}
+
+	// Bottom-up pass: give every cell its accumulated QEF (a leaf's own crossings; an
+	// internal node = sum of its children's, so the node carries ALL the fine Hermite
+	// data within it — no coarse-corner undersampling). When error_driven, collapse a
+	// node whose children are all leaves into a single leaf if one vertex fits that
+	// accumulated data within eps_px on screen (and the node isn't above the min-grid
+	// floor). Collapsing orphans the children; point-location meshing stitches the
+	// resulting size jumps crack-free.
+	void accumulate(int idx) {
+		if (cells[idx].leaf) {
+			cells[idx].qef = leaf_qef(idx);
+			return;
 		}
-		Vector3 cmin = to_v3(o);
-		Vector3 cmax = cmin + Vector3(1, 1, 1) * double(s);
-		return Math::sqrt(qef.residual(qef.solve(cmin, cmax)) / double(qef.count));
+		Qef sum;
+		bool all_leaves = true;
+		for (int i = 0; i < 8; ++i) {
+			int ch = cells[idx].children[i];
+			accumulate(ch);
+			sum.add(cells[ch].qef);
+			if (!cells[ch].leaf) {
+				all_leaves = false;
+			}
+		}
+		cells[idx].qef = sum;
+		if (!error_driven || !all_leaves || sum.count == 0 || cells[idx].size > max_leaf_size) {
+			return;
+		}
+		Vector3 cmin = to_v3(cells[idx].origin);
+		Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
+		Vector3 v = sum.solve(cmin, cmax);
+		double we = Math::sqrt(sum.residual(v) / double(sum.count));
+		Vector3 center = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
+		double dist = MAX((center - camera).length(), 1e-3);
+		if (we * proj / dist > eps_px) {
+			return; // surface too complex here for one vertex — keep the children
+		}
+		cells[idx].leaf = true; // collapse: this node is now the leaf...
+		for (int i = 0; i < 8; ++i) {
+			cells[cells[idx].children[i]].leaf = false; // ...its children are orphaned
+		}
 	}
 
 	int build(const Vector3i &origin, int size, int depth) {
@@ -162,18 +205,9 @@ struct Octree {
 		if (double(size) <= clip.target_cell_size(center)) {
 			return idx; // at the data resolution floor — can't refine further
 		}
-		// Error-driven: stop (coarsen) once one vertex represents the surface here to
-		// within eps_px on screen. Nodes with no crossing fall through to distance
-		// behaviour (subdivide to the data floor) so sub-cell features aren't missed.
-		if (error_driven) {
-			double we = node_error(origin, size);
-			if (we >= 0.0) {
-				double dist = MAX((center - camera).length(), 1e-3);
-				if (we * proj / dist <= eps_px) {
-					return idx;
-				}
-			}
-		}
+		// Always build down to the data floor; error-driven coarsening happens bottom-up
+		// in accumulate() (build fine, then collapse where the fine data fits one vertex),
+		// which measures the real surface instead of undersampling at coarse corners.
 		int half = size >> 1;
 		cells[idx].leaf = false; // index-access only; cells may reallocate during recursion
 		for (int i = 0; i < 8; ++i) {
@@ -201,35 +235,16 @@ struct Octree {
 		return idx;
 	}
 
-	void build_vertex(int idx) {
-		Vector3i o = cells[idx].origin;
-		int s = cells[idx].size;
-		Qef qef;
-		Vector3 nsum;
-		for (int e = 0; e < 12; ++e) {
-			const int *pa = CORNER[EDGES[e][0]];
-			const int *pb = CORNER[EDGES[e][1]];
-			Vector3i ca = o + Vector3i(pa[0], pa[1], pa[2]) * s;
-			Vector3i cb = o + Vector3i(pb[0], pb[1], pb[2]) * s;
-			double fa = clip.value(to_v3(ca));
-			double fb = clip.value(to_v3(cb));
-			if ((fa < 0.0) == (fb < 0.0) || fa == fb) {
-				continue;
-			}
-			double t = fa / (fa - fb);
-			Vector3 p = to_v3(ca).lerp(to_v3(cb), t);
-			Vector3 n = clip.gradient(p);
-			qef.add_plane(p, n);
-			nsum += n;
-		}
-		if (qef.count == 0) {
-			return;
-		}
-		Vector3 cmin = to_v3(o);
-		Vector3 cmax = cmin + Vector3(1, 1, 1) * double(s);
+	// Place this leaf's vertex from its accumulated QEF. For a collapsed leaf the QEF
+	// holds all the fine crossings within it, so the vertex and normal reflect the real
+	// surface, not a coarse re-sample.
+	void place_vertex(int idx) {
+		const Qef &qef = cells[idx].qef;
+		Vector3 cmin = to_v3(cells[idx].origin);
+		Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
 		cells[idx].vertex = int(verts.size());
 		verts.push_back(qef.solve(cmin, cmax));
-		normals.push_back(nsum.length_squared() > 0.0 ? nsum.normalized() : Vector3(0, 1, 0));
+		normals.push_back(qef.nsum.length_squared() > 0.0 ? qef.nsum.normalized() : Vector3(0, 1, 0));
 	}
 
 	static bool origin_less(const Vector3i &a, const Vector3i &b) {
@@ -346,11 +361,16 @@ struct Octree {
 
 	void run() {
 		build(Vector3i(0, 0, 0), root_size, 0);
-		// Pass 1: a QEF vertex for every surface leaf. Pass 2: stitch edges.
+		// Keep a flat world at >=2 cells/axis so it meshes (a fully-collapsed flat region
+		// is one empty cell — no quad). half the root => the 8 root children may collapse,
+		// nothing coarser.
+		max_leaf_size = MAX(1, root_size >> 1);
+		accumulate(0); // QEF up the tree + error-driven collapse
+		// Pass 1: a vertex per surviving surface leaf. Pass 2: stitch edges.
 		int n = int(cells.size());
 		for (int i = 0; i < n; ++i) {
-			if (cells[i].leaf) {
-				build_vertex(i);
+			if (cells[i].leaf && cells[i].qef.count > 0) {
+				place_vertex(i);
 			}
 		}
 		for (int i = 0; i < n; ++i) {

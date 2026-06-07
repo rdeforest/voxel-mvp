@@ -89,8 +89,72 @@ func test_lod_transition_is_watertight():
     _assert_watertight(arrays, 2.5)                             # coarse cells are size 2
 
 
-# NOTE: error-driven LOD tests removed — the top-down corner-QEF metric over-coarsens
-# (holes flat regions to one cell; undersamples curvature). The redesign (bottom-up
-# measured-error collapse + a min-grid floor) will bring these invariants back as its
-# spec: error-mode stays watertight on the sphere, and coarsens a flat field far below
-# distance-mode without holing it.
+# --- Error-driven LOD (bottom-up collapse) ---
+#
+# The redesign: build to the data floor, then collapse a node into one leaf wherever
+# its ACCUMULATED QEF (the real fine Hermite data) is fit by one vertex within eps_px
+# on screen, floored so a flat field stays >=2 cells/axis. Its spec is two invariants:
+#   - error-mode stays watertight on the sphere (collapse + point-location stitching
+#     introduce size jumps but no cracks),
+#   - it coarsens a flat field far below distance-mode without holing it (the failure
+#     of the old top-down metric, which collapsed a flat region to one empty cell).
+
+const PROJ := 500.0   # stand-in viewport_height/(2 tan(fov/2))
+
+func _mesh_err(level_data: Array, origins: PackedVector3Array, cells: PackedFloat32Array, half0: float,
+        camera: Vector3, eps_px: float) -> Array:
+    return DCOctreeMesher.new().mesh_clipmap(
+        level_data, DIM, origins, cells, CENTER, half0, DEPTH, camera, PROJ, eps_px, true)
+
+# A flat field: SDF = world.z - PLANE_Z (negative below, positive above). An OPEN
+# surface — boundary edges at the octree perimeter are expected; what matters is it
+# coarsens without a hole in the interior.
+const PLANE_Z := 16.0
+func _plane_level(origin: Vector3, cell: float) -> PackedFloat32Array:
+    var data := PackedFloat32Array()
+    data.resize(DIM * DIM * DIM)
+    var i := 0
+    for z in DIM:
+        for y in DIM:
+            for x in DIM:
+                data[i] = (origin + Vector3(x, y, z) * cell).z - PLANE_Z
+                i += 1
+    return data
+
+
+func test_error_mode_sphere_watertight():
+    # Camera far enough that the screen error of the sphere's curvature falls under eps,
+    # so cells collapse — to varying sizes across the surface. Point-location meshing must
+    # stitch those size jumps crack-free, exactly as it does the clipmap LOD boundary.
+    var data := _level(Vector3.ZERO, 1.0)
+    var origins := PackedVector3Array([Vector3.ZERO])
+    var cells := PackedFloat32Array([1.0])
+    var camera := CENTER + Vector3(0, 0, 220)
+    var fine := _mesh([data], origins, cells, 1e9)                       # distance mode (baseline)
+    var coarse := _mesh_err([data], origins, cells, 1e9, camera, 1.0)
+    assert_false(coarse.is_empty(), "error mode produced a surface")
+    _assert_watertight(coarse, 3.5)                                     # looser hug — coarse cells deviate more
+    var fine_tris: int   = (fine[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
+    var coarse_tris: int = (coarse[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
+    assert_lt(coarse_tris, fine_tris, "error mode coarsened the curved sphere")
+
+
+func test_error_mode_coarsens_flat_without_holing():
+    # A flat field is the case the old top-down metric broke (collapsed to one empty
+    # cell -> a hole). Bottom-up collapse should coarsen it hard (a plane needs few
+    # cells) yet still produce a connected surface that hugs the plane.
+    var data := _plane_level(Vector3.ZERO, 1.0)
+    var origins := PackedVector3Array([Vector3.ZERO])
+    var cells := PackedFloat32Array([1.0])
+    var fine := _mesh([data], origins, cells, 1e9)
+    var coarse := _mesh_err([data], origins, cells, 1e9, CENTER + Vector3(0, 0, 60), 1.0)
+    assert_false(coarse.is_empty(), "flat field still meshed (not holed to nothing)")
+    var fine_tris: int   = (fine[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
+    var coarse_tris: int = (coarse[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
+    assert_lt(coarse_tris, fine_tris / 4, "flat field coarsened far below distance mode")
+    assert_gt(coarse_tris, 0, "flat field kept a surface (min-grid floor, no full collapse)")
+    var verts: PackedVector3Array = coarse[Mesh.ARRAY_VERTEX]
+    var max_dev := 0.0
+    for v in verts:
+        max_dev = maxf(max_dev, absf(v.z - PLANE_Z))
+    assert_lt(max_dev, 0.5, "coarse vertices still lie on the plane")
