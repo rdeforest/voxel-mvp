@@ -19,6 +19,8 @@ extends RefCounted
 
 const EMPTY := INF   # sample() of an unwritten region; caller uses the generator instead
 
+enum Op { UNION, SUBTRACT }   # add solid / carve solid away
+
 # Corner offsets indexed by xyz bits (matches the DC mesher's CORNER table).
 const CORNERS: Array[Vector3] = [
     Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0), Vector3(1, 1, 0),
@@ -41,20 +43,82 @@ func _init(p_origin := Vector3.ZERO, p_size := 1.0) -> void:
 # Imprint `field` (world point -> signed distance, negative inside) into the tree,
 # refining to leaves of side `min_leaf` wherever the field's surface passes. Returns
 # true if anything was written under this node. `material` tags the written leaves.
-func imprint(field: Callable, min_leaf: float, p_material := 0) -> void:
+# `mat` is either an int (one material everywhere) or a Callable(Vector3)->int (per-point
+# material, used by stamp() to keep existing terrain's material where it doesn't add).
+func imprint(field: Callable, min_leaf: float, mat = 0) -> void:
     var center := origin + Vector3.ONE * (size * 0.5)
     var fc: float = field.call(center)
     if absf(fc) > size * 0.8660254:
         # Surface beyond the node's circumradius -> no detail here; one UNIFORM leaf
         # carrying the sign (solid/air) for the whole node. Storage = O(1) for bulk.
-        _write_uniform(fc, p_material)
+        _write_uniform(fc, _mat_at(mat, center))
         return
     if size <= min_leaf * 1.0000001:
-        _write_leaf(field, p_material)   # at the skin -> fine leaf with corner samples
+        _write_leaf(field, _mat_at(mat, center))   # at the skin -> fine leaf with corner samples
         return
     _subdivide()
     for ch in children:
-        ch.imprint(field, min_leaf, p_material)
+        ch.imprint(field, min_leaf, mat)
+
+func _mat_at(mat, p: Vector3) -> int:
+    return mat.call(p) if mat is Callable else mat
+
+
+# Stamp a shape (world point -> signed distance) into the EXISTING field, combining by
+# `op`: UNION = min(existing, shape) (add solid), SUBTRACT = max(existing, -shape) (carve).
+# This is "imprinting" (doc 03 §4) — terrain and parts are one field, edited the same way.
+# IN PLACE: existing leaves keep their exact corners (just combined with the brush), and a
+# coarse leaf is only subdivided where the brush's surface needs finer detail, inheriting
+# the parent field on the way down. So surface the brush doesn't reach is untouched — no
+# re-sampling, no cracks.
+func stamp(shape: Callable, min_leaf: float, p_material: int, op: Op) -> void:
+    if not children.is_empty():
+        for ch in children:
+            ch.stamp(shape, min_leaf, p_material, op)
+        return
+    if corners.is_empty():
+        return   # unwritten region — the brush only edits existing matter (prototype)
+    var center := origin + Vector3.ONE * (size * 0.5)
+    var sc: float = shape.call(center)
+    # Brush surface passes through this leaf at a finer scale than it -> refine, inheriting
+    # this leaf's field into the children, then recurse.
+    if size > min_leaf * 1.0000001 and absf(sc) <= size * 0.8660254:
+        _subdivide_inherit()
+        for ch in children:
+            ch.stamp(shape, min_leaf, p_material, op)
+        return
+    # Apply the combine at this leaf's corners.
+    var binds := op == Op.UNION and sc < _trilerp(0.5, 0.5, 0.5)
+    for i in 8:
+        var s: float = shape.call(origin + CORNERS[i] * size)
+        corners[i] = minf(corners[i], s) if op == Op.UNION else maxf(corners[i], -s)
+    if binds:
+        material = p_material   # this leaf is now solid because the stamp added it
+
+
+# Subdivide a leaf into 8 children that reproduce its field (corners trilerp'd from this
+# leaf), so refining for a brush doesn't change the existing surface.
+func _subdivide_inherit() -> void:
+    var half := size * 0.5
+    var src := corners
+    children = []
+    for c in CORNERS:
+        var child := VoxelOctree.new(origin + c * half, half)
+        child.material = material
+        child.corners = PackedFloat32Array()
+        for cc in CORNERS:
+            var f := (c + cc) * 0.5   # child corner as a fraction of this leaf
+            child.corners.append(_trilerp_of(src, f.x, f.y, f.z))
+        children.append(child)
+    corners = PackedFloat32Array()
+
+
+static func _trilerp_of(c: PackedFloat32Array, fx: float, fy: float, fz: float) -> float:
+    var c00 := lerpf(c[0], c[1], fx)
+    var c10 := lerpf(c[2], c[3], fx)
+    var c01 := lerpf(c[4], c[5], fx)
+    var c11 := lerpf(c[6], c[7], fx)
+    return lerpf(lerpf(c00, c10, fy), lerpf(c01, c11, fy), fz)
 
 
 # Signed distance at world point `p`: trilinear within the finest written leaf, or
