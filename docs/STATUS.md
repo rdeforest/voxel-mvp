@@ -8,25 +8,59 @@
 
 ## Resumption Brief
 
-### Active thread (2026-06-05): PBD structural physics (Poly Bridge ∪ World of Goo)
+### Active thread (2026-06-06): DC render pipeline → committed to the adaptive-density octree substrate
 
-**Plan:** `~/.claude/plans/i-m-confused-the-mesher-virtual-popcorn.md` (approved).
-Replace the cellular support/collapse core (`TerrainSupport` + `PartSupport` +
-`CollapseDetector`) with a real breakable **mass-spring sim via Position-Based
-Dynamics (XPBD)**: members carry tension+compression and fail over a limit;
-cantilevers/bridges built too far out (not held below or pulled above) fail
-emergently. One particle per tracked cell, auto cross-braced; natural terrain =
-pinned anchors; detached chunks → existing `FallingBodyFactory` + falling-body
-lifecycle (reused). Phased, with the PBD system running **parallel / viz-only
-until it reaches parity**, then a switch-flip + delete (don't delete 3 working
-systems before parity). Headless GUT per phase. See the plan for phases 1–7.
+PBD is **done and authoritative** (see CLAUDE.md "Structural integrity"). This thread
+has been hardening the **DC terrain render pipeline** and then, on hitting the LOD-seam
+wall, **committing to build the adaptive-density octree substrate** as the real fix.
 
-**Two deferred voxel decisions made this session (recorded, NOT this thread):**
-- Voxel substrate → **adaptive-density octree**; godot_voxel is **not sacred**
-  (replaceable where it limits us). See [[adaptive-octree-substrate]] /
-  `docs/roadmap/design/03-dc-qef-geometry.md` §"Decisions taken".
-- **Parts-as-voxels** (imprint parts into SDF + material channel; one field/mesher/
-  integrity) rides on that octree — deferred until we return to voxel work.
+**Landed this session (all committed, headless-tested; GUI-verify the render ones):**
+- `df822e2` **`awake` overlay** — red box around awake RigidBody3D (debris/parts); pure
+  debug, headless-guarded. (One chunk stays awake longer than expected — deferred, has a
+  diagnostic now.)
+- `eca7bf1` **VISION #1 bottom-up error-LOD collapse** — build to data floor, accumulate
+  QEF up the tree (additive `Qef::add` + `nsum`), collapse where one vertex fits within
+  eps_px on screen, min-grid floor. Replaced the broken top-down corner-QEF metric.
+- `0050ced` **collapse hysteresis (persistent octree phase A)** — `DCOctreeMesher` holds a
+  world-keyed HashSet of last-frame collapses; sticky threshold (eps → eps·2.5) kills the
+  error-LOD popping. Reused mesher instance carries the state.
+- `dae4a32` **geomorph clipmap LOD boundaries** — `Clipmap::value()` blends level k→k+1
+  across each band so the field is continuous (no data step). Killed the dark dirt-slivers.
+- `492f789` **`dcaudit` console cmd** — scans the on-screen mesh for degenerate/sliver/
+  tilted triangles, prints world coords (reads via file log). Pure observer (no remesh).
+- `747d9d0` **per-triangle winding** — `emit_poly` decided one flip per quad; a quad over a
+  LOD size-jump is non-planar so one triangle went back-facing → **see-through** gaps. Now
+  each triangle is oriented to the outward gradient independently. Reversed tris 2→0.
+
+**Decision (2026-06-06): build the adaptive-density octree substrate next.** The residual
+LOD-seam quality (cell-SIZE step between fine and coarse-DATA cells) is the structural DC
+LOD-seam problem (`docs/roadmap/design/07-known-hard-problems.md`); geomorph + per-triangle
+winding fixed the *data step* and the *see-through winding* but not the size step. The clean
+fix is the unified octree over **fine data** with error-collapse for the triangle budget —
+then a coarse cell derives its vertex+normal from accumulated fine QEF data, sits on the
+fine surface, and seams dissolve. This is the SAME substrate **parts-as-voxels** rides on
+(`docs/roadmap/design/03-dc-qef-geometry.md` §"Decisions taken"; [[adaptive-octree-substrate]]).
+**No design doc written yet** — next session starts with the substrate design pass
+(persistent world-fixed octree, fine-data sourcing/streaming, incremental remesh; this also
+absorbs "phase B" of the persistent octree and the clipmap retirement).
+
+**Tier framing for parts-as-voxels** (from the scoping convo): Tier 1 = fat parts (logs/
+stone blocks) imprinted at the current 1m grid + a material channel (contained, no substrate
+change); Tier 2 = thin/sub-meter parts, needs the adaptive octree. Doc 03 already chose
+"start fat."
+
+**Console tools (DC):** `dcerror [on|off]` (error-LOD collapse, default OFF pending eps
+tuning), `dceps <px>`, `dcaudit` (suspect-triangle dump → Debug Console / file log),
+`dcmanager`/`dcsolo`/`dclod`, `awake [on|off]`, `perf`.
+
+**GUI to verify on the laptop:** the see-through triangles should be **gone** (per-triangle
+winding); dark slivers gone (geomorph); error-LOD popping reduced (`dcerror on`, then judge
+whether to flip it default-on). The mesher is render-path = headless-unverifiable for *look*,
+so these need an eyeball before fully trusting.
+
+**Deferred (DC):** zero-area degenerate triangles where the surface grazes an exact-zero grid
+corner (invisible, no pixels); flipping error-LOD default-on (pending pop verification);
+incremental remesh (folded into the substrate work); SDF backstop A2 into the player.
 
 ### Done: F2 LOD seams via our own meshing layer (path b) — DC is the default render
 
