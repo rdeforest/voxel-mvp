@@ -25,6 +25,11 @@ class DCOctreeMesher : public RefCounted {
 	HashSet<Vector4i> _prev_collapse;
 	HashSet<Vector4i> _curr_collapse;
 
+	// Per-triangle owner cell origin (WORLD lattice) of the last mesh_clipmap/mesh_subregion
+	// call — lets the incremental path know which cached triangles a re-meshed sub-box
+	// replaces. One Vector3 (integer-valued) per emitted triangle.
+	PackedVector3Array _last_tri_owners;
+
 public:
 	// Mesh a clipmap of nested baked SDF levels (finest first) into a Mesh.ARRAY_*
 	// array (VERTEX/NORMAL/INDEX), or an empty Array if the region has no surface.
@@ -65,7 +70,31 @@ public:
 			bool error_driven = false,
 			Vector3i lattice_world_origin = Vector3i(),
 			const TypedArray<PackedByteArray> &level_indices = TypedArray<PackedByteArray>(),
+			const PackedColorArray &palette = PackedColorArray(),
+			bool uniform_core = false);
+
+	// Incremental edit patch: mesh a small UNIFORM (1 m) cube [sub_origin, sub_origin+sub_size]
+	// from a fresh SDF grid, emitting ONLY the triangles owned by cells whose origin lies in
+	// the world box [core_min, core_max). The cube must be a couple cells larger than the core
+	// on every side (apron) so boundary quads stitch and land on UNCHANGED vertices — then the
+	// patch splices into the cached full mesh crack-free (the uniform 1 m fine core guarantees
+	// the same per-cell vertices the full build produced). Returns Mesh.ARRAY_* (lattice-local
+	// to sub_origin); pair with get_last_triangle_owners() for the per-triangle owner box test.
+	Array mesh_subregion(
+			const PackedFloat32Array &data,
+			int dim,
+			Vector3 data_origin,
+			double cell,
+			Vector3i sub_origin,
+			int sub_size,
+			Vector3i core_min,
+			Vector3i core_max,
+			const PackedByteArray &indices = PackedByteArray(),
 			const PackedColorArray &palette = PackedColorArray());
+
+	// Per-triangle owner cell origins (WORLD lattice) from the last mesh call — same order/count
+	// as the returned ARRAY_INDEX divided by 3.
+	PackedVector3Array get_last_triangle_owners() const { return _last_tri_owners; }
 
 protected:
 	static void _bind_methods();

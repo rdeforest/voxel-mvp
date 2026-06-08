@@ -20,13 +20,16 @@ extends Node3D
 # transition together. The mesher's point-location meshing stitches it crack-free
 # with no balance pass needed.
 
-const LEVELS            := 5      # LOD levels (0..4): 1024m coverage (64m fine core)
-const LEVEL_DIM         := 65     # samples per axis per level; LEVEL_DIM-1 must be a power of 2
+const LEVELS            := 5      # LOD levels (0..4): 2048m coverage (128m fine core)
+const LEVEL_DIM         := 129    # samples per axis per level; LEVEL_DIM-1 must be a power of 2
+                                  # 129 -> ±64m of 1m cells, so dramatic 3D terrain (overhangs,
+                                  # relief) renders fine instead of undersampling into floating
+                                  # islands. ~8x the mesh compute of 65 (perf is fine until <30fps).
 const RECENTER_DISTANCE := 8.0    # re-mesh once the follow target drifts this far (m)
 
 # Derived: octree root spans the coarsest level. ROOT = (LEVEL_DIM-1) << (LEVELS-1).
-const _LEVEL_CELLS      := LEVEL_DIM - 1                 # 64
-const _ROOT_DEPTH       := 6 + LEVELS - 1                # log2(64) + (LEVELS-1)
+const _LEVEL_CELLS      := LEVEL_DIM - 1                 # 128
+const _ROOT_DEPTH       := 7 + LEVELS - 1                # log2(128) + (LEVELS-1)
 const _COARSEST_CELL    := 1 << (LEVELS - 1)             # snap granularity (16m)
 
 var _terrain: VoxelLodTerrain
@@ -44,9 +47,19 @@ var _mesher := DCOctreeMesher.new()   # reused: holds the persistent collapse-hy
 var _task_id := -1
 var _job_origin: Vector3i
 var _job_arrays: Array = []
+var _job_owners: PackedVector3Array = PackedVector3Array()
 var _last_center := Vector3.INF
 var _job_read_ms := 0
 var _job_t0 := 0
+
+# Cached displayed mesh (the last FULL build) so an edit can splice a re-meshed sub-box in
+# place instead of rebuilding the whole clipmap (the ~5s full re-mesh). Owners are the
+# per-triangle world owner-cell origin; _cache_origin is the root the verts are local to.
+var _cache_arrays: Array = []
+var _cache_owners: PackedVector3Array = PackedVector3Array()
+var _cache_origin: Vector3i
+const _EDIT_MARGIN := 3     # cells of slack around the edit box (covers the SDF influence)
+const _EDIT_APRON  := 4     # cells built beyond the core for stitching the patch seam
 
 # Print per-recenter read/mesh timings to the output (tuning aid). Only fires while
 # the manager is enabled, which is opt-in, so it's quiet in normal play.
@@ -138,8 +151,65 @@ func _apply_render_swap() -> void:
         _mesh_instance.material_override = _terrain.material if as_terrain else _debug_material
 
 
-func _on_terrain_edit(_event: TerrainSdfChangedEvent) -> void:
-    _last_center = Vector3.INF   # force a re-mesh so the edit shows next tick
+func _on_terrain_edit(event: TerrainSdfChangedEvent) -> void:
+    # Incremental: re-mesh just the edited sub-box and splice it into the cached mesh, so a
+    # dig shows in a frame instead of waiting on the ~5s full clipmap rebuild. Falls back to
+    # a full re-mesh when the fast path can't apply.
+    if not _enabled or _follow == null:
+        return
+    if not _try_splice_edit(event):
+        _last_center = Vector3.INF   # fall back: full re-mesh next tick
+
+
+# Re-mesh a small box around the edit (DCOctreeMesher.mesh_subregion) and swap its triangles
+# for the cached mesh's in that box. Returns false (caller does a full re-mesh) when there's
+# no cached base, a full job is in flight, or the edit is outside the uniform fine core.
+func _try_splice_edit(event: TerrainSdfChangedEvent) -> bool:
+    if _task_id != -1 or _cache_arrays.is_empty():
+        return false
+    var root_half := float(1 << _ROOT_DEPTH) * 0.5
+    var fine_half := float(_LEVEL_CELLS) * 0.5 - float(_EDIT_MARGIN + _EDIT_APRON + 2)
+    var off_center := (event.box_origin + event.box_size * 0.5) - (Vector3(_cache_origin) + Vector3.ONE * root_half)
+    if maxf(absf(off_center.x), maxf(absf(off_center.y), absf(off_center.z))) > fine_half:
+        return false   # outside the 1m fine core — the splice would meet coarse LOD; full re-mesh
+
+    var core_min := Vector3i(event.box_origin.floor()) - Vector3i.ONE * _EDIT_MARGIN
+    var core_max := Vector3i((event.box_origin + event.box_size).ceil()) + Vector3i.ONE * _EDIT_MARGIN
+    var sub_origin := core_min - Vector3i.ONE * _EDIT_APRON
+    var sub_hi := core_max + Vector3i.ONE * _EDIT_APRON
+    var span := maxi(sub_hi.x - sub_origin.x, maxi(sub_hi.y - sub_origin.y, sub_hi.z - sub_origin.z))
+    var sub_size := 1
+    while sub_size < span:
+        sub_size <<= 1
+    var sub_dim := sub_size + 1
+
+    var reader := DCRegionReader.new()
+    var size_v := Vector3i(sub_dim, sub_dim, sub_dim)
+    var sdf := reader.read_sdf_lod(_terrain, 0, sub_origin, size_v)
+    if sdf.size() != sub_dim * sub_dim * sub_dim:
+        return false
+    var idx := reader.read_indices_lod(_terrain, 0, sub_origin, size_v)
+    var patch := _mesher.mesh_subregion(sdf, sub_dim, Vector3.ZERO, 1.0,
+        sub_origin, sub_size, core_min, core_max, idx, MaterialPalette.colors())
+    _apply_splice(core_min, core_max, sub_origin, patch, _mesher.get_last_triangle_owners())
+    return true
+
+
+# Swap the cached mesh's triangles in the core box for the patch's (DCEditSplicer does the
+# pure array surgery), then upload. Runs on the main thread — O(triangles) (~ms), not the
+# 10M-cell full rebuild. The spliced result becomes the base for the next edit.
+func _apply_splice(core_min: Vector3i, core_max: Vector3i, sub_origin: Vector3i,
+        patch: Array, patch_owners: PackedVector3Array) -> void:
+    var r := DCEditSplicer.splice(_cache_arrays, _cache_owners, _cache_origin,
+        core_min, core_max, sub_origin, patch, patch_owners)
+    var arrays: Array = r.arrays
+    var mesh := ArrayMesh.new()
+    if (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() > 0:
+        mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+    _mesh_instance.mesh = mesh
+    _cache_arrays = arrays
+    _cache_owners = r.owners
+    Perf.mark_event()
 
 
 func _process(_dt: float) -> void:
@@ -149,6 +219,7 @@ func _process(_dt: float) -> void:
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()
+            Perf.mark_event()   # mark the frame the new mesh is applied (correlate spikes)
     else:
         var center := _follow.global_position
         if center.distance_to(_last_center) > RECENTER_DISTANCE:
@@ -222,7 +293,8 @@ func _mesh_job(level_data: Array, level_origins: PackedVector3Array, level_cells
         world_origin: Vector3i, level_indices: Array, palette: PackedColorArray) -> void:
     _job_arrays = _mesher.mesh_clipmap(
         level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH,
-        camera, proj, eps, err, world_origin, level_indices, palette)
+        camera, proj, eps, err, world_origin, level_indices, palette, true)  # uniform 1m fine core (splice-able)
+    _job_owners = _mesher.get_last_triangle_owners()
 
 
 # Diagnostic (dcdump): write this dispatch's mesher INPUT (clipmap SDF + params) paired
@@ -262,6 +334,9 @@ func _finish() -> void:
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _job_arrays)
     _mesh_instance.mesh = mesh
     _mesh_instance.global_position = Vector3(_job_origin)
+    _cache_arrays = _job_arrays           # this full build is now the splice base
+    _cache_owners = _job_owners
+    _cache_origin = _job_origin
     if _pending_data_only:
         _pending_data_only = false   # first mesh is up — now safe to hide godot_voxel
         set_data_only(true)

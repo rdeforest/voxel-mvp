@@ -8,11 +8,20 @@ render_mode cull_back;
 
 uniform vec3  grass_color    : source_color = vec3(0.35, 0.55, 0.22);
 uniform vec3  dirt_color     : source_color = vec3(0.42, 0.32, 0.20);
+uniform vec3  rock_color     : source_color = vec3(0.46, 0.46, 0.48);
 
 // Slope mask in cos(angle) space. cos(30°) ≈ 0.866; the transition band
 // from full-dirt to full-grass spans roughly 25°–35°.
 uniform float slope_dirt_max : hint_range(0.0, 1.0) = 0.82;   // ≥35°  → full dirt
 uniform float slope_grass_min: hint_range(0.0, 1.0) = 0.91;   // ≤25°  → full grass
+
+// Rock on the heights and the cliffs. Above rock_line (in a band) the surface turns to
+// rock; very steep faces turn to rock at any altitude (rock_slope_cos in cos space — a
+// smaller cos = steeper). Tunable live: `set rock_line 50`, `set rock_band 12`, etc.
+uniform float rock_line      = 60.0;                          // altitude (m) where rock takes over
+uniform float rock_band      : hint_range(0.5, 60.0) = 14.0;  // blend thickness around rock_line
+uniform float rock_slope_cos : hint_range(0.0, 1.0)  = 0.55;  // faces steeper than this → rock
+uniform float rock_slope_soft: hint_range(0.0, 1.0)  = 0.20;  // steepness blend width
 
 uniform float wave_scale     : hint_range(0.01, 5.0) = 1.4;   // base frequency; larger = denser pattern
 uniform float wave_speed     : hint_range(0.0, 10.0) = 0.9;
@@ -95,6 +104,13 @@ void fragment() {
     grass.g     += hue_amount * (wave - 0.5);
 
     vec3 albedo = mix(dirt_color, grass, grass_mask);
+
+    // Rock on the heights and steep cliffs (procedural terrain material — altitude+slope,
+    // so it works at every LOD). Mountains are high AND steep, so either pushes toward rock.
+    float rock_alt   = smoothstep(rock_line - rock_band, rock_line + rock_band, v_world_pos.y);
+    float rock_steep = smoothstep(rock_slope_cos + rock_slope_soft, rock_slope_cos - rock_slope_soft, slope_cos);
+    float rock_mask  = max(rock_alt, rock_steep);
+    albedo = mix(albedo, rock_color, rock_mask);
 
     // Per-voxel material (from the DC mesher's CHANNEL_INDICES sampling): COLOR.a
     // near 0 marks a vertex carrying an explicit material colour (a CSG stamp), so

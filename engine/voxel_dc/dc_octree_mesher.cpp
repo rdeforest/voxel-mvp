@@ -170,11 +170,29 @@ struct Octree {
 	static constexpr double HYST = 2.5;          // stay-collapsed slack: subdivide only past eps*HYST
 	bool emit_color = false;       // sample material ids and emit per-vertex colours
 	PackedColorArray palette;      // material id -> albedo (index 0 = natural)
+	bool uniform_core = false;     // keep the finest level (level 0) at 1m — never collapse it,
+	                               // so the fine field has clean cell boundaries an edit patch
+	                               // can splice against (incremental meshing). Outer levels still
+	                               // collapse by screen error.
+	bool emit_filter = false;      // emit only triangles owned by cells inside [emit_min, emit_max)
+	Vector3i emit_min;             // (WORLD lattice) — the incremental patch's core box
+	Vector3i emit_max;
 	LocalVector<Cell> cells;
 	PackedVector3Array verts;
 	PackedVector3Array normals;
 	PackedColorArray colors;       // per-vertex material colour (rgb); a=0 material, a=1 natural
 	PackedInt32Array indices;
+	PackedVector3Array tri_owners; // WORLD owner-cell origin per emitted triangle
+
+	// World-lattice origin of a cell (cells store origin relative to the octree root).
+	Vector3i cell_world_origin(int idx) const {
+		return cells[idx].origin + world_origin;
+	}
+
+	bool owner_in_emit_box(int idx) const {
+		Vector3i o = cell_world_origin(idx);
+		return o.x >= emit_min.x && o.x < emit_max.x && o.y >= emit_min.y && o.y < emit_max.y && o.z >= emit_min.z && o.z < emit_max.z;
+	}
 
 	// A leaf's QEF, built from the 12 cube edges that cross the isosurface (the cell's
 	// own Hermite data at its own size).
@@ -240,6 +258,14 @@ struct Octree {
 		}
 		Vector3 cmin = to_v3(cells[idx].origin);
 		Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
+		// Never collapse the finest level: a uniform 1m fine core gives edit patches clean
+		// cell boundaries to splice against (incremental meshing). Outer levels still coarsen.
+		if (uniform_core) {
+			Vector3 c = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
+			if (clip.level_index(c) == 0) {
+				return;
+			}
+		}
 		Vector3 v = sum.solve(cmin, cmax);
 		// Collapse error = the L2 residual of the accumulated QEF at the merged vertex,
 		// NOT divided by plane count. The old /count averaged a thin feature's few
@@ -373,24 +399,26 @@ struct Octree {
 	}
 
 	// Emit one triangle wound so its front face points `outward` (Godot is CW-from-front,
-	// so reverse when the right-hand normal already points outward).
-	void emit_tri(int i0, int i1, int i2, const Vector3 &outward) {
+	// so reverse when the right-hand normal already points outward). `owner` (world lattice)
+	// is the cell that owns this edge — tagged per triangle for the incremental splice.
+	void emit_tri(int i0, int i1, int i2, const Vector3 &outward, const Vector3 &owner) {
 		Vector3 n = (verts[i1] - verts[i0]).cross(verts[i2] - verts[i0]);
 		if (n.dot(outward) >= 0.0) {
 			indices.push_back(i0); indices.push_back(i2); indices.push_back(i1);
 		} else {
 			indices.push_back(i0); indices.push_back(i1); indices.push_back(i2);
 		}
+		tri_owners.push_back(owner);
 	}
 
 	// Decide winding PER TRIANGLE, not once for the whole quad: a quad spanning a LOD
 	// size jump is non-planar, so a single flip decision leaves one of its two triangles
 	// back-facing — a culled, see-through gap. Orienting each triangle to `outward`
 	// independently keeps the surface consistently wound across the seam.
-	void emit_poly(const int ring[], int rc, const Vector3 &outward) {
-		emit_tri(ring[0], ring[1], ring[2], outward);
+	void emit_poly(const int ring[], int rc, const Vector3 &outward, const Vector3 &owner) {
+		emit_tri(ring[0], ring[1], ring[2], outward, owner);
 		if (rc == 4) {
-			emit_tri(ring[0], ring[2], ring[3], outward);
+			emit_tri(ring[0], ring[2], ring[3], outward, owner);
 		}
 	}
 
@@ -418,6 +446,9 @@ struct Octree {
 		if (!owns_edge(leaf_idx, ring_cells)) {
 			return;
 		}
+		if (emit_filter && !owner_in_emit_box(leaf_idx)) {
+			return; // incremental patch: only the core box's own triangles
+		}
 		int ring[4];
 		int rc = 0;
 		for (int k = 0; k < 4; ++k) {
@@ -438,7 +469,7 @@ struct Octree {
 		}
 		double t = fa / (fa - fb);
 		Vector3 outward = clip.gradient(to_v3(lo).lerp(to_v3(hi), t));
-		emit_poly(ring, rc, outward);
+		emit_poly(ring, rc, outward, to_v3(cell_world_origin(leaf_idx)));
 	}
 
 	void emit_leaf_edges(int leaf_idx) {
@@ -491,7 +522,8 @@ Array DCOctreeMesher::mesh_clipmap(
 		bool error_driven,
 		Vector3i lattice_world_origin,
 		const TypedArray<PackedByteArray> &level_indices,
-		const PackedColorArray &palette) {
+		const PackedColorArray &palette,
+		bool uniform_core) {
 	Array out;
 	const int n = level_data.size();
 	if (n == 0 || dim < 2 || level_origins.size() != n || level_cells.size() != n || depth < 1) {
@@ -510,6 +542,7 @@ Array DCOctreeMesher::mesh_clipmap(
 	Octree oct;
 	oct.emit_color = with_indices;
 	oct.palette = palette;
+	oct.uniform_core = uniform_core;   // keep the 1m fine core uniform so edit patches splice cleanly
 	oct.root_size = 1 << depth;
 	oct.max_depth = depth;
 	oct.camera = camera;
@@ -551,6 +584,70 @@ Array DCOctreeMesher::mesh_clipmap(
 		_curr_collapse.clear();
 	}
 
+	_last_tri_owners = oct.tri_owners;
+	if (oct.verts.is_empty()) {
+		return out;
+	}
+	out.resize(Mesh::ARRAY_MAX);
+	out[Mesh::ARRAY_VERTEX] = oct.verts;
+	out[Mesh::ARRAY_NORMAL] = oct.normals;
+	if (!oct.colors.is_empty()) {
+		out[Mesh::ARRAY_COLOR] = oct.colors;
+	}
+	out[Mesh::ARRAY_INDEX] = oct.indices;
+	return out;
+}
+
+Array DCOctreeMesher::mesh_subregion(
+		const PackedFloat32Array &data,
+		int dim,
+		Vector3 data_origin,
+		double cell,
+		Vector3i sub_origin,
+		int sub_size,
+		Vector3i core_min,
+		Vector3i core_max,
+		const PackedByteArray &indices,
+		const PackedColorArray &palette) {
+	Array out;
+	_last_tri_owners = PackedVector3Array();
+	if (dim < 2 || sub_size < 1 || data.size() != int64_t(dim) * dim * dim) {
+		ERR_PRINT("DCOctreeMesher::mesh_subregion: bad arguments");
+		return out;
+	}
+	const bool with_indices = indices.size() == data.size() && palette.size() > 0;
+
+	// One uniform level at the data resolution; no error-driven collapse, so the cube is
+	// meshed at 1m throughout — identical per-cell vertices to the full build's fine core.
+	Octree oct;
+	oct.emit_color = with_indices;
+	oct.palette = palette;
+	oct.root_size = sub_size;
+	oct.max_depth = 0;
+	for (int s = sub_size; s > 1; s >>= 1) {
+		oct.max_depth++;
+	}
+	oct.error_driven = false;
+	oct.world_origin = sub_origin;          // cells.origin is local to sub_origin -> owners are world
+	oct.emit_filter = true;
+	oct.emit_min = core_min;
+	oct.emit_max = core_max;
+	oct.clip.center = Vector3();
+	oct.clip.half0 = double(sub_size) * 4.0; // one level, so level_index is always 0 anyway
+	oct.clip.levels.resize(1);
+	Level lv;
+	lv.data = data.ptr();
+	lv.origin = data_origin;
+	lv.cell = cell;
+	lv.dim = dim;
+	if (with_indices) {
+		lv.idx = indices.ptr();
+	}
+	oct.clip.levels[0] = lv;
+
+	oct.run();
+
+	_last_tri_owners = oct.tri_owners;
 	if (oct.verts.is_empty()) {
 		return out;
 	}
@@ -567,8 +664,15 @@ Array DCOctreeMesher::mesh_clipmap(
 void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("mesh_clipmap", "level_data", "dim", "level_origins", "level_cells", "center", "half0", "depth",
-					"camera", "proj", "eps_px", "error_driven", "lattice_world_origin", "level_indices", "palette"),
+					"camera", "proj", "eps_px", "error_driven", "lattice_world_origin", "level_indices", "palette",
+					"uniform_core"),
 			&DCOctreeMesher::mesh_clipmap,
 			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(Vector3i()),
-			DEFVAL(TypedArray<PackedByteArray>()), DEFVAL(PackedColorArray()));
+			DEFVAL(TypedArray<PackedByteArray>()), DEFVAL(PackedColorArray()), DEFVAL(false));
+	ClassDB::bind_method(
+			D_METHOD("mesh_subregion", "data", "dim", "data_origin", "cell", "sub_origin", "sub_size",
+					"core_min", "core_max", "indices", "palette"),
+			&DCOctreeMesher::mesh_subregion,
+			DEFVAL(PackedByteArray()), DEFVAL(PackedColorArray()));
+	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"), &DCOctreeMesher::get_last_triangle_owners);
 }
