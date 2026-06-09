@@ -7,11 +7,6 @@ extends Node3D
 # command. Off by default; skips work when headless.
 
 const COLOR := Color(1.0, 0.25, 0.1)
-const EDGES := [
-    [0, 1], [1, 3], [3, 2], [2, 0],
-    [4, 5], [5, 7], [7, 6], [6, 4],
-    [0, 4], [1, 5], [2, 6], [3, 7],
-]
 
 var _world:    Node
 var _mi:       MeshInstance3D
@@ -59,9 +54,9 @@ func _process(_dt: float) -> void:
     _im.surface_begin(Mesh.PRIMITIVE_LINES)
     _im.surface_set_color(COLOR)
     for aabb in boxes:
-        for edge in EDGES:
-            _im.surface_add_vertex(_corner(aabb, edge[0]))
-            _im.surface_add_vertex(_corner(aabb, edge[1]))
+        for edge in CubeGeometry.EDGES:
+            _im.surface_add_vertex(CubeGeometry.corner_in(aabb, edge[0]))
+            _im.surface_add_vertex(CubeGeometry.corner_in(aabb, edge[1]))
     _im.surface_end()
 
 
@@ -80,6 +75,3 @@ func _world_aabb(body: Node3D) -> AABB:
     if not has_any:
         return AABB(body.global_position - Vector3.ONE * 0.5, Vector3.ONE)
     return aabb
-
-static func _corner(aabb: AABB, i: int) -> Vector3:
-    return aabb.position + aabb.size * Vector3(float(i & 1), float((i >> 1) & 1), float((i >> 2) & 1))

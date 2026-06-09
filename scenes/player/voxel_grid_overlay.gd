@@ -8,13 +8,6 @@ const SHELL_ALPHAS := [0.9, 0.6, 0.3, 0.1]   # shell 0 = targeted cell
 const GREY         := Color(0.85, 0.85, 0.85)
 
 # 12 edges of a unit cube as (corner_a, corner_b) pairs.
-# Corners indexed by (x,y,z) bits: 0=(0,0,0) ... 7=(1,1,1).
-const EDGES := [
-    [0, 1], [1, 3], [3, 2], [2, 0],   # bottom face
-    [4, 5], [5, 7], [7, 6], [6, 4],   # top face
-    [0, 4], [1, 5], [2, 6], [3, 7],   # verticals
-]
-
 var raycast: RayCast3D       # assigned by player._ready
 var enabled: bool    = false
 var _im:     ImmediateMesh
@@ -60,12 +53,9 @@ func _redraw(center: Vector3i) -> void:
 func _draw_cube_edges(cell: Vector3i, color: Color) -> void:
     var base := Vector3(cell)
     _im.surface_set_color(color)
-    for edge in EDGES:
-        _im.surface_add_vertex(base + _corner(edge[0]))
-        _im.surface_add_vertex(base + _corner(edge[1]))
-
-static func _corner(i: int) -> Vector3:
-    return Vector3(float(i & 1), float((i >> 1) & 1), float((i >> 2) & 1))
+    for edge in CubeGeometry.EDGES:
+        _im.surface_add_vertex(base + CubeGeometry.corner(edge[0]))
+        _im.surface_add_vertex(base + CubeGeometry.corner(edge[1]))
 
 static func _shell_cells(center: Vector3i, d: int) -> Array[Vector3i]:
     if d == 0:

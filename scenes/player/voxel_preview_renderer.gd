@@ -29,13 +29,6 @@ const REFUSED_GREY_BLEND  := 0.7
 # shared edge.
 const INSET := 0.05
 
-# 12 edges of a unit cube as corner-index pairs (xyz bits).
-const EDGES := [
-    [0, 1], [1, 3], [3, 2], [2, 0],
-    [4, 5], [5, 7], [7, 6], [6, 4],
-    [0, 4], [1, 5], [2, 6], [3, 7],
-]
-
 # 6 faces × 2 triangles each, indexed by cube corners.
 const FACE_TRIS := [
     # -Y
@@ -119,9 +112,11 @@ func _emit_lines(im: ImmediateMesh, cell: Vector3i, color: Color, alpha: float) 
     var c := color
     c.a = alpha
     im.surface_set_color(c)
-    for edge in EDGES:
-        im.surface_add_vertex(base + _corner(edge[0]))
-        im.surface_add_vertex(base + _corner(edge[1]))
+    # Corners inset (CubeGeometry.corner_inset) so wireframes don't z-fight with the
+    # terrain surface or double-draw shared edges with neighbours.
+    for edge in CubeGeometry.EDGES:
+        im.surface_add_vertex(base + CubeGeometry.corner_inset(edge[0], INSET))
+        im.surface_add_vertex(base + CubeGeometry.corner_inset(edge[1], INSET))
 
 func _emit_tris(im: ImmediateMesh, cell: Vector3i, color: Color, alpha: float) -> void:
     var base := Vector3(cell)
@@ -129,17 +124,9 @@ func _emit_tris(im: ImmediateMesh, cell: Vector3i, color: Color, alpha: float) -
     c.a = alpha
     im.surface_set_color(c)
     for tri in FACE_TRIS:
-        im.surface_add_vertex(base + _corner(tri[0]))
-        im.surface_add_vertex(base + _corner(tri[1]))
-        im.surface_add_vertex(base + _corner(tri[2]))
-
-# Corners inset slightly inside the unit cube so wireframes don't z-fight
-# with the terrain surface or double-draw shared edges with neighbours.
-static func _corner(i: int) -> Vector3:
-    var x := INSET if (i & 1) == 0          else 1.0 - INSET
-    var y := INSET if ((i >> 1) & 1) == 0   else 1.0 - INSET
-    var z := INSET if ((i >> 2) & 1) == 0   else 1.0 - INSET
-    return Vector3(x, y, z)
+        im.surface_add_vertex(base + CubeGeometry.corner_inset(tri[0], INSET))
+        im.surface_add_vertex(base + CubeGeometry.corner_inset(tri[1], INSET))
+        im.surface_add_vertex(base + CubeGeometry.corner_inset(tri[2], INSET))
 
 static func _tinted(c: Color, refused: bool) -> Color:
     return c.lerp(COLOR_GREY, REFUSED_GREY_BLEND) if refused else c

@@ -258,34 +258,38 @@ func _cmd_pbddemo(kind := "cantilever", size := 12) -> void:
     LimboConsole.info("pbddemo: %s size %d (%d members)" % [kind, size, sim.member_count()])
 
 # Toggle the performance overlay (FPS + per-subsystem ms). No arg flips it.
+# A console toggle's new state: empty arg flips `current`, otherwise "on" sets true.
+func _parse_toggle(state: String, current: bool) -> bool:
+    return not current if state == "" else state == "on"
+
 func _cmd_perf(state := "") -> void:
-    var on := not Perf.is_shown() if state == "" else state == "on"
+    var on := _parse_toggle(state, Perf.is_shown())
     Perf.set_shown(on)
     LimboConsole.info("perf: %s" % ("on" if on else "off"))
 
 # Toggle live PBD stress viz over the player's real structures (viz-only). No arg flips.
 func _cmd_pbdlive(state := "") -> void:
-    var on := not _pbd_structure.is_enabled() if state == "" else state == "on"
+    var on := _parse_toggle(state, _pbd_structure.is_enabled())
     _pbd_structure.set_enabled(on)
     LimboConsole.info("pbdlive: %s" % ("on" if on else "off"))
 
 # Toggle the always-on threaded DC terrain manager (path-b #3). No arg flips it.
 func _cmd_dcmanager(state := "") -> void:
-    var on := not _dc_manager.is_enabled() if state == "" else state == "on"
+    var on := _parse_toggle(state, _dc_manager.is_enabled())
     _dc_manager.set_enabled(on)
     LimboConsole.info("dcmanager: %s" % ("on" if on else "off"))
 
 # Data-only mode: hide godot_voxel's render so only our DC mesh shows. Turning it
 # on also enables the manager (no point hiding terrain with nothing replacing it).
 func _cmd_dcsolo(state := "") -> void:
-    var on := not _dc_manager.is_data_only() if state == "" else state == "on"
+    var on := _parse_toggle(state, _dc_manager.is_data_only())
     if on:
         _dc_manager.set_enabled(true)
     _dc_manager.set_data_only(on)
     LimboConsole.info("dcsolo: %s (godot_voxel render %s)" % [("on" if on else "off"), ("hidden" if on else "shown")])
 
 func _cmd_dcerror(state := "") -> void:
-    var on := not _dc_manager.error_driven if state == "" else state == "on"
+    var on := _parse_toggle(state, _dc_manager.error_driven)
     _dc_manager.error_driven = on
     _dc_manager.remesh()
     LimboConsole.info("dcerror: %s (eps %.2f px)" % [("on" if on else "off"), _dc_manager.eps_px])
@@ -305,7 +309,7 @@ func _cmd_dcaudit() -> void:
     LimboConsole.info("dcaudit: scanned the on-screen mesh; suspect triangles printed to stdout (Debug Console)")
 
 func _cmd_awake(state := "") -> void:
-    var on := not _awake_overlay.is_enabled() if state == "" else state == "on"
+    var on := _parse_toggle(state, _awake_overlay.is_enabled())
     _awake_overlay.set_enabled(on)
     LimboConsole.info("awake highlight: %s" % ("on" if on else "off"))
 

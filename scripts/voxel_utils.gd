@@ -58,33 +58,17 @@ static func footprint_from_aabb(aabb: AABB) -> Array[Vector3i]:
     return result
 
 
+# One axis of the cell-snapped AABB: a span >= one voxel snaps out to the enclosing whole
+# cells; a sub-voxel span collapses to the single cell holding its midpoint. [origin, size].
+static func _cell_axis(position: float, size: float) -> Array:
+    if size >= VoxelConstants.VOXEL_SIZE:
+        var origin: float = floor(position)
+        return [origin, ceil(position + size) - origin]
+    return [floor(position + size * 0.5), 1.0]
+
+
 static func _aabb_to_cell_aabb(aabb: AABB) -> AABB:
-    var px := 0.0
-    var sx := 0.0
-    var py := 0.0
-    var sy := 0.0
-    var pz := 0.0
-    var sz := 0.0
-
-    if aabb.size.x >= VoxelConstants.VOXEL_SIZE:
-        px = floor(aabb.position.x)
-        sx = ceil(aabb.end.x) - px
-    else:
-        px = floor(aabb.position.x + aabb.size.x * 0.5)
-        sx = 1.0
-
-    if aabb.size.y >= VoxelConstants.VOXEL_SIZE:
-        py = floor(aabb.position.y)
-        sy = ceil(aabb.end.y) - py
-    else:
-        py = floor(aabb.position.y + aabb.size.y * 0.5)
-        sy = 1.0
-
-    if aabb.size.z >= VoxelConstants.VOXEL_SIZE:
-        pz = floor(aabb.position.z)
-        sz = ceil(aabb.end.z) - pz
-    else:
-        pz = floor(aabb.position.z + aabb.size.z * 0.5)
-        sz = 1.0
-
-    return AABB(Vector3(px, py, pz), Vector3(sx, sy, sz))
+    var x := _cell_axis(aabb.position.x, aabb.size.x)
+    var y := _cell_axis(aabb.position.y, aabb.size.y)
+    var z := _cell_axis(aabb.position.z, aabb.size.z)
+    return AABB(Vector3(x[0], y[0], z[0]), Vector3(x[1], y[1], z[1]))
