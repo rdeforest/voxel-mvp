@@ -293,7 +293,9 @@ func _mesh_job(level_data: Array, level_origins: PackedVector3Array, level_cells
         world_origin: Vector3i, level_indices: Array, palette: PackedColorArray) -> void:
     _job_arrays = _mesher.mesh_clipmap(
         level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH,
-        camera, proj, eps, err, world_origin, level_indices, palette, true)  # uniform 1m fine core (splice-able)
+        camera, proj, eps, err, world_origin, level_indices, palette,
+        true,   # uniform 1m fine core (splice-able)
+        1.5)    # surface-sparse build: skip provably-empty regions (~25x fewer cells)
     _job_owners = _mesher.get_last_triangle_owners()
 
 

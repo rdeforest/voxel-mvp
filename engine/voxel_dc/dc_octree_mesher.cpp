@@ -174,6 +174,11 @@ struct Octree {
 	                               // so the fine field has clean cell boundaries an edit patch
 	                               // can splice against (incremental meshing). Outer levels still
 	                               // collapse by screen error.
+	double prune_safety = 0.0;     // >0 enables the surface-sparse build: stop subdividing a cell
+	                               // proven surface-free by a locally-estimated Lipschitz bound, so
+	                               // the tree is O(surface) not O(volume). The factor pads the
+	                               // gradient estimate against nonlinearity (≈1.5 safe). 0 = the
+	                               // old dense build-to-floor everywhere.
 	bool emit_filter = false;      // emit only triangles owned by cells inside [emit_min, emit_max)
 	Vector3i emit_min;             // (WORLD lattice) — the incremental patch's core box
 	Vector3i emit_max;
@@ -307,6 +312,25 @@ struct Octree {
 			return idx;
 		}
 		Vector3 center = to_v3(origin) + Vector3(1, 1, 1) * (size * 0.5);
+		// Surface-sparse prune: if the cell is provably surface-free, stop here instead of
+		// subdividing its whole subtree down to the floor (the dense build's 10M-cell cost).
+		// |field(center)| greater than the field's worst-case change to any corner means no
+		// zero-crossing inside. The change is bounded by half the cell-scale gradient summed
+		// over axes (L1, conservative vs the diagonal), padded by prune_safety for the field's
+		// nonlinearity. Self-calibrating: steep regions have a big gradient and prune less, so
+		// no global slope constant to mis-tune. A pruned cell carries no surface, so no
+		// crossing edge touches it and the stitch loses nothing.
+		if (prune_safety > 0.0 && size > 1) {
+			double fc = clip.value(center);
+			double h = size * 0.5;
+			double gx = Math::abs(clip.value(center + Vector3(h, 0, 0)) - clip.value(center - Vector3(h, 0, 0)));
+			double gy = Math::abs(clip.value(center + Vector3(0, h, 0)) - clip.value(center - Vector3(0, h, 0)));
+			double gz = Math::abs(clip.value(center + Vector3(0, 0, h)) - clip.value(center - Vector3(0, 0, h)));
+			double spread = 0.5 * (gx + gy + gz) * prune_safety;
+			if (Math::abs(fc) > spread) {
+				return idx; // confidently surface-free — uniform leaf, don't subdivide
+			}
+		}
 		if (double(size) <= clip.target_cell_size(center)) {
 			return idx; // at the data resolution floor — can't refine further
 		}
@@ -523,7 +547,8 @@ Array DCOctreeMesher::mesh_clipmap(
 		Vector3i lattice_world_origin,
 		const TypedArray<PackedByteArray> &level_indices,
 		const PackedColorArray &palette,
-		bool uniform_core) {
+		bool uniform_core,
+		double prune_safety) {
 	Array out;
 	const int n = level_data.size();
 	if (n == 0 || dim < 2 || level_origins.size() != n || level_cells.size() != n || depth < 1) {
@@ -543,6 +568,7 @@ Array DCOctreeMesher::mesh_clipmap(
 	oct.emit_color = with_indices;
 	oct.palette = palette;
 	oct.uniform_core = uniform_core;   // keep the 1m fine core uniform so edit patches splice cleanly
+	oct.prune_safety = prune_safety;   // >0: surface-sparse build (skip provably-empty regions)
 	oct.root_size = 1 << depth;
 	oct.max_depth = depth;
 	oct.camera = camera;
@@ -665,10 +691,10 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("mesh_clipmap", "level_data", "dim", "level_origins", "level_cells", "center", "half0", "depth",
 					"camera", "proj", "eps_px", "error_driven", "lattice_world_origin", "level_indices", "palette",
-					"uniform_core"),
+					"uniform_core", "prune_safety"),
 			&DCOctreeMesher::mesh_clipmap,
 			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(Vector3i()),
-			DEFVAL(TypedArray<PackedByteArray>()), DEFVAL(PackedColorArray()), DEFVAL(false));
+			DEFVAL(TypedArray<PackedByteArray>()), DEFVAL(PackedColorArray()), DEFVAL(false), DEFVAL(0.0));
 	ClassDB::bind_method(
 			D_METHOD("mesh_subregion", "data", "dim", "data_origin", "cell", "sub_origin", "sub_size",
 					"core_min", "core_max", "indices", "palette"),

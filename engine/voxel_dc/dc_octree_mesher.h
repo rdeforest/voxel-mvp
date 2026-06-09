@@ -71,7 +71,8 @@ public:
 			Vector3i lattice_world_origin = Vector3i(),
 			const TypedArray<PackedByteArray> &level_indices = TypedArray<PackedByteArray>(),
 			const PackedColorArray &palette = PackedColorArray(),
-			bool uniform_core = false);
+			bool uniform_core = false,
+			double prune_safety = 0.0);
 
 	// Incremental edit patch: mesh a small UNIFORM (1 m) cube [sub_origin, sub_origin+sub_size]
 	// from a fresh SDF grid, emitting ONLY the triangles owned by cells whose origin lies in
