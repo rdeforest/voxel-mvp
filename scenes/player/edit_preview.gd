@@ -49,9 +49,12 @@ func _process(_delta: float) -> void:
     # Inert: an air target this mode won't act on (CSG aiming at nothing). Show the
     # ghost greyed ("won't do anything") and drop the resize arrow.
     var inert := not aim.hit and not mode.acts_on_air
-    mesh              = mode.get_preview_mesh.call(aim.position, aim.normal)
-    material_override = _refused_mat if inert else mode.get_preview_material.call(aim.position, aim.normal)
-    global_position   = mode.get_preview_position.call(aim.position, aim.normal)
+    # A mode with no mesh ghost (Dig/Fill/Raise/… use the world-space cell preview
+    # instead) simply leaves these unset: no mesh, default tint, at the hit point.
+    mesh              = mode.get_preview_mesh.call(aim.position, aim.normal)     if mode.get_preview_mesh.is_valid()     else null
+    material_override = _refused_mat if inert else (
+        mode.get_preview_material.call(aim.position, aim.normal)                 if mode.get_preview_material.is_valid() else null)
+    global_position   = mode.get_preview_position.call(aim.position, aim.normal) if mode.get_preview_position.is_valid() else aim.position
 
     if mode.get_preview_basis.is_valid():
         global_transform.basis = mode.get_preview_basis.call(aim.position, aim.normal)

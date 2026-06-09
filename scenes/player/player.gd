@@ -313,19 +313,9 @@ func _update_mode_label() -> void:
     var lines: Array[String] = []
     var t        := current_tool()
     var activity := current_activity()
-    if activity != null and activity.mode_name == "Build":
-        lines.append("Material: %s" % build_state.current_material())
-        lines.append("Part:     %s" % build_state.part_name())
-        var r := build_state.rotation
-        lines.append("Rotation: %d°, %d°, %d°" % [r.x, r.y, r.z])
-    if activity != null and t.name == "CSG":
-        lines.append("Size:     %s" % csg_state.resize_label())
-        lines.append("Resize:   %s   (wheel; C cycles)" % csg_state.active_axis_label())
-        lines.append("Material: %s" % csg_state.current_material())
-        var cr := csg_state.rotation
-        lines.append("Rotation: %d°, %d°, %d°" % [cr.x, cr.y, cr.z])
-        lines.append("Op:       %s   (B toggles)" % csg_state.op_label())
     if activity != null:
+        if activity.get_hud_lines.is_valid():
+            lines.append_array(activity.get_hud_lines.call())
         lines.append("Activity: %s" % activity.mode_name)
     lines.append("Tool:     %s" % t.name)
     if _movement != null and _movement.fly_enabled:

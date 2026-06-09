@@ -14,6 +14,7 @@ var get_air_distance:     Callable      # optional; () -> float air-preview dist
 var uses_placement_offset: bool = false # Shift+W/A/E + wheel nudges the target
 var keep_offset_on_action: bool = false # don't reset the offset after acting (e.g. Probe)
 var csg_shape:            int  = -1     # CsgSdf.Shape for CSG activities; -1 = not a CSG mode
+var get_hud_lines:        Callable      # optional; () -> Array[String] of mode-specific HUD detail
 
 func named(                p_name: String)   -> EditMode:
     mode_name            = p_name
@@ -45,6 +46,10 @@ func axis_arrow(           fn:     Callable) -> EditMode:
 
 func shape(                p_shape: int)     -> EditMode:
     csg_shape            = p_shape
+    return self
+
+func hud_lines(            fn:     Callable) -> EditMode:
+    get_hud_lines        = fn
     return self
 
 func air_placement(        enabled: bool)    -> EditMode:

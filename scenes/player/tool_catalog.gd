@@ -23,66 +23,22 @@ func _build_catalog(af: ActionFactories, bs: BuildState, cs: CsgState) -> Array[
     var csg_sub   := _make_preview_material(Color(1.0, 0.4, 0.35, 0.35))  # red    — difference
     var csg_mat   := func(): return csg_add if cs.op == CsgState.Op.ADD else csg_sub
 
+    # Most activities show no mesh ghost — the world-space VoxelPreviewRenderer draws
+    # their affected cells instead — so they leave the preview callables unset (EditMode
+    # default: no mesh, at the hit point). Only Build and CSG carry a real ghost mesh.
     var none_activities: Array[EditMode] = [
-        EditMode.new()                                            \
-            .named("Probe")                                       \
-            .on_make_action(af.make_probe)                        \
-            .preview_mesh(    func(_hp, _hn): return null)        \
-            .preview_material(func(_hp, _hn): return null)        \
-            .preview_position(func( hp, _hn): return hp)          \
-            .placement_offset(true)                               \
-            .keep_offset(true),
+        EditMode.new().named("Probe").on_make_action(af.make_probe) \
+            .placement_offset(true).keep_offset(true),
     ]
 
     var landscape_activities: Array[EditMode] = [
-        EditMode.new()                                            \
-            .named("Dig")                                         \
-            .on_make_action(af.make_dig)                          \
-            .preview_mesh(    func(_hp, _hn): return null)        \
-            .preview_material(func(_hp, _hn): return null)        \
-            .preview_position(func( hp, _hn): return hp),
-
-        EditMode.new()                                            \
-            .named("Fill")                                        \
-            .on_make_action(af.make_fill)                         \
-            .preview_mesh(    func(_hp, _hn): return null)        \
-            .preview_material(func(_hp, _hn): return null)        \
-            .preview_position(func( hp, _hn): return hp),
-
-        EditMode.new()                                            \
-            .named("Flatten")                                     \
-            .on_make_action(af.make_flatten)                      \
-            .preview_mesh(    func(_hp, _hn): return null)        \
-            .preview_material(func(_hp, _hn): return null)        \
-            .preview_position(func( hp, _hn): return hp),
-
-        EditMode.new()                                            \
-            .named("Raise")                                       \
-            .on_make_action(af.make_raise)                        \
-            .preview_mesh(    func(_hp, _hn): return null)        \
-            .preview_material(func(_hp, _hn): return null)        \
-            .preview_position(func( hp, _hn): return hp),
-
-        EditMode.new()                                            \
-            .named("Lower")                                       \
-            .on_make_action(af.make_lower)                        \
-            .preview_mesh(    func(_hp, _hn): return null)        \
-            .preview_material(func(_hp, _hn): return null)        \
-            .preview_position(func( hp, _hn): return hp),
-
-        EditMode.new()                                            \
-            .named("FillVoxel")                                   \
-            .on_make_action(af.make_fill_voxel)                   \
-            .preview_mesh(    func(_hp, _hn): return null)        \
-            .preview_material(func(_hp, _hn): return null)        \
-            .preview_position(func( hp, _hn): return hp),
-
-        EditMode.new()                                            \
-            .named("EmptyVoxel")                                  \
-            .on_make_action(af.make_empty_voxel)                  \
-            .preview_mesh(    func(_hp, _hn): return null)        \
-            .preview_material(func(_hp, _hn): return null)        \
-            .preview_position(func( hp, _hn): return hp),
+        EditMode.new().named("Dig").on_make_action(af.make_dig),
+        EditMode.new().named("Fill").on_make_action(af.make_fill),
+        EditMode.new().named("Flatten").on_make_action(af.make_flatten),
+        EditMode.new().named("Raise").on_make_action(af.make_raise),
+        EditMode.new().named("Lower").on_make_action(af.make_lower),
+        EditMode.new().named("FillVoxel").on_make_action(af.make_fill_voxel),
+        EditMode.new().named("EmptyVoxel").on_make_action(af.make_empty_voxel),
     ]
 
     var construction_activities: Array[EditMode] = [
@@ -93,31 +49,16 @@ func _build_catalog(af: ActionFactories, bs: BuildState, cs: CsgState) -> Array[
             .preview_material(func(_hp, _hn): return build_mat)                                 \
             .preview_position(func( hp, _hn): return _ghost_mesh_position(af.build_placement_pos(hp), bs))   \
             .preview_basis(   func(_hp, _hn): return bs.rotation_basis())                                    \
+            .hud_lines(       func():         return _build_hud(bs))                                         \
             .air_placement(   true)                                                                          \
             .placement_offset(true),
 
-        EditMode.new()                                          \
-            .named("Remove")                                    \
-            .on_make_action(af.make_removal)                    \
-            .preview_mesh(    func(_hp, _hn): return null)      \
-            .preview_material(func(_hp, _hn): return null)      \
-            .preview_position(func( hp, _hn): return hp),
+        EditMode.new().named("Remove").on_make_action(af.make_removal),
     ]
 
     var assembly_activities: Array[EditMode] = [
-        EditMode.new()                                         \
-            .named("Add Snap")                                 \
-            .on_make_action(af.make_add_snap)                  \
-            .preview_mesh(    func(_hp, _hn): return null)     \
-            .preview_material(func(_hp, _hn): return null)     \
-            .preview_position(func( hp, _hn): return hp),
-
-        EditMode.new()                                         \
-            .named("Remove Snap")                              \
-            .on_make_action(af.make_remove_snap)               \
-            .preview_mesh(    func(_hp, _hn): return null)     \
-            .preview_material(func(_hp, _hn): return null)     \
-            .preview_position(func( hp, _hn): return hp),
+        EditMode.new().named("Add Snap").on_make_action(af.make_add_snap),
+        EditMode.new().named("Remove Snap").on_make_action(af.make_remove_snap),
     ]
 
     var csg_activities: Array[EditMode] = [
@@ -151,10 +92,32 @@ static func _csg_mode(p_name: String, shape: int, af: ActionFactories, cs: CsgSt
         .preview_position(func( hp, _hn): return af.csg_placement_pos(hp))  \
         .preview_basis(   func(_hp, _hn): return cs.rotation_basis())       \
         .axis_arrow(      func():         return cs.axis_dir())             \
+        .hud_lines(       func():         return _csg_hud(cs))              \
         .air_placement(   true)                                            \
         .act_on_air(      false)                                           \
         .air_distance(    func(): return 2.0 * cs.bounding_extent())       \
         .placement_offset(true)
+
+
+# Mode-specific HUD detail lines (the player appends Activity/Tool/Fly around them).
+# Each mode carries its own describer, so the HUD isn't a string-match on mode names.
+static func _build_hud(bs: BuildState) -> Array[String]:
+    var r := bs.rotation
+    return [
+        "Material: %s" % bs.current_material(),
+        "Part:     %s" % bs.part_name(),
+        "Rotation: %d°, %d°, %d°" % [r.x, r.y, r.z],
+    ]
+
+static func _csg_hud(cs: CsgState) -> Array[String]:
+    var r := cs.rotation
+    return [
+        "Size:     %s" % cs.resize_label(),
+        "Resize:   %s   (wheel; C cycles)" % cs.active_axis_label(),
+        "Material: %s" % cs.current_material(),
+        "Rotation: %d°, %d°, %d°" % [r.x, r.y, r.z],
+        "Op:       %s   (B toggles)" % cs.op_label(),
+    ]
 
 
 static func _make_preview_material(color: Color) -> StandardMaterial3D:
