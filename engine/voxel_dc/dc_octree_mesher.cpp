@@ -1,27 +1,19 @@
 #include "dc_octree_mesher.h"
 
 #include "dc_qef.h"
+#include "octree_geometry.h"
 
 #include "core/math/math_funcs.h"
 #include "core/templates/local_vector.h"
 #include "scene/resources/mesh.h"
 
-using voxel_dc::Qef;
+// CB (cube corners by xyz bits), EDGES (12 corner-pairs), RING (4 cells around an edge),
+// and Qef all come from voxel_dc — shared with the SparseVoxelOctree storage/mesher so
+// the corner order can't drift between them.
+using namespace voxel_dc;
 
 namespace {
 
-// Cube corners by xyz bits, and the 12 edges.
-const int CORNER[8][3] = {
-	{ 0, 0, 0 }, { 1, 0, 0 }, { 0, 1, 0 }, { 1, 1, 0 },
-	{ 0, 0, 1 }, { 1, 0, 1 }, { 0, 1, 1 }, { 1, 1, 1 },
-};
-const int EDGES[12][2] = {
-	{ 0, 1 }, { 2, 3 }, { 4, 5 }, { 6, 7 },
-	{ 0, 2 }, { 1, 3 }, { 4, 6 }, { 5, 7 },
-	{ 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 },
-};
-// Four cells around an edge, in (perp-u, perp-v) quadrant offsets.
-const int RING[4][2] = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };
 const double QUERY_EPS = 0.25; // perpendicular offset to land just across an edge
 
 inline Vector3 to_v3(const Vector3i &v) {
@@ -206,8 +198,8 @@ struct Octree {
 		Vector3i o = cells[idx].origin;
 		int s = cells[idx].size;
 		for (int e = 0; e < 12; ++e) {
-			const int *pa = CORNER[EDGES[e][0]];
-			const int *pb = CORNER[EDGES[e][1]];
+			const int *pa = CB[EDGES[e][0]];
+			const int *pb = CB[EDGES[e][1]];
 			Vector3i ca = o + Vector3i(pa[0], pa[1], pa[2]) * s;
 			Vector3i cb = o + Vector3i(pb[0], pb[1], pb[2]) * s;
 			double fa = clip.value(to_v3(ca));
@@ -340,7 +332,7 @@ struct Octree {
 		int half = size >> 1;
 		cells[idx].leaf = false; // index-access only; cells may reallocate during recursion
 		for (int i = 0; i < 8; ++i) {
-			Vector3i co = origin + Vector3i(CORNER[i][0], CORNER[i][1], CORNER[i][2]) * half;
+			Vector3i co = origin + Vector3i(CB[i][0], CB[i][1], CB[i][2]) * half;
 			int child = build(co, half, depth + 1);
 			cells[idx].children[i] = child;
 		}

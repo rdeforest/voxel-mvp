@@ -1,11 +1,14 @@
 #include "voxel_mesher_dc.h"
 
 #include "dc_qef.h"
+#include "octree_geometry.h"
 
 #include "core/math/color.h"
 #include "core/templates/local_vector.h"
 #include "modules/voxel/storage/voxel_buffer.h"
 
+using voxel_dc::CB;       // cube corners by xyz bits (shared with the octree mesher/store)
+using voxel_dc::EDGES;    // 12 edges as corner-index pairs
 using voxel_dc::Qef;
 using zylann::voxel::VoxelBuffer;
 
@@ -19,17 +22,8 @@ namespace {
 const int MIN_PADDING = 2;
 const int MAX_PADDING = 3;
 
-// Cube corners by xyz bits: 0=(0,0,0) .. 7=(1,1,1). 12 edges as corner pairs.
-const int CORNER[8][3] = {
-	{ 0, 0, 0 }, { 1, 0, 0 }, { 0, 1, 0 }, { 1, 1, 0 },
-	{ 0, 0, 1 }, { 1, 0, 1 }, { 0, 1, 1 }, { 1, 1, 1 },
-};
-const int EDGES[12][2] = {
-	{ 0, 1 }, { 2, 3 }, { 4, 5 }, { 6, 7 },
-	{ 0, 2 }, { 1, 3 }, { 4, 6 }, { 5, 7 },
-	{ 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 },
-};
-// Ring of the four cells around an edge, in (perp-u, perp-v) offsets.
+// Per-block (grid) edge ring — DISTINCT from voxel_dc::RING (the octree mesher's
+// centred quadrant offsets); this is the corner-origin form for fixed-grid meshing.
 const int RING[4][2] = { { -1, -1 }, { 0, -1 }, { 0, 0 }, { -1, 0 } };
 
 // Debug palette: per-vertex colour by LOD index, painted by the terrain shader
@@ -105,8 +99,8 @@ void VoxelMesherDC::build(Output &output, const Input &input) {
 				Qef qef;
 				Vector3 nsum;
 				for (int e = 0; e < 12; ++e) {
-					const int *ca = CORNER[EDGES[e][0]];
-					const int *cb = CORNER[EDGES[e][1]];
+					const int *ca = CB[EDGES[e][0]];
+					const int *cb = CB[EDGES[e][1]];
 					const int ax = bx + ca[0], ay = by + ca[1], az = bz + ca[2];
 					const int bx2 = bx + cb[0], by2 = by + cb[1], bz2 = bz + cb[2];
 					const float fa = sd(ax, ay, az);
