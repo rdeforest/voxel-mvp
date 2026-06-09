@@ -5,6 +5,7 @@ extends Node3D
 @onready var _player:    CharacterBody3D     = $Player
 
 var _dc_manager: DCTerrainManager
+var _substrate_preview: DcSubstratePreview
 var _dc_collision: DCCollisionManager
 var _awake_overlay: AwakeOverlay
 var _pbd_demo: PbdDemo
@@ -58,6 +59,9 @@ func _ready() -> void:
     add_child(_dc_manager)
     _dc_manager.setup(_terrain, _player)
     _dc_manager.start_default()   # DC is the default terrain render; dcmanager/dcsolo override
+    _substrate_preview = DcSubstratePreview.new()
+    add_child(_substrate_preview)
+    _substrate_preview.setup(_player)   # Phase B store-over-generator render preview (dcgen)
     # Body-driven JIT terrain collision from our DC mesher; godot_voxel collision is
     # off (world.tscn generate_collisions = false), so this is the only terrain body.
     _dc_collision = DCCollisionManager.new()
@@ -130,6 +134,7 @@ func _console_commands() -> Array:
         [_cmd_dceps,     "dceps",     "Set the error-driven LOD threshold in px (lower = more detail). Usage: dceps <px>"],
         [_cmd_dcdump,    "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [_cmd_dcaudit,   "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
+        [_cmd_dcgen,     "dcgen",     "Phase B preview: render the octree-over-generator substrate (cyan) at your position. Usage: dcgen [on|off]"],
         [_cmd_pbddemo,   "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [_cmd_physics_active, "physics_active", "Toggle the structural physics simulation on your real structures (sag + collapse under load). Usage: physics_active [on|off]"],
         [_cmd_perf,      "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
@@ -307,6 +312,16 @@ func _cmd_dcdump() -> void:
 func _cmd_dcaudit() -> void:
     _dc_manager.audit_current_mesh()
     LimboConsole.info("dcaudit: scanned the on-screen mesh; suspect triangles printed to stdout (Debug Console)")
+
+# `dcgen on` (re)builds the substrate preview at your current position; `dcgen off` hides it.
+func _cmd_dcgen(state := "") -> void:
+    var on := _parse_toggle(state, _substrate_preview.visible)
+    if on:
+        var tris := _substrate_preview.rebuild()
+        LimboConsole.info("dcgen: on — %d triangles (octree over the generator field, cyan)" % tris)
+    else:
+        _substrate_preview.clear()
+        LimboConsole.info("dcgen: off")
 
 func _cmd_awake(state := "") -> void:
     var on := _parse_toggle(state, _awake_overlay.is_enabled())

@@ -76,6 +76,21 @@ func test_graded_terrain_fine_near_focus_and_sparser_than_uniform() -> void:
     assert_lt(graded.leaf_count(), uniform.leaf_count(), "grading is sparser than uniform-fine")
 
 
+func test_substrate_preview_meshes_terrain() -> void:
+    # The dcgen render glue: build the octree-over-generator preview at a position and
+    # confirm it produces a non-empty mesh (the path the live render rides on).
+    var follow := Node3D.new()
+    add_child_autofree(follow)
+    follow.global_position = Vector3(100, 0, 100)
+    var preview := DcSubstratePreview.new()
+    add_child_autofree(preview)
+    preview.setup(follow)
+    assert_gt(preview.rebuild(), 0, "preview meshes terrain at the focus")
+    assert_true(preview.visible, "shown after rebuild")
+    preview.clear()
+    assert_false(preview.visible, "hidden after clear")
+
+
 # March up the column; SDF crosses negative (solid, below ground) -> positive (air).
 func _octree_crossing(t: SparseVoxelOctree, x: float, z: float, y_lo: float, y_hi: float) -> float:
     var y := y_lo
