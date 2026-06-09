@@ -16,7 +16,7 @@ func before_each() -> void:
 
 func _sphere(op: int, radius: float) -> CsgAction:
     return CsgAction.new(
-        CsgSdf.Shape.SPHERE, Vector3(radius, 0, 0),
+        CsgSphereShape.new(radius),
         Transform3D(Basis.IDENTITY, Vector3.ZERO), op, &"Stone", _terrain, null)
 
 
@@ -44,7 +44,7 @@ func test_player_clearance_refuses_burying_stamp() -> void:
     add_child_autofree(player)
     player.global_position = Vector3.ZERO
     var action := CsgAction.new(
-        CsgSdf.Shape.SPHERE, Vector3(4, 0, 0),
+        CsgSphereShape.new(4.0),
         Transform3D(Basis.IDENTITY, Vector3.ZERO), CsgState.Op.ADD, &"Stone", _terrain, player)
     assert_false(action.validate(), "stamp would bury the player -> refused")
 
@@ -54,7 +54,7 @@ func test_world_box_grows_with_rotation() -> void:
     # band is written on every side.
     var basis  := Basis(Vector3.UP, deg_to_rad(45.0))
     var action := CsgAction.new(
-        CsgSdf.Shape.BOX, Vector3(4, 4, 4),
+        CsgBoxShape.new(Vector3(4, 4, 4)),
         Transform3D(basis, Vector3(10, 0, 0)), CsgState.Op.ADD, &"Stone", _terrain, null)
     var box := action._world_box()
     # 4×4×4 box rotated 45° about Y spans ~5.66 in X/Z; +/- MARGIN(2) each side.

@@ -13,8 +13,7 @@ extends AdditiveAction
 const MARGIN  := 2.0   # cells of band written beyond the shape, for a clean crossing
 
 
-var shape:    int
-var dims:     Vector3
+var shape:    CsgShape      # active primitive: owns its dims, SDF, and local AABB
 var xform:    Transform3D   # shape local -> world (rotation basis + placement origin)
 var op:       int           # CsgState.Op
 
@@ -26,8 +25,7 @@ var _work_computed: bool = false
 
 
 func _init(
-    p_shape:    int,
-    p_dims:     Vector3,
+    p_shape:    CsgShape,
     p_xform:    Transform3D,
     p_op:       int,
     p_material: StringName,
@@ -35,7 +33,6 @@ func _init(
     p_player:   CharacterBody3D,
 ) -> void:
     shape         = p_shape
-    dims          = p_dims
     xform         = p_xform
     op            = p_op
     material_name = p_material
@@ -103,7 +100,7 @@ func execute() -> void:
 # World AABB the stamp touches: the shape's local AABB rotated into world by
 # `xform`, grown by MARGIN so the surface band is written all around.
 func _world_box() -> AABB:
-    return (xform * CsgSdf.local_aabb(shape, dims)).grow(MARGIN)
+    return (xform * shape.local_aabb()).grow(MARGIN)
 
 
 func _ensure_work() -> void:
@@ -123,7 +120,7 @@ func _compute_work() -> Array:
         box.position,
         box.size,
         func(cell: Vector3i) -> void:
-            var d := CsgSdf.distance(shape, inv * Vector3(cell), dims)
+            var d := shape.sdf(inv * Vector3(cell))
             d = clampf(d, VoxelConstants.SDF_SOLID, VoxelConstants.SDF_AIR)
             var existing := vt.get_voxel_f(cell)
             var combined := minf(existing, d) if op == CsgState.Op.ADD else maxf(existing, -d)

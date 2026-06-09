@@ -7,32 +7,35 @@ extends GutTest
 func test_bounding_extent_per_shape() -> void:
     var cs := CsgState.new()
     cs.set_shape(CsgSdf.Shape.BOX)
-    cs.box_size = Vector3(2, 9, 4)
+    (cs.active_shape() as CsgBoxShape).size = Vector3(2, 9, 4)
     assert_eq(cs.bounding_extent(), 9.0, "box -> largest side")
     cs.set_shape(CsgSdf.Shape.CYLINDER)
-    cs.cyl_radius = 5.0   # diameter 10
-    cs.cyl_height = 3.0
+    var cyl := cs.active_shape() as CsgCylinderShape
+    cyl.radius = 5.0   # diameter 10
+    cyl.height = 3.0
     assert_eq(cs.bounding_extent(), 10.0, "cylinder -> max(diameter, height)")
     cs.set_shape(CsgSdf.Shape.SPHERE)
-    cs.sphere_radius = 6.0
+    (cs.active_shape() as CsgSphereShape).radius = 6.0
     assert_eq(cs.bounding_extent(), 12.0, "sphere -> diameter")
 
 
 func test_wheel_grows_active_axis_only() -> void:
     var cs := CsgState.new()
     cs.set_shape(CsgSdf.Shape.BOX)
-    cs.box_size = Vector3(4, 4, 4)
+    var box := cs.active_shape() as CsgBoxShape
+    box.size = Vector3(4, 4, 4)
     cs.active_axis = 1            # Y
     cs.grow(2.0)                  # +2 * RESIZE_STEP
-    assert_eq(cs.box_size, Vector3(4, 6, 4), "only the active axis grows")
+    assert_eq(box.size, Vector3(4, 6, 4), "only the active axis grows")
 
 
 func test_grow_clamps_to_min() -> void:
     var cs := CsgState.new()
     cs.set_shape(CsgSdf.Shape.SPHERE)
-    cs.sphere_radius = 1.0
+    var sphere := cs.active_shape() as CsgSphereShape
+    sphere.radius = 1.0
     cs.grow(-100.0)
-    assert_eq(cs.sphere_radius, CsgState.MIN_DIM, "can't shrink below MIN_DIM")
+    assert_eq(sphere.radius, CsgState.MIN_DIM, "can't shrink below MIN_DIM")
 
 
 func test_cylinder_axis_maps_radius_or_height() -> void:

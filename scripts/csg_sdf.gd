@@ -34,30 +34,3 @@ static func cylinder(p: Vector3, radius: float, height: float) -> float:
 
 static func sphere(p: Vector3, radius: float) -> float:
     return p.length() - radius
-
-
-# Evaluate `shape` at local point `p` from a generic dimensions vector:
-#   BOX      — full sizes (x, y, z)
-#   CYLINDER — dims.x = radius, dims.y = height
-#   SPHERE   — dims.x = radius
-static func distance(shape: int, p: Vector3, dims: Vector3) -> float:
-    match shape:
-        Shape.BOX:      return box(p, dims)
-        Shape.CYLINDER: return cylinder(p, dims.x, dims.y)
-        Shape.SPHERE:   return sphere(p, dims.x)
-    return 1.0
-
-
-# Local-space AABB enclosing the shape (centred at the origin).
-static func local_aabb(shape: int, dims: Vector3) -> AABB:
-    match shape:
-        Shape.BOX:
-            return AABB(-dims * 0.5, dims)
-        Shape.CYLINDER:
-            var r := dims.x
-            var h := dims.y
-            return AABB(Vector3(-r, -h * 0.5, -r), Vector3(r * 2.0, h, r * 2.0))
-        Shape.SPHERE:
-            var rs := dims.x
-            return AABB(-Vector3.ONE * rs, Vector3.ONE * rs * 2.0)
-    return AABB()

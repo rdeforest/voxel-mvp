@@ -106,8 +106,7 @@ func make_csg(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
     var origin := csg_placement_pos(hit_pos)
     var xform  := Transform3D(_csg_state.rotation_basis(), origin)
     return CsgAction.new(
-        _csg_state.shape,
-        _csg_state.dims(),
+        _csg_state.active_shape(),
         xform,
         _csg_state.op,
         _csg_state.current_material(),

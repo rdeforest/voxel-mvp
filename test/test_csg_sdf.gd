@@ -42,10 +42,3 @@ func test_rotation_roundtrip_is_distance_preserving() -> void:
     var surface_world := xform * surface_local
     var d := CsgSdf.box(xform.affine_inverse() * surface_world, size)
     assert_almost_eq(d, 0.0, EPS, "rotated surface point still reads as on-surface")
-
-
-func test_local_aabb_encloses_shapes() -> void:
-    assert_eq(CsgSdf.local_aabb(CsgSdf.Shape.BOX, Vector3(4, 6, 2)), AABB(Vector3(-2, -3, -1), Vector3(4, 6, 2)))
-    assert_eq(CsgSdf.local_aabb(CsgSdf.Shape.SPHERE, Vector3(3, 0, 0)), AABB(-Vector3.ONE * 3.0, Vector3.ONE * 6.0))
-    var cyl: AABB = CsgSdf.local_aabb(CsgSdf.Shape.CYLINDER, Vector3(2, 8, 0))
-    assert_eq(cyl, AABB(Vector3(-2, -4, -2), Vector3(4, 8, 4)), "cylinder r2 h8")
