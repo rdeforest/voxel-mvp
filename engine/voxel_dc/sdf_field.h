@@ -11,6 +11,27 @@
 
 namespace voxel_dc {
 
+// Trilinear sampling of a dense SDF grid (x-fastest, dim^3, world = origin + lattice
+// * cell), clamped at the edge. Shared by ArrayField and the mesher's clipmap Level —
+// the one definition of "read this grid" so the two can't drift apart.
+inline double grid_clamped(const float *data, int dim, int x, int y, int z) {
+	x = CLAMP(x, 0, dim - 1);
+	y = CLAMP(y, 0, dim - 1);
+	z = CLAMP(z, 0, dim - 1);
+	return double(data[x + dim * (y + dim * z)]);
+}
+
+inline double sample_trilinear(const float *data, int dim, const Vector3 &origin, double cell, const Vector3 &world) {
+	double lx = (world.x - origin.x) / cell, ly = (world.y - origin.y) / cell, lz = (world.z - origin.z) / cell;
+	int x0 = int(Math::floor(lx)), y0 = int(Math::floor(ly)), z0 = int(Math::floor(lz));
+	double fx = lx - x0, fy = ly - y0, fz = lz - z0;
+	double c00 = Math::lerp(grid_clamped(data, dim, x0, y0, z0), grid_clamped(data, dim, x0 + 1, y0, z0), fx);
+	double c10 = Math::lerp(grid_clamped(data, dim, x0, y0 + 1, z0), grid_clamped(data, dim, x0 + 1, y0 + 1, z0), fx);
+	double c01 = Math::lerp(grid_clamped(data, dim, x0, y0, z0 + 1), grid_clamped(data, dim, x0 + 1, y0, z0 + 1), fx);
+	double c11 = Math::lerp(grid_clamped(data, dim, x0, y0 + 1, z0 + 1), grid_clamped(data, dim, x0 + 1, y0 + 1, z0 + 1), fx);
+	return Math::lerp(Math::lerp(c00, c10, fy), Math::lerp(c01, c11, fy), fz);
+}
+
 struct Field {
 	virtual ~Field() {}
 	virtual double sample(const Vector3 &p) const = 0; // negative inside solid
@@ -50,21 +71,8 @@ struct ArrayField : public Field {
 	double cell;
 	ArrayField(const float *d, int dm, const Vector3 &o, double c) :
 			data(d), dim(dm), origin(o), cell(c) {}
-	double grid(int x, int y, int z) const {
-		x = CLAMP(x, 0, dim - 1);
-		y = CLAMP(y, 0, dim - 1);
-		z = CLAMP(z, 0, dim - 1);
-		return double(data[x + dim * (y + dim * z)]);
-	}
 	double sample(const Vector3 &p) const override {
-		double lx = (p.x - origin.x) / cell, ly = (p.y - origin.y) / cell, lz = (p.z - origin.z) / cell;
-		int x0 = int(Math::floor(lx)), y0 = int(Math::floor(ly)), z0 = int(Math::floor(lz));
-		double fx = lx - x0, fy = ly - y0, fz = lz - z0;
-		double c00 = Math::lerp(grid(x0, y0, z0), grid(x0 + 1, y0, z0), fx);
-		double c10 = Math::lerp(grid(x0, y0 + 1, z0), grid(x0 + 1, y0 + 1, z0), fx);
-		double c01 = Math::lerp(grid(x0, y0, z0 + 1), grid(x0 + 1, y0, z0 + 1), fx);
-		double c11 = Math::lerp(grid(x0, y0 + 1, z0 + 1), grid(x0 + 1, y0 + 1, z0 + 1), fx);
-		return Math::lerp(Math::lerp(c00, c10, fy), Math::lerp(c01, c11, fy), fz);
+		return sample_trilinear(data, dim, origin, cell, p);
 	}
 };
 

@@ -2,6 +2,7 @@
 
 #include "dc_qef.h"
 #include "octree_geometry.h"
+#include "sdf_field.h"
 
 #include "core/math/math_funcs.h"
 #include "core/templates/local_vector.h"
@@ -20,21 +21,14 @@ inline Vector3 to_v3(const Vector3i &v) {
 	return Vector3(real_t(v.x), real_t(v.y), real_t(v.z));
 }
 
-// One baked SDF grid (a clipmap level): trilinear value + central-difference
-// gradient. Reads are clamped at the grid edge.
+// One baked SDF grid (a clipmap level): trilinear value (shared voxel_dc sampler) plus
+// the material-index channel. Reads are clamped at the grid edge.
 struct Level {
 	const float *data = nullptr;
 	const uint8_t *idx = nullptr; // optional CHANNEL_INDICES bytes, same layout as data
 	Vector3 origin;
 	double cell = 1.0;
 	int dim = 0;
-
-	double grid(int x, int y, int z) const {
-		x = CLAMP(x, 0, dim - 1);
-		y = CLAMP(y, 0, dim - 1);
-		z = CLAMP(z, 0, dim - 1);
-		return double(data[x + dim * (y + dim * z)]);
-	}
 
 	// Nearest material id at a world point (ids are discrete — no interpolation).
 	int index_nearest(const Vector3 &world) const {
@@ -51,16 +45,7 @@ struct Level {
 	}
 
 	double at(const Vector3 &world) const {
-		double lx = (world.x - origin.x) / cell;
-		double ly = (world.y - origin.y) / cell;
-		double lz = (world.z - origin.z) / cell;
-		int x0 = int(Math::floor(lx)), y0 = int(Math::floor(ly)), z0 = int(Math::floor(lz));
-		double fx = lx - x0, fy = ly - y0, fz = lz - z0;
-		double c00 = Math::lerp(grid(x0, y0, z0), grid(x0 + 1, y0, z0), fx);
-		double c10 = Math::lerp(grid(x0, y0 + 1, z0), grid(x0 + 1, y0 + 1, z0), fx);
-		double c01 = Math::lerp(grid(x0, y0, z0 + 1), grid(x0 + 1, y0, z0 + 1), fx);
-		double c11 = Math::lerp(grid(x0, y0 + 1, z0 + 1), grid(x0 + 1, y0 + 1, z0 + 1), fx);
-		return Math::lerp(Math::lerp(c00, c10, fy), Math::lerp(c01, c11, fy), fz);
+		return voxel_dc::sample_trilinear(data, dim, origin, cell, world);
 	}
 };
 
