@@ -1,14 +1,11 @@
 class_name FlattenAction
-extends AdditiveAction
-
-const GRID_ID = 0
+extends PlayerSafeAction
 
 var plane_point: Vector3   # a point the flatten plane passes through
 var normal:      Vector3   # normal of the flatten plane (unit length)
 var radius:      float
 
 var terrain:     VoxelLodTerrain
-var player:      CharacterBody3D
 
 var _work: Array         = []   # [[Vector3i cell, float sdf], ...]
 var _work_computed: bool = false
@@ -32,7 +29,7 @@ func validate() -> bool:
     _ensure_work()
     if _work.is_empty():
         return false
-    if _would_endanger_player():
+    if _endangers():
         return false
     return true
 
@@ -44,7 +41,7 @@ func preview() -> ActionPreview:
             p.air.append(entry[0])
         else:
             p.solid.append(entry[0])
-    p.refused = _work.is_empty() or _would_endanger_player()
+    p.refused = _work.is_empty() or _endangers()
     return p
 
 func execute() -> void:
@@ -62,29 +59,20 @@ func execute() -> void:
     var dims   :=                Vector3.ONE * (radius * 2.0)
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(GRID_ID, origin, dims))
+        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, origin, dims))
 
 
 # --- Internals ---
 
-# Refuse if any work cell would either bury the player (fill into their
-# capsule) or knock their support out (remove the cell under their feet).
-# Capsule defaults: radius 0.5, total height 3.0, origin at center.
-func _would_endanger_player() -> bool:
-    if player == null:
-        return false
-    var ppos := player.global_position
-    var capsule_aabb := AABB(
-        ppos + Vector3(-0.6, -1.5, -0.6),
-        Vector3(1.2, 3.0, 1.2))
-    var support_aabb := AABB(
-        ppos + Vector3(-0.6, -3.0, -0.6),
-        Vector3(1.2, 1.5, 1.2))
+# Refuse if any work cell would bury the player (new solid in their capsule) or knock
+# their support out (new air under their feet). The boxes live in PlayerSafeAction.
+func _endangers() -> bool:
     for entry in _work:
-        var center := Vector3(entry[0]) + Vector3.ONE * 0.5
-        var sdf:  float = entry[1]
-        if sdf < 0.0 and capsule_aabb.has_point(center):   return true
-        if sdf > 0.0 and support_aabb.has_point(center):   return true
+        var sdf: float = entry[1]   # the new SDF for this cell
+        if sdf < 0.0 and buries(entry[0]):
+            return true
+        if sdf > 0.0 and drops(entry[0]):
+            return true
     return false
 
 func _ensure_work() -> void:

@@ -53,7 +53,7 @@ func make_dig(hit_pos: Vector3, hit_normal: Vector3) -> Action:
 
 func make_fill(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var center := hit_pos + hit_normal * (EDIT_RADIUS * 0.5)
-    return FillAction.new(center, EDIT_RADIUS, _terrain, _player)
+    return FillAction.new(center, EDIT_RADIUS, _terrain, _player, _build_state.current_material())
 
 func make_flatten(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var flatten_normal := get_flatten_normal()
@@ -65,12 +65,12 @@ func make_raise(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
     return RaiseAction.new(hit_pos, EDIT_RADIUS, _terrain, _player)
 
 func make_lower(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
-    return LowerAction.new(hit_pos, EDIT_RADIUS, _terrain)
+    return LowerAction.new(hit_pos, EDIT_RADIUS, _terrain, _player)
 
 func make_fill_voxel(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var pos := hit_pos + hit_normal * 0.5     # nudge into the air cell
     var cell := Vector3i(floori(pos.x), floori(pos.y), floori(pos.z))
-    return FillVoxelAction.new(cell, _terrain, _player)
+    return FillVoxelAction.new(cell, _terrain, _player, _build_state.current_material())
 
 func make_empty_voxel(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var pos := hit_pos - hit_normal * 0.01    # nudge into the solid cell

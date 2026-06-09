@@ -10,7 +10,6 @@ extends AdditiveAction
 # evaluated at the integer lattice points the mesher reads, over the shape's
 # rotated AABB plus a margin so the surface band is written on every side.
 
-const GRID_ID := 0
 const MARGIN  := 2.0   # cells of band written beyond the shape, for a clean crossing
 
 
@@ -18,10 +17,8 @@ var shape:    int
 var dims:     Vector3
 var xform:    Transform3D   # shape local -> world (rotation basis + placement origin)
 var op:       int           # CsgState.Op
-var material: StringName
 
 var terrain:  VoxelLodTerrain
-var player:   CharacterBody3D
 
 # Cached work: [[Vector3i cell, float new_sdf, bool was_solid, bool now_solid], ...]
 var _work: Array         = []
@@ -37,20 +34,20 @@ func _init(
     p_terrain:  VoxelLodTerrain,
     p_player:   CharacterBody3D,
 ) -> void:
-    shape    = p_shape
-    dims     = p_dims
-    xform    = p_xform
-    op       = p_op
-    material = p_material
-    terrain  = p_terrain
-    player   = p_player
+    shape         = p_shape
+    dims          = p_dims
+    xform         = p_xform
+    op            = p_op
+    material_name = p_material
+    terrain       = p_terrain
+    player        = p_player
 
 
 func validate() -> bool:
     _ensure_work()
     if _work.is_empty():
         return false
-    return not _would_endanger_player()
+    return not _endangers()
 
 
 func preview() -> ActionPreview:
@@ -61,7 +58,7 @@ func preview() -> ActionPreview:
             p.solid.append(entry[0])
         elif entry[2]:                    # was solid, now air
             p.air.append(entry[0])
-    p.refused = _work.is_empty() or _would_endanger_player()
+    p.refused = _work.is_empty() or _endangers()
     return p
 
 
@@ -76,19 +73,19 @@ func execute() -> void:
 
     var vt := terrain.get_voxel_tool()
     vt.channel = VoxelBuffer.CHANNEL_SDF
-    var mat := Materials.from_name(material)
+    var mat := Materials.from_name(material_name)
     for entry in _work:
         var cell: Vector3i = entry[0]
         vt.set_voxel_f(cell, entry[1])
         if entry[3] and not entry[2]:
-            VoxelEventBusSingleton.emit(VoxelAddedEvent.CHANNEL,   VoxelAddedEvent.new(GRID_ID, cell, mat))
+            VoxelEventBusSingleton.emit(VoxelAddedEvent.CHANNEL,   VoxelAddedEvent.new(VoxelConstants.GRID_ID, cell, mat))
         elif entry[2] and not entry[3]:
-            VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(GRID_ID, cell))
+            VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))
 
     # Tag the newly-solid voxels with the material id (CHANNEL_INDICES, 8-bit).
     # The DC mesher reads it back and the terrain shader colours by it. Carved
     # cells become air, so they get no material.
-    var idx := MaterialPalette.index_of(material)
+    var idx := MaterialPalette.index_of(material_name)
     vt.channel = VoxelBuffer.CHANNEL_INDICES
     for entry in _work:
         if entry[3]:
@@ -98,7 +95,7 @@ func execute() -> void:
     var box := _world_box()
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(GRID_ID, box.position, box.size))
+        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box.position, box.size))
 
 
 # --- Internals ---
@@ -139,21 +136,15 @@ func _compute_work() -> Array:
     return work
 
 
-# Refuse if the stamp would bury the player (new solid in their capsule) or cut
-# the ground out from under their feet (new air in the support box below them).
-func _would_endanger_player() -> bool:
-    if player == null:
-        return false
-    var ppos := player.global_position
-    var capsule := AABB(ppos + Vector3(-0.6, -1.5, -0.6), Vector3(1.2, 3.0, 1.2))
-    var support := AABB(ppos + Vector3(-0.6, -3.0, -0.6), Vector3(1.2, 1.5, 1.2))
+# Refuse if the stamp would bury the player (new solid in their capsule) or cut the
+# ground out from under their feet (new air in the support box). Boxes: PlayerSafeAction.
+func _endangers() -> bool:
     for entry in _work:
-        var center := Vector3(entry[0]) + VoxelConstants.VOXEL_CENTER_OFFSET
         var was_solid: bool = entry[2]
         var now_solid: bool = entry[3]
-        if now_solid and not was_solid and capsule.has_point(center):
+        if now_solid and not was_solid and buries(entry[0]):
             return true
-        if was_solid and not now_solid and support.has_point(center):
+        if was_solid and not now_solid and drops(entry[0]):
             return true
     return false
 

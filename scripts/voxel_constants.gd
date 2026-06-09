@@ -16,6 +16,19 @@ const VOXEL_HALF := VOXEL_SIZE * 0.5
 # Computed at class load so callsites don't allocate per use.
 const VOXEL_CENTER_OFFSET := Vector3(VOXEL_HALF, VOXEL_HALF, VOXEL_HALF)
 
+# Identifies which voxel grid an event/edit targets. Single grid today (0); in
+# every event payload from day one so multi-grid (deferred) lands without churn.
+const GRID_ID := 0
+
+
+# ============================================================================
+# Support scalar
+# ============================================================================
+# The structural-support scalar runs [0, 1]: 0 = unsupported, 1 = fully supported
+# (direct bedrock/terrain contact). Shared by TerrainSupport and PartSupport.
+const NO_SUPPORT   := 0.0
+const FULL_SUPPORT := 1.0
+
 
 # ============================================================================
 # SDF (signed distance field) semantics
@@ -45,11 +58,6 @@ const SDF_SOLID_THRESHOLD := 0.0
 # its dirty queue. Higher = faster settling, more frame-time cost per change.
 # Tuned for cascading collapses to feel deliberate without stalling.
 const PROPAGATION_BUDGET := 200
-
-# Per-frame budget on how many voxels the collapse detector can flood across.
-# Independent from propagation budget because detection runs only after
-# propagation settles.
-const DETECTION_BUDGET := 500
 
 # Support value at or below which a voxel is considered a fall candidate.
 # Just above zero to avoid floating-point dust. Anything in [0, this] is
