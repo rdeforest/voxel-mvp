@@ -26,6 +26,14 @@ public:
 	// refines to `min_leaf` at the surface. The bridge from procedural terrain.
 	void imprint_array(const PackedFloat32Array &data, int dim, Vector3 origin, double cell, double min_leaf);
 
+	// Imprint the procedural terrain field (TerrainField) into the existing root cube,
+	// refining to `min_leaf` at the surface. The store-over-generator baseline: a fine
+	// analytic field at every point, no godot_voxel mips. Params mirror the .tres graph.
+	void imprint_terrain(double base, double amp, double period, int octaves, int seed, double min_leaf);
+	// The terrain surface height at (x, z) — the analytic oracle, for validating the
+	// C++ field against the live VoxelGeneratorGraph without octree reconstruction error.
+	static double terrain_surface(double x, double z, double base, double amp, double period, int octaves, int seed);
+
 	// Combine a brush into the EXISTING field in place: op 0 = UNION (add solid),
 	// 1 = SUBTRACT (carve). Existing leaves keep their corners (just combined); coarse
 	// leaves subdivide (inheriting the parent field) only where the brush adds detail.
@@ -49,6 +57,11 @@ public:
 	// the size jumps by construction (the mesher's point-location stitch).
 	void imprint_sphere_graded(Vector3 center, double radius, Vector3 focus,
 			double near_leaf, double band, int material);
+	// Distance-graded terrain imprint: fine (near_leaf) near `focus`, doubling every
+	// `band` of distance — one octree spanning the whole view over the procedural field.
+	// The live store-over-generator render path.
+	void imprint_terrain_graded(Vector3 focus, double near_leaf, double band,
+			double base, double amp, double period, int octaves, int seed);
 
 protected:
 	static void _bind_methods();

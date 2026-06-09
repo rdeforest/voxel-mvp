@@ -1,6 +1,7 @@
 #include "sparse_voxel_octree.h"
 
 #include "octree_geometry.h"
+#include "terrain_field.h"
 
 using namespace voxel_dc;
 
@@ -45,6 +46,26 @@ void SparseVoxelOctree::imprint_array(const PackedFloat32Array &data, int dim, V
 	_imprint_node(0, f, min_leaf, 0);
 }
 
+void SparseVoxelOctree::imprint_terrain(double base, double amp, double period, int octaves, int seed, double min_leaf) {
+	imprint(voxel_dc::TerrainField(base, amp, period, octaves, seed), min_leaf, 0);
+}
+
+double SparseVoxelOctree::terrain_surface(double x, double z, double base, double amp, double period, int octaves, int seed) {
+	return voxel_dc::TerrainField(base, amp, period, octaves, seed).surface(x, z);
+}
+
+void SparseVoxelOctree::imprint_terrain_graded(Vector3 focus, double near_leaf, double band,
+		double base, double amp, double period, int octaves, int seed) {
+	if (nodes.is_empty()) {
+		return;
+	}
+	const Vector3 ro = nodes[0].origin;
+	const double rs = nodes[0].size;
+	nodes.clear();
+	_new_node(ro, rs);
+	_imprint_graded(0, voxel_dc::TerrainField(base, amp, period, octaves, seed), focus, near_leaf, band, 0);
+}
+
 void SparseVoxelOctree::imprint_sphere_graded(Vector3 center, double radius, Vector3 focus,
 		double near_leaf, double band, int material) {
 	if (nodes.is_empty()) {
@@ -58,21 +79,25 @@ void SparseVoxelOctree::imprint_sphere_graded(Vector3 center, double radius, Vec
 }
 
 // Like _imprint_node, but the data floor at a node is `near_leaf` doubled once per `band`
-// of distance from `focus` — fine near the viewer, coarse far.
+// of distance from `focus` — fine near the viewer, coarse far. Uses the same sign-agreement
+// homogeneity test (NOT a |SDF| distance prune) so it's correct on the non-unit terrain
+// field — see _imprint_node.
 void SparseVoxelOctree::_imprint_graded(int idx, const voxel_dc::Field &f, const Vector3 &focus,
 		double near_leaf, double band, int material) {
 	const Vector3 o = nodes[idx].origin;
 	const double s = nodes[idx].size;
 	const Vector3 center = o + Vector3(1, 1, 1) * (s * 0.5);
-	const double fc = f.sample(center);
-	if (Math::abs(fc) > s * 0.8660254) {
-		Node &n = nodes[idx];
-		n.has_corners = true;
-		n.material = fc < 0.0 ? uint8_t(material) : 0;
-		for (int i = 0; i < 8; ++i) {
-			n.corners[i] = float(fc);
+	float cs[8];
+	const bool neg = f.sample(corner(o, s, 0)) < 0.0;
+	bool uniform = true;
+	for (int i = 0; i < 8; ++i) {
+		cs[i] = float(f.sample(corner(o, s, i)));
+		if ((cs[i] < 0.0f) != neg) {
+			uniform = false;
 		}
-		return;
+	}
+	if ((f.sample(center) < 0.0) != neg) {
+		uniform = false;
 	}
 	double target = near_leaf;
 	double r = band;
@@ -81,14 +106,10 @@ void SparseVoxelOctree::_imprint_graded(int idx, const voxel_dc::Field &f, const
 		target *= 2.0;
 		r *= 2.0;
 	}
-	if (s <= target * 1.0000001) {
-		float cs[8];
-		for (int i = 0; i < 8; ++i) {
-			cs[i] = float(f.sample(corner(o, s, i)));
-		}
+	if (uniform || s <= target * 1.0000001) {
 		Node &n = nodes[idx];
 		n.has_corners = true;
-		n.material = uint8_t(material);
+		n.material = (uniform && !neg) ? 0 : uint8_t(material);
 		for (int i = 0; i < 8; ++i) {
 			n.corners[i] = cs[i];
 		}
@@ -107,30 +128,34 @@ void SparseVoxelOctree::_imprint_graded(int idx, const voxel_dc::Field &f, const
 	}
 }
 
-// Surface beyond the node's circumradius -> one uniform-sign leaf (bulk, O(1)); at the
-// data floor -> a fine leaf with corner samples; otherwise subdivide and recurse.
+// Homogeneous (corners + centre all one sign) and not yet at the floor -> one uniform
+// bulk leaf (O(1), no recursion); at the data floor -> a fine leaf with corner samples;
+// otherwise the surface passes through, so subdivide and recurse. The sign test is used
+// instead of a |SDF| > circumradius distance test on purpose: the terrain field
+// (y - surface) is NOT a true unit-distance field — it overestimates distance on slopes,
+// so a magnitude prune skips real surface and leaves coarse leaves over detail
+// ([[dc-sdf-not-unit-distance]]; same trap as the reverted surface-sparse prune).
 void SparseVoxelOctree::_imprint_node(int idx, const voxel_dc::Field &f, double min_leaf, int material) {
 	const Vector3 o = nodes[idx].origin;
 	const double s = nodes[idx].size;
-	const Vector3 center = o + Vector3(1, 1, 1) * (s * 0.5);
-	const double fc = f.sample(center);
-	if (Math::abs(fc) > s * 0.8660254) {
-		Node &n = nodes[idx];
-		n.has_corners = true;
-		n.material = fc < 0.0 ? uint8_t(material) : 0;
-		for (int i = 0; i < 8; ++i) {
-			n.corners[i] = float(fc);
+	float cs[8];
+	const bool neg = f.sample(corner(o, s, 0)) < 0.0;
+	bool uniform = true;
+	for (int i = 0; i < 8; ++i) {
+		cs[i] = float(f.sample(corner(o, s, i)));
+		if ((cs[i] < 0.0f) != neg) {
+			uniform = false;
 		}
-		return;
 	}
-	if (s <= min_leaf * 1.0000001) {
-		float cs[8];
-		for (int i = 0; i < 8; ++i) {
-			cs[i] = float(f.sample(corner(o, s, i)));
-		}
+	// The centre catches a feature that pokes into the node without reaching a corner.
+	if ((f.sample(o + Vector3(1, 1, 1) * (s * 0.5)) < 0.0) != neg) {
+		uniform = false;
+	}
+	const bool at_floor = s <= min_leaf * 1.0000001;
+	if (uniform || at_floor) {
 		Node &n = nodes[idx];
 		n.has_corners = true;
-		n.material = uint8_t(material);
+		n.material = (uniform && !neg) ? 0 : uint8_t(material); // air bulk gets no material
 		for (int i = 0; i < 8; ++i) {
 			n.corners[i] = cs[i];
 		}
@@ -276,7 +301,10 @@ void SparseVoxelOctree::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("imprint_sphere", "center", "radius", "min_leaf", "material"), &SparseVoxelOctree::imprint_sphere);
 	ClassDB::bind_method(D_METHOD("imprint_box", "center", "size", "min_leaf", "material"), &SparseVoxelOctree::imprint_box);
 	ClassDB::bind_method(D_METHOD("imprint_array", "data", "dim", "origin", "cell", "min_leaf"), &SparseVoxelOctree::imprint_array);
+	ClassDB::bind_method(D_METHOD("imprint_terrain", "base", "amp", "period", "octaves", "seed", "min_leaf"), &SparseVoxelOctree::imprint_terrain);
+	ClassDB::bind_static_method("SparseVoxelOctree", D_METHOD("terrain_surface", "x", "z", "base", "amp", "period", "octaves", "seed"), &SparseVoxelOctree::terrain_surface);
 	ClassDB::bind_method(D_METHOD("imprint_sphere_graded", "center", "radius", "focus", "near_leaf", "band", "material"), &SparseVoxelOctree::imprint_sphere_graded);
+	ClassDB::bind_method(D_METHOD("imprint_terrain_graded", "focus", "near_leaf", "band", "base", "amp", "period", "octaves", "seed"), &SparseVoxelOctree::imprint_terrain_graded);
 	ClassDB::bind_method(D_METHOD("stamp_sphere", "center", "radius", "min_leaf", "material", "op"), &SparseVoxelOctree::stamp_sphere);
 	ClassDB::bind_method(D_METHOD("stamp_box", "center", "size", "min_leaf", "material", "op"), &SparseVoxelOctree::stamp_box);
 	ClassDB::bind_method(D_METHOD("sample", "p"), &SparseVoxelOctree::sample);
