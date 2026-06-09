@@ -6,10 +6,9 @@ var part:          Part
 var placement_pos: Vector3    # world position for the rotated bottom-center
 var world_anchor:  Vector3i   # voxel-grid cell for the click point
 var rotation:      Vector3    # per-axis rotation in degrees (X, Y, Z), continuous
-var material_name: StringName # overrides part.material_name when non-empty
 var terrain:       VoxelLodTerrain
 var integrity:     StructuralIntegrity   # query path only (has_part_cell)
-var player:        CharacterBody3D
+# material_name (the part's material) and player are inherited from AdditiveAction.
 
 var _cached_fp:   Array[Vector3i] = []
 var _fp_computed: bool            = false
