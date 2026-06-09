@@ -1,6 +1,6 @@
 # System data-flow
 
-[← Diagrams index](index.md)
+[← Diagrams index](00_INDEX.md)
 
 The big picture: **how a click becomes physics, and how physics becomes terrain
 again.** The shape to notice is the **feedback loop** — edits don't call systems
