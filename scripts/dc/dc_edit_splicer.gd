@@ -55,23 +55,24 @@ static func splice(cache_arrays: Array, cache_owners: PackedVector3Array, cache_
         out_own.append(cache_owners[t])
     if not patch.is_empty():
         var pi: PackedInt32Array = patch[Mesh.ARRAY_INDEX]
+        @warning_ignore("integer_division")
         for t in pi.size() / 3:
             out_idx.append(pi[t * 3] + base); out_idx.append(pi[t * 3 + 1] + base); out_idx.append(pi[t * 3 + 2] + base)
             out_own.append(patch_owners[t])
 
     # Compact to referenced vertices.
-    var remap := {}
+    var vmap := {}
     var nv := PackedVector3Array()
     var nn := PackedVector3Array()
     var ncol := PackedColorArray()
     for j in out_idx.size():
         var old := out_idx[j]
-        if not remap.has(old):
-            remap[old] = nv.size()
+        if not vmap.has(old):
+            vmap[old] = nv.size()
             nv.append(verts[old]); nn.append(normals[old])
             if has_color:
                 ncol.append(colors[old])
-        out_idx[j] = remap[old]
+        out_idx[j] = vmap[old]
 
     var arrays: Array = []
     arrays.resize(Mesh.ARRAY_MAX)

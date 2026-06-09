@@ -281,16 +281,20 @@ func _uses_csg() -> bool:
     return current_tool().name == "CSG"
 
 func _edit_cycle_material() -> void:
-    csg_state.cycle_material() if _uses_csg() else build_state.cycle_material()
+    if _uses_csg(): csg_state.cycle_material()
+    else:           build_state.cycle_material()
 
 func _edit_rotate_y() -> void:
-    csg_state.rotate_y() if _uses_csg() else build_state.rotate_y()
+    if _uses_csg(): csg_state.rotate_y()
+    else:           build_state.rotate_y()
 
 func _edit_rotate_x() -> void:
-    csg_state.rotate_x() if _uses_csg() else build_state.rotate_x()
+    if _uses_csg(): csg_state.rotate_x()
+    else:           build_state.rotate_x()
 
 func _edit_rotate_z() -> void:
-    csg_state.rotate_z() if _uses_csg() else build_state.rotate_z()
+    if _uses_csg(): csg_state.rotate_z()
+    else:           build_state.rotate_z()
 
 func _csg_cycle_axis() -> void:
     if _uses_csg():

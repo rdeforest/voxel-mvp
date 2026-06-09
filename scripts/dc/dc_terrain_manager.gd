@@ -238,8 +238,8 @@ func _dispatch(center: Vector3) -> void:
     var root_size := 1 << _ROOT_DEPTH                       # world extent of the coarsest level
     # Snap the centre to the coarsest cell so every level's read origin lands on its
     # own LOD grid (floor-snap, so it's stable across the world origin).
-    var snapped := Vector3i((center / float(_COARSEST_CELL)).floor()) * _COARSEST_CELL
-    var root_origin := snapped - Vector3i.ONE * _half(root_size)
+    var snapped_center := Vector3i((center / float(_COARSEST_CELL)).floor()) * _COARSEST_CELL
+    var root_origin := snapped_center - Vector3i.ONE * _half(root_size)
     var center_lattice := Vector3.ONE * _half(root_size)    # follow target, lattice space
     var dim_v := Vector3i(LEVEL_DIM, LEVEL_DIM, LEVEL_DIM)
     var read_t0 := Time.get_ticks_msec()
@@ -385,6 +385,7 @@ func _audit(arrays: Array, origin: Vector3i) -> void:
             bad.append({"w": (a + b + c) / 3.0 + o, "area": area, "aspect": aspect, "dev": dev,
                 "tag": ("degen" if degenerate else "sliver" if sliver else "tilted")})
     bad.sort_custom(func(x, y): return x["dev"] + (200.0 if x["aspect"] > 80 else 0.0) > y["dev"] + (200.0 if y["aspect"] > 80 else 0.0))
+    @warning_ignore("integer_division")
     print("dcaudit: %d suspect triangles of %d (origin %s)" % [bad.size(), idx.size() / 3, str(origin)])
     for i in mini(15, bad.size()):
         var t = bad[i]

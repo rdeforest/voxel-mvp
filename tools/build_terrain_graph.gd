@@ -42,6 +42,9 @@ func _mountain_noise() -> ZN_FastNoiseLite:
 
 func _initialize() -> void:
     var gen := VoxelGeneratorGraph.new()
+    # Single texture id per voxel (8-bit CHANNEL_INDICES), matching our material model.
+    # The default Mixel4 splat mode demands a 16-bit indices channel and warns otherwise.
+    gen.texture_mode = VoxelGeneratorGraph.TEXTURE_MODE_SINGLE
     var g := gen.get_main_function()
     var T := VoxelGraphFunction
 
