@@ -146,6 +146,53 @@ tradeoff that sets how far structures stay crisp; (c) persistent store + increme
 remesh (A4) is now a *perf* optimisation (retire the 8 m-recenter full rebuild), not
 the visual fix. B is unchanged.
 
+## Correction (2026-06-08): the honest field is Phase B, not a Phase A bolt-on
+
+Two sessions of work + a self-inflicted bug forced a sharper read of where the
+view-dependence actually lives and what can fix it. **The 2026-06-07 finding above
+was half-right** — error-collapse from accumulated QEF *does* make coarse cells sit on
+the fine surface, but **only where there is fine data to accumulate.** Within the fine
+core (LOD0, now ±64 m after `LEVEL_DIM` 65→129) that holds. Beyond it the leaves are
+built from **godot_voxel's lossy downsampled mips** (the clipmap's coarse levels), and
+**geomorph blends those lossy levels by camera distance.** That blend — not the cell
+grid (world-aligned, fine) — is the remaining view-dependence and the LOD seam: the far
+field is meshed from data that (a) is lossy and (b) blends differently as you move.
+
+**This is not fixable in Phase A.** godot_voxel only streams LOD0 near the camera; far
+regions are coarse by construction, and fine data over a large radius is memory-bound
+(the doc's hard limit). So as long as the data source is godot_voxel's mip clipmap, the
+far field stays coarse-and-blended and geomorph (or a visible step) is unavoidable.
+**Retiring geomorph requires fine data everywhere, which is Phase B** — the octree as
+store, *defer-to-generator*: the generator is a fine field at every point, edits ride in
+the sparse store, so coarse cells accumulate from genuinely-fine QEF — no mips, no blend,
+faithful at every level, identical from every vantage. **That is where geomorph dies**,
+and it dies as a *consequence of an honest field*, not as a standalone deletion (deleting
+it over the lossy mips just exposes the step — a regression, manifesto #8 / Hytale).
+
+**Cautionary tale — the surface-sparse prune (commit da8a988, reverted 34ef2dd).** Built
+to cut the ~5 s movement re-mesh (profiled: 4 s of it is `accumulate` over 10.8 M cells,
+mostly empty), a build-time prune skipped provably-empty regions and ran **16× faster
+with byte-identical output** — *on a raw `y − surface` field*. On the **faithful** field
+(real generator through godot_voxel's lossy SDF encoding + the geomorph blend) it deleted
+**~45 % of the surface** and spawned big spanning slivers, caught live by `dcaudit`. The
+prune trusts a local gradient; the lossy-mip + geomorph field distorts that gradient.
+**Lessons:** (1) validate mesher changes on the faithful encoded multi-level field, never
+a raw analytic one ([[validate-on-faithful-field]]); (2) the prune is a *Phase B*
+mechanism — only safe once the field is faithful at every level, which is exactly what
+fine-data-everywhere buys; bolting it onto Phase A's mips is the bug; (3) per
+**non-negotiable #8**, that 5 s is **worker-thread wall-clock that never touches
+framerate** — the "second kind" of cost the manifesto says to *leave alone*. It is now
+the cautionary tale on manifesto line 182. The field-model rework is justified by
+**view-dependence and the lying-mip seam (correctness)**, with any speedup a byproduct —
+never the reason.
+
+**Net reframing of the remaining work:** Phase A's *near* field is at its ceiling (A1/A3
+done; A4 done for edits via the incremental splice — commit afd1c0a). The substantive
+substrate work that remains is **Phase B's store-over-generator faithful field**, where
+geomorph, view-dependence, and affordable surface-sparse meshing all resolve together.
+Don't spend more effort making the godot_voxel-mip far field "honest"; spend it replacing
+the data source. (The dense build is correct and ships; the 5 s is left as-is per #8.)
+
 ## Phase A — render substrate over godot_voxel data
 
 **Goal:** the persistent world-fixed octree is the render layer; godot_voxel stays the
@@ -219,10 +266,13 @@ persistence move.
      does not). Robust to noise; a touch more state.
    - Combination. *Recommendation: max-residual first, add the cone if needed; the CSG
      spire is the test.*
-2. **Fine-data sourcing during A.** godot_voxel LOD0 only covers near the camera; far
-   regions only have coarse data. Confirm the world-fixed grid samples the finest
-   *available* data per region and that this doesn't reintroduce a seam (it shouldn't —
-   the cell grid is fixed; only the sampling floor varies, and geomorph blends it).
+2. **Fine-data sourcing — SETTLED (2026-06-08), see Correction above.** godot_voxel LOD0
+   only covers near the camera; far regions only have coarse mips. The earlier hope —
+   "geomorph blends it, no seam" — was wrong: geomorph blending those lossy mips by camera
+   distance *is* the residual view-dependence + seam, and it can't be removed while the
+   data source is godot_voxel (fine-everywhere is memory-bound). The honest fix (fine field
+   everywhere, accumulate fine QEF, no geomorph) is **Phase B's store-over-generator**, not
+   Phase A. Far field stays clean-coarse in A; faithful in B.
 3. **Resident-set bound + eviction.** How far the persistent octree extends and how it
    evicts (Phase A bounds it to view radius; Phase B streams).
 4. **Storage format (B1).** Node layout, compression policy (surface-dominated),
