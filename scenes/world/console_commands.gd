@@ -182,15 +182,11 @@ func dcaudit() -> void:
     dc_manager.audit_current_mesh()
     LimboConsole.info("dcaudit: scanned the on-screen mesh; suspect triangles printed to stdout (Debug Console)")
 
-# `dcgen on` (re)builds the substrate preview at your current position; `dcgen off` hides it.
+# `dcgen on` starts the live substrate render (follows you, threaded re-mesh); `dcgen off` hides it.
 func dcgen(state := "") -> void:
-    var on := _parse_toggle(state, substrate_preview.visible)
-    if on:
-        var tris := substrate_preview.rebuild()
-        LimboConsole.info("dcgen: on — %d triangles (octree over the generator field, cyan)" % tris)
-    else:
-        substrate_preview.clear()
-        LimboConsole.info("dcgen: off")
+    var on := _parse_toggle(state, substrate_preview.is_enabled())
+    substrate_preview.set_enabled(on)
+    LimboConsole.info("dcgen: %s (live octree-over-generator render, cyan)" % ("on" if on else "off"))
 
 # Spawn a live PBD structural-physics demo in front of the player (stress-coloured
 # lines; watch it sag and snap). Re-run to reset.
