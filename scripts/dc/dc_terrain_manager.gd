@@ -295,7 +295,9 @@ func _mesh_job(level_data: Array, level_origins: PackedVector3Array, level_cells
         level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH,
         camera, proj, eps, err, world_origin, level_indices, palette,
         true,   # uniform 1m fine core (splice-able)
-        1.5)    # surface-sparse build: skip provably-empty regions (~25x fewer cells)
+        0.0)    # surface-sparse prune DISABLED: the local-gradient bound is unreliable on
+                # godot_voxel's lossy-encoded + geomorph-blended multi-level SDF (it over-prunes
+                # real surface -> big slivers). Safe at lod 0 only; needs a mip-robust bound.
     _job_owners = _mesher.get_last_triangle_owners()
 
 

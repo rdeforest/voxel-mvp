@@ -5,6 +5,12 @@ extends GutTest
 # [[dc-sdf-not-unit-distance]] hazard). Proof: mesh the same 128m cube of the actual
 # generator dense and pruned; the pruned mesh must be just as watertight as the dense one
 # and cover the same surface, while building dramatically faster.
+#
+# SCOPE: this validates ONE level (lod 0), where the field is faithful. The prune is NOT
+# safe on the live MULTI-level clipmap — godot_voxel's lossy-encoded coarse mips, blended by
+# the geomorph, distort the local gradient the prune trusts, and it over-prunes real surface
+# (big slivers). So it's DISABLED on the live path until a mip-robust bound exists; this test
+# guards only the lod-0 building block.
 
 const GRAPH := "res://assets/generators/terrain.tres"
 const SIZE  := 128                         # depth-7 octree root, 1m floor (the fine-core case)
