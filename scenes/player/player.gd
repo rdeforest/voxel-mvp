@@ -85,12 +85,12 @@ func _ready() -> void:
         KEY_F:            _toggle_wireframe,
         KEY_X:            _toggle_fly,
         KEY_V:            _toggle_stress_viz,
-        KEY_M:            _edit_cycle_material,
-        KEY_R:            _edit_rotate_y,
-        KEY_T:            _edit_rotate_x,
-        KEY_Y:            _edit_rotate_z,
-        KEY_C:            _csg_cycle_axis,
-        KEY_B:            _csg_toggle_op,
+        KEY_M:            _route_edit.bind(&"cycle_material"),
+        KEY_R:            _route_edit.bind(&"rotate_y"),
+        KEY_T:            _route_edit.bind(&"rotate_x"),
+        KEY_Y:            _route_edit.bind(&"rotate_z"),
+        KEY_C:            _route_csg.bind(&"cycle_axis"),
+        KEY_B:            _route_csg.bind(&"toggle_op"),
         KEY_BRACKETLEFT:  build_state.prev_part,
         KEY_BRACKETRIGHT: build_state.next_part,
         KEY_G:            _toggle_grid_overlay,
@@ -280,29 +280,19 @@ func _select_activity(idx: int) -> void:
 func _uses_csg() -> bool:
     return current_tool().name == "CSG"
 
-func _edit_cycle_material() -> void:
-    if _uses_csg(): csg_state.cycle_material()
-    else:           build_state.cycle_material()
+# The editing state for the active tool. BuildState (parts) and CsgState (primitives)
+# expose the same edit-verb interface (cycle_material, rotate_x/y/z), so an edit input
+# routes to whichever is active instead of branching the same way in every handler.
+func _active_edit_state() -> Object:
+    return csg_state if _uses_csg() else build_state
 
-func _edit_rotate_y() -> void:
-    if _uses_csg(): csg_state.rotate_y()
-    else:           build_state.rotate_y()
+func _route_edit(verb: StringName) -> void:
+    _active_edit_state().call(verb)
 
-func _edit_rotate_x() -> void:
-    if _uses_csg(): csg_state.rotate_x()
-    else:           build_state.rotate_x()
-
-func _edit_rotate_z() -> void:
-    if _uses_csg(): csg_state.rotate_z()
-    else:           build_state.rotate_z()
-
-func _csg_cycle_axis() -> void:
+# CSG-only verbs (no part-building equivalent): a no-op outside the CSG tool.
+func _route_csg(verb: StringName) -> void:
     if _uses_csg():
-        csg_state.cycle_axis()
-
-func _csg_toggle_op() -> void:
-    if _uses_csg():
-        csg_state.toggle_op()
+        csg_state.call(verb)
 
 # Keep the CSG state's active shape in step with the selected activity, so the
 # ghost, resize, and stamp all act on the shape the activity names.
