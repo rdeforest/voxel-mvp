@@ -8,11 +8,34 @@
 
 ## Resumption Brief
 
-### Active thread (2026-06-06): DC render pipeline → committed to the adaptive-density octree substrate
+### Active thread (2026-06-09): adaptive-octree substrate — Phase B underway (store-over-generator)
 
-PBD is **done and authoritative** (see CLAUDE.md "Structural integrity"). This thread
-has been hardening the **DC terrain render pipeline** and then, on hitting the LOD-seam
-wall, **committing to build the adaptive-density octree substrate** as the real fix.
+PBD is **done and authoritative** (see CLAUDE.md "Structural integrity"). The DC render
+pipeline was hardened, then we **committed to the adaptive-density octree substrate**
+(`docs/roadmap/design/10-adaptive-octree-substrate.md`). **Phase A is at its ceiling**
+(world-fixed grid was already true; error-collapse default-on; incremental edit splice
+landed). Per the doc's 2026-06-08 correction, the substantive remaining work is **Phase B's
+store-over-generator faithful field**: the octree as the store, deferring to the generator
+for unedited world, so coarse cells accumulate from genuinely-fine QEF — no godot_voxel
+mips, no geomorph blend, view-independent by construction.
+
+**Phase B status (2026-06-09):**
+- `SparseVoxelOctree` (C++) was already a tested B1 prototype — sparse adaptive store,
+  subdivide-on-imprint, stamp union/subtract, watertight DC mesh — but **not wired live**.
+- `fd62d49` **TerrainField + imprint unit-distance fix (bite 1, the Phase B keystone).**
+  The procedural terrain as a fine C++ `Field` (FastNoiseLite, matches the .tres graph to
+  0.01 m), with `imprint_terrain` / `imprint_terrain_graded`. Found + fixed a real bug: the
+  octree imprint pruned bulk leaves by `|SDF| > circumradius`, a true-distance assumption
+  that shipped broken for the non-unit terrain field (only ever tested on sphere/box) —
+  replaced with a sign-agreement homogeneity test. [[dc-sdf-not-unit-distance]].
+- **NEXT bite: wire the octree as a live render source behind a console toggle** (like
+  `dcmanager` was) — imprint `TerrainField` graded around the camera + stamp edits, render
+  the octree mesh. This is where the camera-snapped clipmap starts to retire. **Decision due
+  then:** keep the `.tres` graph as the editor-tinkerable authoring tool (faithful C++ port
+  kept in sync) vs. make the C++ `TerrainField` the single generator (tuning → params +
+  rebuild). Doesn't affect earlier bites.
+
+**Earlier in this thread (DC render pipeline, all committed, headless-tested; GUI-verify the render ones):**
 
 **Landed this session (all committed, headless-tested; GUI-verify the render ones):**
 - `df822e2` **`awake` overlay** — red box around awake RigidBody3D (debris/parts); pure
@@ -42,11 +65,9 @@ fine surface, and seams dissolve. This is the SAME substrate **parts-as-voxels**
 (`docs/roadmap/design/03-dc-qef-geometry.md` §"Decisions taken"; [[adaptive-octree-substrate]]).
 **Design doc written (2026-06-07): `docs/roadmap/design/10-adaptive-octree-substrate.md`** —
 persistent world-fixed octree, fine-data sourcing, accumulated-QEF coarse vertices, SDF+material
-per leaf, incremental remesh; staged **Phase A** (render substrate over godot_voxel data — fixes
-seams + view-dependence, validatable with the CSG tool) → **Phase B** (data substrate; godot_voxel
-removal; parts-as-voxels). Approved A-first. **Next: implement Phase A** — start A1 (world-fixed
-octree store) + A3 (collapse-metric fix; the `sqrt(residual/count)` averaging is the thin-feature
-bug, [[dc-thin-feature-collapse-bug]]).
+per leaf, incremental remesh; staged **Phase A** (render substrate over godot_voxel data) →
+**Phase B** (data substrate; godot_voxel removal; parts-as-voxels). *(Superseded by the Phase B
+status at the top of this brief — A landed/ceiling, B is underway.)*
 
 Also landed (2026-06-07): the **CSG primitive tool** + **per-voxel material channel** (8-bit
 CHANNEL_INDICES; the DC mesher emits per-vertex material colour, id 0 = natural/slope-shaded) —
