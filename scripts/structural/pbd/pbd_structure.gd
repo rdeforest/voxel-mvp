@@ -10,7 +10,7 @@ extends Node3D
 # loose, terrain cells are carved out of the SDF + handed to FallingBodyFactory and
 # detached parts drop whole; the old PartSupport strain/collapse stands down via
 # StructuralIntegrity.part_collapse_enabled (terrain has no old system left).
-# `pbdlive` toggles it; the `V` key toggles the stress-line overlay. Reports its
+# `physics_active` toggles it; the `V` key toggles the stress-line overlay. Reports its
 # per-tick cost to the Perf overlay.
 
 

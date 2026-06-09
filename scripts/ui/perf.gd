@@ -63,14 +63,17 @@ func _ready() -> void:
     _label.add_theme_constant_override("outline_size", 5)
     _label.add_theme_font_size_override("font_size", 16)
     _label.visible = false
-    add_child(_label)
 
     _drawer = Strip.new()
     _drawer.host = self
     _drawer.mouse_filter = Control.MOUSE_FILTER_IGNORE
     _drawer.set_anchors_preset(Control.PRESET_FULL_RECT)
     _drawer.visible = false
+
+    # Order matters: later siblings draw on top. Add the graph first (behind) and the
+    # text last (on top), so the bottom strip never covers the perf readout it overlaps.
     add_child(_drawer)
+    add_child(_label)
 
 
 # A subsystem's time-this-frame, in milliseconds. Cheap; call it every frame the

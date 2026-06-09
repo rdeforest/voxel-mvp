@@ -42,7 +42,7 @@ const ROWS := [
     ["V",                 "Toggle PBD stress lines"],
     ["G",                 "Toggle voxel grid overlay"],
     ["F",                 "Toggle scene wireframe"],
-    ["`",                 "Console (commands: settle, pbdlive, perf, reset, …)"],
+    ["`",                 "Console (commands: settle, physics_active, perf, reset, …)"],
     ["?",                 "This help"],
 
     ["System"],

@@ -64,7 +64,7 @@ func _log_pbd(cell: Vector3i) -> void:
         return
     var p := pbd.probe(cell)
     if not p.get("enabled", false):
-        LimboConsole.info("  PBD      off (enable with `pbdlive on`)")
+        LimboConsole.info("  PBD      off (enable with `physics_active on`)")
         return
     if not p.get("in_network", false):
         LimboConsole.info("  PBD      cell not in network")

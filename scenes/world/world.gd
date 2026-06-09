@@ -131,7 +131,7 @@ func _console_commands() -> Array:
         [_cmd_dcdump,    "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [_cmd_dcaudit,   "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
         [_cmd_pbddemo,   "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
-        [_cmd_pbdlive,   "pbdlive",   "Toggle live PBD stress viz over your REAL structures (viz-only). Usage: pbdlive [on|off]"],
+        [_cmd_physics_active, "physics_active", "Toggle the structural physics simulation on your real structures (sag + collapse under load). Usage: physics_active [on|off]"],
         [_cmd_perf,      "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
         [_cmd_awake,     "awake",     "Highlight awake physics bodies (debris / collapsed parts) with a box. Usage: awake [on|off]"],
         [_cmd_lod,       "lod",       "Get/set terrain lod_distance (higher = LOD boundaries farther = less pop-in). Usage: lod [distance]"],
@@ -268,10 +268,10 @@ func _cmd_perf(state := "") -> void:
     LimboConsole.info("perf: %s" % ("on" if on else "off"))
 
 # Toggle live PBD stress viz over the player's real structures (viz-only). No arg flips.
-func _cmd_pbdlive(state := "") -> void:
+func _cmd_physics_active(state := "") -> void:
     var on := _parse_toggle(state, _pbd_structure.is_enabled())
     _pbd_structure.set_enabled(on)
-    LimboConsole.info("pbdlive: %s" % ("on" if on else "off"))
+    LimboConsole.info("physics_active: %s" % ("on" if on else "off"))
 
 # Toggle the always-on threaded DC terrain manager (path-b #3). No arg flips it.
 func _cmd_dcmanager(state := "") -> void:
