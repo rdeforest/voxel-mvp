@@ -1,7 +1,6 @@
 class_name EmptyVoxelAction
 extends Action
 
-const GRID_ID := 0
 
 var cell:    Vector3i
 var terrain: VoxelLodTerrain
@@ -27,10 +26,10 @@ func execute() -> void:
     vt.set_voxel_f(cell, VoxelConstants.SDF_AIR)
     VoxelEventBusSingleton.emit(
         VoxelRemovedEvent.CHANNEL,
-        VoxelRemovedEvent.new(GRID_ID, cell))
+        VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(GRID_ID, Vector3(cell), Vector3.ONE))
+        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, Vector3(cell), Vector3.ONE))
 
 func preview() -> ActionPreview:
     var p := ActionPreview.new()

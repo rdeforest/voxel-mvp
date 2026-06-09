@@ -1,7 +1,6 @@
 class_name DigAction
 extends Action
 
-const GRID_ID = 0
 
 enum Shape { SPHERE }
 
@@ -67,7 +66,7 @@ func execute() -> void:
             if VoxelUtils.is_in_sphere(Vector3(pos), position, radius):
                 VoxelEventBusSingleton.emit(
                     VoxelRemovedEvent.CHANNEL,
-                    VoxelRemovedEvent.new(GRID_ID, pos))
+                    VoxelRemovedEvent.new(VoxelConstants.GRID_ID, pos))
     )
 
     # Box one cell wider than the dig sphere so the boundary-cell scan in
@@ -76,4 +75,4 @@ func execute() -> void:
     var scan_size   :=            Vector3.ONE * ((radius + 1.0) * 2.0)
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(GRID_ID, scan_origin, scan_size))
+        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, scan_origin, scan_size))

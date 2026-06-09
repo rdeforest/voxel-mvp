@@ -1,9 +1,6 @@
 class_name TerrainSupport
 extends RefCounted
 
-const NO_SUPPORT   = 0.0
-const FULL_SUPPORT = 1.0
-const GRID_ID      = 0
 
 var voxel_data:           Dictionary[Vector3i, VoxelRecord] = {}
 var dirty_queue:          Array[Vector3i]                   = []
@@ -48,7 +45,7 @@ func _on_terrain_sdf_changed(event: TerrainSdfChangedEvent) -> void:
                 _remove_voxel(cell)
                 VoxelEventBusSingleton.emit(
                     VoxelRemovedEvent.CHANNEL,
-                    VoxelRemovedEvent.new(GRID_ID, cell))
+                    VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))
                 continue
             if not voxel_data[cell].dirty:
                 voxel_data[cell].dirty = true
@@ -104,7 +101,7 @@ func dirty_neighbors_of(cell: Vector3i) -> void:
 func get_support(pos: Vector3i) -> float:
     if voxel_data.has(pos):
         return voxel_data[pos].support
-    return FULL_SUPPORT
+    return VoxelConstants.FULL_SUPPORT
 
 func is_natural_terrain(pos: Vector3i) -> bool:
     if voxel_data.has(pos):
@@ -138,37 +135,37 @@ func process_dirty_queue() -> void:
 
 func _calculate_support(pos: Vector3i) -> float:
     if is_natural_terrain(pos + Vector3i(0, -1, 0)):
-        return FULL_SUPPORT
+        return VoxelConstants.FULL_SUPPORT
 
     var current_support := voxel_data[pos].support as float
-    var best            := NO_SUPPORT
+    var best            := VoxelConstants.NO_SUPPORT
     for neighbor in VoxelUtils.neighbors(pos):
         best = maxf(best, _support_from_neighbor(neighbor, pos, current_support))
 
-    return maxf(NO_SUPPORT, best - voxel_data[pos].material.decay)
+    return maxf(VoxelConstants.NO_SUPPORT, best - voxel_data[pos].material.decay)
 
 
 # Classification cascade, priority order:
 #   tracked voxel  → its support
 #   part-occupied  → best support across the stacked parts
 #   solid above    → skip (gravity flows down)
-#   solid bedrock  → FULL_SUPPORT
+#   solid bedrock  → VoxelConstants.FULL_SUPPORT
 #   suspended mass → lazy-register, then skip
 #   air            → skip
 func _support_from_neighbor(neighbor: Vector3i, self_pos: Vector3i, self_support: float) -> float:
     if voxel_data.has(neighbor):
         return voxel_data[neighbor].support
-    if _part_support != null and _part_support.has_cell(neighbor):
+    if _part_support != null and _part_support.has_part_cell(neighbor):
         return _part_support.best_support_at(neighbor)
     if not _is_terrain_solid(neighbor):
-        return NO_SUPPORT
+        return VoxelConstants.NO_SUPPORT
     if neighbor.y > self_pos.y:
-        return NO_SUPPORT
+        return VoxelConstants.NO_SUPPORT
     if _is_bedrock(neighbor):
-        return FULL_SUPPORT
+        return VoxelConstants.FULL_SUPPORT
     if self_support > VoxelConstants.FALL_THRESHOLD:
         _register_voxel(neighbor, Materials.STONE)
-    return NO_SUPPORT
+    return VoxelConstants.NO_SUPPORT
 
 
 # --- Internals ---

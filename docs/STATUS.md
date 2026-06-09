@@ -122,8 +122,10 @@ Path-b build order / progress:
   meshes via it on the worker. **~44ms vs ~1.4–2.8s GDScript** (~40×). Tested on
   real terrain (`test_dc_real_terrain.gd`: sound) and an analytic sphere
   (`test_dc_octree_mesher.gd`: watertight + crack-free LOD transition). The
-  GDScript prototype meshers have since been **retired** — `scripts/dc/` is now
-  just `dc_terrain_manager.gd`.
+  GDScript prototype *render* meshers have since been **retired**. `scripts/dc/`
+  also keeps `voxel_octree.gd` + `octree_mesher.gd` (the Phase B substrate
+  prototypes — the oracle `SparseVoxelOctree` was ported from, still active),
+  plus `dc_collision_manager.gd` and `dc_edit_splicer.gd`.
   - NOTE: surface-adaptive pruning was abandoned — magnitude-based prune shatters
     on slopes (the terrain SDF overestimates true distance on slopes, see
     [[dc-sdf-not-unit-distance]]); sign-based couldn't be proven to fix the live

@@ -1,7 +1,6 @@
 class_name RemovalAction
 extends Action
 
-const GRID_ID = 0
 
 var target_node: Node3D
 var integrity:   StructuralIntegrity   # query path only (has_part)
@@ -25,5 +24,5 @@ func preview() -> ActionPreview:
 func execute() -> void:
     VoxelEventBusSingleton.emit(
         PartRemovedEvent.CHANNEL,
-        PartRemovedEvent.new(GRID_ID, target_node))
+        PartRemovedEvent.new(VoxelConstants.GRID_ID, target_node))
     target_node.queue_free()

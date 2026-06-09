@@ -1,7 +1,6 @@
 class_name ConstructionAction
 extends AdditiveAction
 
-const GRID_ID = 0
 
 var part:          Part
 var placement_pos: Vector3    # world position for the rotated bottom-center
@@ -69,7 +68,7 @@ func execute() -> void:
     VoxelEventBusSingleton.emit(
         PartAddedEvent.CHANNEL,
         PartAddedEvent.new(
-            GRID_ID,
+            VoxelConstants.GRID_ID,
             instance,
             _footprint(),
             Materials.from_name(material_name),

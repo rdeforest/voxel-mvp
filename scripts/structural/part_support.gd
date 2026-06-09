@@ -1,9 +1,6 @@
 class_name PartSupport
 extends RefCounted
 
-const NO_SUPPORT       = 0.0
-const FULL_SUPPORT     = 1.0
-const GRID_ID          = 0
 
 # Stress emission visibility: parts only glow when the cursor is within
 # PROXIMITY_RADIUS of any of the part's cells, OR support has dropped to
@@ -68,14 +65,11 @@ func _remove_part(node: Node3D) -> void:
 func has_part(node: Node3D) -> bool:
     return part_registry.has(node)
 
-func has_cell(pos: Vector3i) -> bool:
-    return _cell_to_part.has(pos)
-
 func has_part_cell(pos: Vector3i) -> bool:
     return _cell_to_part.has(pos)
 
 func best_support_at(cell: Vector3i) -> float:
-    var best := NO_SUPPORT
+    var best := VoxelConstants.NO_SUPPORT
     for part_node in _cell_to_part[cell]:
         best = maxf(best, part_registry[part_node].support)
     return best
@@ -133,7 +127,7 @@ func _recompute_part_support() -> void:
         data.support = _calculate_part_support(node, data)
 
 func _calculate_part_support(node: Node3D, data: PartData) -> float:
-    var best          := NO_SUPPORT
+    var best          := VoxelConstants.NO_SUPPORT
     var has_supporter := false
     var any_dirty     := false
     var found_full    := false
@@ -165,10 +159,10 @@ func _calculate_part_support(node: Node3D, data: PartData) -> float:
     data.in_limbo = any_dirty
 
     if found_full:
-        return FULL_SUPPORT
+        return VoxelConstants.FULL_SUPPORT
     if not has_supporter:
-        return NO_SUPPORT
-    return maxf(NO_SUPPORT, best - data.material.decay)
+        return VoxelConstants.NO_SUPPORT
+    return maxf(VoxelConstants.NO_SUPPORT, best - data.material.decay)
 
 static func _min_y(cells: Array[Vector3i]) -> int:
     var min_cell_y := cells[0].y
@@ -218,7 +212,7 @@ func _apply_visual(node: Node3D, support: float, strain_progress: float, pulse: 
 func collapse_part(node: Node3D) -> void:
     if not part_registry.has(node):
         return
-    _apply_visual(node, FULL_SUPPORT, 0.0, 0.0, false)
+    _apply_visual(node, VoxelConstants.FULL_SUPPORT, 0.0, 0.0, false)
 
     var data := part_registry[node]
     var mass := float(data.cells.size())

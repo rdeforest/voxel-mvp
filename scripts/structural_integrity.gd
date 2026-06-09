@@ -1,8 +1,6 @@
 class_name StructuralIntegrity
 extends Node
 
-const NO_SUPPORT   = 0.0
-const FULL_SUPPORT = 1.0
 
 var terrain:            VoxelLodTerrain
 
@@ -83,8 +81,6 @@ func has_part_cell(pos: Vector3i) -> bool:
 func get_part_data(node: Node3D) -> PartData:
     return part_support.part_registry.get(node)
 
-
-# --- Debug ---
 
 # --- Helpers ---
 
