@@ -55,6 +55,24 @@ func _ready() -> void:
     build_state.changed.connect(_update_mode_label)
     csg_state.changed.connect(_update_mode_label)
 
+    _create_overlays()
+
+    VoxelEventBusSingleton.subscribe(WorldReadyEvent.CHANNEL, _on_world_ready)
+
+    _wire_debug_raycast.call_deferred()
+
+    Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
+    edit_preview.player     = self
+    raycast.target_position = Vector3(0, 0, -EDIT_REACH)
+
+    _build_input_map()
+
+    _sync_csg_shape()
+    _update_mode_label()
+
+
+func _create_overlays() -> void:
     _grid_overlay = preload("res://scenes/player/voxel_grid_overlay.gd").new()
     _grid_overlay.raycast = raycast
     get_parent().add_child.call_deferred(_grid_overlay)
@@ -70,15 +88,8 @@ func _ready() -> void:
     _help_overlay = HelpOverlay.new()
     add_child(_help_overlay)
 
-    VoxelEventBusSingleton.subscribe(WorldReadyEvent.CHANNEL, _on_world_ready)
 
-    _wire_debug_raycast.call_deferred()
-
-    Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-
-    edit_preview.player     = self
-    raycast.target_position = Vector3(0, 0, -EDIT_REACH)
-
+func _build_input_map() -> void:
     _key_actions = {
         KEY_TAB:          _cycle_tool,
         KEY_Q:            _quit_game,
@@ -110,9 +121,6 @@ func _ready() -> void:
     _mouse_button_actions = {
         MOUSE_BUTTON_LEFT: _try_edit_terrain,
     }
-
-    _sync_csg_shape()
-    _update_mode_label()
 
 
 # Deferred because StructuralIntegrity constructs its `part_support` component in
