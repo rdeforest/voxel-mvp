@@ -65,11 +65,12 @@ func _ready() -> void:
     _substrate_preview = DcSubstratePreview.new()
     add_child(_substrate_preview)
     _substrate_preview.setup(_player, _edit_store.store)   # Phase B S3: render imprints generator + edits from the store (dcgen)
-    # Body-driven JIT terrain collision from our DC mesher; godot_voxel collision is
-    # off (world.tscn generate_collisions = false), so this is the only terrain body.
+    # Body-driven JIT terrain collision from our DC mesher, sourced from the EditStore
+    # (generator + edits) — godot_voxel collision is off (world.tscn generate_collisions
+    # = false), so this is the only terrain body.
     _dc_collision = DCCollisionManager.new()
     add_child(_dc_collision)
-    _dc_collision.setup(_terrain, _player)
+    _dc_collision.setup(_edit_store.store, _player)
     _awake_overlay = AwakeOverlay.new()
     add_child(_awake_overlay)
     _awake_overlay.setup(self)

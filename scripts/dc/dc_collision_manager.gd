@@ -11,10 +11,12 @@ extends Node3D
 # (world._enter_tree). A region recooks when its body drifts past RECOOK_DIST or an
 # edit overlaps it, and is evicted when the body sleeps or leaves. Gated on world_ready.
 #
-# Cook is cheap (64³ region ~0.15 ms, 32³ ~0.035 ms — test_spike_collision_cook), so
-# regions cook synchronously before bodies move (process_priority below default). The
-# SDF backstop (depenetrate, used by the player) is the always-correct floor for the
-# frame before a region is ready.
+# The SDF source is the EditStore (generator + edits) — no godot_voxel read, so collision
+# is always available (no streaming wait). Each region keeps a persistent scrolling buffer:
+# a recook re-samples only the shell that scrolled in (movement) plus any edited box, via
+# EditStore.fill_region — cheap and field-agnostic (no heightfield assumption). The mesh
+# step runs over the whole region but is itself cheap (~0.15 ms — test_spike_collision_cook).
+# The SDF backstop (depenetrate, used by the player) is the always-correct floor.
 
 const PLAYER_REGION := 64    # edge in metres (2^DEPTH); covers the player body + ~24 m aim reach
 const DEBRIS_REGION := 32
@@ -22,19 +24,17 @@ const RECOOK_DIST   := 8.0   # recook once a body drifts this far from its regio
 const DWELL         := 1.0   # seconds an idle region lingers before eviction
 const COOK_BUDGET   := 2      # region (re)cooks per physics tick (player first)
 
-var _terrain: VoxelLodTerrain
+var _edit_store: EditStore                 # SDF source (generator + edits); replaces the godot_voxel read
 var _player:  CharacterBody3D
 var _body:    StaticBody3D                 # holds every active region's CollisionShape3D
-var _reader:  DCRegionReader
 var _mesher:  DCOctreeMesher
-var _regions: Dictionary = {}              # body -> {center: Vector3, origin: Vector3i, size: int, shape: CollisionShape3D|null, idle: float}
+var _regions: Dictionary = {}              # body -> {center, origin: Vector3i, size, shape, idle, buffer: PackedFloat32Array}
 var _active := false
 
 
-func setup(terrain: VoxelLodTerrain, player: CharacterBody3D) -> void:
-    _terrain = terrain
+func setup(edit_store: EditStore, player: CharacterBody3D) -> void:
+    _edit_store = edit_store
     _player  = player
-    _reader  = DCRegionReader.new()
     _mesher  = DCOctreeMesher.new()
     _body = StaticBody3D.new()
     _body.name = "DCTerrainCollision"
@@ -101,7 +101,9 @@ func _active_bodies() -> Array:
 
 # --- Cook / evict ---
 
-func _cook_region(body: Node3D, size: int) -> void:
+# `dirty` (origin/size, world cells; zero = none) forces re-sampling of an edited box —
+# passed on an edit recook so the change shows even where the region didn't move.
+func _cook_region(body: Node3D, size: int, dirty_origin := Vector3i.ZERO, dirty_size := Vector3i.ZERO) -> void:
     var depth := 0
     var n := size
     while n > 1:
@@ -111,19 +113,20 @@ func _cook_region(body: Node3D, size: int) -> void:
     var half := size >> 1
     var origin := Vector3i(floori(c.x) - half, floori(c.y) - half, floori(c.z) - half)
     var dim := size + 1
-    var data := _reader.read_sdf_lod0(_terrain, origin, Vector3i(dim, dim, dim))
-    if data.size() != dim * dim * dim:
-        return   # region not streamed yet — try next tick; the SDF backstop covers the gap
+    var old: Variant = _regions.get(body)
+    var prev_buffer: PackedFloat32Array = old["buffer"] if old != null else PackedFloat32Array()
+    var prev_origin: Vector3i = old["origin"] if old != null else Vector3i.ZERO
+    # Scrolling buffer: reuse the overlap, re-sample only the shell that moved + the dirty box.
+    var data := _edit_store.fill_region(origin, dim, 1.0, prev_buffer, prev_origin, dirty_origin, dirty_size)
     var arrays := _mesher.mesh_clipmap(
         [data], dim, PackedVector3Array([Vector3.ZERO]), PackedFloat32Array([1.0]),
         Vector3.ZERO, 1e9, depth)
-    var old: Variant = _regions.get(body)
     if old != null and old["shape"] != null:
         old["shape"].queue_free()
     var shape: CollisionShape3D = null
     if not arrays.is_empty():
         shape = _build_shape(arrays, origin)
-    _regions[body] = {"center": Vector3(origin) + Vector3.ONE * float(half), "origin": origin, "size": size, "shape": shape, "idle": 0.0}
+    _regions[body] = {"center": Vector3(origin) + Vector3.ONE * float(half), "origin": origin, "size": size, "shape": shape, "idle": 0.0, "buffer": data}
 
 func _build_shape(arrays: Array, origin: Vector3i) -> CollisionShape3D:
     var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
@@ -165,11 +168,13 @@ func _free_region(body: Variant) -> void:
 
 func _on_edit(event: TerrainSdfChangedEvent) -> void:
     var ebox := AABB(event.box_origin, event.box_size).grow(1.0)
+    var d_o := Vector3i(ebox.position.floor())
+    var d_s := Vector3i(ebox.size.ceil()) + Vector3i.ONE   # cover the box's cells inclusively
     for body in _regions.keys():
         var r: Dictionary = _regions[body]
         if AABB(Vector3(r["origin"]), Vector3.ONE * float(r["size"])).intersects(ebox):
             if is_instance_valid(body):
-                _cook_region(body, r["size"])
+                _cook_region(body, r["size"], d_o, d_s)
             else:
                 _free_region(body)
 
@@ -181,25 +186,20 @@ func _on_edit(event: TerrainSdfChangedEvent) -> void:
 # unchanged. Gradient-normalized distance (f/|∇f|) so it's correct on the terrain's
 # non-unit-distance SDF (see test_spike_sdf_backstop). Cheap; safe to call each frame.
 func depenetrate(pos: Vector3, radius: float) -> Vector3:
-    if not _active or not is_instance_valid(_terrain):
+    if not _active or _edit_store == null:
         return pos
-    var vt := _terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-    var g := _sdf_grad(vt, pos)
+    var g := _sdf_grad(pos)
     var gl := g.length()
     if gl < 1e-6:
         return pos
-    var dist := vt.get_voxel_f(Vector3i(roundi(pos.x), roundi(pos.y), roundi(pos.z))) / gl
+    var dist := _edit_store.sample(pos) / gl
     if dist >= radius:
         return pos
     return pos + (g / gl) * (radius - dist)
 
-func _sdf_grad(vt: VoxelTool, p: Vector3) -> Vector3:
+func _sdf_grad(p: Vector3) -> Vector3:
     const H := 1.0
     return Vector3(
-        _sdf(vt, p + Vector3(H, 0, 0)) - _sdf(vt, p - Vector3(H, 0, 0)),
-        _sdf(vt, p + Vector3(0, H, 0)) - _sdf(vt, p - Vector3(0, H, 0)),
-        _sdf(vt, p + Vector3(0, 0, H)) - _sdf(vt, p - Vector3(0, 0, H))) / (2.0 * H)
-
-func _sdf(vt: VoxelTool, p: Vector3) -> float:
-    return vt.get_voxel_f(Vector3i(roundi(p.x), roundi(p.y), roundi(p.z)))
+        _edit_store.sample(p + Vector3(H, 0, 0)) - _edit_store.sample(p - Vector3(H, 0, 0)),
+        _edit_store.sample(p + Vector3(0, H, 0)) - _edit_store.sample(p - Vector3(0, H, 0)),
+        _edit_store.sample(p + Vector3(0, 0, H)) - _edit_store.sample(p - Vector3(0, 0, H))) / (2.0 * H)
