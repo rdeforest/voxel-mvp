@@ -19,10 +19,24 @@
 
 namespace voxel_dc {
 
+// Canonical terrain params (mirror tools/build_terrain_graph.gd). The C++ field is the
+// home now; the .tres graph is the legacy mirror until godot_voxel retires.
+namespace terrain_defaults {
+constexpr double BASE = 30.0;
+constexpr double AMP = 140.0;
+constexpr double PERIOD = 1000.0;
+constexpr int OCTAVES = 2;
+constexpr int SEED = 1337;
+} // namespace terrain_defaults
+
 struct TerrainField : public Field {
 	fast_noise_lite::FastNoiseLite noise;
 	double base;
 	double amp;
+
+	TerrainField() :
+			TerrainField(terrain_defaults::BASE, terrain_defaults::AMP, terrain_defaults::PERIOD,
+					terrain_defaults::OCTAVES, terrain_defaults::SEED) {}
 
 	TerrainField(double p_base, double p_amp, double period, int octaves, int seed) :
 			base(p_base), amp(p_amp) {
