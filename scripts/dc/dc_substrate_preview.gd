@@ -8,13 +8,17 @@ extends MeshInstance3D
 # (the property the camera-snapped clipmap can't have) and there are no mips, so no
 # geomorph blend. Shown cyan, overlaid on the existing terrain for comparison.
 #
-# Live + threaded: the octree build + mesh (pure C++, no Node / RenderingServer) runs on
-# a WorkerThreadPool task, re-dispatched when the player drifts past RECENTER_DISTANCE;
-# the ArrayMesh swap happens on the main thread when the task completes. Same lifecycle
-# as DCTerrainManager. `dcgen` toggles it.
+# World-fixed + persistent + incremental: the octree's root is snapped to a world grid
+# (so cells never shift — view-independent by construction), and it's kept across frames.
+# Moving the player only REFINES the octree toward the new position (refine_terrain_graded
+# adds detail at the leading margin — cheap); a full rebuild happens only when the player
+# leaves the root (re-root) or an edit dirties it. The build/refine + mesh run on a
+# WorkerThreadPool task (pure C++, no Node/RenderingServer); the ArrayMesh swap is on the
+# main thread. Edit-aware: a box around the player is re-read from godot_voxel's store and
+# overlaid on the generator, so digs/builds show. `dcgen` toggles it. Shown cyan, overlaid.
 #
-# NOT yet: edit-aware (digs/builds don't show — it's pure generator + grading), and it
-# doesn't replace the clipmap as the default render. Those are the next bites.
+# NOT yet: the default render (it overlays the clipmap, not replaces it); collision and
+# persistence still come from godot_voxel.
 
 # Terrain params — mirror tools/build_terrain_graph.gd. The terrain function now lives in
 # C++ (TerrainField); these are the tunables until the .tres graph retires with godot_voxel.
@@ -24,24 +28,26 @@ const PERIOD  := 1000.0
 const OCTAVES := 2
 const SEED    := 1337
 
-const ROOT_SIZE         := 256.0   # world cube spanning the preview, centred on the player
+const ROOT_SIZE         := 512.0   # world-fixed cube; bigger coverage is affordable now (refine, not rebuild)
+const ROOT_SNAP         := 64.0    # snap the root origin to this world grid (cells stay world-aligned)
+const ROOT_MARGIN       := 128.0   # re-root once the player is this close to the root's face
 const NEAR_LEAF         := 1.0     # finest leaf at the focus
-const BAND              := 24.0    # leaf size doubles every BAND metres from the focus
-const RECENTER_DISTANCE := 16.0    # re-mesh once the player drifts this far (m)
+const BAND              := 32.0    # leaf size doubles every BAND metres from the focus
+const RECENTER_DISTANCE := 16.0    # refine toward the player once they drift this far (m)
 const OVERLAY_DIM       := 65      # edit-overlay box read from godot_voxel: 64 m span around the player
 const OVERLAY_HALF      := 32      # OVERLAY_DIM / 2 — the box's half-extent in cells
-# Perf note: each recenter rebuilds the whole octree from the noise (the sign-agreement
-# homogeneity test samples TerrainField ~9x per node), so it's seconds at 512 m and
-# sub-second at 256 m — fine off-thread for a diagnostic, but the real fix for a default
-# render is incremental re-imprint (only the margin the player crossed), a later bite.
 
 var _follow:  Node3D
 var _terrain: VoxelLodTerrain   # null = generator-only (no edit overlay)
 var _reader:  DCRegionReader
 var _enabled := false
 
+var _octree:      SparseVoxelOctree   # the persistent octree (built once per re-root, refined on move)
+var _root_origin: Vector3
+var _built  := false
+var _dirty  := false                  # an edit happened — force a full rebuild
+
 var _task_id := -1
-var _job_octree: SparseVoxelOctree
 var _job_overlay: Dictionary = {}   # {data, origin} read on the main thread for the worker
 var _job_arrays: Array = []
 var _last_center := Vector3.INF
@@ -64,10 +70,11 @@ func setup(follow: Node3D, terrain: VoxelLodTerrain = null) -> void:
     visible = false
 
 
-# An edit re-reads the world, so rebuild at the next frame to pick it up.
+# An edit changed the world, so the octree needs a full rebuild to pick it up (refine
+# only ADDS generator detail — it doesn't re-read the edit overlay).
 func _on_terrain_edit(_event: VoxelEvent) -> void:
     if _enabled:
-        _last_center = Vector3.INF
+        _dirty = true
 
 
 func is_enabled() -> bool:
@@ -77,7 +84,7 @@ func is_enabled() -> bool:
 func set_enabled(on: bool) -> void:
     _enabled = on
     if on:
-        _last_center = Vector3.INF   # force an immediate (re)build at the current position
+        _built = false   # force a build next frame
     else:
         visible = false
         mesh = null
@@ -89,24 +96,54 @@ func _process(_dt: float) -> void:
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()
-    elif _follow.global_position.distance_to(_last_center) > RECENTER_DISTANCE:
-        _dispatch(_follow.global_position)
+        return
+    var p := _follow.global_position
+    if not _built or _dirty or _outside_root(p):
+        _dispatch_build(p)
+    elif p.distance_to(_last_center) > RECENTER_DISTANCE:
+        _dispatch_refine(p)
 
 
-# Build the octree shell + read the edit overlay on the main thread (object creation and
-# the godot_voxel read must not happen off-thread), then imprint + mesh on a worker (pure
-# C++ data work — no Node / RenderingServer access).
-func _dispatch(center: Vector3) -> void:
-    _last_center = center
-    _job_overlay = _read_overlay(center)
-    _job_octree = SparseVoxelOctree.new()
-    _job_octree.setup(center - Vector3.ONE * (ROOT_SIZE * 0.5), ROOT_SIZE)
-    _task_id = WorkerThreadPool.add_task(_mesh_job.bind(center), false, "substrate octree mesh")
+# World-fixed root origin snapped to the ROOT_SNAP grid, centred on the player — so cells
+# never shift under a fixed feature, and re-roots land on stable boundaries.
+func _snap_root(p: Vector3) -> Vector3:
+    return ((p - Vector3.ONE * (ROOT_SIZE * 0.5)) / ROOT_SNAP).floor() * ROOT_SNAP
 
 
-func _mesh_job(center: Vector3) -> void:
-    _imprint(_job_octree, center, _job_overlay)
-    _job_arrays = _job_octree.mesh()
+func _outside_root(p: Vector3) -> bool:
+    var lo := _root_origin + Vector3.ONE * ROOT_MARGIN
+    var hi := _root_origin + Vector3.ONE * (ROOT_SIZE - ROOT_MARGIN)
+    return p.x < lo.x or p.y < lo.y or p.z < lo.z or p.x > hi.x or p.y > hi.y or p.z > hi.z
+
+
+# Full rebuild: fresh octree at a snapped root, edit overlay re-read (main thread), then
+# imprint + mesh on the worker. Runs on re-root, on an edit, and the first build.
+func _dispatch_build(p: Vector3) -> void:
+    _root_origin = _snap_root(p)
+    _octree = SparseVoxelOctree.new()
+    _octree.setup(_root_origin, ROOT_SIZE)
+    _job_overlay = _read_overlay(p)
+    _built = true
+    _dirty = false
+    _last_center = p
+    _task_id = WorkerThreadPool.add_task(_build_job.bind(p), false, "substrate build")
+
+
+# Incremental: refine the persistent octree toward the new position (cheap — only the
+# leading margin), then re-mesh. The common case as you walk.
+func _dispatch_refine(p: Vector3) -> void:
+    _last_center = p
+    _task_id = WorkerThreadPool.add_task(_refine_job.bind(p), false, "substrate refine")
+
+
+func _build_job(p: Vector3) -> void:
+    _imprint(_octree, p, _job_overlay)
+    _job_arrays = _octree.mesh()
+
+
+func _refine_job(p: Vector3) -> void:
+    _octree.refine_terrain_graded(p, NEAR_LEAF, BAND, BASE, AMP, PERIOD, OCTAVES, SEED)
+    _job_arrays = _octree.mesh()
 
 
 # Read a box around the focus from godot_voxel's edited store (generator baseline + edits),
