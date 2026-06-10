@@ -76,6 +76,25 @@ func test_graded_terrain_fine_near_focus_and_sparser_than_uniform() -> void:
     assert_lt(graded.leaf_count(), uniform.leaf_count(), "grading is sparser than uniform-fine")
 
 
+func test_overlay_shows_edit_over_generator() -> void:
+    # Edit-awareness: a dense overlay grid (a region re-read from the edited store) must
+    # override the generator inside its box, while the rest defers to TerrainField. Prove
+    # it with a solid block floating above the surface, where pure generator says air.
+    var s0 := SparseVoxelOctree.terrain_surface(100, 100, BASE, AMP, PERIOD, OCTAVES, SEED)
+    var t := SparseVoxelOctree.new()
+    var focus := Vector3(100, s0, 100)
+    t.setup(Vector3(100 - 64, s0 - 32, 100 - 64), 128.0)
+    var dim := 17
+    var box_origin := Vector3(92, s0 + 30, 92)   # ~30 m above the surface
+    var solid := PackedFloat32Array()
+    solid.resize(dim * dim * dim)
+    solid.fill(-5.0)                              # deep solid everywhere in the box
+    t.imprint_terrain_overlay_graded(focus, 1.0, 40.0, BASE, AMP, PERIOD, OCTAVES, SEED, solid, dim, box_origin, 1.0)
+    assert_lt(t.sample(box_origin + Vector3.ONE * 8.0), 0.0, "overlay block reads solid over the air generator")
+    assert_gt(t.sample(Vector3(130, s0 + 38, 130)), 0.0, "outside the overlay box defers to the generator (air)")
+    assert_lt(t.sample(Vector3(100, s0 - 10, 100)), 0.0, "below the surface is still solid ground (generator)")
+
+
 func test_substrate_preview_meshes_terrain() -> void:
     # The dcgen render glue: build the octree-over-generator preview at a position and
     # confirm it produces a non-empty mesh (the path the live render rides on).

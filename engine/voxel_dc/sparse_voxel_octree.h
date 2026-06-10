@@ -62,6 +62,12 @@ public:
 	// The live store-over-generator render path.
 	void imprint_terrain_graded(Vector3 focus, double near_leaf, double band,
 			double base, double amp, double period, int octaves, int seed);
+	// Edit-aware graded terrain imprint: TerrainField base, with `overlay` (a dense SDF
+	// grid re-read from the edited store, e.g. DCRegionReader) overlaid inside its box, so
+	// edits there show while the rest defers to the generator. Empty overlay = plain terrain.
+	void imprint_terrain_overlay_graded(Vector3 focus, double near_leaf, double band,
+			double base, double amp, double period, int octaves, int seed,
+			const PackedFloat32Array &overlay, int overlay_dim, Vector3 overlay_origin, double overlay_cell);
 
 protected:
 	static void _bind_methods();

@@ -66,6 +66,26 @@ void SparseVoxelOctree::imprint_terrain_graded(Vector3 focus, double near_leaf, 
 	_imprint_graded(0, voxel_dc::TerrainField(base, amp, period, octaves, seed), focus, near_leaf, band, 0);
 }
 
+void SparseVoxelOctree::imprint_terrain_overlay_graded(Vector3 focus, double near_leaf, double band,
+		double base, double amp, double period, int octaves, int seed,
+		const PackedFloat32Array &overlay, int overlay_dim, Vector3 overlay_origin, double overlay_cell) {
+	if (nodes.is_empty()) {
+		return;
+	}
+	const Vector3 ro = nodes[0].origin;
+	const double rs = nodes[0].size;
+	nodes.clear();
+	_new_node(ro, rs);
+	const voxel_dc::TerrainField bg(base, amp, period, octaves, seed);
+	if (overlay.size() >= int64_t(overlay_dim) * overlay_dim * overlay_dim) {
+		const Vector3 box_max = overlay_origin + Vector3(1, 1, 1) * (double(overlay_dim - 1) * overlay_cell);
+		const voxel_dc::OverlayField f(&bg, overlay.ptr(), overlay_dim, overlay_origin, overlay_cell, overlay_origin, box_max);
+		_imprint_graded(0, f, focus, near_leaf, band, 0);
+	} else {
+		_imprint_graded(0, bg, focus, near_leaf, band, 0);
+	}
+}
+
 void SparseVoxelOctree::imprint_sphere_graded(Vector3 center, double radius, Vector3 focus,
 		double near_leaf, double band, int material) {
 	if (nodes.is_empty()) {
@@ -305,6 +325,7 @@ void SparseVoxelOctree::_bind_methods() {
 	ClassDB::bind_static_method("SparseVoxelOctree", D_METHOD("terrain_surface", "x", "z", "base", "amp", "period", "octaves", "seed"), &SparseVoxelOctree::terrain_surface);
 	ClassDB::bind_method(D_METHOD("imprint_sphere_graded", "center", "radius", "focus", "near_leaf", "band", "material"), &SparseVoxelOctree::imprint_sphere_graded);
 	ClassDB::bind_method(D_METHOD("imprint_terrain_graded", "focus", "near_leaf", "band", "base", "amp", "period", "octaves", "seed"), &SparseVoxelOctree::imprint_terrain_graded);
+	ClassDB::bind_method(D_METHOD("imprint_terrain_overlay_graded", "focus", "near_leaf", "band", "base", "amp", "period", "octaves", "seed", "overlay", "overlay_dim", "overlay_origin", "overlay_cell"), &SparseVoxelOctree::imprint_terrain_overlay_graded);
 	ClassDB::bind_method(D_METHOD("stamp_sphere", "center", "radius", "min_leaf", "material", "op"), &SparseVoxelOctree::stamp_sphere);
 	ClassDB::bind_method(D_METHOD("stamp_box", "center", "size", "min_leaf", "material", "op"), &SparseVoxelOctree::stamp_box);
 	ClassDB::bind_method(D_METHOD("sample", "p"), &SparseVoxelOctree::sample);

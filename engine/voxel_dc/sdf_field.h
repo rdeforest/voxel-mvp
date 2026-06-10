@@ -76,6 +76,29 @@ struct ArrayField : public Field {
 	}
 };
 
+// A base field with a denser overlay grid inside one world box: inside the box, sample
+// the overlay; outside, the base. This is how the octree stays edit-aware while deferring
+// to the generator — base = TerrainField (fine everywhere, no mips), overlay = a region
+// re-read from godot_voxel's edited store. The overlay box must sit inside the overlay
+// grid AND be padded with unedited generator at its rim, so overlay == base at the
+// boundary and there's no seam. The base pointer + overlay data must outlive the imprint.
+struct OverlayField : public Field {
+	const Field *base;
+	ArrayField overlay;
+	Vector3 box_min;
+	Vector3 box_max;
+	OverlayField(const Field *b, const float *d, int dim, const Vector3 &o, double c,
+			const Vector3 &bmin, const Vector3 &bmax) :
+			base(b), overlay(d, dim, o, c), box_min(bmin), box_max(bmax) {}
+	double sample(const Vector3 &p) const override {
+		if (p.x >= box_min.x && p.y >= box_min.y && p.z >= box_min.z &&
+				p.x <= box_max.x && p.y <= box_max.y && p.z <= box_max.z) {
+			return overlay.sample(p);
+		}
+		return base->sample(p);
+	}
+};
+
 } // namespace voxel_dc
 
 #endif // SDF_FIELD_H
