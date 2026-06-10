@@ -89,6 +89,22 @@ func test_write_region_stores_an_array() -> void:
     assert_gt(es.sample(Vector3(CX, s0 + 60.0, CZ)), 0.0, "outside the written region defers to the generator")
 
 
+func test_fill_indices_region_reads_per_cell_material() -> void:
+    # The render path (DCTerrainManager) reads material in bulk per clipmap level. A filled
+    # ball paints its material into the dense region; unedited cells read 0 (natural).
+    var es := _store()
+    var s0 := _surface()
+    var center := Vector3(CX, s0 + 6.0, CZ)        # above the surface = air generator
+    es.stamp_sphere(center, 3.0, UNION, 7, 1.0)
+    var dim := 11
+    var origin := Vector3i(int(CX) - 5, int(s0) + 1, int(CZ) - 5)
+    var idx := es.fill_indices_region(origin, dim, 1.0)
+    assert_eq(idx.size(), dim * dim * dim, "returns a dense cube of material ids")
+    var ci := (int(center.x) - origin.x) + dim * ((int(center.y) - origin.y) + dim * (int(center.z) - origin.z))
+    assert_eq(idx[ci], 7, "the filled cell carries its painted material")
+    assert_eq(idx[0], 0, "a corner outside the edit reads natural (0)")
+
+
 func test_imprint_store_graded_bakes_edits_into_render_octree() -> void:
     # S3 render path: a SparseVoxelOctree imprinted from the store carries generator + edits.
     # Use a SURFACE dig (the supported case — the octree is already subdivided at the

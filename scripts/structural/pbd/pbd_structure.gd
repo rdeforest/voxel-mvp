@@ -201,16 +201,15 @@ func _collapse(cells: Array[Vector3i]) -> void:
     var body := FallingBodyFactory.from_voxels(cells)
     get_parent().add_child(body)
     VoxelEventBusSingleton.emit(RegionCollapsingEvent.CHANNEL, RegionCollapsingEvent.new(VoxelConstants.GRID_ID, cells))
-    var vt: VoxelTool = _integrity.terrain_support.terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-    vt.mode = VoxelTool.MODE_REMOVE
+    var work: Array = []
     var lo := Vector3(cells[0])
     var hi := lo + Vector3.ONE
     for v in cells:
-        vt.set_voxel_f(v, VoxelConstants.SDF_AIR)
+        work.append([v, VoxelConstants.SDF_AIR])
         VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(VoxelConstants.GRID_ID, v))
         lo = lo.min(Vector3(v))
         hi = hi.max(Vector3(v) + Vector3.ONE)
+    StoreWrite.cells(_integrity.store, work, func(_entry): return -1)
     VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL, TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, lo, hi - lo))
 
 

@@ -5,7 +5,7 @@ var plane_point: Vector3   # a point the flatten plane passes through
 var normal:      Vector3   # normal of the flatten plane (unit length)
 var radius:      float
 
-var terrain:     VoxelLodTerrain
+var store:       EditStore
 
 var _work: Array         = []   # [[Vector3i cell, float sdf], ...]
 var _work_computed: bool = false
@@ -15,13 +15,13 @@ func _init(
     p_plane_point: Vector3,
     p_normal:      Vector3,
     p_radius:      float,
-    p_terrain:     VoxelLodTerrain,
+    p_store:       EditStore,
     p_player:      CharacterBody3D,
 ) -> void:
     plane_point = p_plane_point
     normal      = p_normal.normalized()
     radius      = p_radius
-    terrain     = p_terrain
+    store       = p_store
     player      = p_player
 
 
@@ -45,15 +45,12 @@ func preview() -> ActionPreview:
     return p
 
 func execute() -> void:
-    if terrain == null:
-        push_error("FlattenAction.execute(): no terrain")
+    if store == null:
+        push_error("FlattenAction.execute(): no store")
         return
 
     _ensure_work()
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-    for entry in _work:
-        vt.set_voxel_f(entry[0], entry[1])
+    StoreWrite.cells(store, _work, func(_entry): return -1)   # keep each cell's current material
 
     var origin := plane_point - Vector3.ONE *  radius
     var dims   :=                Vector3.ONE * (radius * 2.0)
@@ -76,7 +73,7 @@ func _endangers() -> bool:
     return false
 
 func _ensure_work() -> void:
-    if _work_computed or terrain == null:
+    if _work_computed or store == null:
         return
     _work          = _compute_work()
     _work_computed = true
@@ -87,9 +84,6 @@ func _ensure_work() -> void:
 # radius. Skip columns whose +N side is all-solid (would dig a buried slot)
 # or whose -N side is all-air (would float).
 func _compute_work() -> Array:
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-
     var origin := plane_point - Vector3.ONE *  radius
     var dims   :=                Vector3.ONE * (radius * 2.0)
     var columns: Dictionary = {}
@@ -103,7 +97,7 @@ func _compute_work() -> Array:
                 return
             var lateral := Vector3(pos) - normal * plane_dist
             var key     := Vector3i(roundi(lateral.x), roundi(lateral.y), roundi(lateral.z))
-            var is_solid := vt.get_voxel_f(pos) < VoxelConstants.SDF_SOLID_THRESHOLD
+            var is_solid := store.sample(Vector3(pos)) < VoxelConstants.SDF_SOLID_THRESHOLD
             if not columns.has(key):
                 columns[key] = []
             columns[key].append([pos, plane_dist, is_solid])

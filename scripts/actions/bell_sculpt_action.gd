@@ -11,18 +11,18 @@ const AMPLITUDE_RATIO := 0.5   # bell peak/depth = radius * this
 
 var position: Vector3
 var radius:   float
-var terrain:  VoxelLodTerrain
+var store:    EditStore
 var _sign:    float
 
 var _work: Array         = []   # [[Vector3i cell, float new_sdf, float old_sdf], ...]
 var _work_computed: bool = false
 
 
-func _init(p_position: Vector3, p_radius: float, p_terrain: VoxelLodTerrain,
+func _init(p_position: Vector3, p_radius: float, p_store: EditStore,
         p_player: CharacterBody3D, p_sign: float) -> void:
     position = p_position
     radius   = p_radius
-    terrain  = p_terrain
+    store    = p_store
     player   = p_player
     _sign    = p_sign
 
@@ -32,14 +32,11 @@ func validate() -> bool:
     return not _work.is_empty() and not _endangers()
 
 func execute() -> void:
-    if terrain == null:
-        push_error("BellSculptAction.execute(): no terrain")
+    if store == null:
+        push_error("BellSculptAction.execute(): no store")
         return
     _ensure_work()
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-    for entry in _work:
-        vt.set_voxel_f(entry[0], entry[1])
+    StoreWrite.cells(store, _work, func(_entry): return -1)   # reshape keeps each cell's material
     var origin := position - Vector3.ONE * radius
     var dims   := Vector3.ONE * (radius * 2.0)
     VoxelEventBusSingleton.emit(
@@ -64,15 +61,12 @@ func preview() -> ActionPreview:
 # --- Internals ---
 
 func _ensure_work() -> void:
-    if _work_computed or terrain == null:
+    if _work_computed or store == null:
         return
     _work          = _compute_work()
     _work_computed = true
 
 func _compute_work() -> Array:
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-
     var amplitude := radius * AMPLITUDE_RATIO
     var origin    := position - Vector3.ONE * radius
     var dims      := Vector3.ONE * (radius * 2.0)
@@ -88,7 +82,7 @@ func _compute_work() -> Array:
         var t       := d2 / r2
         var falloff := (1.0 - t) * (1.0 - t)   # quartic
         var bell    := amplitude * falloff
-        var old_sdf := vt.get_voxel_f(cell)
+        var old_sdf := store.sample(Vector3(cell))
         out.append([cell, old_sdf + _sign * bell, old_sdf])
     )
     return out

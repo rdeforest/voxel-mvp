@@ -6,7 +6,7 @@ var part:          Part
 var placement_pos: Vector3    # world position for the rotated bottom-center
 var world_anchor:  Vector3i   # voxel-grid cell for the click point
 var rotation:      Vector3    # per-axis rotation in degrees (X, Y, Z), continuous
-var terrain:       VoxelLodTerrain
+var store:         EditStore   # SDF read for the support check
 var integrity:     StructuralIntegrity   # query path only (has_part_cell)
 # material_name (the part's material) and player are inherited from AdditiveAction.
 
@@ -19,7 +19,7 @@ func _init(
     p_anchor:   Vector3i,
     p_rotation: Vector3,
     p_material: StringName,
-    p_terrain:  VoxelLodTerrain,
+    p_store:    EditStore,
     p_integ:    StructuralIntegrity,
     p_player:   CharacterBody3D,
 ) -> void:
@@ -28,7 +28,7 @@ func _init(
     world_anchor  = p_anchor
     rotation      = p_rotation
     material_name = p_material
-    terrain       = p_terrain
+    store         = p_store
     integrity     = p_integ
     player        = p_player
 
@@ -40,13 +40,11 @@ func validate() -> bool:
     if player != null and _footprint_aabb(fp).has_point(player.global_position):
         return false
 
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
     for cell in fp:
         if integrity.has_part_cell(cell):
             return true
         var below := cell + Vector3i(0, -1, 0)
-        if vt.get_voxel_f(below) < VoxelConstants.SDF_SOLID_THRESHOLD:
+        if store.sample(Vector3(below)) < VoxelConstants.SDF_SOLID_THRESHOLD:
             return true
         if integrity.has_part_cell(below):
             return true
@@ -62,7 +60,7 @@ func preview() -> ActionPreview:
 func execute() -> void:
     var instance := part.instantiate(material_name)
     instance.transform = part.world_transform(_basis(), placement_pos)
-    terrain.get_parent().add_child(instance)
+    player.get_parent().add_child(instance)   # parts are children of the world (player's parent)
 
     VoxelEventBusSingleton.emit(
         PartAddedEvent.CHANNEL,

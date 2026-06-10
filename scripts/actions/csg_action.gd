@@ -17,7 +17,7 @@ var shape:    CsgShape      # active primitive: owns its dims, SDF, and local AA
 var xform:    Transform3D   # shape local -> world (rotation basis + placement origin)
 var op:       int           # CsgState.Op
 
-var terrain:  VoxelLodTerrain
+var store:    EditStore
 
 # Cached work: [[Vector3i cell, float new_sdf, bool was_solid, bool now_solid], ...]
 var _work: Array         = []
@@ -29,14 +29,14 @@ func _init(
     p_xform:    Transform3D,
     p_op:       int,
     p_material: StringName,
-    p_terrain:  VoxelLodTerrain,
+    p_store:    EditStore,
     p_player:   CharacterBody3D,
 ) -> void:
     shape         = p_shape
     xform         = p_xform
     op            = p_op
     material_name = p_material
-    terrain       = p_terrain
+    store         = p_store
     player        = p_player
 
 
@@ -60,34 +60,27 @@ func preview() -> ActionPreview:
 
 
 func execute() -> void:
-    if terrain == null:
-        push_error("CsgAction.execute(): no terrain")
+    if store == null:
+        push_error("CsgAction.execute(): no store")
         return
     _ensure_work()
 
     if op == CsgState.Op.ADD:
         _freeze_bodies_in_volume()
 
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
+    # One dense write: newly-solid cells take the CSG material; carved (air) cells keep
+    # their current material (it's unused for air). The DC mesher reads the material back
+    # and the terrain shader colours by it.
+    var solid_index := MaterialPalette.index_of(material_name)
+    StoreWrite.cells(store, _work, func(entry): return solid_index if entry[3] else -1)
+
     var mat := Materials.from_name(material_name)
     for entry in _work:
         var cell: Vector3i = entry[0]
-        vt.set_voxel_f(cell, entry[1])
         if entry[3] and not entry[2]:
             VoxelEventBusSingleton.emit(VoxelAddedEvent.CHANNEL,   VoxelAddedEvent.new(VoxelConstants.GRID_ID, cell, mat))
         elif entry[2] and not entry[3]:
             VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))
-
-    # Tag the newly-solid voxels with the material id (CHANNEL_INDICES, 8-bit).
-    # The DC mesher reads it back and the terrain shader colours by it. Carved
-    # cells become air, so they get no material.
-    var idx := MaterialPalette.index_of(material_name)
-    vt.channel = VoxelBuffer.CHANNEL_INDICES
-    for entry in _work:
-        if entry[3]:
-            vt.set_voxel(entry[0], idx)
-    vt.channel = VoxelBuffer.CHANNEL_SDF
 
     var box := _world_box()
     VoxelEventBusSingleton.emit(
@@ -104,26 +97,24 @@ func _world_box() -> AABB:
 
 
 func _ensure_work() -> void:
-    if _work_computed or terrain == null:
+    if _work_computed or store == null:
         return
     _work          = _compute_work()
     _work_computed = true
 
 
 func _compute_work() -> Array:
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-    var inv  := xform.affine_inverse()
+    var inverse := xform.affine_inverse()
     var box  := _world_box()
     var work: Array = []
     VoxelUtils.for_each_in_bounding_box(
         box.position,
         box.size,
         func(cell: Vector3i) -> void:
-            var d := shape.sdf(inv * Vector3(cell))
-            d = clampf(d, VoxelConstants.SDF_SOLID, VoxelConstants.SDF_AIR)
-            var existing := vt.get_voxel_f(cell)
-            var combined := minf(existing, d) if op == CsgState.Op.ADD else maxf(existing, -d)
+            var distance := shape.sdf(inverse * Vector3(cell))
+            distance = clampf(distance, VoxelConstants.SDF_SOLID, VoxelConstants.SDF_AIR)
+            var existing := store.sample(Vector3(cell))
+            var combined := minf(existing, distance) if op == CsgState.Op.ADD else maxf(existing, -distance)
             if is_equal_approx(combined, existing):
                 return
             var was_solid := existing  < VoxelConstants.SDF_SOLID_THRESHOLD
@@ -157,7 +148,9 @@ func _freeze_bodies_in_volume() -> void:
     query.shape              = shape3
     query.transform          = Transform3D(Basis(), box.position + box.size * 0.5)
     query.collide_with_areas = false
-    for hit in terrain.get_world_3d().direct_space_state.intersect_shape(query, 32):
+    if player == null:
+        return
+    for hit in player.get_world_3d().direct_space_state.intersect_shape(query, 32):
         var body := hit.collider as RigidBody3D
         if body != null and not body.freeze:
             body.freeze = true

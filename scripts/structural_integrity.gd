@@ -2,7 +2,7 @@ class_name StructuralIntegrity
 extends Node
 
 
-var terrain:            VoxelLodTerrain
+var store:              EditStore   # SDF source (generator + edits); set by world.gd after the store exists
 
 var terrain_support:    TerrainSupport
 var part_support:       PartSupport
@@ -23,10 +23,16 @@ var _active := false
 
 
 func _ready() -> void:
-    terrain            = get_parent().get_node("VoxelLodTerrain")
-    terrain_support    = TerrainSupport.new(terrain)
+    terrain_support    = TerrainSupport.new()
     part_support       = PartSupport.new(terrain_support, self)
     terrain_support.bind_part_support(part_support)
+
+
+# world.gd injects the store once it exists (this Node's _ready runs first). Fans it out to
+# the terrain_support's solidity checks and this node's falling-body classification.
+func set_store(p_store: EditStore) -> void:
+    store = p_store
+    terrain_support.store = p_store
 
     VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_world_mutated)
     VoxelEventBusSingleton.subscribe(PartRemovedEvent.CHANNEL,       _on_world_mutated)
@@ -94,22 +100,20 @@ func wake_falling_bodies() -> void:
 # SDF at its current pose. Partially-buried bodies freeze in place; fully-
 # buried bodies integrate back into the SDF as tracked voxels.
 func _tick_falling_bodies() -> void:
-    if terrain == null:
+    if store == null:
         return
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
     for child in get_parent().get_children():
         var body := child as RigidBody3D
         if body == null or not body.has_meta("cell_offsets"):
             continue
-        _classify_falling_body(body, vt)
+        _classify_falling_body(body)
 
-func _classify_falling_body(body: RigidBody3D, vt: VoxelTool) -> void:
+func _classify_falling_body(body: RigidBody3D) -> void:
     var offsets:   Array[Vector3] = body.get_meta("cell_offsets")
     var transform := body.global_transform
     var buried    := 0
     for offset in offsets:
-        if _cell_at(transform * offset, vt) < VoxelConstants.SDF_SOLID_THRESHOLD:
+        if _cell_at(transform * offset) < VoxelConstants.SDF_SOLID_THRESHOLD:
             buried += 1
     if buried == offsets.size():
         _integrate_buried_body(body, offsets, transform)
@@ -131,8 +135,8 @@ func _integrate_buried_body(body: RigidBody3D, offsets: Array[Vector3], transfor
             VoxelAddedEvent.new(0, cell, Materials.STONE))
     body.queue_free()
 
-static func _cell_at(world: Vector3, vt: VoxelTool) -> float:
-    return vt.get_voxel_f(Vector3i(floori(world.x), floori(world.y), floori(world.z)))
+func _cell_at(world: Vector3) -> float:
+    return store.sample(Vector3(floori(world.x), floori(world.y), floori(world.z)))
 
 # Force the world to a settled state so a save is never blocked: drain the support
 # fixpoint, sleep the PBD network in place, and sleep every falling body. The save

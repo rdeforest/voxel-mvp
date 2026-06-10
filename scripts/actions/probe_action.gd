@@ -11,22 +11,22 @@ extends Action
 var hit_pos:    Vector3
 var hit_normal: Vector3
 var offset:     Vector3
-var terrain:    VoxelLodTerrain
+var store:      EditStore
 var integrity:  StructuralIntegrity
 var pbd:        PbdStructure
 
 
-func _init(p_hit_pos: Vector3, p_hit_normal: Vector3, p_offset: Vector3, p_terrain: VoxelLodTerrain, p_integrity: StructuralIntegrity, p_pbd: PbdStructure) -> void:
+func _init(p_hit_pos: Vector3, p_hit_normal: Vector3, p_offset: Vector3, p_store: EditStore, p_integrity: StructuralIntegrity, p_pbd: PbdStructure) -> void:
     hit_pos    = p_hit_pos
     hit_normal = p_hit_normal
     offset     = p_offset
-    terrain    = p_terrain
+    store      = p_store
     integrity  = p_integrity
     pbd        = p_pbd
 
 
 func validate() -> bool:
-    return terrain != null
+    return store != null
 
 
 # Target the solid cell behind the hit surface (same convention as the voxel grid
@@ -39,9 +39,7 @@ func _target_cell() -> Vector3i:
 func execute() -> void:
     var cell := _target_cell()
 
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-    var sdf       := vt.get_voxel_f(cell)
+    var sdf       := store.sample(Vector3(cell))
     var is_solid  := sdf < VoxelConstants.SDF_SOLID_THRESHOLD
     var tracked   := integrity.terrain_support.voxel_data.has(cell)
     var has_part  := integrity.has_part_cell(cell)

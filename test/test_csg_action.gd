@@ -1,34 +1,44 @@
 extends GutTest
 
-# A bare VoxelLodTerrain isn't editable (no stream/streaming), so set_voxel_f
-# can't round-trip here — the actual write is the same vt.set_voxel_f path flatten
-# and fill use in-game. What we CAN pin headlessly is the action's intent: the
-# computed work (via preview) must classify cells correctly from the analytic SDF
-# combined with the existing field (which reads as air everywhere on a bare node).
+# CsgAction's intent, pinned headlessly: the computed work (via preview) must classify cells
+# correctly from the analytic shape SDF combined with the existing field. The field is the
+# EditStore, which defers to the procedural generator — so we stamp well ABOVE the generated
+# surface, where the field reads as air, and a UNION actually creates solid (a SUBTRACT there
+# is a no-op).
 
-var _terrain: VoxelLodTerrain
+const BASE    := 30.0
+const AMP     := 140.0
+const PERIOD  := 1000.0
+const OCTAVES := 2
+const SEED    := 1337
+
+var _store:  EditStore
+var _center: Vector3
 
 
 func before_each() -> void:
-    _terrain = VoxelLodTerrain.new()
-    add_child_autofree(_terrain)
+    var surface := SparseVoxelOctree.terrain_surface(0.0, 0.0, BASE, AMP, PERIOD, OCTAVES, SEED)
+    _center = Vector3(0.0, surface + 60.0, 0.0)   # well into the air
+    _store = EditStore.new()
+    _store.setup(_center - Vector3.ONE * 128.0, 256.0, BASE, AMP, PERIOD, OCTAVES, SEED)
 
 
 func _sphere(op: int, radius: float) -> CsgAction:
     return CsgAction.new(
         CsgSphereShape.new(radius),
-        Transform3D(Basis.IDENTITY, Vector3.ZERO), op, &"Stone", _terrain, null)
+        Transform3D(Basis.IDENTITY, _center), op, &"Stone", _store, null)
 
 
 func test_sphere_add_marks_interior_solid() -> void:
     var action := _sphere(CsgState.Op.ADD, 4.0)
     assert_true(action.validate(), "stamp in empty air is valid")
-    var p := action.preview()
-    assert_false(p.refused, "not refused")
-    assert_true(p.solid.has(Vector3i(0, 0, 0)),  "centre becomes solid")
-    assert_true(p.solid.has(Vector3i(3, 0, 0)),  "inside the radius becomes solid")
-    assert_false(p.solid.has(Vector3i(6, 0, 0)), "outside the radius stays air")
-    assert_true(p.air.is_empty(), "nothing was solid to remove (air terrain)")
+    var preview := action.preview()
+    var center_cell := Vector3i(_center.round())
+    assert_false(preview.refused, "not refused")
+    assert_true(preview.solid.has(center_cell),                     "centre becomes solid")
+    assert_true(preview.solid.has(center_cell + Vector3i(3, 0, 0)), "inside the radius becomes solid")
+    assert_false(preview.solid.has(center_cell + Vector3i(6, 0, 0)), "outside the radius stays air")
+    assert_true(preview.air.is_empty(), "nothing was solid to remove (air terrain)")
 
 
 func test_subtract_on_air_is_refused() -> void:
@@ -42,10 +52,10 @@ func test_player_clearance_refuses_burying_stamp() -> void:
     # A solid stamp centred on the player must refuse (don't-deform-the-player).
     var player := CharacterBody3D.new()
     add_child_autofree(player)
-    player.global_position = Vector3.ZERO
+    player.global_position = _center
     var action := CsgAction.new(
         CsgSphereShape.new(4.0),
-        Transform3D(Basis.IDENTITY, Vector3.ZERO), CsgState.Op.ADD, &"Stone", _terrain, player)
+        Transform3D(Basis.IDENTITY, _center), CsgState.Op.ADD, &"Stone", _store, player)
     assert_false(action.validate(), "stamp would bury the player -> refused")
 
 
@@ -55,7 +65,7 @@ func test_world_box_grows_with_rotation() -> void:
     var basis  := Basis(Vector3.UP, deg_to_rad(45.0))
     var action := CsgAction.new(
         CsgBoxShape.new(Vector3(4, 4, 4)),
-        Transform3D(basis, Vector3(10, 0, 0)), CsgState.Op.ADD, &"Stone", _terrain, null)
+        Transform3D(basis, Vector3(10, 0, 0)), CsgState.Op.ADD, &"Stone", _store, null)
     var box := action._world_box()
     # 4×4×4 box rotated 45° about Y spans ~5.66 in X/Z; +/- MARGIN(2) each side.
     assert_true(box.has_point(Vector3(10, 0, 0)), "encloses the centre")

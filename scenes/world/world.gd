@@ -13,14 +13,9 @@ var _edit_store: EditStoreManager
 var _console: ConsoleCommands
 
 # World-ready gate: gameplay + physics systems start inactive and resume on a
-# WorldReadyEvent, so nothing acts on a half-streamed world. We poll the terrain
-# (is_area_editable around the player) rather than pausing it — pausing the
-# terrain would stall the very streaming we're waiting on. A timeout backstops a
-# bad probe so the game can never freeze forever.
+# WorldReadyEvent. With the store-backed field resident from frame one there's nothing to
+# wait for, so this fires on the first _process frame (see _process).
 var _world_ready := false
-var _ready_wait := 0.0
-const READY_PROBE_RADIUS := 8.0      # cells around the player that must be loaded
-const WORLD_READY_TIMEOUT := 10.0    # seconds; fire anyway past this
 
 
 func _enter_tree() -> void:
@@ -43,12 +38,12 @@ func _enter_tree() -> void:
     var fmt := VoxelFormat.new()
     fmt.set_channel_depth(VoxelBuffer.CHANNEL_INDICES, VoxelBuffer.DEPTH_8_BIT)
     $VoxelLodTerrain.format = fmt
-    # If a reset is pending, detach the SQLite stream BEFORE the terrain
-    # node enters the tree, so it never reads modified blocks from disk.
-    # _enter_tree runs parent-first, so we get here before $VoxelLodTerrain
-    # has run its own _enter_tree.
-    if WorldSnapshot.reset_pending:
-        $VoxelLodTerrain.stream = null
+    # Phase B S4: the EditStore is the persistent terrain layer now, so detach the
+    # SQLite stream unconditionally — godot_voxel is in-memory-only (the dual-write
+    # path still reads its live VoxelData; nothing persists through it). _enter_tree
+    # runs parent-first, so we get here before $VoxelLodTerrain's own _enter_tree.
+    # (The stream sub-resource in world.tscn is removed with the node at S5.)
+    $VoxelLodTerrain.stream = null
 
 func _ready() -> void:
     var resetting := WorldSnapshot.reset_pending
@@ -56,12 +51,18 @@ func _ready() -> void:
     if not resetting and SavePaths.snapshot_exists():
         if WorldSnapshot.load_into(SavePaths.SNAPSHOT_FILE, self):
             Toast.success("Loaded save.")
+    # The EditStore is the authoritative terrain (SDF + material). Build it, restore any saved
+    # edits, then hand it to everything that reads or writes terrain: render, collision, the
+    # structural tracking, and (lazily, via edit_store_ref) the player's actions.
+    _edit_store = EditStoreManager.new()
+    _edit_store.setup()
+    if not resetting and SavePaths.editstore_exists():
+        _edit_store.load_from(SavePaths.EDITSTORE_FILE)   # S4: restore persisted terrain edits into the store
+    _integrity.set_store(_edit_store.store)               # solidity checks + falling-body classification
     _dc_manager = DCTerrainManager.new()
     add_child(_dc_manager)
-    _dc_manager.setup(_terrain, _player)
+    _dc_manager.setup(_terrain, _player, _edit_store.store)   # render sources SDF+material from the store (generator + edits)
     _dc_manager.start_default()   # DC is the default terrain render; dcmanager/dcsolo override
-    _edit_store = EditStoreManager.new()
-    _edit_store.setup(_terrain)                    # Phase B S2: dual-write edits into our EditStore (shadow)
     _substrate_preview = DcSubstratePreview.new()
     add_child(_substrate_preview)
     _substrate_preview.setup(_player, _edit_store.store)   # Phase B S3: render imprints generator + edits from the store (dcgen)
@@ -102,6 +103,17 @@ func _grab_os_focus() -> void:
     DisplayServer.window_move_to_foreground()
     get_window().grab_focus()
 
+# Persist the EditStore blob (terrain SDF). Called by the player's F5 save alongside the
+# WorldSnapshot (parts/player/tunables). S4: replaces the godot_voxel stream's save.
+func save_edit_store() -> void:
+    if _edit_store != null:
+        _edit_store.save_to(SavePaths.EDITSTORE_FILE)
+
+# The authoritative terrain store. Actions resolve it lazily through here (they're built in
+# the player's _ready, before this world's _ready creates the store).
+func edit_store_ref() -> EditStore:
+    return _edit_store.store
+
 func _exit_tree() -> void:
     # Drop our console commands before this world is freed (scene reload / quit)
     # so LimboConsole never holds a callable bound to a freed object.
@@ -109,23 +121,11 @@ func _exit_tree() -> void:
         _console.unregister_all()
 
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
+    # The EditStore + analytic generator are resident from frame one — there's no streaming
+    # to wait for (the old godot_voxel gate is gone). Fire world_ready on the first frame, so
+    # gravity/edits/PBD start against a field that's already trustworthy.
     if _world_ready:
         return
-    _ready_wait += delta
-    var timed_out := _ready_wait >= WORLD_READY_TIMEOUT
-    if not _terrain_loaded_around_player() and not timed_out:
-        return
     _world_ready = true
-    if timed_out:
-        push_warning("world_ready fired on timeout — terrain may not be fully streamed")
     VoxelEventBusSingleton.emit(WorldReadyEvent.CHANNEL, WorldReadyEvent.new())
-
-# True once the terrain DATA (not just mesh) around the player has streamed in —
-# the point at which gravity, edits, and PBD anchoring can trust the SDF.
-func _terrain_loaded_around_player() -> bool:
-    if _player == null or _terrain == null:
-        return false
-    var vt := _terrain.get_voxel_tool()
-    var origin := _player.global_position - Vector3.ONE * READY_PROBE_RADIUS
-    return vt.is_area_editable(AABB(origin, Vector3.ONE * (READY_PROBE_RADIUS * 2.0)))

@@ -6,12 +6,11 @@ var voxel_data:           Dictionary[Vector3i, VoxelRecord] = {}
 var dirty_queue:          Array[Vector3i]                   = []
 var _lowest_registered_y: Dictionary                        = {}
 
-var terrain:              VoxelLodTerrain
+var store:                EditStore   # SDF source (generator + edits); injected by StructuralIntegrity
 var _part_support:        PartSupport
 
 
-func _init(p_terrain: VoxelLodTerrain) -> void:
-    terrain = p_terrain
+func _init() -> void:
     VoxelEventBusSingleton.subscribe(VoxelAddedEvent.CHANNEL,        _on_voxel_added)
     VoxelEventBusSingleton.subscribe(VoxelRemovedEvent.CHANNEL,      _on_voxel_removed)
     VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_terrain_sdf_changed)
@@ -29,12 +28,10 @@ func _on_voxel_removed(event: VoxelRemovedEvent) -> void:
     _remove_voxel(event.pos)
 
 func _on_terrain_sdf_changed(event: TerrainSdfChangedEvent) -> void:
-    if terrain == null:
+    if store == null:
         return
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
     for cell in event.cells:
-        var is_solid := vt.get_voxel_f(cell) < VoxelConstants.SDF_SOLID_THRESHOLD
+        var is_solid := store.sample(Vector3(cell)) < VoxelConstants.SDF_SOLID_THRESHOLD
         if voxel_data.has(cell):
             # Tracked record exists. If the SDF has become air (e.g. via
             # LowerAction or any other path that didn't explicitly emit
@@ -56,7 +53,7 @@ func _on_terrain_sdf_changed(event: TerrainSdfChangedEvent) -> void:
         if not is_solid:
             continue
         for neighbor in VoxelUtils.neighbors(cell):
-            if vt.get_voxel_f(neighbor) >= VoxelConstants.SDF_SOLID_THRESHOLD:
+            if store.sample(Vector3(neighbor)) >= VoxelConstants.SDF_SOLID_THRESHOLD:
                 _register_voxel(cell, Materials.STONE)
                 break
 
@@ -182,8 +179,6 @@ func _is_bedrock(pos: Vector3i) -> bool:
     return not _lowest_registered_y.has(col) or _lowest_registered_y[col] > pos.y
 
 func _is_terrain_solid(pos: Vector3i) -> bool:
-    if terrain == null:
+    if store == null:
         return false
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-    return vt.get_voxel_f(pos) < VoxelConstants.SDF_SOLID_THRESHOLD
+    return store.sample(Vector3(pos)) < VoxelConstants.SDF_SOLID_THRESHOLD

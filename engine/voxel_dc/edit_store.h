@@ -52,6 +52,10 @@ public:
 	// world units; the field makes no heightfield assumption, so this works for any field.
 	PackedFloat32Array fill_region(Vector3i origin, int dim, double cell,
 			const PackedFloat32Array &prev, Vector3i prev_origin, Vector3i dirty_origin, Vector3i dirty_size) const;
+	// Dense per-cell material ids over a cubic region (generator = 0 where unedited), the
+	// material companion to fill_region — the render samples both for a clipmap level. No
+	// scrolling buffer: material is read once per full re-mesh, not per moving frame.
+	PackedByteArray fill_indices_region(Vector3i origin, int dim, double cell) const;
 	int material_at(Vector3 p) const;
 	int leaf_count() const;          // stored (edited) leaves — the storage measure
 

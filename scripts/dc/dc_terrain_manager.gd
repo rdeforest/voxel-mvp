@@ -32,7 +32,8 @@ const _LEVEL_CELLS      := LEVEL_DIM - 1                 # 128
 const _ROOT_DEPTH       := 7 + LEVELS - 1                # log2(128) + (LEVELS-1)
 const _COARSEST_CELL    := 1 << (LEVELS - 1)             # snap granularity (16m)
 
-var _terrain: VoxelLodTerrain
+var _terrain: VoxelLodTerrain   # kept only to hide godot_voxel's own render + borrow its grass material
+var _edit_store: EditStore      # SDF + material source (generator + edits); replaces the godot_voxel read
 var _follow:  Node3D
 
 var _mesh_instance: MeshInstance3D
@@ -83,8 +84,9 @@ var _dump_dict := {}
 var eps_px := 8.0
 
 
-func setup(terrain: VoxelLodTerrain, follow: Node3D) -> void:
+func setup(terrain: VoxelLodTerrain, follow: Node3D, edit_store: EditStore) -> void:
     _terrain = terrain
+    _edit_store = edit_store
     _follow  = follow
     _saved_render_mask = terrain.render_layers_mask
     _mesh_instance = MeshInstance3D.new()
@@ -183,12 +185,11 @@ func _try_splice_edit(event: TerrainSdfChangedEvent) -> bool:
         sub_size <<= 1
     var sub_dim := sub_size + 1
 
-    var reader := DCRegionReader.new()
-    var size_v := Vector3i(sub_dim, sub_dim, sub_dim)
-    var sdf := reader.read_sdf_lod(_terrain, 0, sub_origin, size_v)
-    if sdf.size() != sub_dim * sub_dim * sub_dim:
-        return false
-    var idx := reader.read_indices_lod(_terrain, 0, sub_origin, size_v)
+    # Read the edit box from the live store (cell 1, small box → cheap on the main thread).
+    # The dual-write subscribes the bus BEFORE this manager (see world._ready), so the store
+    # already holds this edit by the time the splice runs.
+    var sdf: PackedFloat32Array = _edit_store.fill_region(sub_origin, sub_dim, 1.0, PackedFloat32Array(), Vector3i.ZERO, Vector3i.ZERO, Vector3i.ZERO)
+    var idx: PackedByteArray = _edit_store.fill_indices_region(sub_origin, sub_dim, 1.0)
     var patch := _mesher.mesh_subregion(sdf, sub_dim, Vector3.ZERO, 1.0,
         sub_origin, sub_size, core_min, core_max, idx, MaterialPalette.colors())
     _apply_splice(core_min, core_max, sub_origin, patch, _mesher.get_last_triangle_owners())
@@ -240,28 +241,24 @@ func _dispatch(center: Vector3) -> void:
     var coarse_cell_origin := Vector3i((center / float(_COARSEST_CELL)).floor()) * _COARSEST_CELL
     var root_origin := coarse_cell_origin - Vector3i.ONE * _half(root_size)
     var center_lattice := Vector3.ONE * _half(root_size)    # follow target, lattice space
-    var dim_v := Vector3i(LEVEL_DIM, LEVEL_DIM, LEVEL_DIM)
-    var read_t0 := Time.get_ticks_msec()
-    var reader := DCRegionReader.new()
-    # Parallel arrays describing the clipmap levels for the C++ mesher: per level k,
-    # the SDF data, its lattice origin, and its cell size (LOD k = 2^k).
-    var level_data: Array = []
-    var level_indices: Array = []                           # per-level CHANNEL_INDICES (material ids)
+    # Per-level clipmap geometry (cheap, main thread); the store reads themselves run on the
+    # worker (10M generator evals would stall the frame here). Per level k: lattice origin,
+    # cell size (LOD k = 2^k), and the world origin in CELL units (the fill_region argument —
+    # world_origin is a multiple of cell, so the integer divide is exact).
     var level_origins := PackedVector3Array()
     var level_cells := PackedFloat32Array()
+    var level_world_cells := PackedVector3Array()
     for k in LEVELS:
         var cell := 1 << k
         var half_k := _half(_LEVEL_CELLS) << k              # lattice half-extent of level k
         var lattice_origin := Vector3i.ONE * (_half(root_size) - half_k)
         var world_origin := root_origin + lattice_origin
-        var data := reader.read_sdf_lod(_terrain, k, world_origin, dim_v)
-        if data.size() != LEVEL_DIM * LEVEL_DIM * LEVEL_DIM:
-            return                                          # incomplete read; try again next tick
-        level_data.append(data)
-        level_indices.append(reader.read_indices_lod(_terrain, k, world_origin, dim_v))
+        @warning_ignore("integer_division")
+        var world_cells := world_origin / cell             # exact: world_origin is a multiple of cell
         level_origins.append(Vector3(lattice_origin))
         level_cells.append(float(cell))
-    _job_read_ms = Time.get_ticks_msec() - read_t0
+        level_world_cells.append(Vector3(world_cells))
+    _job_read_ms = 0                                        # reads moved to the worker
     _job_t0      = Time.get_ticks_msec()
     _job_origin  = root_origin
     _job_arrays  = []
@@ -277,19 +274,34 @@ func _dispatch(center: Vector3) -> void:
         var vp_h := float(get_viewport().get_visible_rect().size.y)
         proj = vp_h / (2.0 * tan(deg_to_rad(cam.fov) * 0.5))
     if dump_next:
-        _arm_dump(level_data, level_origins, level_cells, center_lattice, camera_lattice, half0, proj, root_origin)
+        _arm_dump(center_lattice, camera_lattice, half0, proj, root_origin)
+    # An immutable snapshot of the sparse store for the worker (cheap — copies only edited
+    # nodes; unedited world stays the on-demand generator).
+    var job_store: EditStore = _edit_store.duplicate()
     _task_id = WorkerThreadPool.add_task(
-        _mesh_job.bind(level_data, level_origins, level_cells, center_lattice, half0,
+        _mesh_job.bind(job_store, level_world_cells, level_origins, level_cells, center_lattice, half0,
             camera_lattice, proj, eps_px, error_driven, root_origin,
-            level_indices, MaterialPalette.colors()), false, "DC terrain mesh")
+            MaterialPalette.colors()), false, "DC terrain mesh")
 
 
-# Runs on a worker thread: the C++ DCOctreeMesher builds + meshes one octree over
-# the clipmap. Pure computation over immutable PackedArrays — safe off the main
-# thread (no Node / engine access).
-func _mesh_job(level_data: Array, level_origins: PackedVector3Array, level_cells: PackedFloat32Array,
+# Runs on a worker thread: read each clipmap level from the (immutable) store snapshot, then
+# build + mesh one octree over them with the C++ DCOctreeMesher. Pure computation over the
+# snapshot + immutable PackedArrays — safe off the main thread (no Node / engine access).
+func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
+        level_origins: PackedVector3Array, level_cells: PackedFloat32Array,
         center: Vector3, half0: float, camera: Vector3, proj: float, eps: float, err: bool,
-        world_origin: Vector3i, level_indices: Array, palette: PackedColorArray) -> void:
+        world_origin: Vector3i, palette: PackedColorArray) -> void:
+    var level_data: Array = []
+    var level_indices: Array = []
+    for k in LEVELS:
+        var cell: float = level_cells[k]
+        var wc := Vector3i(level_world_cells[k])
+        level_data.append(store.fill_region(wc, LEVEL_DIM, cell, PackedFloat32Array(), Vector3i.ZERO, Vector3i.ZERO, Vector3i.ZERO))
+        level_indices.append(store.fill_indices_region(wc, LEVEL_DIM, cell))
+    if _dump_armed:
+        _dump_dict["level_data"] = level_data
+        _dump_dict["origins"]    = level_origins
+        _dump_dict["cells"]      = level_cells
     _job_arrays = _mesher.mesh_clipmap(
         level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH,
         camera, proj, eps, err, world_origin, level_indices, palette,
@@ -303,12 +315,12 @@ func _mesh_job(level_data: Array, level_origins: PackedVector3Array, level_cells
 # Diagnostic (dcdump): write this dispatch's mesher INPUT (clipmap SDF + params) paired
 # with the OUTPUT mesh it produced, so the exact case can be replayed and audited
 # headlessly — and the displayed mesh inspected directly (Mesh.ARRAY_* arrays).
-func _arm_dump(level_data: Array, origins: PackedVector3Array, cells: PackedFloat32Array,
-        center: Vector3, camera: Vector3, half0: float, proj: float, root_origin: Vector3i) -> void:
+func _arm_dump(center: Vector3, camera: Vector3, half0: float, proj: float, root_origin: Vector3i) -> void:
     dump_next = false
     _dump_armed = true
+    # level_data / origins / cells are filled in by _mesh_job once the worker reads the store.
     _dump_dict = {
-        "level_data": level_data, "origins": origins, "cells": cells, "dim": LEVEL_DIM,
+        "dim": LEVEL_DIM,
         "center": center, "camera": camera, "half0": half0, "depth": _ROOT_DEPTH,
         "proj": proj, "eps": eps_px, "err": error_driven, "root_origin": root_origin,
     }

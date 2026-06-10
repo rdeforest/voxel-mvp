@@ -3,27 +3,23 @@ extends Action
 
 
 var cell:    Vector3i
-var terrain: VoxelLodTerrain
+var store:   EditStore
 
 
-func _init(p_cell: Vector3i, p_terrain: VoxelLodTerrain) -> void:
-    cell    = p_cell
-    terrain = p_terrain
+func _init(p_cell: Vector3i, p_store: EditStore) -> void:
+    cell  = p_cell
+    store = p_store
 
 
 func validate() -> bool:
-    if terrain == null:
+    if store == null:
         return false
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-    if vt.get_voxel_f(cell) >= VoxelConstants.SDF_SOLID_THRESHOLD:
+    if store.sample(Vector3(cell)) >= VoxelConstants.SDF_SOLID_THRESHOLD:
         return false   # already air — nothing to do
     return true
 
 func execute() -> void:
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-    vt.set_voxel_f(cell, VoxelConstants.SDF_AIR)
+    StoreWrite.cells(store, [[cell, VoxelConstants.SDF_AIR]], func(_entry): return -1)
     VoxelEventBusSingleton.emit(
         VoxelRemovedEvent.CHANNEL,
         VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))

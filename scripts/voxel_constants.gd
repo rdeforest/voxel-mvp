@@ -50,6 +50,10 @@ const SDF_SOLID := -5.0
 # Strictly less-than-zero is solid; anything else is air.
 const SDF_SOLID_THRESHOLD := 0.0
 
+# EditStore brush ops (match EditStore::stamp_* `op`): UNION adds solid, SUBTRACT carves.
+const STORE_OP_UNION    := 0
+const STORE_OP_SUBTRACT := 1
+
 
 # ============================================================================
 # Structural integrity tuning

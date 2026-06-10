@@ -8,18 +8,17 @@ const EDIT_RADIUS := 3.0
 const SNAP_RADIUS := 0.75
 
 var _player:      CharacterBody3D
-var _terrain:     VoxelLodTerrain
 var _integrity:   StructuralIntegrity
 var _camera:      Camera3D
 var _raycast:     RayCast3D
 var _build_state: BuildState
 var _csg_state:   CsgState
 var _pbd:         PbdStructure   # resolved lazily — created by world after the player
+var _store_ref:   EditStore      # the edit store — created by world after the player; resolved lazily
 
 
 func _init(
     player:      CharacterBody3D,
-    terrain:     VoxelLodTerrain,
     integrity:   StructuralIntegrity,
     camera:      Camera3D,
     raycast:     RayCast3D,
@@ -27,7 +26,6 @@ func _init(
     csg_state:   CsgState,
 ) -> void:
     _player      = player
-    _terrain     = terrain
     _integrity   = integrity
     _camera      = camera
     _raycast     = raycast
@@ -35,10 +33,18 @@ func _init(
     _csg_state   = csg_state
 
 
+# The EditStore is created in world._ready, after the player's _ready, so it can't be
+# captured at construction — resolve it on first use and cache (same pattern as _pbd).
+func _store() -> EditStore:
+    if _store_ref == null:
+        _store_ref = _player.get_parent().edit_store_ref()
+    return _store_ref
+
+
 # --- Factories (one per EditMode) ---
 
 func make_probe(hit_pos: Vector3, hit_normal: Vector3) -> Action:
-    return ProbeAction.new(hit_pos, hit_normal, _build_state.placement_offset, _terrain, _integrity, _pbd_structure())
+    return ProbeAction.new(hit_pos, hit_normal, _build_state.placement_offset, _store(), _integrity, _pbd_structure())
 
 # PbdStructure is added to the world after the player's _ready, so it can't be
 # captured at construction — resolve it on first use and cache.
@@ -49,33 +55,33 @@ func _pbd_structure() -> PbdStructure:
 
 func make_dig(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var center := hit_pos - hit_normal * (EDIT_RADIUS * 0.5)
-    return DigAction.new(center, EDIT_RADIUS, _terrain)
+    return DigAction.new(center, EDIT_RADIUS, _store())
 
 func make_fill(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var center := hit_pos + hit_normal * (EDIT_RADIUS * 0.5)
-    return FillAction.new(center, EDIT_RADIUS, _terrain, _player, _build_state.current_material())
+    return FillAction.new(center, EDIT_RADIUS, _store(), _player, _build_state.current_material())
 
 func make_flatten(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var flatten_normal := get_flatten_normal()
     if flatten_normal == Vector3.ZERO:
         flatten_normal = hit_normal
-    return FlattenAction.new(hit_pos, flatten_normal, EDIT_RADIUS, _terrain, _player)
+    return FlattenAction.new(hit_pos, flatten_normal, EDIT_RADIUS, _store(), _player)
 
 func make_raise(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
-    return RaiseAction.new(hit_pos, EDIT_RADIUS, _terrain, _player)
+    return RaiseAction.new(hit_pos, EDIT_RADIUS, _store(), _player)
 
 func make_lower(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
-    return LowerAction.new(hit_pos, EDIT_RADIUS, _terrain, _player)
+    return LowerAction.new(hit_pos, EDIT_RADIUS, _store(), _player)
 
 func make_fill_voxel(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var pos := hit_pos + hit_normal * 0.5     # nudge into the air cell
     var cell := Vector3i(floori(pos.x), floori(pos.y), floori(pos.z))
-    return FillVoxelAction.new(cell, _terrain, _player, _build_state.current_material())
+    return FillVoxelAction.new(cell, _store(), _player, _build_state.current_material())
 
 func make_empty_voxel(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var pos := hit_pos - hit_normal * 0.01    # nudge into the solid cell
     var cell := Vector3i(floori(pos.x), floori(pos.y), floori(pos.z))
-    return EmptyVoxelAction.new(cell, _terrain)
+    return EmptyVoxelAction.new(cell, _store())
 
 func make_removal(_hit_pos: Vector3, _hit_normal: Vector3) -> Action:
     var collider := _raycast.get_collider()
@@ -110,7 +116,7 @@ func make_csg(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
         xform,
         _csg_state.op,
         _csg_state.current_material(),
-        _terrain,
+        _store(),
         _player,
     )
 
@@ -128,7 +134,7 @@ func make_construction(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
         anchor,
         _build_state.rotation,
         _build_state.current_material(),
-        _terrain,
+        _store(),
         _integrity,
         _player,
     )

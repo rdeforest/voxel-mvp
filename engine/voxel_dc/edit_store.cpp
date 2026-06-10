@@ -114,10 +114,13 @@ void EditStore::_write_region(int idx, const voxel_dc::ArrayField &sdf, const Pa
 		}
 		n.has_corners = true;
 		if (!indices.is_empty()) {
+			// Material is indexed at the leaf ORIGIN cell (floor of the centre), so it lines
+			// up with the array cell whose SDF corner sits at this leaf's origin — the
+			// convention StoreWrite paints with. (round() would push the .5 to the next cell.)
 			const Vector3 c = o + Vector3(1, 1, 1) * (s * 0.5);
-			const int ix = CLAMP(int(Math::round((c.x - aorigin.x) / cell)), 0, adim - 1);
-			const int iy = CLAMP(int(Math::round((c.y - aorigin.y) / cell)), 0, adim - 1);
-			const int iz = CLAMP(int(Math::round((c.z - aorigin.z) / cell)), 0, adim - 1);
+			const int ix = CLAMP(int(Math::floor((c.x - aorigin.x) / cell)), 0, adim - 1);
+			const int iy = CLAMP(int(Math::floor((c.y - aorigin.y) / cell)), 0, adim - 1);
+			const int iz = CLAMP(int(Math::floor((c.z - aorigin.z) / cell)), 0, adim - 1);
 			n.material = indices[ix + adim * (iy + adim * iz)];
 		}
 		return;
@@ -251,6 +254,21 @@ PackedFloat32Array EditStore::fill_region(Vector3i origin, int dim, double cell,
 	return out;
 }
 
+PackedByteArray EditStore::fill_indices_region(Vector3i origin, int dim, double cell) const {
+	PackedByteArray out;
+	out.resize(int64_t(dim) * dim * dim);
+	uint8_t *w = out.ptrw();
+	for (int z = 0; z < dim; ++z) {
+		for (int y = 0; y < dim; ++y) {
+			for (int x = 0; x < dim; ++x) {
+				const Vector3 p = Vector3(origin.x + x, origin.y + y, origin.z + z) * cell;
+				w[x + dim * (y + dim * z)] = uint8_t(material_at(p));
+			}
+		}
+	}
+	return out;
+}
+
 Ref<EditStore> EditStore::duplicate() const {
 	Ref<EditStore> c;
 	c.instantiate();
@@ -350,6 +368,7 @@ void EditStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("leaf_count"), &EditStore::leaf_count);
 	ClassDB::bind_method(D_METHOD("duplicate"), &EditStore::duplicate);
 	ClassDB::bind_method(D_METHOD("fill_region", "origin", "dim", "cell", "prev", "prev_origin", "dirty_origin", "dirty_size"), &EditStore::fill_region);
+	ClassDB::bind_method(D_METHOD("fill_indices_region", "origin", "dim", "cell"), &EditStore::fill_indices_region);
 	ClassDB::bind_method(D_METHOD("serialize"), &EditStore::serialize);
 	ClassDB::bind_method(D_METHOD("deserialize", "bytes"), &EditStore::deserialize);
 }

@@ -29,7 +29,6 @@ var _mouse_button_actions: Dictionary
 @onready var mode_label:   Label               = $HUD/BoxContainer/ModeLabel
 @onready var edit_preview: MeshInstance3D      = $EditPreview
 @onready var integrity:    StructuralIntegrity = get_parent().get_node("StructuralIntegrity")
-@onready var terrain:      VoxelLodTerrain     = get_parent().get_node("VoxelLodTerrain")
 @onready var raycast:      RayCast3D           = $Head/RayCast3D
 
 const EDIT_REACH := 30.0
@@ -49,7 +48,7 @@ func _ready() -> void:
     _camera_rig       = CameraRig.new(self, $Head)
     build_state       = BuildState.new()
     csg_state         = CsgState.new()
-    action_factories  = ActionFactories.new(self, terrain, integrity, camera, raycast, build_state, csg_state)
+    action_factories  = ActionFactories.new(self, integrity, camera, raycast, build_state, csg_state)
     tool_catalog      = ToolCatalog.new(action_factories, build_state, csg_state)
     _activity_indices.resize(tool_catalog.tools.size())   # all zero
     build_state.changed.connect(_update_mode_label)
@@ -345,7 +344,6 @@ func _toggle_wireframe() -> void:
     )
 
 func _quit_game() -> void:
-    TerrainPersistence.flush(terrain)
     get_tree().quit()
 
 
@@ -355,9 +353,10 @@ func _save_game() -> void:
     if not integrity.is_quiescent():
         Toast.failure("Can't save — world still settling.")
         return
-    TerrainPersistence.flush(terrain)
-    var err := WorldSnapshot.save(SavePaths.SNAPSHOT_FILE, get_parent())
+    var world := get_parent()
+    var err := WorldSnapshot.save(SavePaths.SNAPSHOT_FILE, world)
     if err == OK:
+        world.save_edit_store()   # S4: persist terrain edits via the EditStore blob
         Toast.success("Saved.")
     else:
         push_error("Save failed: %s" % error_string(err))

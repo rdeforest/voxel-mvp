@@ -6,13 +6,13 @@ enum Shape { SPHERE }
 var position:  Vector3
 var radius:    float
 var shape:     int  # Shape enum
-var terrain:   VoxelLodTerrain
+var store:     EditStore
 
 
 func _init(
     p_position:  Vector3,
     p_radius:    float,
-    p_terrain:   VoxelLodTerrain,
+    p_store:     EditStore,
     p_player:    CharacterBody3D,
     p_material:  StringName = &"Stone",
     p_shape:     int = Shape.SPHERE,
@@ -20,7 +20,7 @@ func _init(
     position      = p_position
     radius        = p_radius
     shape         = p_shape
-    terrain       = p_terrain
+    store         = p_store
     player        = p_player
     material_name = p_material
 
@@ -34,10 +34,8 @@ func validate() -> bool:
 func preview() -> ActionPreview:
     var p := ActionPreview.new()
     p.refused = not validate()
-    if terrain == null:
+    if store == null:
         return p
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
     var origin     := position - Vector3.ONE *  radius
     var dimensions :=            Vector3.ONE * (radius * 2.0)
     VoxelUtils.for_each_in_bounding_box(
@@ -46,14 +44,14 @@ func preview() -> ActionPreview:
         func(cell: Vector3i) -> void:
             if not VoxelUtils.is_in_sphere(Vector3(cell), position, radius):
                 return
-            if vt.get_voxel_f(cell) >= VoxelConstants.SDF_SOLID_THRESHOLD:
+            if store.sample(Vector3(cell)) >= VoxelConstants.SDF_SOLID_THRESHOLD:
                 p.solid.append(cell)
     )
     return p
 
 func execute() -> void:
-    if terrain == null:
-        push_error("FillAction.execute(): no terrain")
+    if store == null:
+        push_error("FillAction.execute(): no store")
         return
 
     # Freeze any falling bodies inside the fill volume *before* the SDF mutation lands,
@@ -61,10 +59,8 @@ func execute() -> void:
     # classifier integrates them into the SDF the moment they're fully covered.
     _freeze_bodies_in_volume()
 
-    var voxel_tool := terrain.get_voxel_tool()
-    voxel_tool.channel = VoxelBuffer.CHANNEL_SDF
-    voxel_tool.mode    = VoxelTool.MODE_ADD
-    voxel_tool.do_sphere(position, radius)
+    store.stamp_sphere(position, radius, VoxelConstants.STORE_OP_UNION,
+        MaterialPalette.index_of(material_name), 1.0)
 
     var origin     := position - Vector3.ONE *  radius
     var dimensions :=            Vector3.ONE * (radius * 2.0)
@@ -85,7 +81,9 @@ func execute() -> void:
 
 
 func _freeze_bodies_in_volume() -> void:
-    var space  := terrain.get_world_3d().direct_space_state
+    if player == null:
+        return
+    var space  := player.get_world_3d().direct_space_state
     var sphere := SphereShape3D.new()
     sphere.radius = radius
     var query := PhysicsShapeQueryParameters3D.new()
