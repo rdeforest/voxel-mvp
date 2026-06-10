@@ -105,6 +105,39 @@ func test_imprint_store_graded_bakes_edits_into_render_octree() -> void:
     assert_lt(oc.sample(Vector3(CX, s0 - 40.0, CZ)), 0.0, "unedited deep ground stays solid (generator)")
 
 
+func test_fill_region_incremental_matches_full() -> void:
+    # The scrolling-buffer fill: filling a moved region from the previous buffer (reuse the
+    # overlap, sample only the shell) must equal a full re-sample.
+    var es := _store()
+    var s0 := _surface()
+    es.stamp_sphere(Vector3(CX, s0, CZ), 5.0, SUBTRACT, 0, 1.0)
+    var dim := 16
+    var o0 := Vector3i(int(CX) - 8, int(s0) - 8, int(CZ) - 8)
+    var none := Vector3i.ZERO
+    var full0 := es.fill_region(o0, dim, 1.0, PackedFloat32Array(), none, none, none)
+    var o1 := o0 + Vector3i(0, 0, 3)                      # scroll 3 m north
+    var inc := es.fill_region(o1, dim, 1.0, full0, o0, none, none)
+    var full1 := es.fill_region(o1, dim, 1.0, PackedFloat32Array(), none, none, none)
+    assert_eq(inc, full1, "incremental shell fill equals a full re-sample")
+
+
+func test_fill_region_dirty_box_resamples_an_edit() -> void:
+    # Reusing the previous buffer but flagging the edited box dirty must re-sample exactly
+    # those cells — matching a full re-sample after the edit.
+    var es := _store()
+    var s0 := _surface()
+    var dim := 16
+    var o := Vector3i(int(CX) - 8, int(s0) - 8, int(CZ) - 8)
+    var none := Vector3i.ZERO
+    var before := es.fill_region(o, dim, 1.0, PackedFloat32Array(), none, none, none)
+    es.stamp_sphere(Vector3(CX, s0, CZ), 4.0, SUBTRACT, 0, 1.0)   # edit inside the region
+    var dirty_o := Vector3i(int(CX) - 6, int(s0) - 6, int(CZ) - 6)
+    var dirty_s := Vector3i(12, 12, 12)
+    var inc := es.fill_region(o, dim, 1.0, before, o, dirty_o, dirty_s)
+    var full := es.fill_region(o, dim, 1.0, PackedFloat32Array(), none, none, none)
+    assert_eq(inc, full, "dirty box re-samples to match a full re-sample after the edit")
+
+
 func test_serialize_round_trips() -> void:
     var es := _store()
     var s0 := _surface()

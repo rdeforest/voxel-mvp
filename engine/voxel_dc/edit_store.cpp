@@ -217,6 +217,40 @@ int EditStore::material_at(Vector3 p) const {
 	return nodes[idx].has_corners ? int(nodes[idx].material) : 0;
 }
 
+PackedFloat32Array EditStore::fill_region(Vector3i origin, int dim, double cell,
+		const PackedFloat32Array &prev, Vector3i prev_origin, Vector3i dirty_origin, Vector3i dirty_size) const {
+	PackedFloat32Array out;
+	out.resize(int64_t(dim) * dim * dim);
+	float *w = out.ptrw();
+	const bool has_prev = prev.size() == int64_t(dim) * dim * dim;
+	const float *pr = has_prev ? prev.ptr() : nullptr;
+	const Vector3i shift = origin - prev_origin; // prev index of new cell i is i + shift
+	const bool has_dirty = dirty_size.x > 0 && dirty_size.y > 0 && dirty_size.z > 0;
+	for (int z = 0; z < dim; ++z) {
+		for (int y = 0; y < dim; ++y) {
+			for (int x = 0; x < dim; ++x) {
+				const int wx = origin.x + x; // world cell (cell == 1 for the collision buffer)
+				const int wy = origin.y + y;
+				const int wz = origin.z + z;
+				const int px = x + shift.x;
+				const int py = y + shift.y;
+				const int pz = z + shift.z;
+				const bool in_dirty = has_dirty &&
+						wx >= dirty_origin.x && wx < dirty_origin.x + dirty_size.x &&
+						wy >= dirty_origin.y && wy < dirty_origin.y + dirty_size.y &&
+						wz >= dirty_origin.z && wz < dirty_origin.z + dirty_size.z;
+				const int oi = x + dim * (y + dim * z);
+				if (has_prev && !in_dirty && px >= 0 && px < dim && py >= 0 && py < dim && pz >= 0 && pz < dim) {
+					w[oi] = pr[px + dim * (py + dim * pz)];
+				} else {
+					w[oi] = float(sample(Vector3(wx, wy, wz) * cell));
+				}
+			}
+		}
+	}
+	return out;
+}
+
 Ref<EditStore> EditStore::duplicate() const {
 	Ref<EditStore> c;
 	c.instantiate();
@@ -315,6 +349,7 @@ void EditStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("material_at", "p"), &EditStore::material_at);
 	ClassDB::bind_method(D_METHOD("leaf_count"), &EditStore::leaf_count);
 	ClassDB::bind_method(D_METHOD("duplicate"), &EditStore::duplicate);
+	ClassDB::bind_method(D_METHOD("fill_region", "origin", "dim", "cell", "prev", "prev_origin", "dirty_origin", "dirty_size"), &EditStore::fill_region);
 	ClassDB::bind_method(D_METHOD("serialize"), &EditStore::serialize);
 	ClassDB::bind_method(D_METHOD("deserialize", "bytes"), &EditStore::deserialize);
 }

@@ -43,6 +43,15 @@ public:
 	double sample(Vector3 p) const;  // stored edit if any, else the generator
 	bool has_edit(Vector3 p) const;  // true where the player has edited (stored), false = generator
 	Ref<EditStore> duplicate() const; // immutable snapshot for a worker thread (the store is sparse, so cheap)
+
+	// Sample a dense cubic region of the field (generator + edits), REUSING a previous
+	// buffer where it overlaps — the scrolling-buffer incremental fill (e.g. for a moving
+	// collision region). A cell that maps into `prev` and isn't in the dirty box is copied;
+	// the rest are sampled fresh. Pass empty `prev` for a full sample. `dirty` (origin/size
+	// in world cells; size 0 = none) forces re-sampling of an edited box. `origin` is in
+	// world units; the field makes no heightfield assumption, so this works for any field.
+	PackedFloat32Array fill_region(Vector3i origin, int dim, double cell,
+			const PackedFloat32Array &prev, Vector3i prev_origin, Vector3i dirty_origin, Vector3i dirty_size) const;
 	int material_at(Vector3 p) const;
 	int leaf_count() const;          // stored (edited) leaves — the storage measure
 
