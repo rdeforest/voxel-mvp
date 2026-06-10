@@ -61,7 +61,7 @@ func _ready() -> void:
     _dc_manager.start_default()   # DC is the default terrain render; dcmanager/dcsolo override
     _substrate_preview = DcSubstratePreview.new()
     add_child(_substrate_preview)
-    _substrate_preview.setup(_player)   # Phase B store-over-generator render preview (dcgen)
+    _substrate_preview.setup(_player, _terrain)   # Phase B store-over-generator render preview (dcgen); terrain = edit overlay
     # Body-driven JIT terrain collision from our DC mesher; godot_voxel collision is
     # off (world.tscn generate_collisions = false), so this is the only terrain body.
     _dc_collision = DCCollisionManager.new()
