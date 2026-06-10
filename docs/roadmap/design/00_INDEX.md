@@ -29,3 +29,6 @@ or condensed.
 - [`10-adaptive-octree-substrate.md`](10-adaptive-octree-substrate.md) —
   specifies the persistent world-fixed octree substrate that will replace
   both render and data layers and fix LOD seams.
+- [`11-octree-edit-store.md`](11-octree-edit-store.md) — the detailed design
+  for doc 10's Phase B core: a persistent sparse EditStore (edits only,
+  deferring to the generator) that replaces godot_voxel as the data layer.
