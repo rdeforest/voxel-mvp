@@ -93,8 +93,13 @@ The **op-log** (doc 05) is the right representation for *multiplayer sync* — a
 orthogonal to the local store. It can be layered on later without changing this design; it
 is NOT the local persistence format.
 
-*Cost owned by this choice:* no free undo/redo (a sampled store has no op history). Undo
-is not a v0.1 feature; if it's wanted later, an op-log rides alongside. Flagged below.
+*Cost owned by this choice:* no free undo/redo (a sampled store has no op history). This
+is fine — undo is **not** going to be a sampled-store concern. The planned model is a
+**commit action**: enter an undoable "hypothetical" build mode, specify changes (recorded
+as pending, not yet applied to the authoritative field), then commit. That also sidesteps
+physics-instability during intermediate build steps (nothing is real until commit) and
+ties into the future parts library. An op-log of the *pending* edits is the natural backing
+for that mode — layered on when it's built, not part of the base store.
 
 **2. Write API (B2): one sink the actions call.** Every edit currently ends at
 `VoxelTool` (godot_voxel). Introduce one method — `EditStore.stamp(field, op, material)` —
@@ -130,9 +135,11 @@ cleanly:
   the new part is copy-on-write-from-generator and the unedited→generator sentinel). Tests:
   stamp a brush → sample reflects it; unedited → defers; serialize round-trips; a dig over
   generator terrain materialises + carves correctly.
-- **S2 — Dual-write.** Edits write to godot_voxel (as now) **and** the EditStore. A probe/
-  test asserts the two fields agree over edited regions. godot_voxel still drives
-  everything — pure addition, fully reversible.
+- **S2 — Dual-write.** Edits write to godot_voxel (as now) **and** the EditStore. A *light*
+  check that the two roughly agree over edited regions is enough — divergence only matters
+  until godot_voxel is dropped at S5, and a little wrong for a while during the migration
+  is acceptable (Robert's call; the saves are test-only). godot_voxel still drives
+  everything — pure addition, reversible.
 - **S3 — Flip render + collision to the EditStore.** Swap the substrate's overlay source
   and `DCCollisionManager`'s SDF source from `DCRegionReader` (godot_voxel) to
   `generator + EditStore`. This also **fixes the substrate's 64 m edit-overlay limit** (all
@@ -147,24 +154,32 @@ cleanly:
 
 Each stage ships and is reversible on its own; godot_voxel is the fallback through S4.
 
-## Risks / open questions (the yellow & red flags I can see)
+## Open questions — resolved (2026-06-10)
 
-- **🟡 Existing saves don't transfer.** The EditStore is a new format; current godot_voxel
-  SQLite saves won't load into it. Options: a one-time importer (read godot_voxel's edited
-  blocks → stamp the EditStore at S4) or accept a world reset (precedent: the material-
-  channel reset). Importer is the no-half-measure choice; reset is cheaper. **Needs a call.**
-- **🟡 Dual-write divergence (S2).** The EditStore and godot_voxel could drift (e.g. godot_
-  voxel quantises SDF to 16-bit; our store doesn't). The validation probe must tolerate
-  quantisation but catch real divergence. Defining that tolerance is the fiddly part.
-- **🟡 Edit-time copy-on-write resolution.** When a brush first touches unedited space, at
-  what leaf size do we materialise the generator before applying the brush? Too coarse =
-  inaccurate edit boundary; too fine = wasted storage. Likely: the brush's own min-leaf.
-- **🟡 No undo with a sampled store.** Acceptable for v0.1 (no undo today). If undo becomes
-  a goal, an op-log rides alongside the sampled store — a known extension, not a redesign.
-- **🟢 Render/collision correctness on the flip (S3).** Mitigated by toggle + the existing
-  tests + dual-write fallback; the same machinery, different source.
-- **🟢 Streaming at scale.** Resident-only is fine for v0.1; paging is an additive future
-  step the octree structure already permits.
+All resolved with Robert; recorded here so the calls aren't relitigated.
+
+- **Existing saves don't transfer → accept the reset.** All current saves are test-only,
+  so no importer; the new store just starts fresh (precedent: the material-channel reset).
+- **Dual-write divergence → tolerate it.** It only matters until godot_voxel is dropped at
+  S5, after which there's one source and the question is moot. A little wrong during the
+  migration is acceptable; a light agreement check, not a rigorous probe.
+- **Edit-time copy-on-write resolution → as fine as practical, watch frame time.** We are
+  NOT optimising storage or memory yet — only frame time, target **< 20 ms/frame (50 fps;
+  picked over 30 fps because 1/30 is a repeating decimal)**. So materialise the generator
+  at the brush's resolution (or finer) and only coarsen if a build's frame cost crosses
+  that budget. Tunable later; not a blocker for the big bites.
+- **No undo → deferred to the commit / hypothetical-build model** (see Decision 1) — not a
+  sampled-store concern.
+- **Render/collision correctness on the flip (S3) → that's what tests are for.** Proceed,
+  watch the suite + an eyeball, deal with consequences if they surface. Same machinery,
+  different source; dual-write is the fallback through S4.
+- **Streaming at scale → resident-only now, paging later.** Confirmed; nothing to page out
+  while edits are sparse, and the octree structure permits adding it when a huge-edit area
+  ever needs it.
+
+**Schedule note:** Robert is aiming to finish Phase 5.5 this week and is fine with the app
+being broken or a little off during the migration — so bias toward forward progress over
+defensive scaffolding between S1 and S5.
 
 ## Manifesto check
 
