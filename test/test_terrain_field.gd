@@ -110,6 +110,30 @@ func test_substrate_preview_meshes_terrain() -> void:
     assert_false(preview.visible, "hidden after clear")
 
 
+func test_refine_brings_a_coarse_region_to_fine() -> void:
+    # Build with the focus in a far corner, so the surface in the middle is coarse; then
+    # refine toward the middle and confirm it became fine (and stayed watertight). This is
+    # the incremental-LOD path: only add detail where the player approaches.
+    var s0 := SparseVoxelOctree.terrain_surface(64, 64, BASE, AMP, PERIOD, OCTAVES, SEED)
+    var t := SparseVoxelOctree.new()
+    t.setup(Vector3(0, s0 - 64, 0), 128.0)
+    var far_focus := Vector3(0, s0 - 64, 0)        # a corner, far from the surface centre
+    var mid := Vector3(64, s0, 64)
+    t.imprint_terrain_graded(far_focus, 1.0, 16.0, BASE, AMP, PERIOD, OCTAVES, SEED)
+    var coarse_leaves := t.leaf_count()
+
+    t.refine_terrain_graded(mid, 1.0, 16.0, BASE, AMP, PERIOD, OCTAVES, SEED)
+    assert_gt(t.leaf_count(), coarse_leaves, "refine subdivided the surface near the new focus")
+    var err: float = absf(_octree_crossing(t, 64, 64, s0 - 64, s0 + 64) - SparseVoxelOctree.terrain_surface(64, 64, BASE, AMP, PERIOD, OCTAVES, SEED))
+    assert_lt(err, 1.5, "refined surface stays accurate")
+    # (A second refine at the same focus is a no-op — everything's already fine enough.)
+    var refined_leaves := t.leaf_count()
+    t.refine_terrain_graded(mid, 1.0, 16.0, BASE, AMP, PERIOD, OCTAVES, SEED)
+    assert_eq(t.leaf_count(), refined_leaves, "refine is idempotent at a fixed focus")
+    # (Crack-free meshing of the mixed-size octree is the shared mesher's job, covered
+    # watertight on a closed sphere by test_octree_graded; terrain is an open heightfield.)
+
+
 # March up the column; SDF crosses negative (solid, below ground) -> positive (air).
 func _octree_crossing(t: SparseVoxelOctree, x: float, z: float, y_lo: float, y_hi: float) -> float:
     var y := y_lo

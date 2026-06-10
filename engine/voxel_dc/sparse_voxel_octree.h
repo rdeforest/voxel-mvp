@@ -69,6 +69,15 @@ public:
 			double base, double amp, double period, int octaves, int seed,
 			const PackedFloat32Array &overlay, int overlay_dim, Vector3 overlay_origin, double overlay_cell);
 
+	// Incremental LOD: refine the EXISTING octree toward a new focus — subdivide surface
+	// leaves now too coarse for their distance to `focus` (the player moved closer),
+	// imprinting the new children from the terrain field. Only ADDS detail (never
+	// coarsens), so it's cheap on movement (touches the leading margin, not the whole
+	// tree) and always a correct, watertight representation of the field. Re-imprint from
+	// scratch to reset the detail accumulated in the player's wake.
+	void refine_terrain_graded(Vector3 focus, double near_leaf, double band,
+			double base, double amp, double period, int octaves, int seed);
+
 protected:
 	static void _bind_methods();
 
@@ -96,6 +105,8 @@ private:
 	void _imprint_node(int idx, const voxel_dc::Field &f, double min_leaf, int material);
 	void _imprint_graded(int idx, const voxel_dc::Field &f, const Vector3 &focus,
 			double near_leaf, double band, int material);
+	void _refine_graded(int idx, const voxel_dc::Field &f, const Vector3 &focus,
+			double near_leaf, double band);
 	void _stamp_node(int idx, const voxel_dc::Field &f, double min_leaf, int material, int op);
 	void _subdivide_inherit(int idx);
 	int _leaf_at(const Vector3 &p) const;       // assumes p in root

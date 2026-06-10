@@ -86,6 +86,71 @@ void SparseVoxelOctree::imprint_terrain_overlay_graded(Vector3 focus, double nea
 	}
 }
 
+void SparseVoxelOctree::refine_terrain_graded(Vector3 focus, double near_leaf, double band,
+		double base, double amp, double period, int octaves, int seed) {
+	if (nodes.is_empty()) {
+		return;
+	}
+	_refine_graded(0, voxel_dc::TerrainField(base, amp, period, octaves, seed), focus, near_leaf, band);
+}
+
+void SparseVoxelOctree::_refine_graded(int idx, const voxel_dc::Field &f, const Vector3 &focus,
+		double near_leaf, double band) {
+	if (!nodes[idx].is_leaf()) {
+		int ch[8];
+		for (int i = 0; i < 8; ++i) {
+			ch[i] = nodes[idx].children[i];
+		}
+		for (int i = 0; i < 8; ++i) {
+			_refine_graded(ch[i], f, focus, near_leaf, band);
+		}
+		return;
+	}
+	const double s = nodes[idx].size;
+	if (s <= near_leaf * 1.0000001 || !nodes[idx].has_corners) {
+		return; // already finest, or an unwritten leaf
+	}
+	// Only surface leaves carry detail worth refining (a uniform leaf has no surface).
+	const bool neg0 = nodes[idx].corners[0] < 0.0f;
+	bool has_surface = false;
+	for (int i = 1; i < 8; ++i) {
+		if ((nodes[idx].corners[i] < 0.0f) != neg0) {
+			has_surface = true;
+			break;
+		}
+	}
+	if (!has_surface) {
+		return;
+	}
+	// Target leaf size for this node at the new focus (graded: double per band of distance).
+	const Vector3 o = nodes[idx].origin;
+	const Vector3 center = o + Vector3(1, 1, 1) * (s * 0.5);
+	double target = near_leaf;
+	double r = band;
+	const double dist = (center - focus).length();
+	while (dist > r) {
+		target *= 2.0;
+		r *= 2.0;
+	}
+	if (s <= target * 1.0000001) {
+		return; // already coarse enough for its distance
+	}
+	// Subdivide and imprint the children from the field (each refines toward target).
+	const double half = s * 0.5;
+	const int material = nodes[idx].material;
+	int ch[8];
+	for (int i = 0; i < 8; ++i) {
+		ch[i] = _new_node(o + Vector3(CB[i][0], CB[i][1], CB[i][2]) * half, half);
+	}
+	for (int i = 0; i < 8; ++i) {
+		nodes[idx].children[i] = ch[i]; // index-access: nodes may have reallocated above
+	}
+	nodes[idx].has_corners = false; // now an internal node
+	for (int i = 0; i < 8; ++i) {
+		_imprint_graded(ch[i], f, focus, near_leaf, band, material);
+	}
+}
+
 void SparseVoxelOctree::imprint_sphere_graded(Vector3 center, double radius, Vector3 focus,
 		double near_leaf, double band, int material) {
 	if (nodes.is_empty()) {
@@ -326,6 +391,7 @@ void SparseVoxelOctree::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("imprint_sphere_graded", "center", "radius", "focus", "near_leaf", "band", "material"), &SparseVoxelOctree::imprint_sphere_graded);
 	ClassDB::bind_method(D_METHOD("imprint_terrain_graded", "focus", "near_leaf", "band", "base", "amp", "period", "octaves", "seed"), &SparseVoxelOctree::imprint_terrain_graded);
 	ClassDB::bind_method(D_METHOD("imprint_terrain_overlay_graded", "focus", "near_leaf", "band", "base", "amp", "period", "octaves", "seed", "overlay", "overlay_dim", "overlay_origin", "overlay_cell"), &SparseVoxelOctree::imprint_terrain_overlay_graded);
+	ClassDB::bind_method(D_METHOD("refine_terrain_graded", "focus", "near_leaf", "band", "base", "amp", "period", "octaves", "seed"), &SparseVoxelOctree::refine_terrain_graded);
 	ClassDB::bind_method(D_METHOD("stamp_sphere", "center", "radius", "min_leaf", "material", "op"), &SparseVoxelOctree::stamp_sphere);
 	ClassDB::bind_method(D_METHOD("stamp_box", "center", "size", "min_leaf", "material", "op"), &SparseVoxelOctree::stamp_box);
 	ClassDB::bind_method(D_METHOD("sample", "p"), &SparseVoxelOctree::sample);
