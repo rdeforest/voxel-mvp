@@ -21,6 +21,7 @@ var pbd_structure:     PbdStructure
 var integrity:         StructuralIntegrity
 var player:            CharacterBody3D
 var awake_overlay:     AwakeOverlay
+var edit_store:        EditStoreManager
 
 var _pbd_demo: PbdDemo   # lazily spawned by `pbddemo`
 
@@ -53,6 +54,7 @@ func _table() -> Array:
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
         [dcgen,           "dcgen",     "Phase B preview: render the octree-over-generator substrate (cyan) at your position. Usage: dcgen [on|off]"],
+        [editstore,       "editstore", "Phase B: print the EditStore shadow's leaf count + compare its SDF at you to godot_voxel's (dual-write check)."],
         [pbddemo,         "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [physics_active,  "physics_active", "Toggle the structural physics simulation on your real structures (sag + collapse under load). Usage: physics_active [on|off]"],
         [perf,            "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
@@ -190,6 +192,18 @@ func dcgen(state := "") -> void:
 
 # Spawn a live PBD structural-physics demo in front of the player (stress-coloured
 # lines; watch it sag and snap). Re-run to reset.
+# Dual-write check (S2): how many edited leaves the shadow store holds, and whether its
+# SDF at your position agrees with godot_voxel's (they should match over edited regions).
+func editstore() -> void:
+    var p := player.global_position
+    var stored: float = edit_store.store.sample(p)
+    var vt := terrain.get_voxel_tool()
+    vt.channel = VoxelBuffer.CHANNEL_SDF
+    var voxel := vt.get_voxel_f(Vector3i(p.round()))
+    LimboConsole.info("editstore: %d edited leaves; at you store=%.2f godot_voxel=%.2f" % [
+        edit_store.store.leaf_count(), stored, voxel])
+
+
 func pbddemo(kind := "cantilever", size := 12) -> void:
     var fwd := -player.global_transform.basis.z
     var base := Vector3i((player.global_position + fwd * 6.0 + Vector3.UP * 4.0).round())

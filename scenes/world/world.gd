@@ -9,6 +9,7 @@ var _substrate_preview: DcSubstratePreview
 var _dc_collision: DCCollisionManager
 var _awake_overlay: AwakeOverlay
 var _pbd_structure: PbdStructure
+var _edit_store: EditStoreManager
 var _console: ConsoleCommands
 
 # World-ready gate: gameplay + physics systems start inactive and resume on a
@@ -62,6 +63,8 @@ func _ready() -> void:
     _substrate_preview = DcSubstratePreview.new()
     add_child(_substrate_preview)
     _substrate_preview.setup(_player, _terrain)   # Phase B store-over-generator render preview (dcgen); terrain = edit overlay
+    _edit_store = EditStoreManager.new()
+    _edit_store.setup(_terrain)                    # Phase B S2: dual-write edits into our EditStore (shadow)
     # Body-driven JIT terrain collision from our DC mesher; godot_voxel collision is
     # off (world.tscn generate_collisions = false), so this is the only terrain body.
     _dc_collision = DCCollisionManager.new()
@@ -85,6 +88,7 @@ func _ready() -> void:
     _console.integrity         = _integrity
     _console.player            = _player
     _console.awake_overlay     = _awake_overlay
+    _console.edit_store        = _edit_store
     _console.register_all()
     # Pull the OS window forward and take keyboard focus on launch, so an F5 from
     # the editor doesn't leave keystrokes landing in the script. Deferred so the

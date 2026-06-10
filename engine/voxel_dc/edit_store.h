@@ -33,6 +33,13 @@ public:
 	void stamp_sphere(Vector3 center, double radius, int op, int material, double min_leaf);
 	void stamp_box(Vector3 center, Vector3 size, int op, int material, double min_leaf);
 
+	// Write a region's final SDF (+ per-cell material) from a dense cubic array — e.g.
+	// re-read from godot_voxel after an edit — into the store, REPLACING whatever was
+	// there (the array is the authoritative result, not a brush to combine). The dual-
+	// write shadow path. Copy-on-write: materialises the region down to `cell`, leaving
+	// the rest sparse. `indices` may be empty (material 0).
+	void write_region(const PackedFloat32Array &sdf, const PackedByteArray &indices, int dim, Vector3 origin, double cell);
+
 	double sample(Vector3 p) const;  // stored edit if any, else the generator
 	bool has_edit(Vector3 p) const;  // true where the player has edited (stored), false = generator
 	int material_at(Vector3 p) const;
@@ -74,6 +81,8 @@ private:
 	int _new_node(const Vector3 &o, double s);
 	void _stamp(const voxel_dc::Field &brush, const Vector3 &rmin, const Vector3 &rmax, int op, int material, double min_leaf);
 	void _stamp_region(int idx, const voxel_dc::Field &brush, const Vector3 &rmin, const Vector3 &rmax, int op, int material, double min_leaf);
+	void _write_region(int idx, const voxel_dc::ArrayField &sdf, const PackedByteArray &indices,
+			int adim, const Vector3 &aorigin, double cell, const Vector3 &rmin, const Vector3 &rmax);
 	void _subdivide(int idx); // edited leaf -> inherit its field; unedited -> fresh (still generator)
 	int _leaf_at(const Vector3 &p) const;
 	int _child_index(int idx, const Vector3 &p) const;

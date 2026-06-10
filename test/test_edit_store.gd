@@ -73,6 +73,22 @@ func test_reedit_combines_with_stored_not_generator() -> void:
     assert_gt(v, -6.0, "combined with the STORED air (~-2), not the generator (~-20)")
 
 
+func test_write_region_stores_an_array() -> void:
+    # The dual-write path: write a dense SDF array (a region re-read from godot_voxel) into
+    # the store, replacing whatever was there; the rest defers to the generator.
+    var es := _store()
+    var s0 := _surface()
+    var dim := 9
+    var arr := PackedFloat32Array()
+    arr.resize(dim * dim * dim)
+    arr.fill(-5.0)                              # a solid block...
+    var origin := Vector3(CX, s0 + 20.0, CZ)    # ...placed above the surface (generator = air)
+    es.write_region(arr, PackedByteArray(), dim, origin, 1.0)
+    assert_lt(es.sample(origin + Vector3.ONE * 4.0), 0.0, "written region reads the array's solid value")
+    assert_true(es.has_edit(origin + Vector3.ONE * 4.0), "written region is stored")
+    assert_gt(es.sample(Vector3(CX, s0 + 60.0, CZ)), 0.0, "outside the written region defers to the generator")
+
+
 func test_serialize_round_trips() -> void:
     var es := _store()
     var s0 := _surface()

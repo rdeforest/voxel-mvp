@@ -86,6 +86,54 @@ void EditStore::_stamp_region(int idx, const voxel_dc::Field &brush, const Vecto
 	}
 }
 
+void EditStore::write_region(const PackedFloat32Array &sdf, const PackedByteArray &indices, int dim, Vector3 origin, double cell) {
+	if (nodes.is_empty() || sdf.size() < int64_t(dim) * dim * dim) {
+		return;
+	}
+	const voxel_dc::ArrayField field(sdf.ptr(), dim, origin, cell);
+	const Vector3 rmin = origin;
+	const Vector3 rmax = origin + Vector3(1, 1, 1) * (double(dim - 1) * cell);
+	_write_region(0, field, indices, dim, origin, cell, rmin, rmax);
+}
+
+// Like _stamp_region but it SETS the stored field from the array (the array is the final
+// result), rather than combining a brush. Material is the array's nearest index at the
+// leaf centre.
+void EditStore::_write_region(int idx, const voxel_dc::ArrayField &sdf, const PackedByteArray &indices,
+		int adim, const Vector3 &aorigin, double cell, const Vector3 &rmin, const Vector3 &rmax) {
+	const Vector3 o = nodes[idx].origin;
+	const double s = nodes[idx].size;
+	if (o.x + s <= rmin.x || o.y + s <= rmin.y || o.z + s <= rmin.z ||
+			o.x >= rmax.x || o.y >= rmax.y || o.z >= rmax.z) {
+		return;
+	}
+	if (s <= cell * 1.0000001) {
+		Node &n = nodes[idx];
+		for (int i = 0; i < 8; ++i) {
+			n.corners[i] = float(sdf.sample(corner(o, s, i)));
+		}
+		n.has_corners = true;
+		if (!indices.is_empty()) {
+			const Vector3 c = o + Vector3(1, 1, 1) * (s * 0.5);
+			const int ix = CLAMP(int(Math::round((c.x - aorigin.x) / cell)), 0, adim - 1);
+			const int iy = CLAMP(int(Math::round((c.y - aorigin.y) / cell)), 0, adim - 1);
+			const int iz = CLAMP(int(Math::round((c.z - aorigin.z) / cell)), 0, adim - 1);
+			n.material = indices[ix + adim * (iy + adim * iz)];
+		}
+		return;
+	}
+	if (nodes[idx].is_leaf()) {
+		_subdivide(idx);
+	}
+	int ch[8];
+	for (int i = 0; i < 8; ++i) {
+		ch[i] = nodes[idx].children[i];
+	}
+	for (int i = 0; i < 8; ++i) {
+		_write_region(ch[i], sdf, indices, adim, aorigin, cell, rmin, rmax);
+	}
+}
+
 // An edited leaf subdivides into children that reproduce its field (trilerp'd corners), so
 // refining doesn't move the stored surface. An unedited leaf subdivides into fresh unedited
 // children (they still defer to the generator until a brush materialises them).
@@ -246,6 +294,7 @@ void EditStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "origin", "size", "base", "amp", "period", "octaves", "seed"), &EditStore::setup);
 	ClassDB::bind_method(D_METHOD("stamp_sphere", "center", "radius", "op", "material", "min_leaf"), &EditStore::stamp_sphere);
 	ClassDB::bind_method(D_METHOD("stamp_box", "center", "size", "op", "material", "min_leaf"), &EditStore::stamp_box);
+	ClassDB::bind_method(D_METHOD("write_region", "sdf", "indices", "dim", "origin", "cell"), &EditStore::write_region);
 	ClassDB::bind_method(D_METHOD("sample", "p"), &EditStore::sample);
 	ClassDB::bind_method(D_METHOD("has_edit", "p"), &EditStore::has_edit);
 	ClassDB::bind_method(D_METHOD("material_at", "p"), &EditStore::material_at);
