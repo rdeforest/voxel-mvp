@@ -1,9 +1,22 @@
 #include "sparse_voxel_octree.h"
 
+#include "edit_store.h"
 #include "octree_geometry.h"
 #include "terrain_field.h"
 
 using namespace voxel_dc;
+
+namespace {
+// Samples an EditStore as a field (generator + edits) so the render octree can imprint it.
+struct StoreField : public voxel_dc::Field {
+	const EditStore *store;
+	StoreField(const EditStore *s) :
+			store(s) {}
+	double sample(const Vector3 &p) const override {
+		return store->sample(p);
+	}
+};
+} // namespace
 
 int SparseVoxelOctree::_new_node(const Vector3 &o, double s) {
 	Node n;
@@ -92,6 +105,18 @@ void SparseVoxelOctree::refine_terrain_graded(Vector3 focus, double near_leaf, d
 		return;
 	}
 	_refine_graded(0, voxel_dc::TerrainField(base, amp, period, octaves, seed), focus, near_leaf, band);
+}
+
+void SparseVoxelOctree::imprint_store_graded(const Ref<EditStore> &store, Vector3 focus, double near_leaf, double band) {
+	if (nodes.is_empty() || store.is_null()) {
+		return;
+	}
+	const Vector3 ro = nodes[0].origin;
+	const double rs = nodes[0].size;
+	nodes.clear();
+	_new_node(ro, rs);
+	const StoreField f(store.ptr());
+	_imprint_graded(0, f, focus, near_leaf, band, 0);
 }
 
 void SparseVoxelOctree::_refine_graded(int idx, const voxel_dc::Field &f, const Vector3 &focus,
@@ -392,6 +417,7 @@ void SparseVoxelOctree::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("imprint_terrain_graded", "focus", "near_leaf", "band", "base", "amp", "period", "octaves", "seed"), &SparseVoxelOctree::imprint_terrain_graded);
 	ClassDB::bind_method(D_METHOD("imprint_terrain_overlay_graded", "focus", "near_leaf", "band", "base", "amp", "period", "octaves", "seed", "overlay", "overlay_dim", "overlay_origin", "overlay_cell"), &SparseVoxelOctree::imprint_terrain_overlay_graded);
 	ClassDB::bind_method(D_METHOD("refine_terrain_graded", "focus", "near_leaf", "band", "base", "amp", "period", "octaves", "seed"), &SparseVoxelOctree::refine_terrain_graded);
+	ClassDB::bind_method(D_METHOD("imprint_store_graded", "store", "focus", "near_leaf", "band"), &SparseVoxelOctree::imprint_store_graded);
 	ClassDB::bind_method(D_METHOD("stamp_sphere", "center", "radius", "min_leaf", "material", "op"), &SparseVoxelOctree::stamp_sphere);
 	ClassDB::bind_method(D_METHOD("stamp_box", "center", "size", "min_leaf", "material", "op"), &SparseVoxelOctree::stamp_box);
 	ClassDB::bind_method(D_METHOD("sample", "p"), &SparseVoxelOctree::sample);

@@ -34,12 +34,8 @@ const ROOT_MARGIN       := 128.0   # re-root once the player is this close to th
 const NEAR_LEAF         := 1.0     # finest leaf at the focus
 const BAND              := 32.0    # leaf size doubles every BAND metres from the focus
 const RECENTER_DISTANCE := 16.0    # refine toward the player once they drift this far (m)
-const OVERLAY_DIM       := 65      # edit-overlay box read from godot_voxel: 64 m span around the player
-const OVERLAY_HALF      := 32      # OVERLAY_DIM / 2 — the box's half-extent in cells
-
 var _follow:  Node3D
-var _terrain: VoxelLodTerrain   # null = generator-only (no edit overlay)
-var _reader:  DCRegionReader
+var _edit_store: EditStore   # the live shadow store; snapshotted per build. null = pure generator
 var _enabled := false
 
 var _octree:      SparseVoxelOctree   # the persistent octree (built once per re-root, refined on move)
@@ -48,19 +44,18 @@ var _built  := false
 var _dirty  := false                  # an edit happened — force a full rebuild
 
 var _task_id := -1
-var _job_overlay: Dictionary = {}   # {data, origin} read on the main thread for the worker
+var _job_store: EditStore   # immutable EditStore snapshot handed to the worker
 var _job_arrays: Array = []
 var _last_center := Vector3.INF
 
 
-# `terrain` lets the preview stay edit-aware: each build re-reads a box around the player
-# from godot_voxel's edited store and overlays it on the generator, so digs/builds show.
-# Without it, the preview is the pure generator.
-func setup(follow: Node3D, terrain: VoxelLodTerrain = null) -> void:
+# `edit_store` makes the preview edit-aware: each build imprints the store's field
+# (generator + ALL resident edits), so digs/builds show everywhere, not just near the
+# player. Without it, the preview is the pure generator. An edit forces a rebuild.
+func setup(follow: Node3D, edit_store: EditStore = null) -> void:
     _follow = follow
-    _terrain = terrain
-    if _terrain != null:
-        _reader = DCRegionReader.new()
+    _edit_store = edit_store
+    if _edit_store != null:
         VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_terrain_edit)
     var mat := StandardMaterial3D.new()
     mat.albedo_color = Color(0.25, 0.85, 1.0)
@@ -116,13 +111,14 @@ func _outside_root(p: Vector3) -> bool:
     return p.x < lo.x or p.y < lo.y or p.z < lo.z or p.x > hi.x or p.y > hi.y or p.z > hi.z
 
 
-# Full rebuild: fresh octree at a snapped root, edit overlay re-read (main thread), then
-# imprint + mesh on the worker. Runs on re-root, on an edit, and the first build.
+# Full rebuild: fresh octree at a snapped root, an immutable EditStore snapshot taken on
+# the main thread, then imprint + mesh on the worker. Runs on re-root, on an edit, and the
+# first build.
 func _dispatch_build(p: Vector3) -> void:
     _root_origin = _snap_root(p)
     _octree = SparseVoxelOctree.new()
     _octree.setup(_root_origin, ROOT_SIZE)
-    _job_overlay = _read_overlay(p)
+    _job_store = _edit_store.duplicate() if _edit_store != null else null
     _built = true
     _dirty = false
     _last_center = p
@@ -137,7 +133,7 @@ func _dispatch_refine(p: Vector3) -> void:
 
 
 func _build_job(p: Vector3) -> void:
-    _imprint(_octree, p, _job_overlay)
+    _imprint(_octree, _job_store, p)
     _job_arrays = _octree.mesh()
 
 
@@ -146,22 +142,14 @@ func _refine_job(p: Vector3) -> void:
     _job_arrays = _octree.mesh()
 
 
-# Read a box around the focus from godot_voxel's edited store (generator baseline + edits),
-# LOD0 so it's fine. Empty when there's no terrain (generator-only preview). Main thread.
-func _read_overlay(center: Vector3) -> Dictionary:
-    if _terrain == null:
-        return {}
-    var origin := Vector3i(center.floor()) - Vector3i.ONE * OVERLAY_HALF
-    var data := _reader.read_sdf_lod(_terrain, 0, origin, Vector3i.ONE * OVERLAY_DIM)
-    return {"data": data, "origin": Vector3(origin)}
-
-
-func _imprint(octree: SparseVoxelOctree, center: Vector3, overlay: Dictionary) -> void:
-    if overlay.is_empty():
-        octree.imprint_terrain_graded(center, NEAR_LEAF, BAND, BASE, AMP, PERIOD, OCTAVES, SEED)
+# Imprint the octree from the EditStore's field (generator + all edits) when we have one,
+# else the pure generator. `store` is the snapshot for the worker (or the live store on the
+# sync rebuild path — same thread, no race).
+func _imprint(octree: SparseVoxelOctree, store: EditStore, center: Vector3) -> void:
+    if store != null:
+        octree.imprint_store_graded(store, center, NEAR_LEAF, BAND)
     else:
-        octree.imprint_terrain_overlay_graded(center, NEAR_LEAF, BAND, BASE, AMP, PERIOD, OCTAVES, SEED,
-            overlay.data, OVERLAY_DIM, overlay.origin, 1.0)
+        octree.imprint_terrain_graded(center, NEAR_LEAF, BAND, BASE, AMP, PERIOD, OCTAVES, SEED)
 
 
 func _finish() -> void:
@@ -185,7 +173,7 @@ func rebuild() -> int:
     var center := _follow.global_position
     var octree := SparseVoxelOctree.new()
     octree.setup(center - Vector3.ONE * (ROOT_SIZE * 0.5), ROOT_SIZE)
-    _imprint(octree, center, _read_overlay(center))
+    _imprint(octree, _edit_store, center)   # sync, main thread — the live store is safe to read directly
     var arrays := octree.mesh()
     mesh = _arrays_to_mesh(arrays)
     global_position = Vector3.ZERO

@@ -60,11 +60,11 @@ func _ready() -> void:
     add_child(_dc_manager)
     _dc_manager.setup(_terrain, _player)
     _dc_manager.start_default()   # DC is the default terrain render; dcmanager/dcsolo override
-    _substrate_preview = DcSubstratePreview.new()
-    add_child(_substrate_preview)
-    _substrate_preview.setup(_player, _terrain)   # Phase B store-over-generator render preview (dcgen); terrain = edit overlay
     _edit_store = EditStoreManager.new()
     _edit_store.setup(_terrain)                    # Phase B S2: dual-write edits into our EditStore (shadow)
+    _substrate_preview = DcSubstratePreview.new()
+    add_child(_substrate_preview)
+    _substrate_preview.setup(_player, _edit_store.store)   # Phase B S3: render imprints generator + edits from the store (dcgen)
     # Body-driven JIT terrain collision from our DC mesher; godot_voxel collision is
     # off (world.tscn generate_collisions = false), so this is the only terrain body.
     _dc_collision = DCCollisionManager.new()

@@ -89,6 +89,22 @@ func test_write_region_stores_an_array() -> void:
     assert_gt(es.sample(Vector3(CX, s0 + 60.0, CZ)), 0.0, "outside the written region defers to the generator")
 
 
+func test_imprint_store_graded_bakes_edits_into_render_octree() -> void:
+    # S3 render path: a SparseVoxelOctree imprinted from the store carries generator + edits.
+    # Use a SURFACE dig (the supported case — the octree is already subdivided at the
+    # surface). A small floating edit in empty air is undersampled by the graded octree's
+    # homogeneity prune; that's a separate limitation, noted on imprint_store_graded.
+    var es := _store()
+    var s0 := _surface()
+    var dig := Vector3(CX, s0, CZ)                 # carve a crater on the surface
+    es.stamp_sphere(dig, 5.0, SUBTRACT, 0, 1.0)
+    var oc := SparseVoxelOctree.new()
+    oc.setup(Vector3(CX - 128.0, s0 - 128.0, CZ - 128.0), 256.0)
+    oc.imprint_store_graded(es, dig, 1.0, 32.0)
+    assert_gt(oc.sample(Vector3(CX, s0 - 2.0, CZ)), 0.0, "the dig (carved crater) shows air in the render octree")
+    assert_lt(oc.sample(Vector3(CX, s0 - 40.0, CZ)), 0.0, "unedited deep ground stays solid (generator)")
+
+
 func test_serialize_round_trips() -> void:
     var es := _store()
     var s0 := _surface()

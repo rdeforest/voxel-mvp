@@ -15,6 +15,8 @@
 
 #include "sdf_field.h"
 
+class EditStore;
+
 class SparseVoxelOctree : public RefCounted {
 	GDCLASS(SparseVoxelOctree, RefCounted)
 
@@ -77,6 +79,16 @@ public:
 	// scratch to reset the detail accumulated in the player's wake.
 	void refine_terrain_graded(Vector3 focus, double near_leaf, double band,
 			double base, double amp, double period, int octaves, int seed);
+
+	// Imprint the field (generator + edits) of an EditStore, graded around focus — the
+	// render octree's source once edits live in the store instead of being re-read from
+	// godot_voxel. Pass a snapshot (EditStore.duplicate()) when imprinting off-thread.
+	// Limitation: a small edit ISOLATED in empty space (e.g. a block built mid-air) can be
+	// missed — the graded octree's homogeneity prune undersamples a feature that doesn't
+	// reach a coarse node's corners/centre. Surface edits (digs/builds on the ground) are
+	// caught because the surface is already subdivided. Fixing the isolated case means
+	// force-subdividing where the store has edits — a later refinement.
+	void imprint_store_graded(const Ref<EditStore> &store, Vector3 focus, double near_leaf, double band);
 
 protected:
 	static void _bind_methods();

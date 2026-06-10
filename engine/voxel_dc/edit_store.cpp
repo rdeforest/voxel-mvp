@@ -217,6 +217,21 @@ int EditStore::material_at(Vector3 p) const {
 	return nodes[idx].has_corners ? int(nodes[idx].material) : 0;
 }
 
+Ref<EditStore> EditStore::duplicate() const {
+	Ref<EditStore> c;
+	c.instantiate();
+	c->nodes = nodes;
+	c->_root_origin = _root_origin;
+	c->_root_size = _root_size;
+	c->_base = _base;
+	c->_amp = _amp;
+	c->_period = _period;
+	c->_octaves = _octaves;
+	c->_seed = _seed;
+	c->_gen = _gen;
+	return c;
+}
+
 int EditStore::leaf_count() const {
 	int n = 0;
 	for (uint32_t i = 0; i < nodes.size(); ++i) {
@@ -299,6 +314,7 @@ void EditStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_edit", "p"), &EditStore::has_edit);
 	ClassDB::bind_method(D_METHOD("material_at", "p"), &EditStore::material_at);
 	ClassDB::bind_method(D_METHOD("leaf_count"), &EditStore::leaf_count);
+	ClassDB::bind_method(D_METHOD("duplicate"), &EditStore::duplicate);
 	ClassDB::bind_method(D_METHOD("serialize"), &EditStore::serialize);
 	ClassDB::bind_method(D_METHOD("deserialize", "bytes"), &EditStore::deserialize);
 }

@@ -42,6 +42,7 @@ public:
 
 	double sample(Vector3 p) const;  // stored edit if any, else the generator
 	bool has_edit(Vector3 p) const;  // true where the player has edited (stored), false = generator
+	Ref<EditStore> duplicate() const; // immutable snapshot for a worker thread (the store is sparse, so cheap)
 	int material_at(Vector3 p) const;
 	int leaf_count() const;          // stored (edited) leaves — the storage measure
 
