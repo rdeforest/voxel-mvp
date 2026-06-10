@@ -8,32 +8,37 @@
 
 ## Resumption Brief
 
-### Active thread (2026-06-09): adaptive-octree substrate — Phase B underway (store-over-generator)
+### Active thread (2026-06-10): adaptive-octree substrate — Phase B, godot_voxel down to persistence
 
-PBD is **done and authoritative** (see CLAUDE.md "Structural integrity"). The DC render
-pipeline was hardened, then we **committed to the adaptive-density octree substrate**
-(`docs/roadmap/design/10-adaptive-octree-substrate.md`). **Phase A is at its ceiling**
-(world-fixed grid was already true; error-collapse default-on; incremental edit splice
-landed). Per the doc's 2026-06-08 correction, the substantive remaining work is **Phase B's
-store-over-generator faithful field**: the octree as the store, deferring to the generator
-for unedited world, so coarse cells accumulate from genuinely-fine QEF — no godot_voxel
-mips, no geomorph blend, view-independent by construction.
+PBD is **done and authoritative** (see CLAUDE.md "Structural integrity"). Phase A is at its
+ceiling; the substrate render is incremental + edit-aware + view-independent. Phase B (the
+octree as the data store, replacing godot_voxel) is following the migration in
+`docs/roadmap/design/11-octree-edit-store.md`. **The terrain generator now lives in C++**
+(`TerrainField`, [[terrain-generation-in-cpp]]); the `.tres` graph is the legacy mirror to
+delete at S5. Generator-home decision: C++ is the single source (Robert, 2026-06-10).
 
-**Phase B status (2026-06-09):**
-- `SparseVoxelOctree` (C++) was already a tested B1 prototype — sparse adaptive store,
-  subdivide-on-imprint, stamp union/subtract, watertight DC mesh — but **not wired live**.
-- `fd62d49` **TerrainField + imprint unit-distance fix (bite 1, the Phase B keystone).**
-  The procedural terrain as a fine C++ `Field` (FastNoiseLite, matches the .tres graph to
-  0.01 m), with `imprint_terrain` / `imprint_terrain_graded`. Found + fixed a real bug: the
-  octree imprint pruned bulk leaves by `|SDF| > circumradius`, a true-distance assumption
-  that shipped broken for the non-unit terrain field (only ever tested on sphere/box) —
-  replaced with a sign-agreement homogeneity test. [[dc-sdf-not-unit-distance]].
-- **NEXT bite: wire the octree as a live render source behind a console toggle** (like
-  `dcmanager` was) — imprint `TerrainField` graded around the camera + stamp edits, render
-  the octree mesh. This is where the camera-snapped clipmap starts to retire. **Decision due
-  then:** keep the `.tres` graph as the editor-tinkerable authoring tool (faithful C++ port
-  kept in sync) vs. make the C++ `TerrainField` the single generator (tuning → params +
-  rebuild). Doesn't affect earlier bites.
+**Phase B migration status (2026-06-10) — S1–S3 done, godot_voxel = persistence + dual-write source:**
+- **EditStore** (`engine/voxel_dc/edit_store.{h,cpp}`) — the persistent SPARSE store: holds
+  ONLY edits (SDF + material), defers to `TerrainField` elsewhere
+  (`sample = has_edit ? stored : generator`). Copy-on-write stamps; `write_region` (dense
+  array replace); `fill_region` (scrolling-buffer incremental sample, no heightfield
+  assumption); `duplicate` (worker snapshot); serialize/deserialize. `test_edit_store` (9).
+- **S1** `869c3ab` store + copy-on-write. **S2** `a6f2ba2` dual-write: `EditStoreManager`
+  shadows every edit into the store from godot_voxel (LOD0 re-read on `terrain_sdf_changed`);
+  `editstore` console cmd checks agreement. **S3a** `8c2c6e6` render flip: the dcgen
+  substrate imprints the store's field (all edits resident — the 64 m overlay limit is gone;
+  render no longer reads godot_voxel). **S3b** `ee075f5`+`a6e0384` collision flip:
+  `DCCollisionManager` cooks from the store via per-body scrolling buffers (always available,
+  no streaming wait).
+- **Known limitation** (documented on `imprint_store_graded`): a small edit ISOLATED in mid-
+  air is undersampled by the graded octree's homogeneity prune; surface edits are caught.
+  Fix = force-subdivide where the store has edits, later.
+- **NEXT: S4 — persistence.** Save/load the EditStore blob (serialize/deserialize exist),
+  replacing the SQLite stream + the snapshot's terrain. Then **S5 — drop godot_voxel** (the
+  `VoxelLodTerrain` node, stream, `.tres` graph + `build_terrain_graph.gd`, the godot_voxel
+  side of `DCRegionReader`, the dual-write). Saves are test-only → reset is fine, no importer.
+- GUI to verify: `dcgen on` then dig far + walk back (edit persists); walk flat/sloped ground
+  (no fall-through — or press X); `editstore` after a dig (leaves grow, store ≈ godot_voxel).
 
 **Earlier in this thread (DC render pipeline, all committed, headless-tested; GUI-verify the render ones):**
 
