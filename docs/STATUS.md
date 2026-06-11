@@ -20,25 +20,35 @@ leaves); **arbitrary rotation** via the OBB brush from day one (UI quantises 15�
 in a **sidecar** (manifesto #7), not the field; chunk collision = convex compound (box-compound
 now, V-HACD off-thread later).
 
-**Done: Stages 1–4** (`3735bf7`, `4eaf553`, `228b417`, `059f36b`). Catalog is `beam` 6×2×2 Wood
-+ `slab` 4×2×4 Stone (2/4/6 m are **temporary testing sizes** — at 1 m grid a feature needs ≥2
-sample spacings, doc 03 Nyquist #1, or faces land on grid planes with a degenerate interior).
-`ConstructionAction` imprints the part's box via the shared `VoxelImprint` (CsgAction shares it);
-the part renders in the terrain DC mesh and PBD sims its cells. `PartIndex` records each
+**Done: Stages 1–5** (`3735bf7`, `4eaf553`, `228b417`, `059f36b`, `ffc725c`). Catalog is `beam`
+6×2×2 Wood + `slab` 4×2×4 Stone (2/4/6 m are **temporary testing sizes** — at 1 m grid a feature
+needs ≥2 sample spacings, doc 03 Nyquist #1, or faces land on grid planes with a degenerate
+interior). `ConstructionAction` imprints the part's box via the shared `VoxelImprint` (CsgAction
+shares it); the part renders in the terrain DC mesh and PBD sims its cells. `PartIndex` records each
 placement's id/cells/material/dims/transform; `parts` console reports its count. **S4** dissolved
 the old part spine (998 lines deleted): no more `PartSupport`/`PartData`/`collapse_part`/strain,
 `part_added`/`part_removed`, snapshot part encode (V6: parts persist via the EditStore blob +
 tracked-voxel array), Assembly tool / snap points, `RemovalAction` (Construction→Remove now digs).
-PBD rebuilds from `voxel_data` alone; detachment carves every loose cell as terrain.
+PBD rebuilds from `voxel_data` alone; detachment carves every loose cell as terrain. **S5** replaced
+`FallingBodyFactory` with **`VoxelChunkBody`**: a detached component falls as a **DC-meshed shape of
+its own SDF** (real surface, material-coloured), collision still a greedy box-compound. The chunk SDF
+is `max(store_sample, 0.5 − corners_in_component/8)` per grid corner — true surface where the chunk
+is, flat cut at the boundary, non-chunk terrain erased; sampled before `PbdStructure._collapse` carves.
+CLAUDE.md's structural/parts/persistence sections were pruned to match (`fa4b4e0`).
 
-**NEXT: Stage 5 — VoxelChunkBody** (break-off). When PBD detaches a component it currently calls
-`FallingBodyFactory.from_voxels` → greedy-merged AABB `RigidBody3D` (still the old box-compound).
-Stage 5 makes a break-off a **DC-meshed shape** that looks like what broke (box-compound collision
-now; V-HACD off-thread later). Then Stage 6: a settled chunk stamps its voxels back into the store
-at its resting pose (merge-back). **Known issue (deferred, Stage 3 enables fixing):** placing a
-part over an existing one recolours the overlap (VoxelImprint paints any now-solid cell) — use
-PartIndex to keep the owning part's material. **Not yet GUI-checked:** S4 is headless-tested
-(171/171 GUT, parse clean) but the build/remove/save-load loop wants an eyeball on the laptop.
+**NEXT: Stage 6 — merge-back.** A `VoxelChunkBody` that comes to rest should stamp its voxels back
+into the EditStore at its **resting pose** (rotated), re-becoming terrain — the round-trip that closes
+parts-as-voxels. Today `StructuralIntegrity._tick_falling_bodies` already re-integrates a *fully
+buried* body cell-by-cell at axis-aligned world cells (emits `voxel_added`); Stage 6 generalises that
+to a settled (possibly rotated) chunk: rasterise the chunk's DC shape / cell offsets into store voxels
+at the resting transform, carry material, then free the body. Decide the settle criterion (sleeping +
+resting-on-solid) and how a rotated chunk maps to the axis-aligned grid (re-imprint its box brush at
+the rest transform is the clean route — same `VoxelImprint` path as placement). **Known issue
+(deferred, Stage 3 enables fixing):** placing a part over an existing one recolours the overlap
+(VoxelImprint paints any now-solid cell) — use PartIndex to keep the owning part's material.
+**GUI-checked through S4** (Robert: no surprises); **S5 not yet GUI-checked** — headless-tested
+(174/174 GUT, parse clean), but the falling-chunk *look* needs an eyeball (mesher = render-path,
+headless-unverifiable for fidelity, per [[no-overclaiming-fixes]]).
 
 
 **Earlier in this thread (DC render pipeline, all committed, headless-tested; GUI-verify the render ones):**
