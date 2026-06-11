@@ -53,3 +53,35 @@ Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double 
 	out["dim"] = dim;
 	return out;
 }
+
+// THAW: seed particles from the solid cells of a store region. Each cell whose centre samples
+// solid gets `ppa`³ particles (at rest, F = identity). The thaw half of the coupling — what
+// converts a region of static terrain into simulated material when it loses support. Returns
+// the number of particles added. `origin`/`dim`/`cell` describe a region of `dim` cells per axis.
+int MpmSim::thaw_from_store(Ref<EditStore> store, Vector3 origin, int dim, double cell, int ppa, double mass, double volume) {
+	if (store.is_null()) {
+		return 0;
+	}
+	const double step = cell / double(ppa);
+	const Vector3 half(0.5 * cell, 0.5 * cell, 0.5 * cell);
+	int added = 0;
+	for (int iz = 0; iz < dim; iz++) {
+		for (int iy = 0; iy < dim; iy++) {
+			for (int ix = 0; ix < dim; ix++) {
+				const Vector3 c0 = origin + Vector3(ix, iy, iz) * cell;
+				if (store->sample(c0 + half) >= 0.0) {
+					continue; // air cell — nothing to thaw
+				}
+				for (int sz = 0; sz < ppa; sz++) {
+					for (int sy = 0; sy < ppa; sy++) {
+						for (int sx = 0; sx < ppa; sx++) {
+							add_particle(c0 + Vector3((sx + 0.5) * step, (sy + 0.5) * step, (sz + 0.5) * step), mass, volume);
+							added++;
+						}
+					}
+				}
+			}
+		}
+	}
+	return added;
+}

@@ -125,6 +125,8 @@ public:
 	// FREEZE (thaw/freeze coupling, mpm_couple.cpp): rasterise the current particles into the
 	// EditStore as SDF + material over their bounding box. Returns {origin, dim} of the region.
 	Dictionary rasterize_to_store(Ref<EditStore> store, double cell, double radius, int material_index);
+	// THAW: seed ppa³ particles in each solid cell of a `dim`-cell region. Returns the count.
+	int thaw_from_store(Ref<EditStore> store, Vector3 origin, int dim, double cell, int ppa, double mass, double volume);
 
 	int particle_count() const { return int(_x.size()); }
 	Vector3 get_position(int i) const { return _x[i]; }

@@ -67,3 +67,32 @@ func test_frozen_surface_tracks_the_cloud_extent() -> void:
     # The cube spans x in [-2, 2). A point just inside the +X face is solid; ~2 cells past it air.
     assert_lt(store.store.sample(Vector3(1.5, top + 1.0, 0.0)), 0.0, "just inside the +X edge is solid")
     assert_gt(store.store.sample(Vector3(3.5, top + 1.0, 0.0)), 0.0, "2 cells past the +X edge is air (not a bloated blob)")
+
+
+func test_thaw_then_freeze_round_trips_a_box() -> void:
+    # The fidelity test of the coupling (the information-loss question): a solid box in one store,
+    # THAWED to particles and FROZEN back, must reproduce the same solid region in a second store.
+    var top := _air_top()
+    var src := EditStoreManager.new()
+    src.setup()
+    src.store.stamp_box(Vector3(0, top + 2, 0), Vector3(4, 4, 4), 0, WOOD, 1.0) # solid box: x,z[-2,2], y[top,top+4]
+
+    var sim := MpmSim.new()
+    sim.configure(Vector3(-16, -16, -16), 32, 1.0, Vector3(0, -9.8, 0), 5000.0, 0.2, -1000.0)
+    var n := sim.thaw_from_store(src.store, Vector3(-4, top - 2, -4), 12, 1.0, 2, 50.0, 0.125)
+    assert_gt(n, 0, "thaw seeded particles from the solid box")
+
+    var dst := EditStoreManager.new()
+    dst.setup()
+    sim.rasterize_to_store(dst.store, 1.0, 0.6, WOOD)
+
+    # Both stores must AGREE on solid/air across a set of probe points (the round-trip reproduces
+    # the box within the rasteriser's ~1-cell resolution).
+    var inside := [Vector3(0, top + 2, 0), Vector3(1.5, top + 1, 1.5), Vector3(-1.5, top + 3, -1.5)]
+    var outside := [Vector3(0, top + 10, 0), Vector3(6, top + 2, 0), Vector3(0, top - 4, 0)]
+    for p in inside:
+        assert_lt(src.store.sample(p), 0.0, "source solid at %s" % p)
+        assert_lt(dst.store.sample(p), 0.0, "round-tripped solid at %s" % p)
+    for p in outside:
+        assert_gt(dst.store.sample(p), 0.0, "round-tripped air at %s" % p)
+    assert_eq(dst.store.material_at(Vector3(0, top + 2, 0)), WOOD, "material survives the round-trip")
