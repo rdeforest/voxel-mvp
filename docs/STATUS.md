@@ -8,19 +8,33 @@
 
 ## Resumption Brief
 
-### Active thread: adaptive-octree substrate — Phase B done (godot_voxel removed)
+### Active thread (2026-06-10): parts-as-voxels — ending the part/terrain dichotomy
 
-The EditStore is the sole terrain layer (SDF + material, persistence, render, collision,
-edits, structural reads); godot_voxel is removed from the running game. Full record:
-[`completed/extras-10-octree-edit-store.md`](completed/extras-10-octree-edit-store.md).
-Design: `docs/roadmap/design/11-octree-edit-store.md`; substrate spec: doc 10.
+The manifesto-#1 payoff that the DC-QEF/octree work was for. Spec: design doc 03
+(§"Imprinting, not CSG"). **6-stage plan** (agreed with Robert): A = parts become voxels
+(1 fat catalog → 2 ConstructionAction imprints → 3 PartIndex identity sidecar → 4 dissolve
+PartSupport); B = break/merge (5 VoxelChunkBody DC-shaped break-off → 6 merge a settled
+chunk back into the store). Decisions: start at **1 m (Tier-1 fat parts)**, sub-metre after
+the rest is solid (needs the adaptive-density render — fine sampling where the store has fine
+leaves); **arbitrary rotation** via the OBB brush from day one (UI quantises 15°); identity
+in a **sidecar** (manifesto #7), not the field; chunk collision = convex compound (box-compound
+now, V-HACD off-thread later).
 
-**GUI-verified good enough** (Robert, 2026-06-10): terrain renders, edits persist + match
-across F5/F9. The X↔Z save/load transpose (`bf9ec2f`, unspecified C++ arg-eval order) is fixed.
+**Done: Stages 1–3** (`3735bf7`, `4eaf553`, `228b417`). Catalog is `beam` 6×2×2 Wood + `slab`
+4×2×4 Stone (2/4/6 m are **temporary testing sizes** — at 1 m grid a feature needs ≥2 sample
+spacings, doc 03 Nyquist #1, or faces land on grid planes with a degenerate interior).
+`ConstructionAction` imprints the part's box via the shared `VoxelImprint` (CsgAction shares
+it); the part renders in the terrain DC mesh and PBD sims its cells. `PartIndex` records each
+placement's id/cells/material/dims/transform; `parts` console reports its count.
 
-**What's next:** open items from doc 10 — single-mesher consolidation, C++ crease normals,
-incremental edit re-mesh; the `dcgen` substrate's homogeneity-prune undersampling (Y=128
-holes) if that debug tool stays. Otherwise the v0.1 gameplay scoping below.
+**NEXT: Stage 4 — dissolve PartSupport** (the point-of-no-return deletion): remove
+`PartSupport`/`PartData`/`collapse_part`/legacy strain, `part_added`/`part_removed` events,
+the snapshot part encode/decode, snap points, `RemovalAction` (removal → dig). Parts are
+already tracked voxels PBD simulates, so it's mostly subtraction across the structural facade,
+snapshot, and player input. **Known issue Stage 3 enables fixing:** placing a part over an
+existing one recolours the overlap (VoxelImprint paints any now-solid cell) — use PartIndex to
+keep the owning part's material. **GUI-checked (Robert):** placement works, materials morph on
+overlap (the above), otherwise OK.
 
 
 **Earlier in this thread (DC render pipeline, all committed, headless-tested; GUI-verify the render ones):**
