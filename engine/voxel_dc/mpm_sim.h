@@ -89,6 +89,10 @@ class MpmSim : public RefCounted {
 	void _apply_collider(const Vector3 &world, Vector3 &v) const;
 	Vector3 _collider_normal(const Vector3 &p) const; // outward = normalized SDF gradient
 
+	// An awake particle's sleep transition (called from _g2p): sleep it once it's been still
+	// for _sleep_after steps, caching its P2G affine so support holds without re-running SVD.
+	void _maybe_sleep(int p, double nv_len, double dt, double dinv);
+
 	// One MLS-MPM step, split into its three phases (share the quadratic-B-spline stencil).
 	void _p2g(double dt);
 	void _grid_update(double dt);
