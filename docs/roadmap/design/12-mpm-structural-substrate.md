@@ -124,6 +124,73 @@ per-region field the particles rasterize into).
 - **Fracture:** start with damage-on-overstretch (particles separate past a strain/stress
   threshold); upgrade to CD-MPM (Wolper 2019) if snap fidelity reads mushy.
 
+## The thaw/freeze boundary and its error budget
+
+The worry this raises is fair: is thaw/freeze a *second* dichotomy — like the LOD seam —
+where information is lost and surprises appear? **No: it is not a new boundary. It is the
+particle↔grid (P2G/G2P) transfer MPM already crosses every substep**, with the persistent
+field being the grid *made durable*. The whole **PIC → FLIP → APIC → PolyPIC** lineage
+exists precisely to bound that transfer's loss:
+
+- **PIC** (grid overwrites particle velocity) — maximally dissipative.
+- **FLIP** (transfer only the delta) — preserves detail, accumulates noise.
+- **APIC** (Jiang 2015) — each particle carries a local *affine* velocity field, so modes
+  the grid can't hold ride on the particle; conserves angular momentum, no FLIP noise. The
+  standard floor.
+- **PolyPIC** (Fu 2017) — higher-order polynomial modes; *theoretically lossless*
+  interpolation when the particle basis spans the grid DOF.
+
+So the "minimum acceptable error" dial for this boundary already exists, with a
+provably-lossless endpoint — the direct analog of pixel-sufficiency.
+
+**What freeze discards, and why it's ~free at rest.** A particle carries (position,
+velocity, deformation gradient `F`, material); a plain SDF cell stores (SDF, material).
+Freeze drops velocity and `F`. But: velocity ≈ 0 at the settle threshold (loss ≤ ε by
+construction); **plastic deformation is already in the geometry** (a bent beam is *shaped*
+bent — the SDF holds it); elastic strain ≈ 0 when relaxed. So for terrain, debris, and
+relaxed material the field is a faithful rest-state record, quantized only to grid
+resolution. **The one exception:** a load-bearing *static* structure holding internal
+stress (an arch in compression, a pre-tensioned member) — motionless, so it passes the
+settle test, but a plain SDF can't hold its stress state, so freeze→re-thaw returns it
+relaxed. Identifiable and bounded (load-bearing static structures only, not the stress-free
+99%).
+
+**Accumulation.** Repeated thaw→freeze *cycling* re-quantizes geometry each cycle. Fix is
+standard sleeping-engine practice: **hysteresis** — require sustained rest before freezing,
+never freeze what just thawed — plus making the field canonical so re-thaw is exact w.r.t.
+it. With hysteresis, boundary cycling doesn't occur.
+
+### Recommended: design the boundary away (sparse sleeping MPM)
+
+The stronger answer **eliminates the lossy conversion**. The sparse-MPM line — SPGrid
+(Setaluri 2014), temporally-adaptive/async MPM (2018), and the 2024 unified-sparse and
+CK-MPM work — only *steps* the grid where material moves; dormant material stays as
+**particles that simply aren't simulated** (lossless: `F`, stress, everything preserved),
+paying memory instead of error. Then:
+
+- The static/dynamic split **coincides with the boundary we already have**: pure
+  *generator* terrain (never touched) stays field; anything ever *disturbed* becomes
+  persistent sleeping particles that never round-trip to field.
+- The load-bearing-stress exception **vanishes** (sleeping particles keep their stress).
+- Cost: store dormant particles for disturbed regions (sparse, bounded by play area) + the
+  renderer must surface particles wherever material has been touched, not just the DC field.
+
+This is the manifesto trade — pay memory + render to *delete* a lossy boundary rather than
+bound it. **This is the recommended target**; the field↔particle freeze (above) is the
+fallback if the dormant-particle memory/render cost proves worse than the bounded loss.
+
+### Sufficiency, generalized
+
+Pixel-sufficiency becomes **sufficient on every error axis**, each a dial set
+below-perceptible — none an unbounded surprise:
+
+| Axis | Dial | Lossless-ish endpoint |
+|---|---|---|
+| Spatial | grid res / particles-per-cell (8/cell std) | finer grid |
+| Transfer | PIC → APIC → PolyPIC order | PolyPIC (theoretically lossless) |
+| Dynamic state | settle threshold ε; keep-particles vs freeze | sparse sleeping (no conversion) |
+| Material | channels stored on freeze (+ stress/`F` if needed) | persist particles |
+
 ## What it subsumes
 
 - **`PbdStructure` + `PbdSim`** — replaced wholesale (the network/anchor/detachment model
@@ -143,7 +210,10 @@ per-region field the particles rasterize into).
    particles that reproduce the field's surface; freeze must rasterize particles back to
    an SDF that the DC mesher renders crack-free against neighbouring static terrain.
    Getting the seam between *frozen* terrain and *just-thawed* material to not pop or gap
-   is the crux. Validate first.
+   is the crux. The error budget and the **sparse-sleeping path that designs this risk
+   away** are analysed in "The thaw/freeze boundary and its error budget" above — sleeping
+   particles in place (rather than rasterizing to field) removes the freeze direction
+   entirely, at a memory/render cost. Validate the sleeping path first.
 2. **Fracture realism.** Naive MPM "fractures" by particle separation, which can look
    mushy. A clean beam-snap may need CD-MPM or a damage model. Tunable depth, not a
    blocker.
@@ -181,17 +251,22 @@ inside the frame budget on the physics GPU while the render GPU holds framerate.
 
 A throwaway, isolated MPM solver — *not* wired into the world — over a single region:
 
-- **Scope:** MLS-MPM core (P2G / grid / G2P / return-mapping), two material models
-  (fixed-corotated elastic, Drucker-Prager granular), the **static terrain SDF as a grid
-  collider**, particle render via the existing DC path.
+- **Scope:** MLS-MPM core (P2G / grid / G2P / return-mapping) with **APIC transfer**, two
+  material models (fixed-corotated elastic, Drucker-Prager granular), the **static terrain
+  SDF as a grid collider**, **sparse sleeping** (settled particles stop being stepped but
+  persist), particle render via the existing DC path.
 - **Test scene 1 — beam on a peak.** An elastic beam balanced on an SDF peak must
   **tip and rest on the mountainside (or slide off and fall)** — *not* sag through it.
   Directly kills the reported bug.
 - **Test scene 2 — dirt slide.** A granular block on a slope must flow to its
   angle-of-repose and pile. Proves the granular model + grid contact.
-- **Success:** both behave physically; substep cost at the scene's particle count is
-  measured and inside budget on a dedicated GPU; a settled clump can be rasterized back
-  to an SDF region the DC mesher renders without a seam.
+- **Test scene 3 — sleeping load-bearer.** A static structure holding stress (a propped
+  beam / simple arch) must keep holding *after it sleeps and re-activates* — proves
+  sparse sleeping preserves the stress state the lossy freeze would drop.
+- **Success:** all three behave physically; substep cost at each scene's particle count is
+  measured and inside budget on a dedicated GPU; and a settled clump round-trips
+  (sleep → re-activate, and — for the fallback path — rasterize to an SDF region the DC
+  mesher renders without a seam).
 - **Kill criteria:** field↔particle seam can't be made crack-free without unbounded
   work; or per-substep cost at realistic region sizes can't fit even one dedicated GPU.
   Either sends us back to a bounded PBD-plus-contact interim with eyes open.
