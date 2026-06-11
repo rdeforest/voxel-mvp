@@ -8,47 +8,43 @@
 
 ## Resumption Brief
 
-### Active thread (2026-06-10): parts-as-voxels — ending the part/terrain dichotomy
+### Active thread (2026-06-11): MPM continuum-physics substrate — spike done, VERDICT = GO
 
-The manifesto-#1 payoff that the DC-QEF/octree work was for. Spec: design doc 03
-(§"Imprinting, not CSG"). **6-stage plan** (agreed with Robert): A = parts become voxels
-(1 fat catalog → 2 ConstructionAction imprints → 3 PartIndex identity sidecar → 4 dissolve
-PartSupport); B = break/merge (5 VoxelChunkBody DC-shaped break-off → 6 merge a settled
-chunk back into the store). Decisions: start at **1 m (Tier-1 fat parts)**, sub-metre after
-the rest is solid (needs the adaptive-density render — fine sampling where the store has fine
-leaves); **arbitrary rotation** via the OBB brush from day one (UI quantises 15°); identity
-in a **sidecar** (manifesto #7), not the field; chunk collision = convex compound (box-compound
-now, V-HACD off-thread later).
+**The pivot.** GUI-testing parts-as-voxels surfaced PBD's structural limits — a beam on a peak
+**sags through the mountain** (no terrain contact) and break-off chunks **lock mid-fall**. PBD
+is the mass-spring approximation; the manifesto says don't keep an approximation for *effort*
+reasons. So the structural sim is moving to **continuum mechanics via MPM** (Material Point
+Method): terrain, parts, debris deform/fracture/flow/settle under one solver, its grid IS our
+voxel grid, topology change (fracture **and** merge) is intrinsic, contact resolves on the grid.
+Spec + verdict: **`docs/roadmap/design/12-mpm-structural-substrate.md`**. MPM **subsumes** PBD,
+`VoxelChunkBody`, the falling-body classifier, and parts-as-voxels **Stages 5–6** (merge-back
+becomes the MPM freeze transition).
 
-**Done: Stages 1–5** (`3735bf7`, `4eaf553`, `228b417`, `059f36b`, `ffc725c`). Catalog is `beam`
-6×2×2 Wood + `slab` 4×2×4 Stone (2/4/6 m are **temporary testing sizes** — at 1 m grid a feature
-needs ≥2 sample spacings, doc 03 Nyquist #1, or faces land on grid planes with a degenerate
-interior). `ConstructionAction` imprints the part's box via the shared `VoxelImprint` (CsgAction
-shares it); the part renders in the terrain DC mesh and PBD sims its cells. `PartIndex` records each
-placement's id/cells/material/dims/transform; `parts` console reports its count. **S4** dissolved
-the old part spine (998 lines deleted): no more `PartSupport`/`PartData`/`collapse_part`/strain,
-`part_added`/`part_removed`, snapshot part encode (V6: parts persist via the EditStore blob +
-tracked-voxel array), Assembly tool / snap points, `RemovalAction` (Construction→Remove now digs).
-PBD rebuilds from `voxel_data` alone; detachment carves every loose cell as terrain. **S5** replaced
-`FallingBodyFactory` with **`VoxelChunkBody`**: a detached component falls as a **DC-meshed shape of
-its own SDF** (real surface, material-coloured), collision still a greedy box-compound. The chunk SDF
-is `max(store_sample, 0.5 − corners_in_component/8)` per grid corner — true surface where the chunk
-is, flat cut at the boundary, non-chunk terrain erased; sampled before `PbdStructure._collapse` carves.
-CLAUDE.md's structural/parts/persistence sections were pruned to match (`fa4b4e0`).
+**Done: the MPM spike (`engine/voxel_dc/mpm_sim.*` + `mpm_material.*` + `mat3.*`,
+`test/test_mpm_sim.gd`, 183/183 GUT).** Isolated MLS-MPM (APIC, double precision), not wired into
+the game. Proven headlessly: stable core loop; verified 3×3 SVD; fixed-corotated + neo-Hookean
+elasticity; **EditStore SDF as a grid collider — a stiff body rests ON terrain, doesn't pass
+through (the beam-through-mountain fix)**; Drucker-Prager sand flows to a repose pile; **sparse
+sleeping** (settled = exact no-op, lossless state; wakes on disturbance — the doc-12 boundary-
+elimination path). Cost is per-particle-linear, SVD-dominated (corotated 2.4 µs/particle; 8 k =
+19.6 ms single-thread CPU). **GO**: physics correct; real-time needs the known runway (fast 3×3
+SVD, multi-thread/GPU, sparse sleeping) — single-GPU on the 5090 (dual-GPU deferred, doc 12).
 
-**NEXT: Stage 6 — merge-back.** A `VoxelChunkBody` that comes to rest should stamp its voxels back
-into the EditStore at its **resting pose** (rotated), re-becoming terrain — the round-trip that closes
-parts-as-voxels. Today `StructuralIntegrity._tick_falling_bodies` already re-integrates a *fully
-buried* body cell-by-cell at axis-aligned world cells (emits `voxel_added`); Stage 6 generalises that
-to a settled (possibly rotated) chunk: rasterise the chunk's DC shape / cell offsets into store voxels
-at the resting transform, carry material, then free the body. Decide the settle criterion (sleeping +
-resting-on-solid) and how a rotated chunk maps to the axis-aligned grid (re-imprint its box brush at
-the rest transform is the clean route — same `VoxelImprint` path as placement). **Known issue
-(deferred, Stage 3 enables fixing):** placing a part over an existing one recolours the overlap
-(VoxelImprint paints any now-solid cell) — use PartIndex to keep the owning part's material.
-**GUI-checked through S4** (Robert: no surprises); **S5 not yet GUI-checked** — headless-tested
-(174/174 GUT, parse clean), but the falling-chunk *look* needs an eyeball (mesher = render-path,
-headless-unverifiable for fidelity, per [[no-overclaiming-fixes]]).
+**NEXT (doc 12 staging, post-spike):** (2) graduate the MPM core toward real-time — fast 3×3 SVD
+(McAdams 2011) + multi-thread, then GPU compute; (3) **the EditStore thaw/freeze coupling** (the
+one remaining *research* risk — seeding particles from the field on failure, freezing settled
+material back, crack-free against static terrain); (4) replace PBD, retiring it + `VoxelChunkBody`
++ the falling-body classifier, closing Stages 5–6 as emergent. Sub-metre parts and the overlap-
+material rule (PartIndex) ride along later.
+
+**Parts-as-voxels Stages 1–5 (done, the substrate MPM rides on)** — `3735bf7`, `4eaf553`,
+`228b417`, `059f36b`, `ffc725c`. Parts are imprinted voxels (`ConstructionAction`+`VoxelImprint`),
+identity in the `PartIndex` sidecar; the old `PartSupport` spine was deleted (S4, 998 lines); S5's
+`VoxelChunkBody` DC-meshes break-offs. Catalog: `beam` 6×2×2 Wood + `slab` 4×2×4 Stone (2/4/6 m
+are temporary testing sizes — doc 03 Nyquist #1). **Stage 6 (merge-back) is PARKED** — it becomes
+the MPM freeze transition, don't build it twice. **Known issue:** placing a part over another
+recolours the overlap (use PartIndex). **GUI-checked through S4**; S5's falling-chunk look not yet
+eyeballed (now moot — MPM replaces that path).
 
 
 **Earlier in this thread (DC render pipeline, all committed, headless-tested; GUI-verify the render ones):**
