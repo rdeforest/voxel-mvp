@@ -168,3 +168,21 @@ func test_serialize_round_trips() -> void:
     assert_true(es2.has_edit(center), "edit flag preserved")
     assert_almost_eq(es2.sample(far), es.sample(far), 0.01, "unedited still defers to the generator")
     assert_false(es2.has_edit(far), "unedited flag preserved")
+
+
+func test_serialize_preserves_xz_orientation() -> void:
+    # Regression: deserialize once read node origins via Vector3(get(), get(), get()), whose
+    # unspecified C++ arg-eval order transposed X<->Z (GCC right-to-left). A symmetric edit
+    # hides it; this carves the +X side only and asserts it does NOT migrate to +Z.
+    var es := _store()
+    var s0 := _surface()
+    var dug_x := Vector3(CX + 15.0, s0 - 5.0, CZ)   # carve on +X
+    var mirror_z := Vector3(CX, s0 - 5.0, CZ + 15.0) # the X<->Z swap target — must stay solid
+    es.stamp_sphere(dug_x, 4.0, SUBTRACT, 0, 1.0)
+
+    var es2 := EditStore.new()
+    es2.deserialize(es.serialize())
+    assert_true(es2.has_edit(dug_x),     "the +X carve survives the round trip at +X")
+    assert_gt(es2.sample(dug_x), 0.0,    "+X is still air after the round trip")
+    assert_false(es2.has_edit(mirror_z), "the carve did NOT transpose onto +Z")
+    assert_lt(es2.sample(mirror_z), 0.0, "+Z is still solid (no X<->Z swap)")

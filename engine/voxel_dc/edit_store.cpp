@@ -330,7 +330,13 @@ void EditStore::deserialize(const PackedByteArray &bytes) {
 	b.instantiate();
 	b->set_data_array(bytes);
 	b->seek(0);
-	_root_origin = Vector3(b->get_double(), b->get_double(), b->get_double());
+	// Read each component into a local before constructing the Vector3: C++ leaves the
+	// order of evaluation of function arguments unspecified, and GCC evaluates right-to-
+	// left, which would transpose X<->Z relative to serialize's sequential writes.
+	const double rox = b->get_double();
+	const double roy = b->get_double();
+	const double roz = b->get_double();
+	_root_origin = Vector3(rox, roy, roz);
 	_root_size = b->get_double();
 	_base = b->get_double();
 	_amp = b->get_double();
@@ -343,7 +349,10 @@ void EditStore::deserialize(const PackedByteArray &bytes) {
 	nodes.reserve(count);
 	for (int i = 0; i < count; ++i) {
 		Node n;
-		n.origin = Vector3(b->get_double(), b->get_double(), b->get_double());
+		const double nox = b->get_double();   // sequential reads — see _root_origin above
+		const double noy = b->get_double();
+		const double noz = b->get_double();
+		n.origin = Vector3(nox, noy, noz);
 		n.size = b->get_double();
 		for (int j = 0; j < 8; ++j) {
 			n.children[j] = b->get_32();
