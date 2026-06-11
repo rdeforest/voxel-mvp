@@ -235,13 +235,16 @@ thousands–~100k, not millions; GPU MPM (MLS-MPM compute kernels) runs that com
 above interactive rates.
 
 **The hardware budget is deliberately generous** (manifesto: only hardware limits count,
-and on a Moore's-law horizon today's high-end is ~$200 of 2036 hardware). Robert has
-authorized **dedicating both GPUs** to the app for research: **physics on GPU 1**
-(a compute context — Vulkan compute or CUDA — running P2G/solve/G2P), **render on GPU 2**
-(Godot's renderer). The cross-GPU boundary is small: the active region's particle/field
-state in, the surfaced mesh / rasterized field out. This is real systems plumbing
-(multi-GPU, compute interop, the Godot↔compute handoff) but it's the *enabling* lever,
-not the physics.
+and on a Moore's-law horizon today's high-end is ~$200 of 2036 hardware).
+
+**Decision (2026-06-11): start single-GPU on the 5090.** The dual-GPU split (physics on one
+card, render on the other) was the original instinct, but the analysis is that the second
+card (a 4070 Ti) doesn't pay: its extra CUDA cores don't beat the **cross-GPU memory-bandwidth
+cost** of shuttling the active region's state over PCIe every frame. The 5090 already drives
+the primary screen, so physics + render co-resident on it is both simpler and faster to start.
+Multi-GPU is revisited only if a single card genuinely can't hold the frame budget — at which
+point the split is a *compute-context* placement detail, not a redesign. The GPU work itself
+(P2G/solve/G2P as Vulkan/CUDA compute) is the enabling lever and is unchanged by this.
 
 Measurement targets for the spike: substep cost vs. active-particle-count, the
 field↔particle transfer cost per region, and whether a representative collapse stays
@@ -281,8 +284,8 @@ A throwaway, isolated MPM solver — *not* wired into the world — over a singl
 4. **Replace PBD** — route detachment/collapse/settle through MPM; retire `PbdStructure`,
    `VoxelChunkBody`, the falling-body classifier, and (if the thaw criterion goes
    MPM-native) the scalar support. Stages 5–6 close as emergent behavior.
-5. **Dual-GPU split** — physics→GPU 1, render→GPU 2; the compute-interop plumbing. Can
-   trail the single-GPU version if that already fits budget.
+5. **GPU compute** — P2G/solve/G2P as Vulkan/CUDA compute on the 5090 (single-GPU per the
+   2026-06-11 decision). A multi-GPU split is a later option only if one card can't fit budget.
 
 ## Open questions (parked, not blocking the spike)
 
