@@ -8,7 +8,33 @@
 
 ## Resumption Brief
 
-### Active thread (2026-06-10): adaptive-octree substrate — Phase B, godot_voxel OUT of the terrain data path
+### Active thread (2026-06-10): adaptive-octree substrate — Phase B S5 DONE, godot_voxel removed from the game
+
+**S5 complete (commits `bfb6856`, `bf9ec2f`, `a98f492`, `e8e0252`, `cc343d3`).** The EditStore
+is the sole terrain layer (SDF + material, persistence, render, collision, edits, structural
+reads). The `VoxelLodTerrain` node + its godot_voxel sub-resources are gone from `world.tscn`;
+the grass material is a standalone `assets/materials/terrain_surface.tres`. Actions write the
+store directly (`stamp_sphere` / `StoreWrite.cells`); the dual-write is gone.
+- **The bug that delayed S5** (`bf9ec2f`): `EditStore.deserialize` built node origins with
+  `Vector3(get_double(), get_double(), get_double())` — C++ leaves arg-eval order unspecified,
+  GCC goes right-to-left, so every save/load transposed the octree X↔Z. A transpose is its own
+  inverse, so two cycles looked correct (masked it). Fixed by reading into named locals;
+  `test_serialize_preserves_xz_orientation` pins it. **Lesson:** never call side-effecting
+  reads as ctor args.
+- **NEEDS GUI VERIFY:** the game runs with NO godot_voxel node — render (DCTerrainManager off a
+  store snapshot, worker thread), collision (DCCollisionManager off the store), player physics,
+  world-ready (fires frame 1, store resident). Headless parse + 191 GUT pass, but gameplay is
+  eyes-only. Verify: load, terrain renders + grass shader, walk/dig/build, F5/F9 persists+matches.
+- **Deferred (own task):** `DCRegionReader` + the `.tres` generator graph + `build_terrain_graph.gd`
+  are still referenced by `test_dc_material` / `test_sparse_voxel_octree` / `test_terrain_graph`
+  (godot_voxel-read fixtures). Migrate those tests onto TerrainField/EditStore, then delete.
+  The godot_voxel *module* stays built (our `engine/voxel_dc` links against it); only its runtime
+  use in the game is gone. `dcgen` substrate's homogeneity-prune undersampling (Y=128 holes) is a
+  known separate limitation, not the render.
+
+---
+
+#### (historical, pre-S5) godot_voxel down to the data path
 
 PBD is **done and authoritative** (see CLAUDE.md "Structural integrity"). Phase A is at its
 ceiling; the substrate render is incremental + edit-aware + view-independent. Phase B (the
