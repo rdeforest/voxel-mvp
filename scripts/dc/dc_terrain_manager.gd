@@ -32,17 +32,15 @@ const _LEVEL_CELLS      := LEVEL_DIM - 1                 # 128
 const _ROOT_DEPTH       := 7 + LEVELS - 1                # log2(128) + (LEVELS-1)
 const _COARSEST_CELL    := 1 << (LEVELS - 1)             # snap granularity (16m)
 
-var _terrain: VoxelLodTerrain   # kept only to hide godot_voxel's own render + borrow its grass material
-var _edit_store: EditStore      # SDF + material source (generator + edits); replaces the godot_voxel read
+var _edit_store: EditStore      # SDF + material source (generator + edits)
 var _follow:  Node3D
 
 var _mesh_instance: MeshInstance3D
 var _enabled := false
 
 var _data_only := false
-var _saved_render_mask := 1      # godot_voxel's render layers before we hid them
-var _pending_data_only := false  # hide godot_voxel once our first mesh lands (no startup void)
-var _debug_material: Material    # translucent cyan, used only in debug-overlay mode
+var _pending_data_only := false  # wear the grass material once our first mesh lands
+var _debug_material: Material    # translucent cyan, used only in the dcmanager debug-overlay mode
 
 # The grass surface material worn by our mesh when DC is the default render. A standalone
 # resource (not the terrain node's) — Godot caches it by path, so the console `set`/`get` and
@@ -90,11 +88,9 @@ var _dump_dict := {}
 var eps_px := 8.0
 
 
-func setup(terrain: VoxelLodTerrain, follow: Node3D, edit_store: EditStore) -> void:
-    _terrain = terrain
+func setup(follow: Node3D, edit_store: EditStore) -> void:
     _edit_store = edit_store
     _follow  = follow
-    _saved_render_mask = terrain.render_layers_mask
     _mesh_instance = MeshInstance3D.new()
     var debug_mat := StandardMaterial3D.new()
     debug_mat.albedo_color = Color(0.2, 1.0, 1.0, 0.55)
@@ -149,10 +145,7 @@ func start_default() -> void:
 
 
 func _apply_render_swap() -> void:
-    if not is_instance_valid(_terrain):
-        return
     var as_terrain := _data_only and _enabled
-    _terrain.render_layers_mask = 0 if as_terrain else _saved_render_mask
     if _mesh_instance != null:
         # Default render: wear the grass surface material. Debug overlay (dcmanager without
         # dcsolo): translucent cyan over godot_voxel.
@@ -382,6 +375,3 @@ func _exit_tree() -> void:
     if _task_id != -1:
         WorkerThreadPool.wait_for_task_completion(_task_id)
         _task_id = -1
-    # Never leave godot_voxel's render hidden behind us.
-    if is_instance_valid(_terrain):
-        _terrain.render_layers_mask = _saved_render_mask

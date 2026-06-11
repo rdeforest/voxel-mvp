@@ -14,7 +14,6 @@ extends RefCounted
 # are the subsystems World owns; assign them before register_all().
 
 var host:              Node
-var terrain:           VoxelLodTerrain
 var dc_manager:        DCTerrainManager
 var substrate_preview: DcSubstratePreview
 var pbd_structure:     PbdStructure
@@ -46,21 +45,18 @@ func _table() -> Array:
     return [
         [set_uniform,     "set",       "Set a terrain shader uniform (float). Usage: set <name> <value>"],
         [get_uniform,     "get",       "List terrain shader uniforms matching a glob (default *). Usage: get [pattern]"],
-        [vdebug,          "vdebug",    "Toggle a VoxelLodTerrain debug overlay. Usage: vdebug [flag]; no arg lists flags."],
         [dcmanager,       "dcmanager", "Toggle the DC terrain manager (threaded re-mesh of a bubble around you). Usage: dcmanager [on|off]"],
-        [dcsolo,          "dcsolo",    "Data-only mode: hide godot_voxel's render so only our DC mesh shows (enables the manager). Usage: dcsolo [on|off]"],
         [dcerror,         "dcerror",   "Toggle error-driven terrain LOD (screen-space error vs distance bands). Usage: dcerror [on|off]"],
         [dceps,           "dceps",     "Set the error-driven LOD threshold in px (lower = more detail). Usage: dceps <px>"],
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
         [dcgen,           "dcgen",     "Phase B preview: render the octree-over-generator substrate (cyan) at your position. Usage: dcgen [on|off]"],
-        [editstore,       "editstore", "Phase B: print the EditStore shadow's leaf count + compare its SDF at you to godot_voxel's (dual-write check)."],
+        [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
         [pbddemo,         "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [physics_active,  "physics_active", "Toggle the structural physics simulation on your real structures (sag + collapse under load). Usage: physics_active [on|off]"],
         [perf,            "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
         [awake,           "awake",     "Highlight awake physics bodies (debris / collapsed parts) with a box. Usage: awake [on|off]"],
-        [lod,             "lod",       "Get/set terrain lod_distance (higher = LOD boundaries farther = less pop-in). Usage: lod [distance]"],
-        [reset,           "reset",     "Delete the save (terrain DB + snapshot) and reload to a fresh world."],
+        [reset,           "reset",     "Delete the save (EditStore blob + snapshot) and reload to a fresh world."],
         [quiescent,       "quiescent", "Print whether the world is quiescent (save-ready)."],
         [settle,          "settle",    "Force the world to rest so a save is never blocked (drains support, sleeps PBD + falling bodies)."],
         [parts,           "parts",     "Print the number of tracked parts."],
@@ -104,54 +100,10 @@ func get_uniform(pattern: String = "*") -> void:
     if found == 0:
         LimboConsole.info("no shader uniforms match '%s'" % pattern)
 
-# VoxelLodTerrain.DebugDrawFlag indices (see voxel_lod_terrain.h). active_mesh_blocks
-# draws a box per visually-active mesh block, coloured by LOD — overlapping boxes of
-# different sizes at one spot mean several LODs are active there.
-const _VDEBUG_FLAGS := {
-    "octree_nodes":       0,
-    "octree_bounds":      1,
-    "mesh_updates":       2,
-    "edit_boxes":         3,
-    "volume_bounds":      4,
-    "edited_blocks":      5,
-    "modifier_bounds":    6,
-    "active_mesh_blocks": 7,
-    "viewer_clipboxes":   8,
-    "loaded_blocks":      9,
-    "active_blocks":      10,
-    "voxel_metadata":     11,
-}
-
-func vdebug(flag_name: String = "") -> void:
-    if not _VDEBUG_FLAGS.has(flag_name):
-        LimboConsole.info("flags: " + ", ".join(PackedStringArray(_VDEBUG_FLAGS.keys())))
-        return
-    var idx: int = _VDEBUG_FLAGS[flag_name]
-    var enabled := not terrain.debug_get_draw_flag(idx)
-    terrain.debug_set_draw_flag(idx, enabled)
-    # Per-flag flags draw nothing unless the master debug renderer is enabled. Keep it
-    # on while any flag is set, off when none remain.
-    var any := false
-    for flag in _VDEBUG_FLAGS:
-        if terrain.debug_get_draw_flag(_VDEBUG_FLAGS[flag]):
-            any = true
-            break
-    terrain.debug_set_draw_enabled(any)
-    LimboConsole.info("vdebug %s = %s" % [flag_name, enabled])
-
 func dcmanager(state := "") -> void:
     var on := _parse_toggle(state, dc_manager.is_enabled())
     dc_manager.set_enabled(on)
     LimboConsole.info("dcmanager: %s" % ("on" if on else "off"))
-
-# Data-only mode: hide godot_voxel's render so only our DC mesh shows. Turning it on
-# also enables the manager (no point hiding terrain with nothing replacing it).
-func dcsolo(state := "") -> void:
-    var on := _parse_toggle(state, dc_manager.is_data_only())
-    if on:
-        dc_manager.set_enabled(true)
-    dc_manager.set_data_only(on)
-    LimboConsole.info("dcsolo: %s (godot_voxel render %s)" % [("on" if on else "off"), ("hidden" if on else "shown")])
 
 func dcerror(state := "") -> void:
     var on := _parse_toggle(state, dc_manager.error_driven)
@@ -181,16 +133,11 @@ func dcgen(state := "") -> void:
 
 # Spawn a live PBD structural-physics demo in front of the player (stress-coloured
 # lines; watch it sag and snap). Re-run to reset.
-# Dual-write check (S2): how many edited leaves the shadow store holds, and whether its
-# SDF at your position agrees with godot_voxel's (they should match over edited regions).
+# How many edited leaves the store holds + its SDF at your position.
 func editstore() -> void:
-    var p := player.global_position
-    var stored: float = edit_store.store.sample(p)
-    var vt := terrain.get_voxel_tool()
-    vt.channel = VoxelBuffer.CHANNEL_SDF
-    var voxel := vt.get_voxel_f(Vector3i(p.round()))
-    LimboConsole.info("editstore: %d edited leaves; at you store=%.2f godot_voxel=%.2f" % [
-        edit_store.store.leaf_count(), stored, voxel])
+    var here := player.global_position
+    LimboConsole.info("editstore: %d edited leaves; at you store=%.2f" % [
+        edit_store.store.leaf_count(), edit_store.store.sample(here)])
 
 
 func pbddemo(kind := "cantilever", size := 12) -> void:
@@ -222,12 +169,6 @@ func awake(state := "") -> void:
     awake_overlay.set_enabled(on)
     LimboConsole.info("awake highlight: %s" % ("on" if on else "off"))
 
-# Tune LOD pop-in live. lod_distance is the per-level switch distance; larger pushes
-# every LOD boundary farther out (finer detail at range, more blocks).
-func lod(distance := -1.0) -> void:
-    if distance > 0.0:
-        terrain.lod_distance = distance
-    LimboConsole.info("lod_distance = %.1f, lod_count = %d" % [terrain.lod_distance, terrain.lod_count])
 
 func reset() -> void:
     # Save files are left untouched on disk. Next scene-reload runs with

@@ -1,6 +1,5 @@
 extends Node3D
 
-@onready var _terrain:   VoxelLodTerrain     = $VoxelLodTerrain
 @onready var _integrity: StructuralIntegrity = $StructuralIntegrity
 @onready var _player:    CharacterBody3D     = $Player
 
@@ -20,30 +19,6 @@ var _world_ready := false
 
 func _enter_tree() -> void:
     SavePaths.ensure_dir()
-    # Keep generated data blocks resident (default off) so our region reads hit
-    # cached data instead of re-running the noise generator every time. Set before
-    # the terrain starts generating (parent _enter_tree runs before the child's).
-    $VoxelLodTerrain.cache_generated_blocks = true
-    # Our DCCollisionManager owns terrain collision now — disable godot_voxel's
-    # per-block collision. Set in code, not world.tscn: the Godot editor re-saves
-    # the scene and silently reverts .tscn edits made externally (it ate this once).
-    $VoxelLodTerrain.generate_collisions = false
-    # Per-voxel material: assign a format with an 8-bit INDICES channel. The
-    # default format stores indices at 16-bit packed-mixel4 (default 0x3210, the
-    # 4-material splat encoding) which has no clean single-id zero; 8-bit gives one
-    # material id per voxel with 0 = "natural" (slope-shaded). Set before the
-    # terrain enters the tree (parent _enter_tree runs first) so the channel is
-    # allocated, streamed, and SQLite-persisted. Existing pre-material saves use a
-    # different format and must be reset (`reset`) — accepted when this landed.
-    var fmt := VoxelFormat.new()
-    fmt.set_channel_depth(VoxelBuffer.CHANNEL_INDICES, VoxelBuffer.DEPTH_8_BIT)
-    $VoxelLodTerrain.format = fmt
-    # Phase B S4: the EditStore is the persistent terrain layer now, so detach the
-    # SQLite stream unconditionally — godot_voxel is in-memory-only (the dual-write
-    # path still reads its live VoxelData; nothing persists through it). _enter_tree
-    # runs parent-first, so we get here before $VoxelLodTerrain's own _enter_tree.
-    # (The stream sub-resource in world.tscn is removed with the node at S5.)
-    $VoxelLodTerrain.stream = null
 
 func _ready() -> void:
     var resetting := WorldSnapshot.reset_pending
@@ -61,8 +36,8 @@ func _ready() -> void:
     _integrity.set_store(_edit_store.store)               # solidity checks + falling-body classification
     _dc_manager = DCTerrainManager.new()
     add_child(_dc_manager)
-    _dc_manager.setup(_terrain, _player, _edit_store.store)   # render sources SDF+material from the store (generator + edits)
-    _dc_manager.start_default()   # DC is the default terrain render; dcmanager/dcsolo override
+    _dc_manager.setup(_player, _edit_store.store)   # render sources SDF + material from the store
+    _dc_manager.start_default()   # DC is the terrain render
     _substrate_preview = DcSubstratePreview.new()
     add_child(_substrate_preview)
     _substrate_preview.setup(_player, _edit_store.store)   # Phase B S3: render imprints generator + edits from the store (dcgen)
@@ -83,7 +58,6 @@ func _ready() -> void:
     _pbd_structure.set_enabled(true)   # PBD is authoritative; the old collapse systems stand down
     _console = ConsoleCommands.new()
     _console.host              = self
-    _console.terrain           = _terrain
     _console.dc_manager        = _dc_manager
     _console.substrate_preview = _substrate_preview
     _console.pbd_structure     = _pbd_structure
