@@ -58,6 +58,12 @@ class MpmSim : public RefCounted {
 	double _friction_angle = 35.0; // sand (degrees)
 	double _viscosity = 0.0;       // deviatoric damping (sand uses a little)
 
+	// When set, the world-fixed grid re-centres on the particle centroid each step so the
+	// material never reaches the domain walls (the grid is scratch — rebuilt every step — so
+	// shifting the origin is free). The active region follows the material, like the DC
+	// collision regions follow bodies. Off by default (the tests pin a fixed grid).
+	bool _recenter = false;
+
 	// Static collider. With a `_collider` EditStore set, contact is resolved against its SDF
 	// (the real terrain) — a grid node whose displaced position lands inside solid is pushed
 	// back out along the SDF normal (the grid-resolved contact PBD lacked). Without one, a flat
@@ -101,6 +107,7 @@ public:
 	void set_contact_friction(double f) { _friction = f; }
 	void set_sand_friction(double friction_angle_degrees) { _friction_angle = friction_angle_degrees; }
 	void set_viscosity(double v) { _viscosity = v; }
+	void set_recenter(bool on) { _recenter = on; } // grid follows the material centroid
 	void set_sdf_collider(const Ref<EditStore> &store) { _collider = store; }
 	void set_sleeping(bool on) { _sleep_enabled = on; }
 	void set_sleep_params(double speed, int after, double wake_speed);

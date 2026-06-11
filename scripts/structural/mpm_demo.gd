@@ -10,10 +10,7 @@ extends Node3D
 
 const PARTICLE_SIZE := 0.45
 const RHO := 400.0
-# Grid: world-fixed, taller below the spawn so it reaches the terrain the block falls onto.
-const MARGIN_XZ := 16
-const MARGIN_UP := 8
-const MARGIN_DOWN := 24
+const GRID_DIM := 40   # the grid re-centres on the block each step, so it never reaches the walls
 
 var _sim: MpmSim
 var _mm: MultiMesh
@@ -34,12 +31,12 @@ func _ready() -> void:
 # Spawn a `side`-cell elastic block centred at `center`, colliding against the terrain SDF.
 func setup(center: Vector3, side: int, edit_store: EditStore) -> void:
     _sim = MpmSim.new()
-    var dim := maxi(MARGIN_XZ * 2, MARGIN_UP + MARGIN_DOWN) + side
-    var origin := Vector3(center.x - MARGIN_XZ, center.y - MARGIN_DOWN, center.z - MARGIN_XZ).floor()
-    _sim.configure(origin, dim, 1.0, Vector3(0, -9.8, 0), -1.0e9)
+    var origin := (center - Vector3.ONE * (GRID_DIM * 0.5)).floor()
+    _sim.configure(origin, GRID_DIM, 1.0, Vector3(0, -9.8, 0), -1.0e9)
     _sim.set_material(0)            # elastic
     _sim.set_iterations(4)
     _sim.set_elastic(1.0, 0.5)     # rotation target, under-relaxed — the stable recipe
+    _sim.set_recenter(true)        # the grid follows the block — no domain-wall bouncing
     _sim.set_sdf_collider(edit_store)
 
     var p_vol := 0.125             # 8 particles per 1 m³ cell

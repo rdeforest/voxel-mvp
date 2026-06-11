@@ -63,6 +63,12 @@ void MpmSim::step(double dt) {
 	if (_sleep_enabled && _awake_count == 0) {
 		return; // fully quiescent — costs nothing
 	}
+	if (_recenter && !_x.is_empty()) {
+		// Slide the world-fixed grid so the material sits in its centre (keeps it off the walls).
+		const Vector3 c = average_position();
+		const double half = _dim * _dx * 0.5;
+		_origin = Vector3(Math::floor(c.x - half), Math::floor(c.y - half), Math::floor(c.z - half));
+	}
 	const int gc = _grid_count();
 	for (int it = 0; it < _iterations; it++) {
 		_solve_constraints();
@@ -314,6 +320,7 @@ void MpmSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_contact_friction", "f"), &MpmSim::set_contact_friction);
 	ClassDB::bind_method(D_METHOD("set_sand_friction", "friction_angle_degrees"), &MpmSim::set_sand_friction);
 	ClassDB::bind_method(D_METHOD("set_viscosity", "v"), &MpmSim::set_viscosity);
+	ClassDB::bind_method(D_METHOD("set_recenter", "on"), &MpmSim::set_recenter);
 	ClassDB::bind_method(D_METHOD("set_sdf_collider", "store"), &MpmSim::set_sdf_collider);
 	ClassDB::bind_method(D_METHOD("set_sleeping", "on"), &MpmSim::set_sleeping);
 	ClassDB::bind_method(D_METHOD("set_sleep_params", "speed", "after", "wake_speed"), &MpmSim::set_sleep_params);

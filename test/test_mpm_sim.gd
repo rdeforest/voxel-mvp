@@ -198,6 +198,32 @@ func test_a_dropped_block_wakes_the_sleeping_pile() -> void:
 
 # --- Pending: PB-MPM sand (Drucker-Prager on the integrated F + logJp) ---
 
+func test_recenter_grid_follows_the_material() -> void:
+    # With re-centering on, the world-fixed grid slides to follow the material, so a block can
+    # travel far past the grid's half-extent (otherwise a hard domain wall) — what fixes the
+    # "bouncing off invisible walls" in the demo. Free-fall a block in a small grid with no floor.
+    var sim := MpmSim.new()
+    sim.configure(Vector3(-12, -12, -12), 24, DX, Vector3(0, -9.8, 0), -1.0e9)
+    sim.set_iterations(4)
+    sim.set_elastic(1.0, 0.5)
+    sim.set_recenter(true)
+    var p_vol := (DX * 0.5) * (DX * 0.5) * (DX * 0.5)
+    for cz in range(-1, 1):
+        for cy in range(-1, 1):
+            for cx in range(-1, 1):
+                for ox in [0.25, 0.75]:
+                    for oy in [0.25, 0.75]:
+                        for oz in [0.25, 0.75]:
+                            sim.add_particle(Vector3(cx + ox, cy + oy, cz + oz), RHO * p_vol, p_vol)
+    var start_y := sim.average_position().y
+
+    for _i in 100:
+        sim.step(0.05)
+
+    assert_true(sim.is_finite(), "stable while free-falling")
+    assert_lt(sim.average_position().y, start_y - 20.0, "fell far past the 12 m grid half-extent — the grid followed (no wall)")
+
+
 func test_elastic_block_rests_on_real_generator_terrain() -> void:
     # The `mpmdemo` scenario headlessly: an elastic block dropped onto the REAL procedural
     # terrain (the EditStore generator as the SDF collider) must fall and rest on it, finite.
