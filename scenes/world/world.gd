@@ -58,6 +58,15 @@ func _ready() -> void:
     _pbd_structure.setup(_integrity)
     _integrity.pbd = _pbd_structure
     _pbd_structure.set_enabled(true)   # PBD is authoritative; the old collapse systems stand down
+    _wire_console()
+    # Pull the OS window forward and take keyboard focus on launch, so an F5 from
+    # the editor doesn't leave keystrokes landing in the script. Deferred so the
+    # window is mapped before we ask. Under focus-follows-mouse the WM still hands
+    # focus back to whatever the pointer is over, so this only sticks if the game
+    # spawns under the cursor.
+    _grab_os_focus.call_deferred()
+
+func _wire_console() -> void:
     _console = ConsoleCommands.new()
     _console.host              = self
     _console.dc_manager        = _dc_manager
@@ -69,12 +78,6 @@ func _ready() -> void:
     _console.edit_store        = _edit_store
     _console.part_index        = _part_index
     _console.register_all()
-    # Pull the OS window forward and take keyboard focus on launch, so an F5 from
-    # the editor doesn't leave keystrokes landing in the script. Deferred so the
-    # window is mapped before we ask. Under focus-follows-mouse the WM still hands
-    # focus back to whatever the pointer is over, so this only sticks if the game
-    # spawns under the cursor.
-    _grab_os_focus.call_deferred()
 
 func _grab_os_focus() -> void:
     DisplayServer.window_move_to_foreground()
