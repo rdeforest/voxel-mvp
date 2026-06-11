@@ -20,21 +20,25 @@ leaves); **arbitrary rotation** via the OBB brush from day one (UI quantises 15�
 in a **sidecar** (manifesto #7), not the field; chunk collision = convex compound (box-compound
 now, V-HACD off-thread later).
 
-**Done: Stages 1–3** (`3735bf7`, `4eaf553`, `228b417`). Catalog is `beam` 6×2×2 Wood + `slab`
-4×2×4 Stone (2/4/6 m are **temporary testing sizes** — at 1 m grid a feature needs ≥2 sample
-spacings, doc 03 Nyquist #1, or faces land on grid planes with a degenerate interior).
-`ConstructionAction` imprints the part's box via the shared `VoxelImprint` (CsgAction shares
-it); the part renders in the terrain DC mesh and PBD sims its cells. `PartIndex` records each
-placement's id/cells/material/dims/transform; `parts` console reports its count.
+**Done: Stages 1–4** (`3735bf7`, `4eaf553`, `228b417`, `059f36b`). Catalog is `beam` 6×2×2 Wood
++ `slab` 4×2×4 Stone (2/4/6 m are **temporary testing sizes** — at 1 m grid a feature needs ≥2
+sample spacings, doc 03 Nyquist #1, or faces land on grid planes with a degenerate interior).
+`ConstructionAction` imprints the part's box via the shared `VoxelImprint` (CsgAction shares it);
+the part renders in the terrain DC mesh and PBD sims its cells. `PartIndex` records each
+placement's id/cells/material/dims/transform; `parts` console reports its count. **S4** dissolved
+the old part spine (998 lines deleted): no more `PartSupport`/`PartData`/`collapse_part`/strain,
+`part_added`/`part_removed`, snapshot part encode (V6: parts persist via the EditStore blob +
+tracked-voxel array), Assembly tool / snap points, `RemovalAction` (Construction→Remove now digs).
+PBD rebuilds from `voxel_data` alone; detachment carves every loose cell as terrain.
 
-**NEXT: Stage 4 — dissolve PartSupport** (the point-of-no-return deletion): remove
-`PartSupport`/`PartData`/`collapse_part`/legacy strain, `part_added`/`part_removed` events,
-the snapshot part encode/decode, snap points, `RemovalAction` (removal → dig). Parts are
-already tracked voxels PBD simulates, so it's mostly subtraction across the structural facade,
-snapshot, and player input. **Known issue Stage 3 enables fixing:** placing a part over an
-existing one recolours the overlap (VoxelImprint paints any now-solid cell) — use PartIndex to
-keep the owning part's material. **GUI-checked (Robert):** placement works, materials morph on
-overlap (the above), otherwise OK.
+**NEXT: Stage 5 — VoxelChunkBody** (break-off). When PBD detaches a component it currently calls
+`FallingBodyFactory.from_voxels` → greedy-merged AABB `RigidBody3D` (still the old box-compound).
+Stage 5 makes a break-off a **DC-meshed shape** that looks like what broke (box-compound collision
+now; V-HACD off-thread later). Then Stage 6: a settled chunk stamps its voxels back into the store
+at its resting pose (merge-back). **Known issue (deferred, Stage 3 enables fixing):** placing a
+part over an existing one recolours the overlap (VoxelImprint paints any now-solid cell) — use
+PartIndex to keep the owning part's material. **Not yet GUI-checked:** S4 is headless-tested
+(171/171 GUT, parse clean) but the build/remove/save-load loop wants an eyeball on the laptop.
 
 
 **Earlier in this thread (DC render pipeline, all committed, headless-tested; GUI-verify the render ones):**
