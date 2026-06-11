@@ -8,8 +8,8 @@ extends Node3D
 # member stress in-world (once per rendered frame). Rebuilds on any structural edit
 # (bus). AUTHORITATIVE while enabled (enabled by default at world startup): when a member
 # breaks and a component comes loose, its cells are carved out of the SDF + handed to
-# FallingBodyFactory. `physics_active` toggles it; the `V` key toggles the stress-line
-# overlay. Reports its per-tick cost to the Perf overlay.
+# VoxelChunkBody (a DC-meshed falling chunk). `physics_active` toggles it; the `V` key
+# toggles the stress-line overlay. Reports its per-tick cost to the Perf overlay.
 
 
 var _integrity: StructuralIntegrity
@@ -179,10 +179,11 @@ func _handle_detachment() -> void:
         _rebuild()
 
 
-# Spawn a falling body for the detached terrain cells, carve them to air, and emit
-# the primitive events so the rest of the world reacts.
+# Spawn a falling chunk for the detached cells, carve them to air, and emit the primitive
+# events so the rest of the world reacts. The body is built (and samples the store) BEFORE
+# the carve below, so its DC mesh captures the real surface.
 func _collapse(cells: Array[Vector3i]) -> void:
-    var body := FallingBodyFactory.from_voxels(cells)
+    var body := VoxelChunkBody.from_voxels(cells, _integrity.store)
     get_parent().add_child(body)
     VoxelEventBusSingleton.emit(RegionCollapsingEvent.CHANNEL, RegionCollapsingEvent.new(VoxelConstants.GRID_ID, cells))
     var work: Array = []
