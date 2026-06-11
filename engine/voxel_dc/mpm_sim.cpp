@@ -32,6 +32,27 @@ int MpmSim::add_particle(Vector3 pos, double mass, double volume) {
 	return int(_x.size()) - 1;
 }
 
+void MpmSim::clear() {
+	_x.clear();
+	_d.clear();
+	_D.clear();
+	_F.clear();
+	_mass.clear();
+	_vol.clear();
+	_logJp.clear();
+	_sleeping.clear();
+	_still.clear();
+	_awake_count = 0;
+}
+
+double MpmSim::max_displacement() const {
+	double m = 0.0;
+	for (uint32_t i = 0; i < _d.size(); i++) {
+		m = MAX(m, _d[i].length());
+	}
+	return m;
+}
+
 void MpmSim::set_sleep_params(double speed, int after, double wake_speed) {
 	_sleep_speed = speed;
 	_sleep_after = after;
@@ -328,6 +349,8 @@ void MpmSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("rasterize_to_store", "store", "cell", "radius", "material_index"), &MpmSim::rasterize_to_store);
 	ClassDB::bind_method(D_METHOD("thaw_from_store", "store", "origin", "dim", "cell", "ppa", "mass", "volume"), &MpmSim::thaw_from_store);
 	ClassDB::bind_method(D_METHOD("add_particle", "pos", "mass", "volume"), &MpmSim::add_particle);
+	ClassDB::bind_method(D_METHOD("clear"), &MpmSim::clear);
+	ClassDB::bind_method(D_METHOD("max_displacement"), &MpmSim::max_displacement);
 	ClassDB::bind_method(D_METHOD("step", "dt"), &MpmSim::step);
 	ClassDB::bind_method(D_METHOD("awake_count"), &MpmSim::awake_count);
 	ClassDB::bind_method(D_METHOD("is_asleep"), &MpmSim::is_asleep);

@@ -25,6 +25,7 @@ var part_index:        PartIndex
 
 var _pbd_demo: PbdDemo   # lazily spawned by `pbddemo`
 var _mpm_demo: MpmDemo   # lazily spawned by `mpmdemo`
+var _mpm_structure: MpmStructure   # lazily spawned by `mpmthaw`
 
 
 # The LimboConsole autoload outlives the World scene. On reload (F9 / reset) the old
@@ -56,6 +57,7 @@ func _table() -> Array:
         [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
         [pbddemo,         "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [mpmdemo,         "mpmdemo",   "PB-MPM demo: spawn a live block of continuum material that falls and rests ON the terrain. Usage: mpmdemo [size]"],
+        [mpmthaw,         "mpmthaw",   "Thaw the REAL terrain at your aim into MPM: it carves out, falls/deforms, and freezes back when settled. Usage: mpmthaw [radius]"],
         [physics_active,  "physics_active", "Toggle the structural physics simulation on your real structures (sag + collapse under load). Usage: physics_active [on|off]"],
         [perf,            "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
         [awake,           "awake",     "Highlight awake physics bodies (debris / collapsed parts) with a box. Usage: awake [on|off]"],
@@ -167,6 +169,20 @@ func mpmdemo(size := 4) -> void:
         host.add_child(_mpm_demo)
     _mpm_demo.setup(center, size, edit_store.store)
     LimboConsole.info("mpmdemo: %d cubed elastic block at %s (PB-MPM, rests on terrain)" % [size, center])
+
+# Thaw the real terrain at the player's aim into MPM material: it carves out of the store, falls
+# and deforms against the rest of the terrain, then freezes back in when it settles.
+func mpmthaw(radius := 3.0) -> void:
+    var rc: RayCast3D = player.raycast
+    if rc == null or not rc.is_colliding():
+        LimboConsole.error("mpmthaw: aim at terrain first")
+        return
+    if _mpm_structure == null:
+        _mpm_structure = MpmStructure.new()
+        host.add_child(_mpm_structure)
+        _mpm_structure.setup(edit_store.store)
+    var n := _mpm_structure.thaw_sphere(rc.get_collision_point(), radius)
+    LimboConsole.info("mpmthaw: thawed %d cells (r=%.1f) into MPM" % [n, radius])
 
 func physics_active(state := "") -> void:
     var on := _parse_toggle(state, pbd_structure.is_enabled())

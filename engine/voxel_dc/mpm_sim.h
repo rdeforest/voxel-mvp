@@ -112,7 +112,11 @@ public:
 	void set_sleeping(bool on) { _sleep_enabled = on; }
 	void set_sleep_params(double speed, int after, double wake_speed);
 	int add_particle(Vector3 pos, double mass, double volume);
+	void clear(); // drop all particles (after a freeze-back); keeps the grid config
 	void step(double dt);
+
+	// Largest particle displacement magnitude last step — a settle gauge for the freeze trigger.
+	double max_displacement() const;
 
 	int awake_count() const { return _awake_count; }
 	bool is_asleep() const { return _sleep_enabled && _awake_count == 0; }
