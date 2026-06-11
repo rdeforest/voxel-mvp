@@ -46,12 +46,15 @@ class MpmSim : public RefCounted {
 	double _mu = 0.0;          // Lamé μ (shear)
 	double _lambda = 0.0;      // Lamé λ
 
-	// Constitutive model. NEO_HOOKEAN needs no SVD (the increment-1 default); COROTATED
-	// uses the polar rotation R = UVᵀ so a stiff body holds its shape and rotates rigidly.
-	int _material = 0;         // 0 = neo-Hookean, 1 = fixed-corotated
+	// Constitutive model. NEO_HOOKEAN needs no SVD (the increment-1 default); COROTATED uses
+	// the polar rotation R = UVᵀ so a stiff body holds its shape; SAND is Drucker-Prager
+	// elastoplasticity (Klár 2016) — granular flow that piles at an angle of repose.
+	int _material = 0;         // 0 = neo-Hookean, 1 = fixed-corotated, 2 = sand
+	double _alpha = 0.0;       // Drucker-Prager friction coefficient (from the friction angle)
 
-	// Kirchhoff stress τ for a deformation gradient, per the active material model.
-	Mat3 _kirchhoff(const Mat3 &f) const;
+	// Kirchhoff stress τ for the active model; may plastically update `f` (sand return-map).
+	Mat3 _stress(Mat3 &f) const;
+	Mat3 _sand(Mat3 &f) const; // Drucker-Prager return-mapping + log-strain (Hencky) stress
 
 	// Static collider. With a `_collider` EditStore set, contact is resolved against its SDF
 	// (the real terrain) — grid nodes inside solid lose their inward-normal velocity (normal
@@ -59,7 +62,11 @@ class MpmSim : public RefCounted {
 	// floor at world y = _floor_y is the fallback (keeps the bare-core tests collider-free).
 	Ref<EditStore> _collider;
 	double _floor_y = 0.0;
-	double _friction = 0.5;
+	// Contact friction as a per-contact tangential damping. Kept LOW because it compounds
+	// every step a node stays in contact — a high value grips a resting pile's base and
+	// stops it spreading (a granular pile's repose should come from the material's own
+	// Drucker-Prager friction, not the floor). Coulomb-correct friction is a later refinement.
+	double _friction = 0.0;
 
 	int _grid_count() const { return _dim * _dim * _dim; }
 
@@ -79,6 +86,8 @@ public:
 	// E = Young's modulus, nu = Poisson's ratio → Lamé μ, λ.
 	void configure(Vector3 origin, int dim, double dx, Vector3 gravity, double E, double nu, double floor_y);
 	void set_material(int m) { _material = m; }
+	void set_contact_friction(double f) { _friction = f; } // floor/SDF tangential damping
+	void set_sand_friction(double friction_angle_degrees); // sets _alpha for the SAND model
 	void set_sdf_collider(const Ref<EditStore> &store) { _collider = store; }
 	int add_particle(Vector3 pos, double mass, double volume);
 	void step(double dt);

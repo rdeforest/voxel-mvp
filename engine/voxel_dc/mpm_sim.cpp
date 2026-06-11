@@ -17,6 +17,13 @@ void MpmSim::configure(Vector3 origin, int dim, double dx, Vector3 gravity, doub
 	_gm.resize(_grid_count());
 }
 
+// Drucker-Prager friction coefficient from a friction angle (≈ the resulting repose angle).
+void MpmSim::set_sand_friction(double friction_angle_degrees) {
+	const double phi = Math::deg_to_rad(friction_angle_degrees);
+	const double sin_phi = Math::sin(phi);
+	_alpha = Math::sqrt(2.0 / 3.0) * 2.0 * sin_phi / (3.0 - sin_phi);
+}
+
 int MpmSim::add_particle(Vector3 pos, double mass, double volume) {
 	_x.push_back(pos);
 	_v.push_back(Vector3());
@@ -52,8 +59,12 @@ void MpmSim::_stencil(const Vector3 &pos, int base[3], Vector3 &fx, double w[3][
 	}
 }
 
-// Kirchhoff stress τ = P Fᵀ for the active constitutive model.
-Mat3 MpmSim::_kirchhoff(const Mat3 &f) const {
+// Kirchhoff stress τ = P Fᵀ for the active constitutive model. May plastically update `f`
+// (the SAND return-mapping moves strain from elastic to plastic).
+Mat3 MpmSim::_stress(Mat3 &f) const {
+	if (_material == 2) { // Drucker-Prager sand
+		return _sand(f);
+	}
 	if (_material == 1) { // fixed-corotated: τ = 2μ(F−R)Fᵀ + λ J(J−1) I, R = U Vᵀ
 		Mat3 u, v;
 		double s[3];
@@ -70,6 +81,56 @@ Mat3 MpmSim::_kirchhoff(const Mat3 &f) const {
 	return (f * f.transposed() - Mat3::identity()).scaled(_mu) + Mat3::identity().scaled(_lambda * Math::log(J));
 }
 
+// Build a diagonal Mat3 from three values.
+static Mat3 diag3(double a, double b, double c) {
+	Mat3 d = Mat3::zero();
+	d.m[0][0] = a;
+	d.m[1][1] = b;
+	d.m[2][2] = c;
+	return d;
+}
+
+// Drucker-Prager sand (Klár 2016). SVD the elastic F, take Hencky strain ε = ln σ, project
+// it onto the cohesionless yield cone (tension → tip; outside the cone → onto its surface),
+// rebuild the *elastic* F from the returned strain (the excess becomes plastic flow), and
+// return the log-strain Kirchhoff stress τ = U·diag(2μεᵢ + λ tr ε)·Uᵀ.
+Mat3 MpmSim::_sand(Mat3 &f) const {
+	Mat3 u, v;
+	double s[3];
+	f.svd(u, s, v);
+	double eps[3];
+	for (int i = 0; i < 3; i++) {
+		eps[i] = Math::log(MAX(Math::abs(s[i]), 1e-4));
+	}
+	const double tr = eps[0] + eps[1] + eps[2];
+	const double eh[3] = { eps[0] - tr / 3.0, eps[1] - tr / 3.0, eps[2] - tr / 3.0 };
+	const double eh_norm = Math::sqrt(eh[0] * eh[0] + eh[1] * eh[1] + eh[2] * eh[2]);
+
+	double ne[3]; // returned (elastic) Hencky strain
+	if (tr > 0.0 || eh_norm < 1e-12) {
+		// Volumetric extension: cohesionless sand can't sustain it → return to the cone tip
+		// (all deviatoric + tensile strain plasticises). Pure compression on-axis stays.
+		const double v_strain = (tr > 0.0) ? 0.0 : tr / 3.0;
+		ne[0] = ne[1] = ne[2] = v_strain;
+	} else {
+		const double dgamma = eh_norm + (3.0 * _lambda + 2.0 * _mu) / (2.0 * _mu) * tr * _alpha;
+		if (dgamma <= 0.0) {
+			ne[0] = eps[0]; // inside the cone → elastic, unchanged
+			ne[1] = eps[1];
+			ne[2] = eps[2];
+		} else {
+			for (int i = 0; i < 3; i++) {
+				ne[i] = eps[i] - dgamma * eh[i] / eh_norm; // project onto the cone surface
+			}
+		}
+	}
+
+	f = u * diag3(Math::exp(ne[0]), Math::exp(ne[1]), Math::exp(ne[2])) * v.transposed();
+	const double trn = ne[0] + ne[1] + ne[2];
+	const Mat3 tp = diag3(2.0 * _mu * ne[0] + _lambda * trn, 2.0 * _mu * ne[1] + _lambda * trn, 2.0 * _mu * ne[2] + _lambda * trn);
+	return u * tp * u.transposed();
+}
+
 // Scatter particle mass + momentum (incl. the internal-stress affine term) to the grid.
 void MpmSim::_p2g(double dt) {
 	const double dinv = 4.0 * _inv_dx * _inv_dx; // quadratic-kernel D⁻¹
@@ -78,7 +139,7 @@ void MpmSim::_p2g(double dt) {
 		// Advance the deformation gradient with last step's affine velocity, then take the
 		// internal-stress term from the constitutive model.
 		_F[p] = (Mat3::identity() + _C[p].scaled(dt)) * _F[p];
-		const Mat3 tau = _kirchhoff(_F[p]);
+		const Mat3 tau = _stress(_F[p]);
 		const Mat3 affine = tau.scaled(-dt * _vol[p] * dinv) + _C[p].scaled(_mass[p]);
 
 		int base[3];
@@ -265,6 +326,8 @@ Dictionary MpmSim::debug_svd(Basis m) const {
 void MpmSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("configure", "origin", "dim", "dx", "gravity", "E", "nu", "floor_y"), &MpmSim::configure);
 	ClassDB::bind_method(D_METHOD("set_material", "m"), &MpmSim::set_material);
+	ClassDB::bind_method(D_METHOD("set_contact_friction", "f"), &MpmSim::set_contact_friction);
+	ClassDB::bind_method(D_METHOD("set_sand_friction", "friction_angle_degrees"), &MpmSim::set_sand_friction);
 	ClassDB::bind_method(D_METHOD("set_sdf_collider", "store"), &MpmSim::set_sdf_collider);
 	ClassDB::bind_method(D_METHOD("debug_svd", "m"), &MpmSim::debug_svd);
 	ClassDB::bind_method(D_METHOD("add_particle", "pos", "mass", "volume"), &MpmSim::add_particle);

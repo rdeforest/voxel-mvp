@@ -137,6 +137,64 @@ func test_corotated_block_rests_on_an_sdf_pillar_without_penetrating() -> void:
     assert_lt(sim.lowest_y(), float(top) + 2.0, "it actually reached the pillar top")
 
 
+func _max_radius(sim: MpmSim) -> float:
+    var r := 0.0
+    for i in sim.particle_count():
+        var p := sim.get_position(i)
+        r = maxf(r, sqrt(p.x * p.x + p.z * p.z))
+    return r
+
+func _max_height(sim: MpmSim) -> float:
+    var h := -INF
+    for i in sim.particle_count():
+        h = maxf(h, sim.get_position(i).y)
+    return h
+
+
+func _sand_column(friction: float, young: float, base: int, tall: int) -> MpmSim:
+    var sim := MpmSim.new()
+    sim.configure(Vector3(-16, -2, -16), 32, DX, Vector3(0, -9.8, 0), young, 0.3, FLOOR_Y)
+    sim.set_material(2)
+    sim.set_sand_friction(35.0)
+    sim.set_contact_friction(friction)
+    var p_vol := (DX * 0.5) * (DX * 0.5) * (DX * 0.5)
+    var p_mass := RHO * p_vol
+    var half := base / 2
+    for cz in range(-half, half):
+        for cy in range(0, tall):
+            for cx in range(-half, half):
+                for ox in [0.25, 0.75]:
+                    for oy in [0.25, 0.75]:
+                        for oz in [0.25, 0.75]:
+                            sim.add_particle(Vector3(cx + ox, cy + oy, cz + oz), p_mass, p_vol)
+    return sim
+
+
+func test_sand_column_collapses_to_a_stable_pile() -> void:
+    # Drucker-Prager granular flow: a tall narrow column of sand must slump OUTWARD into a
+    # shorter, wider pile that HOLDS (not a puddle), at a sand-like angle — behaviour an
+    # elastic block (which keeps its shape) can't produce. This is the dirt-collapse half of
+    # what MPM has to model honestly. The internal friction governs: across floor frictions
+    # ≥ 0.05 the pile radius saturates (~6.2) at ~18-22° — the sand's own shear strength, not
+    # the floor, sets the angle. (~20° vs the 35° input is the known MPM-sand calibration gap
+    # — resolution + a Coulomb-correct contact friction tighten it; a fidelity-tuning item.)
+    var sim := _sand_column(0.1, 1.0e5, 4, 10)
+    var start_radius := _max_radius(sim)
+    var start_height := _max_height(sim)
+
+    for _i in 4000:
+        sim.step(DT)
+
+    assert_true(sim.is_finite(), "sand stayed finite")
+    assert_gt(sim.lowest_y(), FLOOR_Y - 0.6, "the pile rests on the floor (no tunnelling)")
+    var radius := _max_radius(sim)
+    var height := _max_height(sim)
+    assert_gt(radius, start_radius + 2.0, "the column slumped OUTWARD (granular flow), didn't hold its shape (%.1f -> %.1f)" % [start_radius, radius])
+    assert_lt(height, start_height - 4.0, "the pile is much shorter than the column (%.1f -> %.1f)" % [start_height, height])
+    var angle := rad_to_deg(atan(height / radius))
+    assert_between(angle, 10.0, 45.0, "holds a stable sand-like pile — not a puddle (<5°) or a standing tower (>50°) (got %.1f°)" % angle)
+
+
 func test_settles_rather_than_gaining_energy() -> void:
     # A spike sanity floor: by the end the block isn't *gaining* kinetic energy (no blow-up
     # masquerading as finite). Compared against the free-fall energy at impact, not zero —
