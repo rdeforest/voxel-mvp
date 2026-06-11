@@ -53,19 +53,7 @@ func _ready() -> void:
     _awake_overlay = AwakeOverlay.new()
     add_child(_awake_overlay)
     _awake_overlay.setup(self)
-    _pbd_structure = PbdStructure.new()
-    _pbd_structure.name = "PbdStructure"   # ActionFactories resolves the probe target by this name
-    add_child(_pbd_structure)
-    _pbd_structure.setup(_integrity)
-    _integrity.pbd = _pbd_structure
-    _pbd_structure.set_enabled(true)   # PBD is authoritative; the old collapse systems stand down
-    # The PB-MPM substrate (doc 12) that will replace PBD. Created alongside; idle until the
-    # `physics_mode mpm` console command flips StructuralIntegrity.mpm_mode (and disables PBD).
-    _mpm_structure = MpmStructure.new()
-    _mpm_structure.name = "MpmStructure"
-    add_child(_mpm_structure)
-    _mpm_structure.setup(_edit_store.store)
-    _integrity.mpm = _mpm_structure
+    _wire_structural_sims()
     _wire_console()
     # Pull the OS window forward and take keyboard focus on launch, so an F5 from
     # the editor doesn't leave keystrokes landing in the script. Deferred so the
@@ -73,6 +61,23 @@ func _ready() -> void:
     # focus back to whatever the pointer is over, so this only sticks if the game
     # spawns under the cursor.
     _grab_os_focus.call_deferred()
+
+# The two structural sims. PBD is authoritative today; the PB-MPM substrate (doc 12) is created
+# alongside, idle until the `physics_mode mpm` console command flips StructuralIntegrity.mpm_mode
+# (and disables PBD). Replacing PBD outright (default mpm, delete PBD) is increment C.
+func _wire_structural_sims() -> void:
+    _pbd_structure = PbdStructure.new()
+    _pbd_structure.name = "PbdStructure"   # ActionFactories resolves the probe target by this name
+    add_child(_pbd_structure)
+    _pbd_structure.setup(_integrity)
+    _integrity.pbd = _pbd_structure
+    _pbd_structure.set_enabled(true)       # PBD authoritative; the old collapse systems stand down
+
+    _mpm_structure = MpmStructure.new()
+    _mpm_structure.name = "MpmStructure"
+    add_child(_mpm_structure)
+    _mpm_structure.setup(_edit_store.store)
+    _integrity.mpm = _mpm_structure
 
 func _wire_console() -> void:
     _console = ConsoleCommands.new()
