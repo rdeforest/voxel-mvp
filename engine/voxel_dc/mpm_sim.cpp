@@ -97,6 +97,106 @@ double Mat3::determinant() const {
 			m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
 }
 
+// Eigendecomposition of a symmetric 3×3 by cyclic Jacobi: S = V · diag(eval) · Vᵀ, columns
+// of V the eigenvectors. Applying each Givens rotation as a full 3×3 product is trivially
+// cheap at this size and avoids hand-derived (bug-prone) in-place update formulas.
+static void symmetric_eigen(const Mat3 &s_in, Mat3 &v, double eval[3]) {
+	Mat3 a = s_in;
+	v = Mat3::identity();
+	static const int P[3] = { 0, 0, 1 };
+	static const int Q[3] = { 1, 2, 2 };
+	for (int sweep = 0; sweep < 16; sweep++) {
+		double off = Math::abs(a.m[0][1]) + Math::abs(a.m[0][2]) + Math::abs(a.m[1][2]);
+		if (off < 1e-300) {
+			break;
+		}
+		for (int t = 0; t < 3; t++) {
+			const int p = P[t], q = Q[t];
+			const double apq = a.m[p][q];
+			if (Math::abs(apq) < 1e-300) {
+				continue;
+			}
+			// Angle that zeros a_pq under A ← JᵀAJ: tan(2φ) = 2·a_pq / (a_qq − a_pp).
+			const double phi = 0.5 * Math::atan2(2.0 * apq, a.m[q][q] - a.m[p][p]);
+			const double c = Math::cos(phi), sn = Math::sin(phi);
+			Mat3 j = Mat3::identity();
+			j.m[p][p] = c;
+			j.m[q][q] = c;
+			j.m[p][q] = sn;
+			j.m[q][p] = -sn;
+			a = j.transposed() * a * j; // A ← Jᵀ A J
+			v = v * j; // accumulate eigenvectors
+		}
+	}
+	eval[0] = a.m[0][0];
+	eval[1] = a.m[1][1];
+	eval[2] = a.m[2][2];
+}
+
+void Mat3::svd(Mat3 &u, double sigma[3], Mat3 &v) const {
+	double eval[3];
+	symmetric_eigen(transposed() * (*this), v, eval); // V, σ² from FᵀF
+	double sig[3] = { Math::sqrt(MAX(eval[0], 0.0)), Math::sqrt(MAX(eval[1], 0.0)), Math::sqrt(MAX(eval[2], 0.0)) };
+
+	// Sort columns of V (and σ) by descending magnitude so the reflection lands on the
+	// smallest singular value (the fixed-corotated / Drucker-Prager convention).
+	int order[3] = { 0, 1, 2 };
+	for (int i = 0; i < 3; i++) {
+		for (int j = i + 1; j < 3; j++) {
+			if (sig[order[j]] > sig[order[i]]) {
+				const int tmp = order[i];
+				order[i] = order[j];
+				order[j] = tmp;
+			}
+		}
+	}
+	Mat3 vs;
+	double ss[3];
+	for (int i = 0; i < 3; i++) {
+		ss[i] = sig[order[i]];
+		for (int r = 0; r < 3; r++) {
+			vs.m[r][i] = v.m[r][order[i]];
+		}
+	}
+	v = vs;
+
+	// U = F V Σ⁻¹ column by column (F·v_i = σ_i u_i). A (near-)zero σ leaves an undefined
+	// column — fill it with the cross product of the other two to keep U orthonormal.
+	const Mat3 fv = (*this) * v;
+	for (int i = 0; i < 3; i++) {
+		if (ss[i] > 1e-12) {
+			for (int r = 0; r < 3; r++) {
+				u.m[r][i] = fv.m[r][i] / ss[i];
+			}
+		} else {
+			const int a = (i + 1) % 3, b = (i + 2) % 3;
+			const Vector3 ca(u.m[0][a], u.m[1][a], u.m[2][a]);
+			const Vector3 cb(u.m[0][b], u.m[1][b], u.m[2][b]);
+			const Vector3 cr = ca.cross(cb).normalized();
+			u.m[0][i] = cr.x;
+			u.m[1][i] = cr.y;
+			u.m[2][i] = cr.z;
+		}
+	}
+
+	// Make U and V proper rotations; absorb any reflection into the smallest singular value.
+	if (v.determinant() < 0.0) {
+		v.m[0][2] = -v.m[0][2];
+		v.m[1][2] = -v.m[1][2];
+		v.m[2][2] = -v.m[2][2];
+		ss[2] = -ss[2];
+	}
+	if (u.determinant() < 0.0) {
+		u.m[0][2] = -u.m[0][2];
+		u.m[1][2] = -u.m[1][2];
+		u.m[2][2] = -u.m[2][2];
+		ss[2] = -ss[2];
+	}
+	sigma[0] = ss[0];
+	sigma[1] = ss[1];
+	sigma[2] = ss[2];
+}
+
 // --- MpmSim ---
 
 void MpmSim::configure(Vector3 origin, int dim, double dx, Vector3 gravity, double E, double nu, double floor_y) {
@@ -147,20 +247,33 @@ void MpmSim::_stencil(const Vector3 &pos, int base[3], Vector3 &fx, double w[3][
 	}
 }
 
+// Kirchhoff stress τ = P Fᵀ for the active constitutive model.
+Mat3 MpmSim::_kirchhoff(const Mat3 &f) const {
+	if (_material == 1) { // fixed-corotated: τ = 2μ(F−R)Fᵀ + λ J(J−1) I, R = U Vᵀ
+		Mat3 u, v;
+		double s[3];
+		f.svd(u, s, v);
+		const Mat3 r = u * v.transposed();
+		const double J = s[0] * s[1] * s[2];
+		return (f - r).scaled(2.0 * _mu) * f.transposed() + Mat3::identity().scaled(_lambda * J * (J - 1.0));
+	}
+	// neo-Hookean: τ = μ(FFᵀ − I) + λ ln(J) I
+	double J = f.determinant();
+	if (J < 1e-4) {
+		J = 1e-4; // guard a (near-)inverted particle so ln(J) stays finite
+	}
+	return (f * f.transposed() - Mat3::identity()).scaled(_mu) + Mat3::identity().scaled(_lambda * Math::log(J));
+}
+
 // Scatter particle mass + momentum (incl. the internal-stress affine term) to the grid.
 void MpmSim::_p2g(double dt) {
 	const double dinv = 4.0 * _inv_dx * _inv_dx; // quadratic-kernel D⁻¹
 	const int np = int(_x.size());
 	for (int p = 0; p < np; p++) {
 		// Advance the deformation gradient with last step's affine velocity, then take the
-		// neo-Hookean Kirchhoff stress τ = μ(FFᵀ − I) + λ ln(J) I.
+		// internal-stress term from the constitutive model.
 		_F[p] = (Mat3::identity() + _C[p].scaled(dt)) * _F[p];
-		double J = _F[p].determinant();
-		if (J < 1e-4) {
-			J = 1e-4; // guard a (near-)inverted particle so ln(J) stays finite
-		}
-		const Mat3 FFt = _F[p] * _F[p].transposed();
-		const Mat3 tau = (FFt - Mat3::identity()).scaled(_mu) + Mat3::identity().scaled(_lambda * Math::log(J));
+		const Mat3 tau = _kirchhoff(_F[p]);
 		const Mat3 affine = tau.scaled(-dt * _vol[p] * dinv) + _C[p].scaled(_mass[p]);
 
 		int base[3];
@@ -283,8 +396,42 @@ bool MpmSim::is_finite() const {
 	return true;
 }
 
+Dictionary MpmSim::debug_svd(Basis m) const {
+	Mat3 f;
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			f.m[i][j] = m.rows[i][j];
+		}
+	}
+	Mat3 u, v;
+	double s[3];
+	f.svd(u, s, v);
+	Mat3 sig = Mat3::zero();
+	sig.m[0][0] = s[0];
+	sig.m[1][1] = s[1];
+	sig.m[2][2] = s[2];
+	const Mat3 recon = u * sig * v.transposed();
+	double err = 0.0;
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			const double d = recon.m[i][j] - f.m[i][j];
+			err += d * d;
+		}
+	}
+	Dictionary out;
+	out["error"] = Math::sqrt(err);
+	out["det_u"] = u.determinant();
+	out["det_v"] = v.determinant();
+	out["s0"] = s[0];
+	out["s1"] = s[1];
+	out["s2"] = s[2];
+	return out;
+}
+
 void MpmSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("configure", "origin", "dim", "dx", "gravity", "E", "nu", "floor_y"), &MpmSim::configure);
+	ClassDB::bind_method(D_METHOD("set_material", "m"), &MpmSim::set_material);
+	ClassDB::bind_method(D_METHOD("debug_svd", "m"), &MpmSim::debug_svd);
 	ClassDB::bind_method(D_METHOD("add_particle", "pos", "mass", "volume"), &MpmSim::add_particle);
 	ClassDB::bind_method(D_METHOD("step", "dt"), &MpmSim::step);
 	ClassDB::bind_method(D_METHOD("particle_count"), &MpmSim::particle_count);

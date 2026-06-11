@@ -32,7 +32,15 @@ struct Mat3 {
 	Vector3 xform(const Vector3 &v) const; // m · v
 	Mat3 transposed() const;
 	double determinant() const;
+
+	// Signed SVD: this = U · diag(sigma) · Vᵀ, with U and V proper rotations (det = +1) and
+	// sigma sorted by descending magnitude (the last may be negative, absorbing a reflection
+	// — the convention fixed-corotated/Drucker-Prager want so they can handle inversion).
+	void svd(Mat3 &u, double sigma[3], Mat3 &v) const;
 };
+
+#include "core/math/basis.h"
+#include "core/variant/dictionary.h"
 
 class MpmSim : public RefCounted {
 	GDCLASS(MpmSim, RefCounted)
@@ -59,6 +67,13 @@ class MpmSim : public RefCounted {
 	double _mu = 0.0;          // Lamé μ (shear)
 	double _lambda = 0.0;      // Lamé λ
 
+	// Constitutive model. NEO_HOOKEAN needs no SVD (the increment-1 default); COROTATED
+	// uses the polar rotation R = UVᵀ so a stiff body holds its shape and rotates rigidly.
+	int _material = 0;         // 0 = neo-Hookean, 1 = fixed-corotated
+
+	// Kirchhoff stress τ for a deformation gradient, per the active material model.
+	Mat3 _kirchhoff(const Mat3 &f) const;
+
 	// Floor collider at world y = _floor_y: grid nodes at/below it lose downward velocity
 	// and have tangential velocity scaled by (1 − _friction). The first SDF-collider proof;
 	// the EditStore-SDF collider replaces this in a later increment.
@@ -78,8 +93,13 @@ class MpmSim : public RefCounted {
 public:
 	// E = Young's modulus, nu = Poisson's ratio → Lamé μ, λ.
 	void configure(Vector3 origin, int dim, double dx, Vector3 gravity, double E, double nu, double floor_y);
+	void set_material(int m) { _material = m; }
 	int add_particle(Vector3 pos, double mass, double volume);
 	void step(double dt);
+
+	// Test hook: SVD a matrix and report {error (reconstruction Frobenius), det_u, det_v,
+	// s0, s1, s2}. Lets the GDScript suite pin the SVD — the riskiest numerical code here.
+	Dictionary debug_svd(Basis m) const;
 
 	int particle_count() const { return int(_x.size()); }
 	Vector3 get_position(int i) const { return _x[i]; }

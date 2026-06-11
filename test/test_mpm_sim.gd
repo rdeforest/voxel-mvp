@@ -50,6 +50,48 @@ func test_block_falls_and_rests_on_the_floor_without_tunnelling() -> void:
     assert_gt(end_avg, FLOOR_Y - 0.2, "the block rests on the floor, not below it (avg %.2f)" % end_avg)
 
 
+func _check_svd(basis: Basis, label: String) -> void:
+    var r := MpmSim.new().debug_svd(basis)
+    assert_almost_eq(r["error"], 0.0, 1e-9, "%s: U·Σ·Vᵀ reconstructs the matrix" % label)
+    assert_almost_eq(r["det_u"], 1.0, 1e-9, "%s: U is a proper rotation" % label)
+    assert_almost_eq(r["det_v"], 1.0, 1e-9, "%s: V is a proper rotation" % label)
+    # σ₀·σ₁·σ₂ = det(F) (signed) — the reflection rides on the smallest singular value.
+    var prod: float = r["s0"] * r["s1"] * r["s2"]
+    assert_almost_eq(prod, basis.determinant(), 1e-9, "%s: Πσ = det(F)" % label)
+    assert_true(r["s0"] >= r["s1"] and r["s1"] >= abs(r["s2"]), "%s: singular values sorted by magnitude" % label)
+
+
+func test_svd_reconstructs_known_matrices() -> void:
+    _check_svd(Basis.IDENTITY, "identity")
+    _check_svd(Basis.IDENTITY.scaled(Vector3(2.0, 1.0, 0.5)), "diagonal scale")
+    _check_svd(Basis.from_euler(Vector3(0.3, 0.5, 0.7)), "pure rotation")
+    _check_svd(Basis.from_euler(Vector3(0.3, 0.5, 0.7)).scaled(Vector3(3.0, 1.5, 0.7)), "rotation·scale")
+
+
+func test_svd_signed_convention_handles_reflection() -> void:
+    # A negative determinant (reflection) must come back as ONE negative singular value with
+    # U, V still proper rotations — the convention fixed-corotated/Drucker-Prager rely on.
+    var reflected := Basis.IDENTITY.scaled(Vector3(2.0, 1.0, -0.5))
+    var r := MpmSim.new().debug_svd(reflected)
+    assert_almost_eq(r["error"], 0.0, 1e-9, "reconstructs the reflected matrix")
+    assert_almost_eq(r["det_u"], 1.0, 1e-9, "U stays a rotation")
+    assert_almost_eq(r["det_v"], 1.0, 1e-9, "V stays a rotation")
+    assert_lt(r["s2"], 0.0, "the reflection is absorbed as a negative smallest singular value")
+
+
+func test_corotated_block_also_falls_and_rests() -> void:
+    # The fixed-corotated model (which uses the SVD every step) must run as stably as
+    # neo-Hookean on the drop: stay finite, fall, land on the floor without tunnelling.
+    var sim := _block(Vector3i(-2, 4, -2), Vector3i(2, 6, 2))
+    sim.set_material(1)
+    var start_y := sim.average_position().y
+    for _i in STEPS:
+        sim.step(DT)
+    assert_true(sim.is_finite(), "fixed-corotated stayed finite over the drop")
+    assert_lt(sim.average_position().y, start_y - 2.0, "the corotated block fell")
+    assert_gt(sim.lowest_y(), FLOOR_Y - 0.6, "no tunnelling under fixed-corotated")
+
+
 func test_settles_rather_than_gaining_energy() -> void:
     # A spike sanity floor: by the end the block isn't *gaining* kinetic energy (no blow-up
     # masquerading as finite). Compared against the free-fall energy at impact, not zero —
