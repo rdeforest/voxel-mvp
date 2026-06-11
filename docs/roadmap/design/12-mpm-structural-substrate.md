@@ -106,6 +106,18 @@ elastic particles with `cond(F) > 1e6` (liquids use an objective volume measure 
 the 88-line reference) — exactly what the spike implemented; PB-MPM keeps it and changes only
 the time integration. So our `MpmSim` is already most of the way there.
 
+**Status — DONE (elastic), 2026-06-11.** `MpmSim` was converted to PB-MPM (`mpm_sim.cpp` +
+`mpm_material.cpp`), following the EA reference ([github.com/electronicarts/pbmpm](https://github.com/electronicarts/pbmpm)).
+Everything works in displacement; a step iterates [SolveConstraints → P2G → GridUpdate → G2P]
+then integrates (gravity seeded as `d.y -= g·dt²`). The MLS-MPM transfers, 3×3 SVD, SDF collider
+(now displacement-form contact), sparse sleeping, and thaw/freeze coupling all carried over.
+**Unconditional stability confirmed**: a block runs stably at **dt = 0.2** (200× the explicit CFL
+that NaN'd the old solver) and still falls + rests. Caveat: over-driving the constraint (high
+relaxation + many iterations + the volume-preserving target) can diverge; the stable default is
+an under-relaxed rotation target. **Next: PB-MPM sand** (Drucker-Prager on the integrated F +
+`logJp` — the verbatim algorithm is in the EA `particleIntegrate` shader), then the static-terrain
+thaw/freeze seam, then world wiring.
+
 ## TL;DR
 
 PBD (Position Based Dynamics) is the fastest, least physical member of the
