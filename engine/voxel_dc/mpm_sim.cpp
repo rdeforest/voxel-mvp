@@ -334,6 +334,7 @@ void MpmSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("wake_all"), &MpmSim::wake_all);
 	ClassDB::bind_method(D_METHOD("wake_region", "center", "radius"), &MpmSim::wake_region);
 	ClassDB::bind_method(D_METHOD("debug_svd", "m"), &MpmSim::debug_svd);
+	ClassDB::bind_method(D_METHOD("rasterize_to_store", "store", "cell", "radius", "material_index"), &MpmSim::rasterize_to_store);
 	ClassDB::bind_method(D_METHOD("add_particle", "pos", "mass", "volume"), &MpmSim::add_particle);
 	ClassDB::bind_method(D_METHOD("step", "dt"), &MpmSim::step);
 	ClassDB::bind_method(D_METHOD("particle_count"), &MpmSim::particle_count);

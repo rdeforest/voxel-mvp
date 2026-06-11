@@ -122,6 +122,10 @@ public:
 	// s0, s1, s2}. Lets the GDScript suite pin the SVD — the riskiest numerical code here.
 	Dictionary debug_svd(Basis m) const;
 
+	// FREEZE (thaw/freeze coupling, mpm_couple.cpp): rasterise the current particles into the
+	// EditStore as SDF + material over their bounding box. Returns {origin, dim} of the region.
+	Dictionary rasterize_to_store(Ref<EditStore> store, double cell, double radius, int material_index);
+
 	int particle_count() const { return int(_x.size()); }
 	Vector3 get_position(int i) const { return _x[i]; }
 	Vector3 get_velocity(int i) const { return _v[i]; }
