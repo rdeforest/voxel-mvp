@@ -9,6 +9,7 @@ var _dc_collision: DCCollisionManager
 var _awake_overlay: AwakeOverlay
 var _pbd_structure: PbdStructure
 var _edit_store: EditStoreManager
+var _part_index: PartIndex
 var _console: ConsoleCommands
 
 # World-ready gate: gameplay + physics systems start inactive and resume on a
@@ -29,6 +30,7 @@ func _ready() -> void:
     # The EditStore is the authoritative terrain (SDF + material). Build it, restore any saved
     # edits, then hand it to everything that reads or writes terrain: render, collision, the
     # structural tracking, and (lazily, via edit_store_ref) the player's actions.
+    _part_index = PartIndex.new()   # identity sidecar; subscribes to part_placed / voxel_removed
     _edit_store = EditStoreManager.new()
     _edit_store.setup()
     if not resetting and SavePaths.editstore_exists():
@@ -65,6 +67,7 @@ func _ready() -> void:
     _console.player            = _player
     _console.awake_overlay     = _awake_overlay
     _console.edit_store        = _edit_store
+    _console.part_index        = _part_index
     _console.register_all()
     # Pull the OS window forward and take keyboard focus on launch, so an F5 from
     # the editor doesn't leave keystrokes landing in the script. Deferred so the

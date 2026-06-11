@@ -65,6 +65,10 @@ func execute() -> void:
     var xform := _xform()
     var work  := VoxelImprint.compute(store, shape, xform, CsgState.Op.ADD)
     VoxelImprint.apply(store, work, material_name, VoxelImprint.world_box(shape, xform))
+    # Record the placement's identity in the PartIndex sidecar (the field stays pure).
+    VoxelEventBusSingleton.emit(
+        PartPlacedEvent.CHANNEL,
+        PartPlacedEvent.new(VoxelConstants.GRID_ID, _part_cells(), material_name, part.dimensions, xform))
 
 
 # --- internals ---

@@ -21,6 +21,7 @@ var integrity:         StructuralIntegrity
 var player:            CharacterBody3D
 var awake_overlay:     AwakeOverlay
 var edit_store:        EditStoreManager
+var part_index:        PartIndex
 
 var _pbd_demo: PbdDemo   # lazily spawned by `pbddemo`
 
@@ -186,7 +187,7 @@ func settle() -> void:
     LimboConsole.info("settled — quiescent: %s" % integrity.is_quiescent())
 
 func parts() -> void:
-    LimboConsole.info("parts: %d" % integrity.part_support.part_registry.size())
+    LimboConsole.info("parts: %d (PartIndex)" % part_index.count())
 
 func voxels() -> void:
     LimboConsole.info("tracked voxels: %d" % integrity.terrain_support.voxel_data.size())
