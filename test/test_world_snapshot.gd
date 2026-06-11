@@ -18,15 +18,6 @@ class TestSnapshotSerialization:
             {"pos": Vector3i(0, 0, 0),    "material": "Stone", "support": 1.0},
             {"pos": Vector3i(10, -5, 20), "material": "Dirt",  "support": 0.7},
         ],
-        "parts": [
-            {
-                "part_path":   "res://assets/parts/beam/beam.tres",
-                "material":    "Wood",
-                "placement_y": 4.0,
-                "transform":   Transform3D.IDENTITY,
-                "cells":       [Vector3i(0, 0, 0), Vector3i(1, 0, 0)] as Array[Vector3i],
-            },
-        ],
     }
 
     func test_roundtrip_preserves_types():
@@ -37,8 +28,6 @@ class TestSnapshotSerialization:
         assert_eq(deserialized["player"]["build_rotation"],  Vector3i(1, 2, 3))
         assert_eq(deserialized["voxels"][0]["pos"],          Vector3i(0, 0, 0))
         assert_eq(deserialized["voxels"][1]["material"],     "Dirt")
-        assert_eq(deserialized["parts"][0]["transform"],     Transform3D.IDENTITY)
-        assert_eq(deserialized["parts"][0]["cells"][1],      Vector3i(1, 0, 0))
 
     func test_material_resolves_after_roundtrip():
         var deserialized = str_to_var(var_to_str(snap))
@@ -54,7 +43,6 @@ class TestSnapshotFileIO:
         "version": WorldSnapshot.VERSION,
         "player":  {},
         "voxels":  [{"pos": Vector3i(5, 6, 7), "material": "Stone"}],
-        "parts":   [],
     }
 
     func after_each():

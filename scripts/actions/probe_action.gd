@@ -42,7 +42,6 @@ func execute() -> void:
     var sdf       := store.sample(Vector3(cell))
     var is_solid  := sdf < VoxelConstants.SDF_SOLID_THRESHOLD
     var tracked   := integrity.terrain_support.voxel_data.has(cell)
-    var has_part  := integrity.has_part_cell(cell)
 
     LimboConsole.info("Cell %s" % cell)
     LimboConsole.info("  SDF      %.3f (%s)" % [sdf, "solid" if is_solid else "air"])
@@ -52,7 +51,6 @@ func execute() -> void:
         LimboConsole.info("  support  %.3f"  % rec.support)
         LimboConsole.info("  dirty    %s"    % rec.dirty)
         LimboConsole.info("  material %s"    % rec.material.name)
-    LimboConsole.info("  part     %s" % has_part)
     _log_pbd(cell)
 
 

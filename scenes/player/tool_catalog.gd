@@ -1,11 +1,11 @@
 class_name ToolCatalog
 extends RefCounted
 
-# Four top-level tools, each holding a list of activity EditModes:
+# Top-level tools, each holding a list of activity EditModes:
 #   None         — probe-only
 #   Landscape    — Dig, Fill, Flatten, Raise, Lower, FillVoxel, EmptyVoxel
-#   Construction — Build, Remove
-#   Assembly     — Add Snap, Remove Snap (edit a placed part's snap points)
+#   Construction — Build, Remove (parts are voxels; Remove digs them back out)
+#   CSG          — Box, Cylinder, Sphere primitives
 
 var tools: Array[Tool] = []
 
@@ -53,12 +53,7 @@ func _build_catalog(af: ActionFactories, bs: BuildState, cs: CsgState) -> Array[
             .air_placement(   true)                                                                          \
             .placement_offset(true),
 
-        EditMode.new().named("Remove").on_make_action(af.make_removal),
-    ]
-
-    var assembly_activities: Array[EditMode] = [
-        EditMode.new().named("Add Snap").on_make_action(af.make_add_snap),
-        EditMode.new().named("Remove Snap").on_make_action(af.make_remove_snap),
+        EditMode.new().named("Remove").on_make_action(af.make_dig),
     ]
 
     var csg_activities: Array[EditMode] = [
@@ -71,7 +66,6 @@ func _build_catalog(af: ActionFactories, bs: BuildState, cs: CsgState) -> Array[
         Tool.new("None",         none_activities),
         Tool.new("Landscape",    landscape_activities),
         Tool.new("Construction", construction_activities),
-        Tool.new("Assembly",     assembly_activities),
         Tool.new("CSG",          csg_activities),
     ]
 

@@ -7,16 +7,12 @@ var dirty_queue:          Array[Vector3i]                   = []
 var _lowest_registered_y: Dictionary                        = {}
 
 var store:                EditStore   # SDF source (generator + edits); injected by StructuralIntegrity
-var _part_support:        PartSupport
 
 
 func _init() -> void:
     VoxelEventBusSingleton.subscribe(VoxelAddedEvent.CHANNEL,        _on_voxel_added)
     VoxelEventBusSingleton.subscribe(VoxelRemovedEvent.CHANNEL,      _on_voxel_removed)
     VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_terrain_sdf_changed)
-
-func bind_part_support(ps) -> void:
-    _part_support = ps
 
 
 # --- Bus handlers ---
@@ -144,7 +140,6 @@ func _calculate_support(pos: Vector3i) -> float:
 
 # Classification cascade, priority order:
 #   tracked voxel  → its support
-#   part-occupied  → best support across the stacked parts
 #   solid above    → skip (gravity flows down)
 #   solid bedrock  → VoxelConstants.FULL_SUPPORT
 #   suspended mass → lazy-register, then skip
@@ -152,8 +147,6 @@ func _calculate_support(pos: Vector3i) -> float:
 func _support_from_neighbor(neighbor: Vector3i, self_pos: Vector3i, self_support: float) -> float:
     if voxel_data.has(neighbor):
         return voxel_data[neighbor].support
-    if _part_support != null and _part_support.has_part_cell(neighbor):
-        return _part_support.best_support_at(neighbor)
     if not _is_terrain_solid(neighbor):
         return VoxelConstants.NO_SUPPORT
     if neighbor.y > self_pos.y:

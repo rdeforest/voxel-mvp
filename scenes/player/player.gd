@@ -8,7 +8,6 @@ var action_factories:  ActionFactories
 var tool_catalog:      ToolCatalog
 var _grid_overlay:     Node3D
 var _preview_renderer: Node3D
-var _snap_overlay:     Node3D
 var _help_overlay:     HelpOverlay
 
 var tool_index:        int       = 0
@@ -48,7 +47,7 @@ func _ready() -> void:
     _camera_rig       = CameraRig.new(self, $Head)
     build_state       = BuildState.new()
     csg_state         = CsgState.new()
-    action_factories  = ActionFactories.new(self, integrity, camera, raycast, build_state, csg_state)
+    action_factories  = ActionFactories.new(self, integrity, camera, build_state, csg_state)
     tool_catalog      = ToolCatalog.new(action_factories, build_state, csg_state)
     _activity_indices.resize(tool_catalog.tools.size())   # all zero
     build_state.changed.connect(_update_mode_label)
@@ -57,8 +56,6 @@ func _ready() -> void:
     _create_overlays()
 
     VoxelEventBusSingleton.subscribe(WorldReadyEvent.CHANNEL, _on_world_ready)
-
-    _wire_debug_raycast.call_deferred()
 
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
@@ -79,10 +76,6 @@ func _create_overlays() -> void:
     _preview_renderer = preload("res://scenes/player/voxel_preview_renderer.gd").new()
     _preview_renderer.player = self
     get_parent().add_child.call_deferred(_preview_renderer)
-
-    _snap_overlay = preload("res://scenes/player/snap_point_overlay.gd").new()
-    _snap_overlay.player = self
-    get_parent().add_child.call_deferred(_snap_overlay)
 
     _help_overlay = HelpOverlay.new()
     add_child(_help_overlay)
@@ -120,13 +113,6 @@ func _build_input_map() -> void:
     _mouse_button_actions = {
         MOUSE_BUTTON_LEFT: _try_edit_terrain,
     }
-
-
-# Deferred because StructuralIntegrity constructs its `part_support` component in
-# *its* _ready, after Player._ready. (part_support.raycast feeds the old strain-glow
-# proximity test, used only when PBD is disabled.)
-func _wire_debug_raycast() -> void:
-    integrity.part_support.raycast = raycast
 
 
 func current_tool() -> Tool:

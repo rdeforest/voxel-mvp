@@ -2,16 +2,14 @@ class_name PbdStructure
 extends Node3D
 
 # Live PBD over the REAL tracked structural set: derives a spring network (PbdSim,
-# C++) from the current tracked voxels (TerrainSupport.voxel_data) + placed parts
-# (PartSupport.part_registry), with anchors from TerrainSupport.is_natural_terrain,
-# steps the solver each physics tick, and renders member stress in-world (once per
-# rendered frame). Rebuilds on any structural edit (bus). AUTHORITATIVE while enabled
-# (enabled by default at world startup): when a member breaks and a component comes
-# loose, terrain cells are carved out of the SDF + handed to FallingBodyFactory and
-# detached parts drop whole; the old PartSupport strain/collapse stands down via
-# StructuralIntegrity.part_collapse_enabled (terrain has no old system left).
-# `physics_active` toggles it; the `V` key toggles the stress-line overlay. Reports its
-# per-tick cost to the Perf overlay.
+# C++) from the current tracked voxels (TerrainSupport.voxel_data — parts are imprinted
+# into the field, so they're tracked voxels too), with anchors from
+# TerrainSupport.is_natural_terrain, steps the solver each physics tick, and renders
+# member stress in-world (once per rendered frame). Rebuilds on any structural edit
+# (bus). AUTHORITATIVE while enabled (enabled by default at world startup): when a member
+# breaks and a component comes loose, its cells are carved out of the SDF + handed to
+# FallingBodyFactory. `physics_active` toggles it; the `V` key toggles the stress-line
+# overlay. Reports its per-tick cost to the Perf overlay.
 
 
 var _integrity: StructuralIntegrity
@@ -41,8 +39,7 @@ func setup(integrity: StructuralIntegrity) -> void:
     _mi.visible = false
     add_child(_mi)
     for channel in [
-            TerrainSdfChangedEvent.CHANNEL, VoxelAddedEvent.CHANNEL, VoxelRemovedEvent.CHANNEL,
-            PartAddedEvent.CHANNEL, PartRemovedEvent.CHANNEL]:
+            TerrainSdfChangedEvent.CHANNEL, VoxelAddedEvent.CHANNEL, VoxelRemovedEvent.CHANNEL]:
         VoxelEventBusSingleton.subscribe(channel, _on_structural_change)
     VoxelEventBusSingleton.subscribe(WorldReadyEvent.CHANNEL, _on_world_ready)
 
@@ -50,10 +47,6 @@ func setup(integrity: StructuralIntegrity) -> void:
 func set_enabled(on: bool) -> void:
     _enabled = on
     _mi.visible = on and _viz_visible
-    # Take collapse authority while on (the old PartSupport strain/collapse stands
-    # down so two systems don't both act); hand it back when off.
-    if is_instance_valid(_integrity):
-        _integrity.part_collapse_enabled = not on
     if on:
         _dirty = true
     else:
@@ -163,13 +156,11 @@ func _physics_process(delta: float) -> void:
     Perf.report("PBD (%d nodes)" % (_sim.node_count() if _sim != null else 0), (Time.get_ticks_usec() - t0) / 1000.0)
 
 
-# A member broke; any component that's now anchorless is falling. Terrain cells get
-# carved + handed to the falling-body pipeline; any Part with a detached cell drops
-# whole (a part is an atomic Node3D — it can't half-fall). Then rebuild.
+# A member broke; any component that's now anchorless is falling. Its cells (all
+# tracked terrain voxels — parts are imprinted into the field) get carved + handed
+# to the falling-body pipeline. Then rebuild.
 func _handle_detachment() -> void:
     var ts := _integrity.terrain_support
-    var ps := _integrity.part_support
-    var detached_parts := {}   # Node3D -> true (dedup; a part spans many cells)
     var collapsed := false
     for comp in _sim.get_detached_components():
         var cells: Array[Vector3i] = []
@@ -177,19 +168,12 @@ func _handle_detachment() -> void:
             var cell: Vector3i = _cell_of_node[idx]
             if ts.voxel_data.has(cell):
                 cells.append(cell)
-            else:
-                for part in ps.parts_at_cell(cell):
-                    detached_parts[part] = true
         if not cells.is_empty():
             _collapse(cells)
             collapsed = true
-    for part in detached_parts:
-        ps.collapse_part(part)
-        collapsed = true
-    # Rebuild NOW, not next tick: _collapse erased the terrain cells from voxel_data
-    # and collapse_part dropped the parts from the registry (both synchronous), so the
-    # detached nodes vanish from the network this frame instead of free-falling as
-    # stale green lines for a frame (250ms at 4fps). The freshly-built sim won't
+    # Rebuild NOW, not next tick: _collapse erased the detached cells from voxel_data
+    # (synchronous), so they vanish from the network this frame instead of free-falling
+    # as stale green lines for a frame (250ms at 4fps). The freshly-built sim won't
     # report broke_last_step until a real break, so this can't re-enter.
     if collapsed:
         _rebuild()
@@ -222,14 +206,9 @@ func _process(_dt: float) -> void:
 
 func _rebuild() -> void:
     var ts := _integrity.terrain_support
-    var ps := _integrity.part_support
     var cells := {}
     for cell in ts.voxel_data:
         cells[cell] = ts.voxel_data[cell].material
-    for node in ps.part_registry:
-        var data: PartData = ps.part_registry[node]
-        for c in data.cells:
-            cells[c] = data.material
     var is_natural := func(c: Vector3i) -> bool: return ts.is_natural_terrain(c)
     var r := PbdNetworkBuilder.build(cells, is_natural)
     _sim = r["sim"]

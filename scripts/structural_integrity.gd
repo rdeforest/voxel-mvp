@@ -5,17 +5,7 @@ extends Node
 var store:              EditStore   # SDF source (generator + edits); set by world.gd after the store exists
 
 var terrain_support:    TerrainSupport
-var part_support:       PartSupport
 var pbd:                PbdStructure       # set by world.gd; folded into is_quiescent
-
-var _strain_pulse_phase := 0.0
-
-# When false, the old PartSupport strain/collapse stands down because PbdStructure
-# owns part support + collapse. PBD sets this off whenever it's enabled. (Terrain
-# collapse has no old system left — PBD is the only path — so there's no terrain
-# flag; the support propagation that PBD's tracked-set expansion rides on still
-# runs unconditionally.)
-var part_collapse_enabled := true
 
 # Inactive until the world finishes loading (WorldReadyEvent) — don't classify
 # support or tick falling bodies against a half-streamed SDF.
@@ -23,9 +13,7 @@ var _active := false
 
 
 func _ready() -> void:
-    terrain_support    = TerrainSupport.new()
-    part_support       = PartSupport.new(terrain_support, self)
-    terrain_support.bind_part_support(part_support)
+    terrain_support = TerrainSupport.new()
 
 
 # world.gd injects the store once it exists (this Node's _ready runs first). Fans it out to
@@ -35,31 +23,17 @@ func set_store(p_store: EditStore) -> void:
     terrain_support.store = p_store
 
     VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_world_mutated)
-    VoxelEventBusSingleton.subscribe(PartRemovedEvent.CHANNEL,       _on_world_mutated)
     VoxelEventBusSingleton.subscribe(WorldReadyEvent.CHANNEL,        _on_world_ready)
 
-func _exit_tree() -> void:
-    # Break the TerrainSupport ↔ PartSupport reference cycle so the
-    # RefCounted components can free cleanly. Bus subscriptions auto-clean
-    # via WeakRef once the components' refcounts drop to zero.
-    if terrain_support != null:
-        terrain_support.bind_part_support(null)
 
-
-func _physics_process(delta: float) -> void:
+func _physics_process(_delta: float) -> void:
     if not _active:
         return
     var t0 := Time.get_ticks_usec()
-    # Support propagation + cell registration: always — PBD's tracked-set expansion
-    # rides on it (the suspended-mass discovery is gated on the scalar support).
+    # Support propagation + cell registration: PBD's tracked-set expansion rides on it
+    # (the suspended-mass discovery is gated on the scalar support).
     if not terrain_support.dirty_queue.is_empty():
         terrain_support.process_dirty_queue()
-
-    if part_collapse_enabled:   # old part system; off whenever PBD is authoritative
-        _strain_pulse_phase += delta * VoxelConstants.STRAIN_PULSE_HZ * TAU
-        var pulse := 0.5 + 0.5 * sin(_strain_pulse_phase)
-        part_support.tick_strain(delta, pulse)
-
     _tick_falling_bodies()
     Perf.report("Structural", (Time.get_ticks_usec() - t0) / 1000.0)
 
@@ -77,15 +51,6 @@ func _on_world_ready(_event: VoxelEvent) -> void:
 
 func get_support(pos: Vector3i) -> float:
     return terrain_support.get_support(pos)
-
-func has_part(node: Node3D) -> bool:
-    return part_support.has_part(node)
-
-func has_part_cell(pos: Vector3i) -> bool:
-    return part_support.has_part_cell(pos)
-
-func get_part_data(node: Node3D) -> PartData:
-    return part_support.part_registry.get(node)
 
 
 # --- Helpers ---
@@ -161,18 +126,3 @@ func is_quiescent() -> bool:
         var body := child as RigidBody3D
         if body != null and not body.sleeping:         return false
     return true
-
-const SUPPORT_COLOR_TIERS := [
-    [0.75, Color(0.0, 0.3, 1.0)],
-    [0.50, Color(0.0, 0.9, 0.2)],
-    [0.30, Color(1.0, 0.9, 0.0)],
-    [0.10, Color(1.0, 0.5, 0.0)],
-    [0.00, Color(1.0, 0.1, 0.0)],
-]
-const SUPPORT_COLOR_FAILED := Color(0.5, 0.0, 0.0)
-
-static func get_support_color(support: float) -> Color:
-    for tier in SUPPORT_COLOR_TIERS:
-        if support > tier[0]:
-            return tier[1]
-    return SUPPORT_COLOR_FAILED
