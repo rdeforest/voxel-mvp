@@ -20,8 +20,7 @@ extends MeshInstance3D
 # NOT yet: the default render (it overlays the clipmap, not replaces it); collision and
 # persistence still come from godot_voxel.
 
-# Terrain params — mirror tools/build_terrain_graph.gd. The terrain function now lives in
-# C++ (TerrainField); these are the tunables until the .tres graph retires with godot_voxel.
+# Terrain params — mirror TerrainField's terrain_defaults (the terrain function lives in C++).
 const BASE    := 30.0
 const AMP     := 140.0
 const PERIOD  := 1000.0

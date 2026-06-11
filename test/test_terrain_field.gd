@@ -1,12 +1,9 @@
 extends GutTest
 
 # TerrainField (C++): the procedural terrain as a fine analytic SDF field — the
-# store-over-generator baseline for the octree substrate (fine everywhere, no
-# godot_voxel mips). Two things must hold:
-#   1. FIDELITY — its surface matches the SAME ZN_FastNoiseLite the .tres graph's
-#      FastNoise2D node uses (so octree-meshed terrain agrees with godot_voxel-
-#      streamed terrain while the two coexist). These params mirror
-#      tools/build_terrain_graph.gd.
+# store-over-generator baseline for the octree substrate (fine everywhere). Two things
+# must hold:
+#   1. FIDELITY — its surface matches the params below (the single terrain definition).
 #   2. RECONSTRUCTION — imprinting it into the sparse octree reproduces that surface
 #      (the adaptive store captures a heightfield, not just analytic blobs).
 

@@ -3,20 +3,15 @@
 #include "core/object/class_db.h"
 
 #include "dc_octree_mesher.h"
-#include "dc_region_reader.h"
 #include "edit_store.h"
 #include "pbd_sim.h"
 #include "sparse_voxel_octree.h"
-#include "voxel_mesher_dc.h"
 
-// Module name is `voxel_dc`; Godot generates calls to these by that name. It
-// sorts after `voxel`, so VoxelMesher is registered before we subclass it.
+// Module name is `voxel_dc`; Godot generates calls to these by that name.
 void initialize_voxel_dc_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
-	ClassDB::register_class<VoxelMesherDC>();
-	ClassDB::register_class<DCRegionReader>();
 	ClassDB::register_class<DCOctreeMesher>();
 	ClassDB::register_class<PbdSim>();
 	ClassDB::register_class<SparseVoxelOctree>();

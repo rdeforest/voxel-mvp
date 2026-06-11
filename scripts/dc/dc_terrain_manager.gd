@@ -35,9 +35,6 @@ var _follow:  Node3D
 var _mesh_instance: MeshInstance3D
 var _enabled := false
 
-var _data_only := false
-var _pending_data_only := false  # wear the grass material once our first mesh lands
-var _debug_material: Material    # translucent cyan, used only in the dcmanager debug-overlay mode
 
 # The grass surface material worn by our mesh when DC is the default render. A standalone
 # resource (not the terrain node's) — Godot caches it by path, so the console `set`/`get` and
@@ -89,17 +86,11 @@ func setup(follow: Node3D, edit_store: EditStore) -> void:
     _edit_store = edit_store
     _follow  = follow
     _mesh_instance = MeshInstance3D.new()
-    var debug_mat := StandardMaterial3D.new()
-    debug_mat.albedo_color = Color(0.2, 1.0, 1.0, 0.55)
-    debug_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-    debug_mat.cull_mode    = BaseMaterial3D.CULL_DISABLED
-    _debug_material = debug_mat
+    _mesh_instance.material_override = terrain_material
     add_child(_mesh_instance)
-    _apply_render_swap()   # pick the initial mesh material (cyan until we're the default render)
-    # Re-mesh on terrain edits too (not just movement), so digs/builds show even
-    # with godot_voxel's render hidden. Bound method -> the bus weakrefs us and
-    # auto-prunes on scene reload. v1 re-meshes the whole clipmap; incremental
-    # (just the edited region) is a later optimization.
+    # Re-mesh on terrain edits too (not just movement), so digs/builds show. Bound method ->
+    # the bus weakrefs us and auto-prunes on scene reload. v1 re-meshes the whole clipmap;
+    # incremental (just the edited region) is a later optimization.
     VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_terrain_edit)
 
 
@@ -109,7 +100,6 @@ func set_enabled(on: bool) -> void:
         _last_center = Vector3.INF   # force an immediate re-mesh on next tick
     else:
         _mesh_instance.mesh = null
-    _apply_render_swap()
 
 
 func is_enabled() -> bool:
@@ -120,33 +110,9 @@ func remesh() -> void:
     _last_center = Vector3.INF
 
 
-# Data-only mode: hide godot_voxel's own render (render_layers_mask = 0) so our DC
-# mesh is what shows. Collision/data/streaming/edits stay live (collision is a
-# separate static body, unaffected by the render mask). Only takes effect while
-# the manager is enabled; disabling the manager restores godot_voxel's render.
-func set_data_only(on: bool) -> void:
-    _data_only = on
-    _apply_render_swap()
-
-
-func is_data_only() -> bool:
-    return _data_only
-
-
-# Make DC the default render: start meshing now, and hide godot_voxel's own render
-# the moment our first mesh lands (so there's no startup gap where neither shows).
-# The dcmanager / dcsolo console commands still override this by hand.
+# Make DC the terrain render: start meshing now.
 func start_default() -> void:
-    _pending_data_only = true
     set_enabled(true)
-
-
-func _apply_render_swap() -> void:
-    var as_terrain := _data_only and _enabled
-    if _mesh_instance != null:
-        # Default render: wear the grass surface material. Debug overlay (dcmanager without
-        # dcsolo): translucent cyan over godot_voxel.
-        _mesh_instance.material_override = terrain_material if as_terrain else _debug_material
 
 
 func _on_terrain_edit(event: TerrainSdfChangedEvent) -> void:
@@ -348,9 +314,6 @@ func _finish() -> void:
     _cache_arrays = _job_arrays           # this full build is now the splice base
     _cache_owners = _job_owners
     _cache_origin = _job_origin
-    if _pending_data_only:
-        _pending_data_only = false   # first mesh is up — now safe to hide godot_voxel
-        set_data_only(true)
     if log_timings:
         var verts: int = (_job_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
         print("DC clipmap: %d verts — read %d ms (main), mesh %d ms (worker)" % [

@@ -60,7 +60,7 @@ struct BoxField : public Field {
 	}
 };
 
-// A dense SDF grid (what DCRegionReader gives us for procedural terrain), sampled
+// A dense SDF grid (e.g. EditStore.fill_region), sampled
 // trilinearly — the bridge that lets the octree be built from real terrain. The data
 // pointer must outlive the imprint call. Layout: x-fastest, dim^3; world = origin +
 // lattice * cell. Clamped at the grid edge.

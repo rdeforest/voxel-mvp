@@ -1,5 +1,5 @@
-# Godot module config for voxel_dc (our Dual Contouring mesher). Depends on the
-# `voxel` module (godot_voxel) being present; subclasses its VoxelMesher.
+# Godot module config for voxel_dc (our Dual Contouring mesher + octree edit store).
+# Links against the `voxel` module (godot_voxel) for VoxelData/VoxelBuffer types.
 
 
 def can_build(env, platform):
@@ -8,13 +8,3 @@ def can_build(env, platform):
 
 def configure(env):
     pass
-
-
-def get_doc_classes():
-    return [
-        "VoxelMesherDC",
-    ]
-
-
-def get_doc_path():
-    return "doc_classes"

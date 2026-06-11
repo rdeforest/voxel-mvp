@@ -5,7 +5,7 @@
 // minimizes the sum of squared distances to the crossing tangent planes. Solved
 // via cyclic Jacobi eigen-decomposition of A^T A with small eigenvalues clamped
 // (pseudo-inverse), biased toward the crossings' mass point, then clamped into the
-// cell. Shared by VoxelMesherDC (per-block) and DCOctreeMesher (octree clipmap).
+// cell. Used by DCOctreeMesher (octree clipmap).
 
 #include "core/math/math_funcs.h"
 #include "core/math/vector3.h"

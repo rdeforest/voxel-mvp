@@ -24,7 +24,7 @@ public:
 	void setup(Vector3 origin, double size); // create the root cube
 	void imprint_sphere(Vector3 center, double radius, double min_leaf, int material);
 	void imprint_box(Vector3 center, Vector3 size, double min_leaf, int material);
-	// Build from a dense SDF grid (e.g. DCRegionReader terrain): root spans the grid,
+	// Build from a dense SDF grid (e.g. EditStore.fill_region): root spans the grid,
 	// refines to `min_leaf` at the surface. The bridge from procedural terrain.
 	void imprint_array(const PackedFloat32Array &data, int dim, Vector3 origin, double cell, double min_leaf);
 
@@ -65,7 +65,7 @@ public:
 	void imprint_terrain_graded(Vector3 focus, double near_leaf, double band,
 			double base, double amp, double period, int octaves, int seed);
 	// Edit-aware graded terrain imprint: TerrainField base, with `overlay` (a dense SDF
-	// grid re-read from the edited store, e.g. DCRegionReader) overlaid inside its box, so
+	// grid re-read from the edited store) overlaid inside its box, so
 	// edits there show while the rest defers to the generator. Empty overlay = plain terrain.
 	void imprint_terrain_overlay_graded(Vector3 focus, double near_leaf, double band,
 			double base, double amp, double period, int octaves, int seed,
