@@ -19,7 +19,7 @@ func _air_top() -> int:
 func test_freeze_rasterises_a_particle_cube_into_the_store() -> void:
     var top := _air_top()
     var sim := MpmSim.new()
-    sim.configure(Vector3(-16, -16, -16), 32, 1.0, Vector3(0, -9.8, 0), 5000.0, 0.2, -1000.0)
+    sim.configure(Vector3(-16, -16, -16), 32, 1.0, Vector3(0, -9.8, 0), -1000.0)
     # A solid 4x2x4 cube of particles (8 per cell) centred on the air region.
     for cz in range(-2, 2):
         for cy in range(top, top + 2):
@@ -52,7 +52,7 @@ func test_frozen_surface_tracks_the_cloud_extent() -> void:
     # beyond it — the freeze reproduces the cloud's shape, not a bloated blob.
     var top := _air_top()
     var sim := MpmSim.new()
-    sim.configure(Vector3(-16, -16, -16), 32, 1.0, Vector3(0, -9.8, 0), 5000.0, 0.2, -1000.0)
+    sim.configure(Vector3(-16, -16, -16), 32, 1.0, Vector3(0, -9.8, 0), -1000.0)
     for cz in range(-2, 2):
         for cy in range(top, top + 2):
             for cx in range(-2, 2):
@@ -78,7 +78,7 @@ func test_thaw_then_freeze_round_trips_a_box() -> void:
     src.store.stamp_box(Vector3(0, top + 2, 0), Vector3(4, 4, 4), 0, WOOD, 1.0) # solid box: x,z[-2,2], y[top,top+4]
 
     var sim := MpmSim.new()
-    sim.configure(Vector3(-16, -16, -16), 32, 1.0, Vector3(0, -9.8, 0), 5000.0, 0.2, -1000.0)
+    sim.configure(Vector3(-16, -16, -16), 32, 1.0, Vector3(0, -9.8, 0), -1000.0)
     var n := sim.thaw_from_store(src.store, Vector3(-4, top - 2, -4), 12, 1.0, 2, 50.0, 0.125)
     assert_gt(n, 0, "thaw seeded particles from the solid box")
 

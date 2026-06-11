@@ -1,16 +1,18 @@
 #ifndef MPM_SIM_H
 #define MPM_SIM_H
 
-// MLS-MPM (Moving Least Squares Material Point Method) structural-physics spike — the
-// continuum solver that docs/roadmap/design/12-mpm-structural-substrate.md argues should
-// replace PBD. This is the SPIKE core (increment 1): particles carry mass / velocity /
-// deformation gradient F / APIC affine matrix C; one explicit MLS-MPM step transfers
-// particle→grid (P2G), updates grid velocity under gravity + a floor collider, and
-// transfers grid→particle (G2P) with the APIC affine reconstruction (the near-lossless
-// transfer — doc 12 "error budget"). Elasticity is neo-Hookean (Kirchhoff stress
-// τ = μ(FFᵀ − I) + λ ln J · I) so it needs no 3×3 SVD; fixed-corotated + Drucker-Prager
-// (which do) land in a later increment. Not wired into the world — headless-tested only,
-// per the spike's go/no-go. APIC: Jiang 2015; MLS-MPM: Hu 2018.
+// PB-MPM (Position Based Material Point Method) structural-physics solver — the continuum
+// substrate that docs/roadmap/design/12-mpm-structural-substrate.md adopts to replace PBD.
+// Following Lewin 2024 (EA SEED): a semi-implicit compliant-constraint MPM that is
+// UNCONDITIONALLY STABLE at any timestep, over the MLS-MPM grid transfer (Hu 2018, APIC).
+// Everything works in DISPLACEMENT (= velocity·dt): particles carry position, displacement d,
+// a deformation-displacement matrix D (the APIC affine of displacement), and a deformation
+// gradient F. One timestep iterates [SolveConstraints → P2G → GridUpdate → G2P] iterationCount
+// times, then integrates (F ← (I+D)F with plasticity; x += d; d gets gravity for the next
+// step). SolveConstraints replaces explicit stress with a per-particle constraint projection
+// (elastic: toward the polar/volume-preserving target; sand: + Drucker-Prager). The 3×3 polar
+// SVD, the SDF collider, sparse sleeping, and the EditStore thaw/freeze coupling carry over
+// from the explicit spike. Not yet wired into the world — headless-tested.
 
 #include "mat3.h"
 #include "edit_store.h"
@@ -26,16 +28,17 @@ class MpmSim : public RefCounted {
 
 	// Particles (one entry per index).
 	LocalVector<Vector3> _x;    // position (world)
-	LocalVector<Vector3> _v;    // velocity
+	LocalVector<Vector3> _d;    // displacement this step (= velocity·dt; carries gravity over)
+	LocalVector<Mat3> _D;       // deformation displacement (APIC affine of displacement)
 	LocalVector<Mat3> _F;       // deformation gradient
-	LocalVector<Mat3> _C;       // APIC affine velocity matrix
 	LocalVector<double> _mass;
 	LocalVector<double> _vol;   // initial volume V₀
+	LocalVector<double> _logJp; // sand: log of plastic volume (Drucker-Prager hardening)
 
-	// Background grid (dense for the spike; sparse/sleeping is a later increment). One
-	// node per lattice point; index = i + j·dim + k·dim². Node world pos = origin + idx·dx.
-	LocalVector<Vector3> _gv;   // grid velocity (momentum during P2G, velocity after)
-	LocalVector<double> _gm;    // grid mass
+	// Background grid. One node per lattice point; index = i + j·dim + k·dim². The grid carries
+	// displacement-momentum during P2G, then mass-weighted displacement after GridUpdate.
+	LocalVector<Vector3> _gv;
+	LocalVector<double> _gm;
 
 	Vector3 _origin = Vector3(0, 0, 0);
 	int _dim = 32;              // nodes per axis
@@ -43,70 +46,60 @@ class MpmSim : public RefCounted {
 	double _inv_dx = 1.0;
 
 	Vector3 _gravity = Vector3(0.0, -9.8, 0.0);
-	double _mu = 0.0;          // Lamé μ (shear)
-	double _lambda = 0.0;      // Lamé λ
 
-	// Sparse sleeping (doc 12 "design the boundary away"). A particle still for _sleep_after
-	// steps stops being stepped: its P2G contribution is CACHED (no SVD, support preserved
-	// losslessly — F/stress kept), G2P skips it (it doesn't move), and it re-wakes when the
-	// grid velocity at its location exceeds _wake_speed. A fully-asleep sim's step() is a
-	// no-op ("a quiescent structure costs nothing"). Off by default so the bare-physics tests
-	// are unaffected.
+	// PB-MPM constraint parameters (Lewin 2024). iterations = the Jacobi-style outer loop
+	// (more = stiffer/converged). elasticity_ratio α blends the constraint target between the
+	// rotation (shape preservation, α→1) and the volume-preserving shape (α→0). relaxation is
+	// how far D moves toward the target each iteration.
+	int _material = 0;             // 0/1 = elastic, 2 = sand
+	int _iterations = 5;
+	double _elasticity_ratio = 1.0;   // rotation (shape-preserving) target — stable default
+	double _elastic_relaxation = 0.5; // under-relaxed; high relax + many iters can over-drive
+	double _friction_angle = 35.0; // sand (degrees)
+	double _viscosity = 0.0;       // deviatoric damping (sand uses a little)
+
+	// Static collider. With a `_collider` EditStore set, contact is resolved against its SDF
+	// (the real terrain) — a grid node whose displaced position lands inside solid is pushed
+	// back out along the SDF normal (the grid-resolved contact PBD lacked). Without one, a flat
+	// floor at world y = _floor_y is the fallback (keeps the bare-core tests collider-free).
+	Ref<EditStore> _collider;
+	double _floor_y = 0.0;
+	double _friction = 0.0; // tangential damping on contact (kept low; see the explicit spike notes)
+
+	// Sparse sleeping (doc 12). A particle whose displacement stays below _sleep_speed·dt for
+	// _sleep_after steps stops being solved/advected: its P2G contribution is cached (D frozen,
+	// d = 0), and it re-wakes when the grid displacement at its location exceeds _wake_speed·dt.
+	// A fully-asleep sim's step() is a no-op. Off by default so the bare-physics tests are clean.
 	bool _sleep_enabled = false;
 	LocalVector<uint8_t> _sleeping;
 	LocalVector<int32_t> _still;
-	LocalVector<Mat3> _affine; // cached P2G affine while asleep (F frozen, C = 0)
 	int _awake_count = 0;
 	double _sleep_speed = 0.05;
 	int _sleep_after = 80;
 	double _wake_speed = 0.2;
 
-	// Constitutive model. NEO_HOOKEAN needs no SVD (the increment-1 default); COROTATED uses
-	// the polar rotation R = UVᵀ so a stiff body holds its shape; SAND is Drucker-Prager
-	// elastoplasticity (Klár 2016) — granular flow that piles at an angle of repose.
-	int _material = 0;         // 0 = neo-Hookean, 1 = fixed-corotated, 2 = sand
-	double _alpha = 0.0;       // Drucker-Prager friction coefficient (from the friction angle)
-
-	// Kirchhoff stress τ for the active model; may plastically update `f` (sand return-map).
-	Mat3 _stress(Mat3 &f) const;
-	Mat3 _sand(Mat3 &f) const; // Drucker-Prager return-mapping + log-strain (Hencky) stress
-
-	// Static collider. With a `_collider` EditStore set, contact is resolved against its SDF
-	// (the real terrain) — grid nodes inside solid lose their inward-normal velocity (normal
-	// = SDF gradient), which is the grid-resolved contact PBD lacked. Without one, a flat
-	// floor at world y = _floor_y is the fallback (keeps the bare-core tests collider-free).
-	Ref<EditStore> _collider;
-	double _floor_y = 0.0;
-	// Contact friction as a per-contact tangential damping. Kept LOW because it compounds
-	// every step a node stays in contact — a high value grips a resting pile's base and
-	// stops it spreading (a granular pile's repose should come from the material's own
-	// Drucker-Prager friction, not the floor). Coulomb-correct friction is a later refinement.
-	double _friction = 0.0;
-
 	int _grid_count() const { return _dim * _dim * _dim; }
 
-	// Apply the static collider to a grid node's velocity (SDF terrain if set, else floor).
-	void _apply_collider(const Vector3 &world, Vector3 &v) const;
+	// PB-MPM timestep phases.
+	void _solve_constraints();              // per-particle constraint projection → D
+	void _p2g();                            // scatter mass + displacement-momentum
+	void _grid_update();                    // mass-weight + collider (displacement form)
+	void _g2p();                            // gather displacement + rebuild D, sleep transition
+	void _integrate(double dt);             // F ← (I+D)F (+plasticity); x += d; gravity; wake/push
+
+	void _apply_collider(const Vector3 &node_world, Vector3 &disp) const;
 	Vector3 _collider_normal(const Vector3 &p) const; // outward = normalized SDF gradient
-
-	// An awake particle's sleep transition (called from _g2p): sleep it once it's been still
-	// for _sleep_after steps, caching its P2G affine so support holds without re-running SVD.
-	void _maybe_sleep(int p, double nv_len, double dt, double dinv);
-
-	// One MLS-MPM step, split into its three phases (share the quadratic-B-spline stencil).
-	void _p2g(double dt);
-	void _grid_update(double dt);
-	void _g2p(double dt);
-	// Quadratic-B-spline stencil for a particle at `pos`: the base node (lower corner of the
-	// 3³ neighbourhood), the fractional offset `fx`, and the per-axis weights w[axis][0..2].
 	void _stencil(const Vector3 &pos, int base[3], Vector3 &fx, double w[3][3]) const;
+	Mat3 _constraint_target(const Mat3 &f) const; // elastic α·R + (1−α)·vol-preserving
 
 public:
-	// E = Young's modulus, nu = Poisson's ratio → Lamé μ, λ.
-	void configure(Vector3 origin, int dim, double dx, Vector3 gravity, double E, double nu, double floor_y);
+	void configure(Vector3 origin, int dim, double dx, Vector3 gravity, double floor_y);
 	void set_material(int m) { _material = m; }
-	void set_contact_friction(double f) { _friction = f; } // floor/SDF tangential damping
-	void set_sand_friction(double friction_angle_degrees); // sets _alpha for the SAND model
+	void set_iterations(int n) { _iterations = n; }
+	void set_elastic(double ratio, double relaxation) { _elasticity_ratio = ratio; _elastic_relaxation = relaxation; }
+	void set_contact_friction(double f) { _friction = f; }
+	void set_sand_friction(double friction_angle_degrees) { _friction_angle = friction_angle_degrees; }
+	void set_viscosity(double v) { _viscosity = v; }
 	void set_sdf_collider(const Ref<EditStore> &store) { _collider = store; }
 	void set_sleeping(bool on) { _sleep_enabled = on; }
 	void set_sleep_params(double speed, int after, double wake_speed);
@@ -118,19 +111,16 @@ public:
 	void wake_all();
 	void wake_region(Vector3 center, double radius);
 
-	// Test hook: SVD a matrix and report {error (reconstruction Frobenius), det_u, det_v,
-	// s0, s1, s2}. Lets the GDScript suite pin the SVD — the riskiest numerical code here.
+	// Test hook: SVD a matrix and report {error, det_u, det_v, s0, s1, s2}. Pins the SVD.
 	Dictionary debug_svd(Basis m) const;
 
-	// FREEZE (thaw/freeze coupling, mpm_couple.cpp): rasterise the current particles into the
-	// EditStore as SDF + material over their bounding box. Returns {origin, dim} of the region.
+	// Thaw/freeze coupling (mpm_couple.cpp).
 	Dictionary rasterize_to_store(Ref<EditStore> store, double cell, double radius, int material_index);
-	// THAW: seed ppa³ particles in each solid cell of a `dim`-cell region. Returns the count.
 	int thaw_from_store(Ref<EditStore> store, Vector3 origin, int dim, double cell, int ppa, double mass, double volume);
 
 	int particle_count() const { return int(_x.size()); }
 	Vector3 get_position(int i) const { return _x[i]; }
-	Vector3 get_velocity(int i) const { return _v[i]; }
+	Vector3 get_displacement(int i) const { return _d[i]; }
 	Vector3 average_position() const;
 	double lowest_y() const;
 	double kinetic_energy() const;

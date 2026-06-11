@@ -2,79 +2,78 @@
 
 #include "core/math/math_funcs.h"
 
-// Constitutive models for MpmSim — the Kirchhoff stress per material, and the SAND
-// (Drucker-Prager) plastic return-mapping. Split from the transfer/step machinery in
-// mpm_sim.cpp; these are the physics of the material, not the MLS-MPM grid transfer.
+// PB-MPM constitutive code (Lewin 2024): the per-particle constraint projection
+// (SolveConstraints, run each iteration) and the post-iteration integration (F update + safety
+// clamp). Elastic this increment; PB-MPM sand (Drucker-Prager on the integrated F + logJp) is
+// the next. The grid transfers and mechanics live in mpm_sim.cpp.
 
-// Kirchhoff stress τ = P Fᵀ for the active constitutive model. May plastically update `f`
-// (the SAND return-mapping moves strain from elastic to plastic).
-Mat3 MpmSim::_stress(Mat3 &f) const {
-	if (_material == 2) { // Drucker-Prager sand
-		return _sand(f);
-	}
-	if (_material == 1) { // fixed-corotated: τ = 2μ(F−R)Fᵀ + λ J(J−1) I, R = U Vᵀ
-		Mat3 u, v;
-		double s[3];
-		f.svd(u, s, v);
-		const Mat3 r = u * v.transposed();
-		const double J = s[0] * s[1] * s[2];
-		return (f - r).scaled(2.0 * _mu) * f.transposed() + Mat3::identity().scaled(_lambda * J * (J - 1.0));
-	}
-	// neo-Hookean: τ = μ(FFᵀ − I) + λ ln(J) I
-	double J = f.determinant();
-	if (J < 1e-4) {
-		J = 1e-4; // guard a (near-)inverted particle so ln(J) stays finite
-	}
-	return (f * f.transposed() - Mat3::identity()).scaled(_mu) + Mat3::identity().scaled(_lambda * Math::log(J));
+static double sgn(double x) {
+	return x < 0.0 ? -1.0 : 1.0;
 }
 
-// Build a diagonal Mat3 from three values.
-static Mat3 diag3(double a, double b, double c) {
-	Mat3 d = Mat3::zero();
-	d.m[0][0] = a;
-	d.m[1][1] = b;
-	d.m[2][2] = c;
-	return d;
-}
-
-// Drucker-Prager sand (Klár 2016). SVD the elastic F, take Hencky strain ε = ln σ, project
-// it onto the cohesionless yield cone (tension → tip; outside the cone → onto its surface),
-// rebuild the *elastic* F from the returned strain (the excess becomes plastic flow), and
-// return the log-strain Kirchhoff stress τ = U·diag(2μεᵢ + λ tr ε)·Uᵀ.
-Mat3 MpmSim::_sand(Mat3 &f) const {
+// Elastic constraint target for a candidate F*: blend the rotation (shape preservation, α→1)
+// with the closest volume-preserving matrix (α→0), per elasticity_ratio.
+Mat3 MpmSim::_constraint_target(const Mat3 &fstar) const {
 	Mat3 u, v;
 	double s[3];
-	f.svd(u, s, v);
-	double eps[3];
-	for (int i = 0; i < 3; i++) {
-		eps[i] = Math::log(MAX(Math::abs(s[i]), 1e-4));
-	}
-	const double tr = eps[0] + eps[1] + eps[2];
-	const double eh[3] = { eps[0] - tr / 3.0, eps[1] - tr / 3.0, eps[2] - tr / 3.0 };
-	const double eh_norm = Math::sqrt(eh[0] * eh[0] + eh[1] * eh[1] + eh[2] * eh[2]);
-
-	double ne[3]; // returned (elastic) Hencky strain
-	if (tr > 0.0 || eh_norm < 1e-12) {
-		// Volumetric extension: cohesionless sand can't sustain it → return to the cone tip
-		// (all deviatoric + tensile strain plasticises). Pure compression on-axis stays.
-		const double v_strain = (tr > 0.0) ? 0.0 : tr / 3.0;
-		ne[0] = ne[1] = ne[2] = v_strain;
-	} else {
-		const double dgamma = eh_norm + (3.0 * _lambda + 2.0 * _mu) / (2.0 * _mu) * tr * _alpha;
-		if (dgamma <= 0.0) {
-			ne[0] = eps[0]; // inside the cone → elastic, unchanged
-			ne[1] = eps[1];
-			ne[2] = eps[2];
-		} else {
-			for (int i = 0; i < 3; i++) {
-				ne[i] = eps[i] - dgamma * eh[i] / eh_norm; // project onto the cone surface
-			}
-		}
-	}
-
-	f = u * diag3(Math::exp(ne[0]), Math::exp(ne[1]), Math::exp(ne[2])) * v.transposed();
-	const double trn = ne[0] + ne[1] + ne[2];
-	const Mat3 tp = diag3(2.0 * _mu * ne[0] + _lambda * trn, 2.0 * _mu * ne[1] + _lambda * trn, 2.0 * _mu * ne[2] + _lambda * trn);
-	return u * tp * u.transposed();
+	fstar.svd(u, s, v);
+	const double df = fstar.determinant();
+	const double cdf = CLAMP(Math::abs(df), 0.1, 1000.0);
+	const Mat3 Q = fstar.scaled(1.0 / (sgn(df) * Math::sqrt(cdf)));
+	const Mat3 R = u * v.transposed();
+	const double a = _elasticity_ratio;
+	return R.scaled(a) + Q.scaled(1.0 - a);
 }
 
+// Nudge each awake particle's deformation displacement D toward the target that would bring its
+// candidate deformation gradient F* = (I+D)F to the constraint shape. Jacobi-style (all particles
+// independent) — the iteration loop in step() reconciles them through the grid.
+void MpmSim::_solve_constraints() {
+	const int np = int(_x.size());
+	for (int p = 0; p < np; p++) {
+		if (_sleep_enabled && _sleeping[p]) {
+			continue;
+		}
+		const Mat3 fstar = (Mat3::identity() + _D[p]) * _F[p];
+		const Mat3 tgt = _constraint_target(fstar);
+		const Mat3 diff = (tgt * _F[p].inverse() - Mat3::identity()) - _D[p];
+		_D[p] = _D[p] + diff.scaled(_elastic_relaxation);
+	}
+}
+
+// Evolve F ← (I+D)F (with an SVD safety clamp on the singular values to stop force blow-ups),
+// advect x by the displacement, seed gravity into the displacement for the next step, and push
+// out of the collider at the particle level (the grid did most of the contact work).
+void MpmSim::_integrate(double dt) {
+	const Vector3 g_disp = _gravity * (dt * dt);
+	const int np = int(_x.size());
+	for (int p = 0; p < np; p++) {
+		if (_sleep_enabled && _sleeping[p]) {
+			continue;
+		}
+		_F[p] = (Mat3::identity() + _D[p]) * _F[p];
+		Mat3 u, v;
+		double s[3];
+		_F[p].svd(u, s, v);
+		for (int a = 0; a < 3; a++) {
+			s[a] = CLAMP(s[a], 0.2, 10000.0);
+		}
+		Mat3 sig = Mat3::zero();
+		sig.m[0][0] = s[0];
+		sig.m[1][1] = s[1];
+		sig.m[2][2] = s[2];
+		_F[p] = u * sig * v.transposed();
+
+		_x[p] += _d[p];
+		_d[p] += g_disp;
+
+		if (_collider.is_valid()) {
+			const double sd = _collider->sample(_x[p]);
+			if (sd < 0.0) {
+				_x[p] -= _collider_normal(_x[p]) * sd;
+			}
+		} else if (_x[p].y < _floor_y) {
+			_x[p].y = _floor_y;
+		}
+	}
+}

@@ -20,6 +20,7 @@ struct Mat3 {
 	Mat3 scaled(double s) const;
 	Vector3 xform(const Vector3 &v) const; // m · v
 	Mat3 transposed() const;
+	Mat3 inverse() const; // adjugate / determinant (zero matrix if singular)
 	double determinant() const;
 
 	// Signed SVD: this = U · diag(sigma) · Vᵀ, with U and V proper rotations (det = +1) and

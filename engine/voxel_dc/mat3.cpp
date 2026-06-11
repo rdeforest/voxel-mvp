@@ -97,6 +97,25 @@ double Mat3::determinant() const {
 			m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
 }
 
+Mat3 Mat3::inverse() const {
+	const double d = determinant();
+	Mat3 r = zero();
+	if (Math::abs(d) < 1e-12) {
+		return r; // singular
+	}
+	const double id = 1.0 / d;
+	r.m[0][0] = (m[1][1] * m[2][2] - m[1][2] * m[2][1]) * id;
+	r.m[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) * id;
+	r.m[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) * id;
+	r.m[1][0] = (m[1][2] * m[2][0] - m[1][0] * m[2][2]) * id;
+	r.m[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) * id;
+	r.m[1][2] = (m[0][2] * m[1][0] - m[0][0] * m[1][2]) * id;
+	r.m[2][0] = (m[1][0] * m[2][1] - m[1][1] * m[2][0]) * id;
+	r.m[2][1] = (m[0][1] * m[2][0] - m[0][0] * m[2][1]) * id;
+	r.m[2][2] = (m[0][0] * m[1][1] - m[0][1] * m[1][0]) * id;
+	return r;
+}
+
 // Eigendecomposition of a symmetric 3×3 by cyclic Jacobi: S = V · diag(eval) · Vᵀ, columns
 // of V the eigenvectors. Applying each Givens rotation as a full 3×3 product is trivially
 // cheap at this size and avoids hand-derived (bug-prone) in-place update formulas.
