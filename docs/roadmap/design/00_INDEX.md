@@ -32,3 +32,7 @@ or condensed.
 - [`11-octree-edit-store.md`](11-octree-edit-store.md) — the detailed design
   for doc 10's Phase B core: a persistent sparse EditStore (edits only,
   deferring to the generator) that replaces godot_voxel as the data layer.
+- [`12-mpm-structural-substrate.md`](12-mpm-structural-substrate.md) — the
+  target structural simulation: continuum physics via the Material Point
+  Method, replacing PBD so terrain/parts/debris deform, fracture, and settle
+  under one solver (Stages 5–6 become emergent). Vision + spike plan.
