@@ -31,6 +31,9 @@ record work that landed outside the numbered phases.
   structural math.
 - [`extras-09-bugs-closed.md`](extras-09-bugs-closed.md) — the running log
   of cross-cutting named bugs closed outside individual phases.
+- [`extras-10-octree-edit-store.md`](extras-10-octree-edit-store.md) —
+  records the EditStore becoming the sole terrain layer and godot_voxel's
+  removal from the running game (Phase B S4–S5).
 - [`implementation-02-phase-0-foundation.md`](implementation-02-phase-0-foundation.md)
   — records the Phase 0 foundation: procedural terrain, FPS controller,
   gravity, day/night.

@@ -8,92 +8,20 @@
 
 ## Resumption Brief
 
-### Active thread (2026-06-10): adaptive-octree substrate — Phase B S5 DONE, godot_voxel removed from the game
+### Active thread: adaptive-octree substrate — Phase B done (godot_voxel removed)
 
-**S5 complete (commits `bfb6856`, `bf9ec2f`, `a98f492`, `e8e0252`, `cc343d3`).** The EditStore
-is the sole terrain layer (SDF + material, persistence, render, collision, edits, structural
-reads). The `VoxelLodTerrain` node + its godot_voxel sub-resources are gone from `world.tscn`;
-the grass material is a standalone `assets/materials/terrain_surface.tres`. Actions write the
-store directly (`stamp_sphere` / `StoreWrite.cells`); the dual-write is gone.
-- **The bug that delayed S5** (`bf9ec2f`): `EditStore.deserialize` built node origins with
-  `Vector3(get_double(), get_double(), get_double())` — C++ leaves arg-eval order unspecified,
-  GCC goes right-to-left, so every save/load transposed the octree X↔Z. A transpose is its own
-  inverse, so two cycles looked correct (masked it). Fixed by reading into named locals;
-  `test_serialize_preserves_xz_orientation` pins it. **Lesson:** never call side-effecting
-  reads as ctor args.
-- **NEEDS GUI VERIFY:** the game runs with NO godot_voxel node — render (DCTerrainManager off a
-  store snapshot, worker thread), collision (DCCollisionManager off the store), player physics,
-  world-ready (fires frame 1, store resident). Headless parse + 191 GUT pass, but gameplay is
-  eyes-only. Verify: load, terrain renders + grass shader, walk/dig/build, F5/F9 persists+matches.
-- **Deferred (own task):** `DCRegionReader` + the `.tres` generator graph + `build_terrain_graph.gd`
-  are still referenced by `test_dc_material` / `test_sparse_voxel_octree` / `test_terrain_graph`
-  (godot_voxel-read fixtures). Migrate those tests onto TerrainField/EditStore, then delete.
-  The godot_voxel *module* stays built (our `engine/voxel_dc` links against it); only its runtime
-  use in the game is gone. `dcgen` substrate's homogeneity-prune undersampling (Y=128 holes) is a
-  known separate limitation, not the render.
+The EditStore is the sole terrain layer (SDF + material, persistence, render, collision,
+edits, structural reads); godot_voxel is removed from the running game. Full record:
+[`completed/extras-10-octree-edit-store.md`](completed/extras-10-octree-edit-store.md).
+Design: `docs/roadmap/design/11-octree-edit-store.md`; substrate spec: doc 10.
 
----
+**GUI-verified good enough** (Robert, 2026-06-10): terrain renders, edits persist + match
+across F5/F9. The X↔Z save/load transpose (`bf9ec2f`, unspecified C++ arg-eval order) is fixed.
 
-#### (historical, pre-S5) godot_voxel down to the data path
+**What's next:** open items from doc 10 — single-mesher consolidation, C++ crease normals,
+incremental edit re-mesh; the `dcgen` substrate's homogeneity-prune undersampling (Y=128
+holes) if that debug tool stays. Otherwise the v0.1 gameplay scoping below.
 
-PBD is **done and authoritative** (see CLAUDE.md "Structural integrity"). Phase A is at its
-ceiling; the substrate render is incremental + edit-aware + view-independent. Phase B (the
-octree as the data store, replacing godot_voxel) is following the migration in
-`docs/roadmap/design/11-octree-edit-store.md`. **The terrain generator now lives in C++**
-(`TerrainField`, [[terrain-generation-in-cpp]]); the `.tres` graph is the legacy mirror to
-delete at S5. Generator-home decision: C++ is the single source (Robert, 2026-06-10).
-
-**Phase B migration status (2026-06-10) — S1–S4 done, godot_voxel = dual-write source only:**
-- **EditStore** (`engine/voxel_dc/edit_store.{h,cpp}`) — the persistent SPARSE store: holds
-  ONLY edits (SDF + material), defers to `TerrainField` elsewhere
-  (`sample = has_edit ? stored : generator`). Copy-on-write stamps; `write_region` (dense
-  array replace); `fill_region` (scrolling-buffer incremental sample, no heightfield
-  assumption); `duplicate` (worker snapshot); serialize/deserialize. `test_edit_store` (9).
-- **S1** `869c3ab` store + copy-on-write. **S2** `a6f2ba2` dual-write: `EditStoreManager`
-  shadows every edit into the store from godot_voxel (LOD0 re-read on `terrain_sdf_changed`);
-  `editstore` console cmd checks agreement. **S3a** `8c2c6e6` render flip: the dcgen
-  substrate imprints the store's field (all edits resident — the 64 m overlay limit is gone;
-  render no longer reads godot_voxel). **S3b** `ee075f5`+`a6e0384` collision flip:
-  `DCCollisionManager` cooks from the store via per-body scrolling buffers (always available,
-  no streaming wait).
-- **Known limitation** (documented on `imprint_store_graded`): a small edit ISOLATED in mid-
-  air is undersampled by the graded octree's homogeneity prune; surface edits are caught.
-  Fix = force-subdivide where the store has edits, later.
-- **S4** persistence flip: the EditStore blob is now the terrain SDF on disk
-  (`world.editstore`, magic+version header in `EditStoreManager.save_to`/`load_from`).
-  `world._enter_tree` detaches the SQLite stream unconditionally (godot_voxel is in-memory-
-  only); F5 saves the blob next to the snapshot (`world.save_edit_store`); `world._ready`
-  deserializes it into the live store (in-place, before render/collision grab the ref).
-  `TerrainPersistence` flush calls are gone (dead file + its test removed at S5).
-  `test_edit_store_manager` (3) pins the header round-trip. **Accepted migration edge:**
-  re-editing a region restored from the store but absent from godot_voxel's fresh procedural
-  memory can clobber the prior edit — S5 (actions write the store directly) fixes it.
-- **S4** persistence flip (above). Also the **render flip**: `DCTerrainManager` now sources
-  SDF+material from the store (`fill_region` / new `fill_indices_region` on a `duplicate()`
-  snapshot, on the worker thread) instead of `DCRegionReader`/godot_voxel — so persisted
-  edits actually render.
-- **S5 stages 1+2 DONE (this commit) — actions write the store directly; dual-write gone.**
-  Every edit action writes the EditStore: dig/fill via `stamp_sphere` (exact analytic),
-  flatten/csg/bell/voxel via `StoreWrite.cells` (dense-box write; a grid point is a corner
-  shared by 8 leaves, so per-cell writes must go through a dense region). Every read
-  (validation, `TerrainSupport` solidity, falling-body classify, PBD carve, probe) samples
-  the store. `ActionFactories` resolves the store lazily (`world.edit_store_ref()`);
-  `StructuralIntegrity.set_store` fans it to `TerrainSupport`. `EditStoreManager` is now just
-  store-owner + persistence (no `_on_edit`). World-ready gate fires frame one (store+generator
-  always resident). **This is the "persists but doesn't match" fix:** the dual-write re-read
-  godot_voxel's lossy LOD0; actions now land their EXACT values. Fixed a real material bug:
-  `_write_region` indexed material at the leaf center with `round` (pushed the .5 off-cell) →
-  now `floor`, aligned to the leaf origin. `test_terrain_actions` (5) pins it. **Store roots
-  must be integer-aligned** (production's -8192 is) or integer-cell edits smear. godot_voxel
-  is now INERT for terrain — the `VoxelLodTerrain` node still exists but nothing reads it.
-- **NEXT: S5 Stage 3 — physically delete godot_voxel.** Extract the grass `ShaderMaterial`
-  to a standalone `.tres` (console `set`/`get` + snapshot tunables retarget; `DCTerrainManager`
-  loads it); remove the `VoxelLodTerrain` node + `world.tscn` stream/generator/mesher
-  sub-resources, the `.tres` graph + `build_terrain_graph.gd`, the godot_voxel side of
-  `DCRegionReader`, `TerrainPersistence` + `test_terrain_persistence`, the dead `TERRAIN_DB`
-  const. Saves are test-only → reset is fine, no importer.
-- GUI to verify (before Stage 3, while godot_voxel is still a fallback): dig far + walk back,
-  F5, F9 → the edit persists AND renders correctly; walk flat/sloped ground (no fall-through).
 
 **Earlier in this thread (DC render pipeline, all committed, headless-tested; GUI-verify the render ones):**
 
