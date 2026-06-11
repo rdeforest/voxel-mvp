@@ -90,7 +90,8 @@ class MpmSim : public RefCounted {
 	void _apply_collider(const Vector3 &node_world, Vector3 &disp) const;
 	Vector3 _collider_normal(const Vector3 &p) const; // outward = normalized SDF gradient
 	void _stencil(const Vector3 &pos, int base[3], Vector3 &fx, double w[3][3]) const;
-	Mat3 _constraint_target(const Mat3 &f) const; // elastic α·R + (1−α)·vol-preserving
+	Mat3 _constraint_target(const Mat3 &f) const;    // elastic α·R + (1−α)·vol-preserving
+	void _drucker_prager(double s[3], double &logjp) const; // sand plasticity on the singular values
 
 public:
 	void configure(Vector3 origin, int dim, double dx, Vector3 gravity, double floor_y);

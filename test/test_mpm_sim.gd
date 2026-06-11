@@ -199,4 +199,9 @@ func test_a_dropped_block_wakes_the_sleeping_pile() -> void:
 # --- Pending: PB-MPM sand (Drucker-Prager on the integrated F + logJp) ---
 
 func test_pbmpm_sand_repose_pile() -> void:
-    pending("PB-MPM sand (Drucker-Prager return mapping on the integrated F) is the next increment")
+    # The PB-MPM sand path (Drucker-Prager return-mapping + logJp) is implemented in
+    # mpm_material.cpp, but its parameters aren't dialled in: with deviatoric viscosity it
+    # spreads to a near-flat puddle (the damping that stabilises it also removes the shear
+    # strength that should hold a repose pile); without it the constraint injects energy.
+    # Needs the EA reference constants + reworking the granular damping. Tuning deferred.
+    pending("PB-MPM sand: Drucker-Prager implemented; repose-angle tuning deferred (viscosity vs shear-strength conflict)")

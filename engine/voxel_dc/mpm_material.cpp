@@ -3,12 +3,19 @@
 #include "core/math/math_funcs.h"
 
 // PB-MPM constitutive code (Lewin 2024): the per-particle constraint projection
-// (SolveConstraints, run each iteration) and the post-iteration integration (F update + safety
-// clamp). Elastic this increment; PB-MPM sand (Drucker-Prager on the integrated F + logJp) is
-// the next. The grid transfers and mechanics live in mpm_sim.cpp.
+// (SolveConstraints, run each iteration) and the post-iteration integration (F update +
+// plasticity). Elastic + Drucker-Prager sand. The grid transfers/mechanics live in mpm_sim.cpp.
 
 static double sgn(double x) {
 	return x < 0.0 ? -1.0 : 1.0;
+}
+
+static Mat3 diag3(double a, double b, double c) {
+	Mat3 m = Mat3::zero();
+	m.m[0][0] = a;
+	m.m[1][1] = b;
+	m.m[2][2] = c;
+	return m;
 }
 
 // Elastic constraint target for a candidate F*: blend the rotation (shape preservation, α→1)
@@ -25,9 +32,24 @@ Mat3 MpmSim::_constraint_target(const Mat3 &fstar) const {
 	return R.scaled(a) + Q.scaled(1.0 - a);
 }
 
-// Nudge each awake particle's deformation displacement D toward the target that would bring its
-// candidate deformation gradient F* = (I+D)F to the constraint shape. Jacobi-style (all particles
-// independent) — the iteration loop in step() reconciles them through the grid.
+// Sand constraint target: like elastic but the shape target is the (volume-clamped) candidate
+// itself rather than a pure rotation, and the volume target only resists compression (cdf ≤ 1).
+static Mat3 sand_target(const Mat3 &fstar, double logjp, double ratio) {
+	Mat3 u, v;
+	double s[3];
+	fstar.svd(u, s, v);
+	if (logjp == 0.0) {
+		for (int i = 0; i < 3; i++) {
+			s[i] = CLAMP(s[i], 1.0, 1000.0);
+		}
+	}
+	const double df = fstar.determinant();
+	const double cdf = CLAMP(Math::abs(df), 0.1, 1.0);
+	const Mat3 Q = fstar.scaled(1.0 / (sgn(df) * Math::sqrt(cdf)));
+	const Mat3 shape = u * diag3(s[0], s[1], s[2]) * v.transposed();
+	return shape.scaled(ratio) + Q.scaled(1.0 - ratio);
+}
+
 void MpmSim::_solve_constraints() {
 	const int np = int(_x.size());
 	for (int p = 0; p < np; p++) {
@@ -35,15 +57,50 @@ void MpmSim::_solve_constraints() {
 			continue;
 		}
 		const Mat3 fstar = (Mat3::identity() + _D[p]) * _F[p];
-		const Mat3 tgt = _constraint_target(fstar);
+		const Mat3 tgt = (_material == 2) ? sand_target(fstar, _logJp[p], _elasticity_ratio) : _constraint_target(fstar);
 		const Mat3 diff = (tgt * _F[p].inverse() - Mat3::identity()) - _D[p];
 		_D[p] = _D[p] + diff.scaled(_elastic_relaxation);
+		if (_material == 2 && _viscosity > 0.0) {
+			// Remove the deviatoric (shear) part of D — granular viscous damping.
+			const Mat3 deviatoric = (_D[p] + _D[p].transposed()).scaled(-1.0);
+			_D[p] = _D[p] + deviatoric.scaled(_viscosity * 0.5);
+		}
 	}
 }
 
-// Evolve F ← (I+D)F (with an SVD safety clamp on the singular values to stop force blow-ups),
-// advect x by the displacement, seed gravity into the displacement for the next step, and push
-// out of the collider at the particle level (the grid did most of the contact work).
+// Drucker-Prager return-mapping (Klár 2016) on the singular values, with logJp hardening.
+// Projects the Hencky strain onto the cohesionless yield cone; expansion forgets all strain.
+void MpmSim::_drucker_prager(double s[3], double &logjp) const {
+	const double sin_phi = Math::sin(Math::deg_to_rad(_friction_angle));
+	const double alpha = Math::sqrt(2.0 / 3.0) * 2.0 * sin_phi / (3.0 - sin_phi);
+	const double beta = 0.5;
+	double e[3];
+	double tr = logjp;
+	for (int i = 0; i < 3; i++) {
+		e[i] = Math::log(MAX(Math::abs(s[i]), 1e-6));
+		tr += e[i];
+	}
+	double ehat[3];
+	double frob = 0.0;
+	for (int i = 0; i < 3; i++) {
+		ehat[i] = e[i] - tr / 3.0;
+		frob += ehat[i] * ehat[i];
+	}
+	frob = Math::sqrt(frob);
+	if (tr >= 0.0) {
+		s[0] = s[1] = s[2] = 1.0; // expansion: forget all deformation
+		logjp = beta * tr;
+		return;
+	}
+	logjp = 0.0;
+	const double dgamma = frob + (_elasticity_ratio + 1.0) * tr * alpha;
+	if (dgamma > 0.0 && frob > 1e-9) {
+		for (int i = 0; i < 3; i++) {
+			s[i] = Math::exp(e[i] - dgamma / frob * ehat[i]);
+		}
+	}
+}
+
 void MpmSim::_integrate(double dt) {
 	const Vector3 g_disp = _gravity * (dt * dt);
 	const int np = int(_x.size());
@@ -56,13 +113,12 @@ void MpmSim::_integrate(double dt) {
 		double s[3];
 		_F[p].svd(u, s, v);
 		for (int a = 0; a < 3; a++) {
-			s[a] = CLAMP(s[a], 0.2, 10000.0);
+			s[a] = CLAMP(s[a], 0.2, 10000.0); // safety: stop force blow-ups from a degenerate F
 		}
-		Mat3 sig = Mat3::zero();
-		sig.m[0][0] = s[0];
-		sig.m[1][1] = s[1];
-		sig.m[2][2] = s[2];
-		_F[p] = u * sig * v.transposed();
+		if (_material == 2) {
+			_drucker_prager(s, _logJp[p]);
+		}
+		_F[p] = u * diag3(s[0], s[1], s[2]) * v.transposed();
 
 		_x[p] += _d[p];
 		_d[p] += g_disp;
