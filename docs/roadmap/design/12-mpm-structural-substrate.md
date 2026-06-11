@@ -57,7 +57,54 @@ naive Jacobi-via-matmul used here; (2) the per-particle work is **embarrassingly
 (24 cores ≈ 20×; GPU MLS-MPM does millions of particles at 60 fps — 100× our active counts);
 (3) **sparse sleeping** means only active material costs anything. None of these are research
 risks. The remaining *research* risk is the EditStore thaw/freeze coupling (risk #1), not the
-solver.
+solver. *(Update: see PB-MPM below — it removes the stability fragility the spike surfaced.)*
+
+## PB-MPM: the solver formulation (adopt — Lewin 2024, EA SEED)
+
+The spike used **explicit** MLS-MPM and hit its known weaknesses: a CFL timestep cap (small
+`dt`), stiffness sensitivity, and fragile contact-friction tuning. **Position-Based MPM**
+([Lewin 2024, EA SEED](https://media.contentapi.ea.com/content/dam/ea/seed/presentations/seed-siggraph2024-pbmpm-paper.pdf),
+SIGGRAPH Talks) is a semi-implicit **compliant-constraint** reformulation that is
+**unconditionally stable at any timestep**, "as easy to implement as an explicit integrator,"
+and built for real-time games. We adopt it as the solver formulation. Crucially it is a *small
+delta on what the spike already has* — Algorithm 1's only new lines (red in the paper) are a
+constraint solve and an iteration wrapper:
+
+```
+UpdatePBMPM(P):
+  for it in 1..iterationCount:          # PBD-style outer iteration (1 can suffice for stability)
+    P ← SolveConstraints(P)             # NEW: per-particle local solve → deformation displacement Dᵢ
+    G ← ParticleToGrid(P)               # MLS-MPM P2G (have it)
+    G ← GridUpdate(G)                   # gravity + collider (have it)
+    P ← GridToParticle(P, G)            # MLS-MPM G2P / APIC (have it)
+  IntegrateParticles(P)                 # advect x + F once, at the end
+```
+
+`SolveConstraints` replaces explicit stress with a **deformation displacement Dᵢ** (the
+candidate velocity gradient): the candidate `F* = Fᵢ(I + Dᵢ)` and Dᵢ is nudged toward the
+material's constraint. **Co-rotational elastic** (Alg. 2): `A_shape = polar(F*)` (the polar SVD
+we already have), `A_vol = F*/det(F*)`, `Dᵢ ← Fᵢ⁻¹(β·A_vol + (1−β)·A_shape) − I` (β trades volume
+vs shape preservation). **Liquid**: hydrostatic + deviatoric impulses toward a tracked density
+(no SVD). The result is reconciled through the same MLS-MPM grid each iteration.
+
+**Why this is the right call:**
+- **Removes the spike's stability fragility.** Unconditionally stable → big timesteps, no CFL,
+  graceful under crush/over-constraint. Their dam-break: stable at **30 Hz / 1 iteration** vs
+  explicit **240 Hz** — ~8× fewer steps for the same stability, which is also a perf win.
+- **Reuses the whole spike.** MLS-MPM quadratic-B-spline transfers, the 3×3 polar SVD, the SDF
+  collider, sparse sleeping, and the thaw/freeze coupling all carry over unchanged. The change
+  is the per-particle constraint solve + the iteration loop + the Dᵢ/F* integration.
+- **Real-time, parallel.** The paper runs it real-time on a 32-core CPU with AVX2; it's
+  Jacobi-style (all constraints independent) → embarrassingly parallel, GPU-ready.
+
+**Caveats to carry:** Jacobi-style convergence is slow → "artificial softness"; more iterations
+= stiffer (tunable). Large timesteps make elastic `F` badly conditioned — the paper *deletes*
+elastic particles with `cond(F) > 1e6` (liquids use an objective volume measure instead). An
+**XPBD variant** (Macklin 2016) is noted as the path to finer material control if needed.
+
+**Foundation:** the grid transfer is **MLS-MPM** ([Hu et al. 2018](https://github.com/yuanming-hu/taichi_mpm),
+the 88-line reference) — exactly what the spike implemented; PB-MPM keeps it and changes only
+the time integration. So our `MpmSim` is already most of the way there.
 
 ## TL;DR
 
@@ -324,6 +371,10 @@ A throwaway, isolated MPM solver — *not* wired into the world — over a singl
 1. **Spike** (above) — isolated, measured, throwaway. Decides go/no-go.
 2. **MPM core in `engine/`** — the C++ solver as a module, headless-testable (a beam
    deflection vs. analytic Euler-Bernoulli; a sand pile's repose angle), no world wiring.
+   *(Spike done; now convert it to **PB-MPM** — the compliant-constraint formulation above —
+   for unconditional stability + big timesteps, reusing the spike's transfers/SVD/collider/
+   sleeping/coupling. This replaces the explicit-MPM CFL/stiffness/friction tuning and is the
+   real "graduate to real-time" lever, ahead of the fast-SVD / GPU micro-opts.)*
 3. **Thaw/freeze coupling to the EditStore** — the field↔particle transitions; the
    crux from risk #1; validated against the DC render seam.
 4. **Replace PBD** — route detachment/collapse/settle through MPM; retire `PbdStructure`,
