@@ -44,6 +44,25 @@ func test_thaw_simulate_freeze_loop_on_real_terrain() -> void:
     assert_true(solid_found, "the frozen material re-entered the store as solid terrain")
 
 
+func test_floodviz_reaches_a_connected_block_and_settles() -> void:
+    # The flood scout: from a seed cell it should reach every connected solid cell and then stop
+    # (frontier empty), colouring the visible surface cells. A floating 5³ block = 125 cells.
+    var store := EditStoreManager.new()
+    store.setup()
+    var base := _surface() + 30
+    store.store.stamp_box(Vector3(0.5, float(base) + 2.5, 0.5), Vector3(5, 5, 5), 0, 1, 1.0)
+
+    var fv: FloodViz = autofree(FloodViz.new())
+    fv.setup(store.store)
+    fv.start(Vector3i(0, base + 2, 0), 1000) # seed the block centre
+    for _i in 50:
+        fv._process(0.0)
+
+    assert_eq(fv._visited.size(), 125, "flooded every connected solid cell (5³) then stopped")
+    assert_gt(fv._reached, 0, "coloured the visible surface cells")
+    assert_false(fv._running, "the flood settled (frontier drained), didn't run forever")
+
+
 func test_unsupported_cell_flags_a_fall_candidate_and_thaws() -> void:
     # The auto-trigger (replace-PBD B): a genuinely unsupported tracked cell is flagged by the
     # support analysis and thaws into the MPM substrate (what `physics_mode mpm` wires up).

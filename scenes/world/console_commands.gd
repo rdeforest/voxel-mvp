@@ -26,6 +26,7 @@ var part_index:        PartIndex
 var _pbd_demo: PbdDemo   # lazily spawned by `pbddemo`
 var _mpm_demo: MpmDemo   # lazily spawned by `mpmdemo`
 var _mpm_structure: MpmStructure   # lazily spawned by `mpmthaw`
+var _flood_viz: FloodViz   # lazily spawned by `floodviz`
 
 
 # The LimboConsole autoload outlives the World scene. On reload (F9 / reset) the old
@@ -59,6 +60,7 @@ func _table() -> Array:
         [mpmdemo,         "mpmdemo",   "PB-MPM demo: spawn a live block of continuum material that falls and rests ON the terrain. Usage: mpmdemo [size]"],
         [mpmthaw,         "mpmthaw",   "Thaw the REAL terrain at your aim into MPM: it carves out, falls/deforms, and freezes back when settled. Usage: mpmthaw [radius]"],
         [physics_mode,    "physics_mode", "Switch the structural sim: 'pbd' (mass-spring, default) or 'mpm' (PB-MPM continuum — unsupported terrain thaws/falls/freezes). Usage: physics_mode [pbd|mpm]"],
+        [floodviz,        "floodviz",  "Debug: flood connected solid terrain from your aim (biased down), colouring reached surface cells green. Non-blocking. Usage: floodviz [cells_per_frame]"],
         [physics_active,  "physics_active", "Toggle the structural physics simulation on your real structures (sag + collapse under load). Usage: physics_active [on|off]"],
         [perf,            "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
         [awake,           "awake",     "Highlight awake physics bodies (debris / collapsed parts) with a box. Usage: awake [on|off]"],
@@ -184,6 +186,23 @@ func mpmthaw(radius := 3.0) -> void:
         _mpm_structure.setup(edit_store.store)
     var n := _mpm_structure.thaw_sphere(rc.get_collision_point(), radius)
     LimboConsole.info("mpmthaw: thawed %d cells (r=%.1f) into MPM" % [n, radius])
+
+# Debug-flood connected solid terrain from the cell behind the player's aim, biased downward,
+# colouring reached surface cells green so you can watch how far/fast a "connected to ground"
+# search spreads. Scouts the eventual MPM detachment trigger.
+func floodviz(budget := 200) -> void:
+    var rc: RayCast3D = player.raycast
+    if rc == null or not rc.is_colliding():
+        LimboConsole.error("floodviz: aim at terrain first")
+        return
+    var cell := Vector3i((rc.get_collision_point() - rc.get_collision_normal() * 0.5).floor())
+    if _flood_viz == null:
+        _flood_viz = FloodViz.new()
+        host.add_child(_flood_viz)
+        _flood_viz.setup(edit_store.store)
+    _flood_viz.start(cell, budget)
+    LimboConsole.info("floodviz: flooding from %s at %d cells/frame (green = reached surface)" % [cell, budget])
+
 
 # Switch the authoritative structural sim. `mpm` disables PBD and routes loss-of-support cells
 # into the PB-MPM substrate (thaw → fall → freeze); `pbd` restores the mass-spring sim.
