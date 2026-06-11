@@ -137,16 +137,22 @@ func process_dirty_queue() -> void:
         processed += 1
 
 
-# Drain the unsupported cells (the MPM thaw trigger) and drop them from the tracked set — they're
-# becoming MPM particles, no longer static terrain. Returns only cells still tracked + solid.
-func take_fall_candidates() -> Array[Vector3i]:
+# Drain up to `max_count` unsupported cells (the MPM thaw trigger), dropping them from the tracked
+# set — they're becoming MPM particles. Bounded per call so a support cascade can't thaw a whole
+# mountain in one frame; the rest stay flagged for next frame.
+func take_fall_candidates(max_count := 256) -> Array[Vector3i]:
     var out: Array[Vector3i] = []
+    var kept: Array[Vector3i] = []
     for pos in fall_candidates:
-        if voxel_data.has(pos):
+        if not voxel_data.has(pos):
+            _fall_set.erase(pos)
+        elif out.size() < max_count:
             out.append(pos)
             _remove_voxel(pos)
-    fall_candidates.clear()
-    _fall_set.clear()
+            _fall_set.erase(pos)
+        else:
+            kept.append(pos)
+    fall_candidates = kept
     return out
 
 func _calculate_support(pos: Vector3i) -> float:

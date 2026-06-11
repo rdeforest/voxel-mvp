@@ -194,6 +194,8 @@ func physics_mode(mode := "") -> void:
         LimboConsole.info("physics_mode: MPM (PB-MPM continuum) — PBD disabled")
     elif mode == "pbd":
         integrity.mpm_mode = false
+        if integrity.mpm != null:
+            integrity.mpm.reset()   # drop any in-flight MPM material so it stops being stepped
         pbd_structure.set_enabled(true)
         LimboConsole.info("physics_mode: PBD (mass-spring)")
     else:

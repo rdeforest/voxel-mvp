@@ -15,6 +15,7 @@ const GRID_DIM := 48           # re-centred on the material each step (no domain
 const SETTLE_DISP := 0.01      # max displacement/step below which the material counts as settled
 const SETTLE_FRAMES := 30      # consecutive settled frames before freezing back
 const FREEZE_RADIUS := 0.6     # particle-skinning radius for the freeze rasterisation
+const MAX_PARTICLES := 6000    # hard cap — beyond this a step costs too much (a runaway-thaw guard)
 
 var _sim: MpmSim
 var _store: EditStore
@@ -69,6 +70,8 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
     var box_lo := Vector3(INF, INF, INF)
     var box_hi := Vector3(-INF, -INF, -INF)
     for cell in cells:
+        if _sim.particle_count() >= MAX_PARTICLES:
+            break # runaway-thaw guard: leave the rest as terrain rather than choke
         if _store.sample(Vector3(cell) + Vector3(0.5, 0.5, 0.5)) >= VoxelConstants.SDF_SOLID_THRESHOLD:
             continue # already air
         for ox in [0.25, 0.75]:
@@ -90,6 +93,16 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
 
 func active_count() -> int:
     return _sim.particle_count() if _sim != null else 0
+
+
+# Drop all active material (no freeze-back). Called when leaving MPM mode so a large in-flight
+# set stops being stepped.
+func reset() -> void:
+    if _sim != null:
+        _sim.clear()
+    _settled_frames = 0
+    if _mm != null:
+        _mm.instance_count = 0
 
 
 func _physics_process(delta: float) -> void:
