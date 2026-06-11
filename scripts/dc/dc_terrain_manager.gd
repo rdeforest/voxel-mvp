@@ -44,6 +44,12 @@ var _saved_render_mask := 1      # godot_voxel's render layers before we hid the
 var _pending_data_only := false  # hide godot_voxel once our first mesh lands (no startup void)
 var _debug_material: Material    # translucent cyan, used only in debug-overlay mode
 
+# The grass surface material worn by our mesh when DC is the default render. A standalone
+# resource (not the terrain node's) — Godot caches it by path, so the console `set`/`get` and
+# the snapshot tunables load() the SAME instance and edit it live.
+const TERRAIN_MATERIAL_PATH := "res://assets/materials/terrain_surface.tres"
+var terrain_material: ShaderMaterial = load(TERRAIN_MATERIAL_PATH)
+
 var _mesher := DCOctreeMesher.new()   # reused: holds the persistent collapse-hysteresis state
 var _task_id := -1
 var _job_origin: Vector3i
@@ -148,9 +154,9 @@ func _apply_render_swap() -> void:
     var as_terrain := _data_only and _enabled
     _terrain.render_layers_mask = 0 if as_terrain else _saved_render_mask
     if _mesh_instance != null:
-        # Default render: wear the terrain's real material (grass shader). Debug
-        # overlay (dcmanager without dcsolo): translucent cyan over godot_voxel.
-        _mesh_instance.material_override = _terrain.material if as_terrain else _debug_material
+        # Default render: wear the grass surface material. Debug overlay (dcmanager without
+        # dcsolo): translucent cyan over godot_voxel.
+        _mesh_instance.material_override = terrain_material if as_terrain else _debug_material
 
 
 func _on_terrain_edit(event: TerrainSdfChangedEvent) -> void:

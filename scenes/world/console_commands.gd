@@ -76,28 +76,17 @@ func _parse_toggle(state: String, current: bool) -> bool:
 
 
 func set_uniform(param: String, value: float) -> void:
-    var mat := terrain.material as ShaderMaterial
+    var mat := dc_manager.terrain_material
     if mat == null:
-        LimboConsole.error("terrain has no ShaderMaterial")
+        LimboConsole.error("no terrain material")
         return
-    mat.set_shader_parameter(param, value)
-    _push_terrain_material(mat)
+    mat.set_shader_parameter(param, value)   # one MeshInstance now — the change is live
     LimboConsole.info("%s = %s" % [param, value])
 
-# VoxelLodTerrain renders each mesh block with its own pooled COPY of the material (so
-# blocks can carry per-block LOD uniforms); terrain.material is only the template.
-# Changing a uniform on the template doesn't touch the live copies. Re-assigning the
-# material re-pools every block from the template — godot_voxel preserves only its own
-# per-block uniforms across the copy, so our custom uniforms refresh from the template.
-# The null hop defeats set_material's identity early-out (it ignores the same instance).
-func _push_terrain_material(mat: ShaderMaterial) -> void:
-    terrain.material = null
-    terrain.material = mat
-
 func get_uniform(pattern: String = "*") -> void:
-    var mat := terrain.material as ShaderMaterial
+    var mat := dc_manager.terrain_material
     if mat == null:
-        LimboConsole.error("terrain has no ShaderMaterial")
+        LimboConsole.error("no terrain material")
         return
     var found := 0
     for prop in mat.get_property_list():

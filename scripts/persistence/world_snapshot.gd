@@ -41,17 +41,19 @@ static func load_into(path: String, world: Node) -> bool:
 static func encode(world: Node) -> Dictionary:
     var integrity := world.get_node("StructuralIntegrity") as StructuralIntegrity
     var player    := world.get_node("Player") as CharacterBody3D
-    var terrain   := world.get_node("VoxelLodTerrain") as VoxelLodTerrain
     return {
         "version":  VERSION,
         "player":   _encode_player(player),
         "voxels":   _encode_voxels(integrity.terrain_support),
         "parts":    _encode_parts(integrity.part_support),
-        "tunables": _encode_tunables(terrain),
+        "tunables": _encode_tunables(),
     }
 
-static func _encode_tunables(terrain: VoxelLodTerrain) -> Dictionary:
-    var mat := terrain.material as ShaderMaterial
+static func _terrain_material() -> ShaderMaterial:
+    return load(DCTerrainManager.TERRAIN_MATERIAL_PATH) as ShaderMaterial   # the shared cached instance
+
+static func _encode_tunables() -> Dictionary:
+    var mat := _terrain_material()
     if mat == null:
         return {}
     var out: Dictionary = {}
@@ -112,16 +114,15 @@ static func _encode_parts(ps: PartSupport) -> Array:
 static func apply(snap: Dictionary, world: Node) -> void:
     var integrity := world.get_node("StructuralIntegrity") as StructuralIntegrity
     var player    := world.get_node("Player") as CharacterBody3D
-    var terrain   := world.get_node("VoxelLodTerrain") as VoxelLodTerrain
     _apply_voxels(integrity, snap.get("voxels", []))
     _apply_parts(world, integrity, snap.get("parts", []))
     _apply_player(player, snap.get("player", {}))
-    _apply_tunables(terrain, snap.get("tunables", {}))
+    _apply_tunables(snap.get("tunables", {}))
 
-static func _apply_tunables(terrain: VoxelLodTerrain, tunables: Dictionary) -> void:
+static func _apply_tunables(tunables: Dictionary) -> void:
     if tunables.is_empty():
         return
-    var mat := terrain.material as ShaderMaterial
+    var mat := _terrain_material()
     if mat == null:
         return
     for uniform in tunables:
