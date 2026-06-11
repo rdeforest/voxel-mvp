@@ -67,6 +67,14 @@ class MpmSim : public RefCounted {
 
 	int _grid_count() const { return _dim * _dim * _dim; }
 
+	// One MLS-MPM step, split into its three phases (share the quadratic-B-spline stencil).
+	void _p2g(double dt);
+	void _grid_update(double dt);
+	void _g2p(double dt);
+	// Quadratic-B-spline stencil for a particle at `pos`: the base node (lower corner of the
+	// 3³ neighbourhood), the fractional offset `fx`, and the per-axis weights w[axis][0..2].
+	void _stencil(const Vector3 &pos, int base[3], Vector3 &fx, double w[3][3]) const;
+
 public:
 	// E = Young's modulus, nu = Poisson's ratio → Lamé μ, λ.
 	void configure(Vector3 origin, int dim, double dx, Vector3 gravity, double E, double nu, double floor_y);

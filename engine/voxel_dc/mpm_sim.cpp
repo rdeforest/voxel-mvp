@@ -128,11 +128,29 @@ void MpmSim::step(double dt) {
 		_gv[i] = Vector3();
 		_gm[i] = 0.0;
 	}
+	_p2g(dt);
+	_grid_update(dt);
+	_g2p(dt);
+}
 
+void MpmSim::_stencil(const Vector3 &pos, int base[3], Vector3 &fx, double w[3][3]) const {
+	const Vector3 gx = (pos - _origin) * _inv_dx;
+	base[0] = int(Math::floor(gx.x - 0.5));
+	base[1] = int(Math::floor(gx.y - 0.5));
+	base[2] = int(Math::floor(gx.z - 0.5));
+	fx = gx - Vector3(base[0], base[1], base[2]);
+	const double f[3] = { fx.x, fx.y, fx.z };
+	for (int a = 0; a < 3; a++) {
+		w[a][0] = 0.5 * (1.5 - f[a]) * (1.5 - f[a]);
+		w[a][1] = 0.75 - (f[a] - 1.0) * (f[a] - 1.0);
+		w[a][2] = 0.5 * (f[a] - 0.5) * (f[a] - 0.5);
+	}
+}
+
+// Scatter particle mass + momentum (incl. the internal-stress affine term) to the grid.
+void MpmSim::_p2g(double dt) {
 	const double dinv = 4.0 * _inv_dx * _inv_dx; // quadratic-kernel D⁻¹
 	const int np = int(_x.size());
-
-	// --- P2G: scatter mass + momentum (incl. the internal-stress affine term) to the grid.
 	for (int p = 0; p < np; p++) {
 		// Advance the deformation gradient with last step's affine velocity, then take the
 		// neo-Hookean Kirchhoff stress τ = μ(FFᵀ − I) + λ ln(J) I.
@@ -143,37 +161,32 @@ void MpmSim::step(double dt) {
 		}
 		const Mat3 FFt = _F[p] * _F[p].transposed();
 		const Mat3 tau = (FFt - Mat3::identity()).scaled(_mu) + Mat3::identity().scaled(_lambda * Math::log(J));
-		const Mat3 stress = tau.scaled(-dt * _vol[p] * dinv);
-		const Mat3 affine = stress + _C[p].scaled(_mass[p]);
+		const Mat3 affine = tau.scaled(-dt * _vol[p] * dinv) + _C[p].scaled(_mass[p]);
 
-		const Vector3 gx = (_x[p] - _origin) * _inv_dx;
-		const int bx = int(Math::floor(gx.x - 0.5));
-		const int by = int(Math::floor(gx.y - 0.5));
-		const int bz = int(Math::floor(gx.z - 0.5));
-		const Vector3 fx = gx - Vector3(bx, by, bz);
-		// Per-axis quadratic B-spline weights for the 3-node stencil.
-		const double wx[3] = { 0.5 * (1.5 - fx.x) * (1.5 - fx.x), 0.75 - (fx.x - 1.0) * (fx.x - 1.0), 0.5 * (fx.x - 0.5) * (fx.x - 0.5) };
-		const double wy[3] = { 0.5 * (1.5 - fx.y) * (1.5 - fx.y), 0.75 - (fx.y - 1.0) * (fx.y - 1.0), 0.5 * (fx.y - 0.5) * (fx.y - 0.5) };
-		const double wz[3] = { 0.5 * (1.5 - fx.z) * (1.5 - fx.z), 0.75 - (fx.z - 1.0) * (fx.z - 1.0), 0.5 * (fx.z - 0.5) * (fx.z - 0.5) };
-
+		int base[3];
+		Vector3 fx;
+		double w[3][3];
+		_stencil(_x[p], base, fx, w);
 		for (int i = 0; i < 3; i++) {
 			for (int j = 0; j < 3; j++) {
 				for (int k = 0; k < 3; k++) {
-					const int ix = bx + i, iy = by + j, iz = bz + k;
+					const int ix = base[0] + i, iy = base[1] + j, iz = base[2] + k;
 					if (ix < 0 || iy < 0 || iz < 0 || ix >= _dim || iy >= _dim || iz >= _dim) {
 						continue;
 					}
 					const Vector3 dpos = (Vector3(i, j, k) - fx) * _dx; // particle→node (world)
-					const double w = wx[i] * wy[j] * wz[k];
+					const double weight = w[0][i] * w[1][j] * w[2][k];
 					const int n = ix + iy * _dim + iz * _dim * _dim;
-					_gv[n] += (_v[p] * _mass[p] + affine.xform(dpos)) * w;
-					_gm[n] += w * _mass[p];
+					_gv[n] += (_v[p] * _mass[p] + affine.xform(dpos)) * weight;
+					_gm[n] += weight * _mass[p];
 				}
 			}
 		}
 	}
+}
 
-	// --- Grid update: momentum→velocity, gravity, floor + domain-wall boundaries.
+// Momentum→velocity, gravity, floor + domain-wall boundaries (contact resolved on the grid).
+void MpmSim::_grid_update(double dt) {
 	for (int iz = 0; iz < _dim; iz++) {
 		for (int iy = 0; iy < _dim; iy++) {
 			for (int ix = 0; ix < _dim; ix++) {
@@ -183,8 +196,7 @@ void MpmSim::step(double dt) {
 				}
 				Vector3 v = _gv[n] / _gm[n];
 				v += _gravity * dt;
-				const double wy_world = _origin.y + iy * _dx;
-				if (wy_world <= _floor_y && v.y < 0.0) {
+				if (_origin.y + iy * _dx <= _floor_y && v.y < 0.0) {
 					v.y = 0.0;
 					v.x *= (1.0 - _friction);
 					v.z *= (1.0 - _friction);
@@ -203,32 +215,31 @@ void MpmSim::step(double dt) {
 			}
 		}
 	}
+}
 
-	// --- G2P: gather velocity + rebuild the APIC affine matrix, then advect.
+// Gather velocity + rebuild the APIC affine matrix, then advect.
+void MpmSim::_g2p(double dt) {
+	const double dinv = 4.0 * _inv_dx * _inv_dx;
+	const int np = int(_x.size());
 	for (int p = 0; p < np; p++) {
-		const Vector3 gx = (_x[p] - _origin) * _inv_dx;
-		const int bx = int(Math::floor(gx.x - 0.5));
-		const int by = int(Math::floor(gx.y - 0.5));
-		const int bz = int(Math::floor(gx.z - 0.5));
-		const Vector3 fx = gx - Vector3(bx, by, bz);
-		const double wx[3] = { 0.5 * (1.5 - fx.x) * (1.5 - fx.x), 0.75 - (fx.x - 1.0) * (fx.x - 1.0), 0.5 * (fx.x - 0.5) * (fx.x - 0.5) };
-		const double wy[3] = { 0.5 * (1.5 - fx.y) * (1.5 - fx.y), 0.75 - (fx.y - 1.0) * (fx.y - 1.0), 0.5 * (fx.y - 0.5) * (fx.y - 0.5) };
-		const double wz[3] = { 0.5 * (1.5 - fx.z) * (1.5 - fx.z), 0.75 - (fx.z - 1.0) * (fx.z - 1.0), 0.5 * (fx.z - 0.5) * (fx.z - 0.5) };
-
+		int base[3];
+		Vector3 fx;
+		double w[3][3];
+		_stencil(_x[p], base, fx, w);
 		Vector3 nv;
 		Mat3 nc = Mat3::zero();
 		for (int i = 0; i < 3; i++) {
 			for (int j = 0; j < 3; j++) {
 				for (int k = 0; k < 3; k++) {
-					const int ix = bx + i, iy = by + j, iz = bz + k;
+					const int ix = base[0] + i, iy = base[1] + j, iz = base[2] + k;
 					if (ix < 0 || iy < 0 || iz < 0 || ix >= _dim || iy >= _dim || iz >= _dim) {
 						continue;
 					}
 					const Vector3 dpos = (Vector3(i, j, k) - fx) * _dx;
-					const double w = wx[i] * wy[j] * wz[k];
+					const double weight = w[0][i] * w[1][j] * w[2][k];
 					const Vector3 g_v = _gv[ix + iy * _dim + iz * _dim * _dim];
-					nv += g_v * w;
-					nc = nc + Mat3::outer(g_v, dpos).scaled(dinv * w); // APIC affine
+					nv += g_v * weight;
+					nc = nc + Mat3::outer(g_v, dpos).scaled(dinv * weight); // APIC affine
 				}
 			}
 		}
