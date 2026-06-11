@@ -9,10 +9,55 @@ rides on is the EditStore + DC mesher ([`11-octree-edit-store.md`](11-octree-edi
 terrain are the same data") is [`03`](03-dc-qef-geometry.md) §"Imprinting". This doc
 extends that thesis one layer up: **the same simulation, too.***
 
-> **Status: vision + spike plan.** Nothing here is built. The point of the doc is to
-> commit the *target* (MPM as the structural substrate) and define the spike that
-> decides whether we walk to it, before any of PBD or parts-as-voxels Stages 5–6 get
-> deepened — because MPM **subsumes** them.
+> **Status: spike done — VERDICT = GO (2026-06-11).** The isolated CPU spike is built and
+> headless-tested (`engine/voxel_dc/mpm_sim.*`, `mpm_material.*`, `mat3.*`;
+> `test/test_mpm_sim.gd`). All physics scenes behave; the cost is per-particle-linear and
+> SVD-dominated, well inside reach of the planned GPU port. See "Spike results" below before
+> the staging plan. The target (MPM as the structural substrate) stands; next is graduating
+> the core toward real-time (fast 3×3 SVD, multi-thread/GPU) then the EditStore thaw/freeze
+> coupling — *then* it replaces PBD and closes parts-as-voxels Stages 5–6.
+
+## Spike results (2026-06-11)
+
+Built as an isolated `MpmSim` (MLS-MPM, APIC transfer, double precision), not wired into the
+game. Every claim is pinned by a headless GUT test.
+
+**Behaviour — all green:**
+- **Core loop stable**: an elastic block falls under gravity and rests on a floor without
+  blowing up (P2G → grid → G2P with APIC).
+- **3×3 SVD verified** directly (reconstruction, proper-rotation U/V, Πσ = det, signed
+  reflection convention) — caught a Jacobi angle-sign bug in the process.
+- **Fixed-corotated** elasticity (stiff bodies hold shape) and **neo-Hookean** both run.
+- **SDF contact (the bug-fix mechanism)**: a stiff body dropped on a stamped EditStore-SDF
+  pillar is *caught and rests on it*, doesn't pass through — the grid-resolved contact PBD
+  structurally lacked (the beam-swings-through-mountain fix). Note: ~1 cell of contact
+  *softness* at dx = 1 m (finer grid / a penetration push-out tightens it).
+- **Drucker-Prager sand**: a tall column slumps into a stable repose pile; a friction sweep
+  showed the *internal* friction sets the angle (radius saturates independent of the floor).
+  Calibrates to ~20° vs the 35° input — a known MPM-sand resolution/calibration gap.
+- **Sparse sleeping (the boundary-elimination path)**: a settled structure goes fully asleep
+  and steps as an *exact* no-op (state preserved to 1e-12 — lossless, the manifesto answer to
+  the thaw/freeze worry); a dropped block wakes the sleeping pile (drift 0.0 → nonzero).
+
+**Cost (single-threaded CPU, double precision):** per-particle-linear, SVD-dominated.
+
+| Material | µs / particle / step | 8 k particles |
+|---|---|---|
+| neo-Hookean (no SVD) | 0.81 | 6.5 ms |
+| fixed-corotated (SVD) | 2.44 | 19.5 ms |
+| sand (SVD + return-map) | 2.22 | 17.7 ms |
+
+Linear scaling (corotated): 1.7 k → 4.3 ms, 8 k → 19.6 ms, 22 k → 54 ms.
+
+**Verdict — GO.** The physics is correct and the cost is exactly the shape we expected:
+linear in active particles, dominated by the per-particle SVD. Single-threaded CPU is too
+slow for real-time at scale (~8 k particles = one 20 ms frame, one substep) — *as planned*.
+The runway to real-time is well-trodden: (1) a **fast 3×3 SVD** (McAdams 2011) is ~5–10× the
+naive Jacobi-via-matmul used here; (2) the per-particle work is **embarrassingly parallel**
+(24 cores ≈ 20×; GPU MLS-MPM does millions of particles at 60 fps — 100× our active counts);
+(3) **sparse sleeping** means only active material costs anything. None of these are research
+risks. The remaining *research* risk is the EditStore thaw/freeze coupling (risk #1), not the
+solver.
 
 ## TL;DR
 
