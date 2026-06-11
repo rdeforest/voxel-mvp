@@ -10,9 +10,6 @@ extends AdditiveAction
 # evaluated at the integer lattice points the mesher reads, over the shape's
 # rotated AABB plus a margin so the surface band is written on every side.
 
-const MARGIN  := 2.0   # cells of band written beyond the shape, for a clean crossing
-
-
 var shape:    CsgShape      # active primitive: owns its dims, SDF, and local AABB
 var xform:    Transform3D   # shape local -> world (rotation basis + placement origin)
 var op:       int           # CsgState.Op
@@ -64,64 +61,22 @@ func execute() -> void:
         push_error("CsgAction.execute(): no store")
         return
     _ensure_work()
-
     if op == CsgState.Op.ADD:
         _freeze_bodies_in_volume()
-
-    # One dense write: newly-solid cells take the CSG material; carved (air) cells keep
-    # their current material (it's unused for air). The DC mesher reads the material back
-    # and the terrain shader colours by it.
-    var solid_index := MaterialPalette.index_of(material_name)
-    StoreWrite.cells(store, _work, func(entry): return solid_index if entry[3] else -1)
-
-    var mat := Materials.from_name(material_name)
-    for entry in _work:
-        var cell: Vector3i = entry[0]
-        if entry[3] and not entry[2]:
-            VoxelEventBusSingleton.emit(VoxelAddedEvent.CHANNEL,   VoxelAddedEvent.new(VoxelConstants.GRID_ID, cell, mat))
-        elif entry[2] and not entry[3]:
-            VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))
-
-    var box := _world_box()
-    VoxelEventBusSingleton.emit(
-        TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box.position, box.size))
+    VoxelImprint.apply(store, _work, material_name, _world_box())
 
 
 # --- Internals ---
 
-# World AABB the stamp touches: the shape's local AABB rotated into world by
-# `xform`, grown by MARGIN so the surface band is written all around.
 func _world_box() -> AABB:
-    return (xform * shape.local_aabb()).grow(MARGIN)
+    return VoxelImprint.world_box(shape, xform)
 
 
 func _ensure_work() -> void:
     if _work_computed or store == null:
         return
-    _work          = _compute_work()
+    _work          = VoxelImprint.compute(store, shape, xform, op)
     _work_computed = true
-
-
-func _compute_work() -> Array:
-    var inverse := xform.affine_inverse()
-    var box  := _world_box()
-    var work: Array = []
-    VoxelUtils.for_each_in_bounding_box(
-        box.position,
-        box.size,
-        func(cell: Vector3i) -> void:
-            var distance := shape.sdf(inverse * Vector3(cell))
-            distance = clampf(distance, VoxelConstants.SDF_SOLID, VoxelConstants.SDF_AIR)
-            var existing := store.sample(Vector3(cell))
-            var combined := minf(existing, distance) if op == CsgState.Op.ADD else maxf(existing, -distance)
-            if is_equal_approx(combined, existing):
-                return
-            var was_solid := existing  < VoxelConstants.SDF_SOLID_THRESHOLD
-            var now_solid := combined  < VoxelConstants.SDF_SOLID_THRESHOLD
-            work.append([cell, combined, was_solid, now_solid])
-    )
-    return work
 
 
 # Refuse if the stamp would bury the player (new solid in their capsule) or cut the

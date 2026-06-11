@@ -126,16 +126,12 @@ func csg_placement_pos(hit_pos: Vector3) -> Vector3:
 
 
 func make_construction(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
-    var placement_pos := build_placement_pos(hit_pos)
-    var anchor        := Vector3i(roundi(hit_pos.x), floori(hit_pos.y), roundi(hit_pos.z))
     return ConstructionAction.new(
         _build_state.current_part(),
-        placement_pos,
-        anchor,
+        build_placement_pos(hit_pos),
         _build_state.rotation,
         _build_state.current_material(),
         _store(),
-        _integrity,
         _player,
     )
 

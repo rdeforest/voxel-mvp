@@ -4,6 +4,6 @@
 
 [resource]
 script = ExtResource("1_part")
-dimensions = Vector3(3, 1, 1)
+dimensions = Vector3(6, 2, 2)
 material_name = &"Wood"
 snap_points = Array[Vector3]([])
