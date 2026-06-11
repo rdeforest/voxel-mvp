@@ -31,10 +31,44 @@ int MpmSim::add_particle(Vector3 pos, double mass, double volume) {
 	_C.push_back(Mat3::zero());
 	_mass.push_back(mass);
 	_vol.push_back(volume);
+	_sleeping.push_back(0); // new particles start awake (adding one is a disturbance)
+	_still.push_back(0);
+	_affine.push_back(Mat3::zero());
+	_awake_count++;
 	return int(_x.size()) - 1;
 }
 
+void MpmSim::set_sleep_params(double speed, int after, double wake_speed) {
+	_sleep_speed = speed;
+	_sleep_after = after;
+	_wake_speed = wake_speed;
+}
+
+void MpmSim::wake_all() {
+	for (uint32_t i = 0; i < _sleeping.size(); i++) {
+		if (_sleeping[i]) {
+			_sleeping[i] = 0;
+			_still[i] = 0;
+			_awake_count++;
+		}
+	}
+}
+
+void MpmSim::wake_region(Vector3 center, double radius) {
+	const double r2 = radius * radius;
+	for (uint32_t i = 0; i < _sleeping.size(); i++) {
+		if (_sleeping[i] && _x[i].distance_squared_to(center) < r2) {
+			_sleeping[i] = 0;
+			_still[i] = 0;
+			_awake_count++;
+		}
+	}
+}
+
 void MpmSim::step(double dt) {
+	if (_sleep_enabled && _awake_count == 0) {
+		return; // fully quiescent — costs nothing (doc 12 "sparse sleeping")
+	}
 	const int gc = _grid_count();
 	for (int i = 0; i < gc; i++) {
 		_gv[i] = Vector3();
@@ -136,11 +170,15 @@ void MpmSim::_p2g(double dt) {
 	const double dinv = 4.0 * _inv_dx * _inv_dx; // quadratic-kernel D⁻¹
 	const int np = int(_x.size());
 	for (int p = 0; p < np; p++) {
-		// Advance the deformation gradient with last step's affine velocity, then take the
-		// internal-stress term from the constitutive model.
-		_F[p] = (Mat3::identity() + _C[p].scaled(dt)) * _F[p];
-		const Mat3 tau = _stress(_F[p]);
-		const Mat3 affine = tau.scaled(-dt * _vol[p] * dinv) + _C[p].scaled(_mass[p]);
+		// Asleep particles reuse their cached affine (F frozen, C = 0) — no SVD, but they
+		// still scatter so support is preserved. Awake particles advance F + recompute stress.
+		Mat3 affine;
+		if (_sleeping[p]) {
+			affine = _affine[p];
+		} else {
+			_F[p] = (Mat3::identity() + _C[p].scaled(dt)) * _F[p];
+			affine = _stress(_F[p]).scaled(-dt * _vol[p] * dinv) + _C[p].scaled(_mass[p]);
+		}
 
 		int base[3];
 		Vector3 fx;
@@ -251,9 +289,36 @@ void MpmSim::_g2p(double dt) {
 				}
 			}
 		}
+
+		if (_sleep_enabled && _sleeping[p]) {
+			// Asleep: don't advect. Wake if the grid is now pushing it (a disturbance arrived).
+			if (nv.length() > _wake_speed) {
+				_sleeping[p] = 0;
+				_still[p] = 0;
+				_awake_count++;
+			}
+			continue;
+		}
+
 		_v[p] = nv;
 		_C[p] = nc;
 		_x[p] += nv * dt;
+
+		if (_sleep_enabled) {
+			if (nv.length() < _sleep_speed) {
+				if (++_still[p] >= _sleep_after) {
+					// Sleep: freeze in place and cache the (C = 0) P2G affine so support holds
+					// without re-running the SVD while asleep.
+					_v[p] = Vector3();
+					_C[p] = Mat3::zero();
+					_affine[p] = _stress(_F[p]).scaled(-dt * _vol[p] * dinv);
+					_sleeping[p] = 1;
+					_awake_count--;
+				}
+			} else {
+				_still[p] = 0;
+			}
+		}
 	}
 }
 
@@ -329,6 +394,12 @@ void MpmSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_contact_friction", "f"), &MpmSim::set_contact_friction);
 	ClassDB::bind_method(D_METHOD("set_sand_friction", "friction_angle_degrees"), &MpmSim::set_sand_friction);
 	ClassDB::bind_method(D_METHOD("set_sdf_collider", "store"), &MpmSim::set_sdf_collider);
+	ClassDB::bind_method(D_METHOD("set_sleeping", "on"), &MpmSim::set_sleeping);
+	ClassDB::bind_method(D_METHOD("set_sleep_params", "speed", "after", "wake_speed"), &MpmSim::set_sleep_params);
+	ClassDB::bind_method(D_METHOD("awake_count"), &MpmSim::awake_count);
+	ClassDB::bind_method(D_METHOD("is_asleep"), &MpmSim::is_asleep);
+	ClassDB::bind_method(D_METHOD("wake_all"), &MpmSim::wake_all);
+	ClassDB::bind_method(D_METHOD("wake_region", "center", "radius"), &MpmSim::wake_region);
 	ClassDB::bind_method(D_METHOD("debug_svd", "m"), &MpmSim::debug_svd);
 	ClassDB::bind_method(D_METHOD("add_particle", "pos", "mass", "volume"), &MpmSim::add_particle);
 	ClassDB::bind_method(D_METHOD("step", "dt"), &MpmSim::step);

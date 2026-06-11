@@ -195,6 +195,76 @@ func test_sand_column_collapses_to_a_stable_pile() -> void:
     assert_between(angle, 10.0, 45.0, "holds a stable sand-like pile — not a puddle (<5°) or a standing tower (>50°) (got %.1f°)" % angle)
 
 
+func _all_positions(sim: MpmSim) -> Array:
+    var out := []
+    for i in sim.particle_count():
+        out.append(sim.get_position(i))
+    return out
+
+func _max_drift(before: Array, after: Array) -> float:
+    var d := 0.0
+    for i in mini(before.size(), after.size()):
+        d = maxf(d, before[i].distance_to(after[i]))
+    return d
+
+# Settle a block with sleeping on, stepping until the whole sim is asleep (or the budget runs out).
+func _settle_asleep(sim: MpmSim, budget: int) -> bool:
+    sim.set_sleeping(true)
+    sim.set_sleep_params(0.2, 50, 0.5)
+    sim.set_contact_friction(0.2)   # a little dissipation so it reaches full rest
+    for _i in budget:
+        sim.step(DT)
+        if sim.is_asleep():
+            return true
+    return false
+
+
+func test_sleeping_settles_to_a_no_op_and_preserves_state() -> void:
+    # Sparse sleeping (doc 12): a settled structure goes fully asleep, after which step() is a
+    # NO-OP that preserves state exactly — the lossless "design the boundary away" path (no
+    # rasterise-to-field, so F/stress are kept, not dropped).
+    var sim := _block(Vector3i(-2, 1, -2), Vector3i(2, 3, 2))
+    assert_true(_settle_asleep(sim, 6000), "the settled block went fully to sleep (awake_count -> 0)")
+
+    var before := _all_positions(sim)
+    for _i in 300:
+        sim.step(DT)
+    assert_eq(sim.awake_count(), 0, "still asleep")
+    assert_almost_eq(_max_drift(before, _all_positions(sim)), 0.0, 1e-12, "asleep steps are an exact no-op — state preserved losslessly")
+
+
+func test_a_dropped_block_wakes_the_sleeping_pile() -> void:
+    # Wake-on-disturbance: a sleeping pile must re-activate and respond when something lands on
+    # it (the grid velocity from the impact exceeds the wake threshold).
+    var sim := _block(Vector3i(-2, 1, -2), Vector3i(2, 3, 2))
+    assert_true(_settle_asleep(sim, 6000), "the pile slept")
+    sim.set_sleep_params(0.2, 50, 0.1)   # wake threshold the landing load can clear
+    var pile_count := sim.particle_count()
+    var pile_before := _all_positions(sim)
+
+    # Drop a pile-sized block from well above onto the sleeping pile (a clear impact).
+    var p_vol := (DX * 0.5) * (DX * 0.5) * (DX * 0.5)
+    var p_mass := RHO * p_vol
+    for cz in range(-2, 2):
+        for cy in range(12, 14):
+            for cx in range(-2, 2):
+                for ox in [0.25, 0.75]:
+                    for oy in [0.25, 0.75]:
+                        for oz in [0.25, 0.75]:
+                            sim.add_particle(Vector3(cx + ox, cy + oy, cz + oz), p_mass, p_vol)
+    assert_gt(sim.awake_count(), 0, "adding the falling block woke the sim")
+
+    for _i in 2000:
+        sim.step(DT)
+
+    # A woken pile moves MEASURABLY (contrast: a pile that never wakes drifts exactly 0.0,
+    # since asleep particles don't advect). The dent is only modest because once awake the
+    # heavy pile re-supports the load — that magnitude is physics; the nonzero-ness is the proof.
+    var pile_drift := _max_drift(pile_before, _all_positions(sim).slice(0, pile_count))
+    assert_gt(pile_drift, 0.03, "the impact woke and moved the sleeping pile (wake-on-disturbance), drift %.3f" % pile_drift)
+    assert_true(sim.is_finite(), "stayed finite through wake + impact")
+
+
 func test_settles_rather_than_gaining_energy() -> void:
     # A spike sanity floor: by the end the block isn't *gaining* kinetic energy (no blow-up
     # masquerading as finite). Compared against the free-fall energy at impact, not zero —

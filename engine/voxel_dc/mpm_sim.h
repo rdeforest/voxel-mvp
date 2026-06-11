@@ -46,6 +46,21 @@ class MpmSim : public RefCounted {
 	double _mu = 0.0;          // Lamé μ (shear)
 	double _lambda = 0.0;      // Lamé λ
 
+	// Sparse sleeping (doc 12 "design the boundary away"). A particle still for _sleep_after
+	// steps stops being stepped: its P2G contribution is CACHED (no SVD, support preserved
+	// losslessly — F/stress kept), G2P skips it (it doesn't move), and it re-wakes when the
+	// grid velocity at its location exceeds _wake_speed. A fully-asleep sim's step() is a
+	// no-op ("a quiescent structure costs nothing"). Off by default so the bare-physics tests
+	// are unaffected.
+	bool _sleep_enabled = false;
+	LocalVector<uint8_t> _sleeping;
+	LocalVector<int32_t> _still;
+	LocalVector<Mat3> _affine; // cached P2G affine while asleep (F frozen, C = 0)
+	int _awake_count = 0;
+	double _sleep_speed = 0.05;
+	int _sleep_after = 80;
+	double _wake_speed = 0.2;
+
 	// Constitutive model. NEO_HOOKEAN needs no SVD (the increment-1 default); COROTATED uses
 	// the polar rotation R = UVᵀ so a stiff body holds its shape; SAND is Drucker-Prager
 	// elastoplasticity (Klár 2016) — granular flow that piles at an angle of repose.
@@ -89,8 +104,15 @@ public:
 	void set_contact_friction(double f) { _friction = f; } // floor/SDF tangential damping
 	void set_sand_friction(double friction_angle_degrees); // sets _alpha for the SAND model
 	void set_sdf_collider(const Ref<EditStore> &store) { _collider = store; }
+	void set_sleeping(bool on) { _sleep_enabled = on; }
+	void set_sleep_params(double speed, int after, double wake_speed);
 	int add_particle(Vector3 pos, double mass, double volume);
 	void step(double dt);
+
+	int awake_count() const { return _awake_count; }
+	bool is_asleep() const { return _sleep_enabled && _awake_count == 0; }
+	void wake_all();
+	void wake_region(Vector3 center, double radius);
 
 	// Test hook: SVD a matrix and report {error (reconstruction Frobenius), det_u, det_v,
 	// s0, s1, s2}. Lets the GDScript suite pin the SVD — the riskiest numerical code here.
