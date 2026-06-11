@@ -4,9 +4,9 @@ extends RefCounted
 const VERSION := 5
 
 # Survives scene reloads (static var on a loaded script). Set by the `reset`
-# console command and consumed by world.gd on the next _enter_tree/_ready
-# cycle. When true: the SQLite terrain stream is detached for that load
-# (procedural-only terrain), and the snapshot file is left untouched on disk.
+# console command and consumed by world.gd on the next _ready. When true: the saved
+# EditStore blob and snapshot are skipped for that load (fresh procedural terrain), and
+# both save files are left untouched on disk.
 static var reset_pending: bool = false
 
 

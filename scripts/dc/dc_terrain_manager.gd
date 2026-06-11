@@ -1,17 +1,14 @@
 class_name DCTerrainManager
 extends Node3D
 
-# Our own meshing/render layer over godot_voxel's data. Meshes a cube of terrain
-# around the followed node (the player) with our C++ DCOctreeMesher and renders our
-# mesh, re-meshing as the player moves. godot_voxel stays the data / stream / edit /
-# collision engine; this only reads and renders.
+# Our terrain render layer. Meshes a cube of terrain around the followed node (the player)
+# with our C++ DCOctreeMesher and renders our mesh, re-meshing as the player moves. The SDF
+# + material come from the EditStore (generator + edits) — the sole terrain data source.
 #
-# Threading: the region read (DCRegionReader, a bulk locked C++ copy) happens on the
-# main thread (~0ms with cache_generated_blocks on). The expensive meshing pass
-# (DCOctreeMesher) runs on a WorkerThreadPool task over immutable PackedFloat32Array
-# levels, so it never hitches the frame and never touches a Node or the engine store
-# from the thread. The finished arrays come back and the ArrayMesh is built on the
-# main thread (RenderingServer upload).
+# Threading: the per-level region reads (EditStore.fill_region / fill_indices_region) and the
+# meshing pass (DCOctreeMesher) both run on a WorkerThreadPool task over an immutable store
+# snapshot — never touching a Node or the live store from the thread. The finished arrays
+# come back and the ArrayMesh is built on the main thread (RenderingServer upload).
 #
 # Meshes a distance-graded LOD clipmap: nested levels centred on the follow target,
 # level k covering 2^k the extent at 2^k the cell size, each read at LOD k so coarse
