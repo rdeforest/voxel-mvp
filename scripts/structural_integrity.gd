@@ -8,8 +8,10 @@ var terrain_support:    TerrainSupport
 var pbd:                PbdStructure       # set by world.gd; folded into is_quiescent
 var mpm:                MpmStructure       # set by world.gd; the PB-MPM substrate (replaces PBD)
 
-# When true, loss-of-support cells thaw into `mpm` instead of being simulated by PBD (which is
-# disabled). The transition path to replacing PBD — toggled by the `physics_mode` console command.
+# When true, PBD is disabled (toggled by the `physics_mode` console command). The MPM detachment
+# trigger that thaws loose terrain is being rebuilt as an async bounded flood-to-ground (the
+# scalar-support trigger cascaded + locked up and was removed); until it lands, MPM mode just
+# stands PBD down and leaves the `mpmthaw` / `mpmdemo` tools for manual experimentation.
 var mpm_mode := false
 
 # Inactive until the world finishes loading (WorldReadyEvent) — don't classify
@@ -39,8 +41,6 @@ func _physics_process(_delta: float) -> void:
     # (the suspended-mass discovery is gated on the scalar support).
     if not terrain_support.dirty_queue.is_empty():
         terrain_support.process_dirty_queue()
-    if mpm_mode and mpm != null and not terrain_support.fall_candidates.is_empty():
-        mpm.thaw_cells(terrain_support.take_fall_candidates())   # unsupported cells become MPM
     _tick_falling_bodies()
     Perf.report("Structural", (Time.get_ticks_usec() - t0) / 1000.0)
 
