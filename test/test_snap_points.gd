@@ -94,15 +94,6 @@ class TestSnapPointsRemoval:
         assert_almost_eq(SnapPoints.nearest_world(node, Vector3(4.8, 0, 0), 0.4, proto), Vector3(5, 0, 0), Vector3.ONE * 0.0001)
 
 
-class TestPartPrototypeDefaults:
-    extends GutTest
-
-    func test_board_ships_with_two_end_snap_points():
-        var board: Part = preload("res://assets/parts/board/board.tres")
-        assert_eq(board.snap_points.size(), 2)
-        assert_almost_eq(board.snap_points[0], Vector3(1, 0.05, 0), Vector3.ONE * 0.0001)
-
-
 class TestSnapDelta:
     extends GutTest
 

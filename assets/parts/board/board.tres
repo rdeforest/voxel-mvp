@@ -1,8 +1,0 @@
-[gd_resource type="Resource" script_class="Part" format=3 uid="uid://botdc6sloyj1e"]
-
-[ext_resource type="Script" uid="uid://bjij25oiltyca" path="res://scripts/schematics/part.gd" id="1_6wk47"]
-
-[resource]
-script = ExtResource("1_6wk47")
-dimensions = Vector3(2, 0.1, 0.012)
-snap_points = Array[Vector3]([Vector3(1, 0.05, 0), Vector3(-1, 0.05, 0)])

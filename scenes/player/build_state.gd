@@ -4,10 +4,8 @@ extends RefCounted
 signal changed()
 
 var _parts: Array[Part] = [
-    preload("res://assets/parts/board/board.tres"),
-    preload("res://assets/parts/plank/plank.tres"),
-    preload("res://assets/parts/stud/stud.tres"),
     preload("res://assets/parts/beam/beam.tres"),
+    preload("res://assets/parts/slab/slab.tres"),
 ]
 var _materials:    Array[StringName] = [&"Wood", &"Stone", &"Metal", &"Dirt", &"Sand"]
 var _build_meshes: Array[BoxMesh]    = []
