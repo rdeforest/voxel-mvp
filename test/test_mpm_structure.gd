@@ -42,3 +42,30 @@ func test_thaw_simulate_freeze_loop_on_real_terrain() -> void:
             solid_found = true
             break
     assert_true(solid_found, "the frozen material re-entered the store as solid terrain")
+
+
+func test_unsupported_cell_flags_a_fall_candidate_and_thaws() -> void:
+    # The auto-trigger (replace-PBD B): a genuinely unsupported tracked cell is flagged by the
+    # support analysis and thaws into the MPM substrate (what `physics_mode mpm` wires up).
+    var store := EditStoreManager.new()
+    store.setup()
+    var base := _surface() + 30                    # a 3³ solid block floating in the air
+    store.store.stamp_box(Vector3(0.5, float(base) + 1.5, 0.5), Vector3(3, 3, 3), 0, 1, 1.0)
+    var cell := Vector3i(0, base, 0)               # the block's BOTTOM cell — air below it, unsupported
+    assert_lt(store.store.sample(Vector3(cell) + Vector3(0.5, 0.5, 0.5)), 0.0, "the bottom cell is solid")
+
+    var ts := TerrainSupport.new()
+    ts.store = store.store
+    ts._register_voxel(cell, Materials.STONE)
+    var guard := 0
+    while not ts.dirty_queue.is_empty() and guard < 1000:
+        ts.process_dirty_queue()
+        guard += 1
+    assert_false(ts.fall_candidates.is_empty(), "the unsupported cell is flagged as a fall candidate")
+
+    var ms: MpmStructure = autofree(MpmStructure.new())
+    ms.setup(store.store)
+    var thawed := ms.thaw_cells(ts.take_fall_candidates())
+    assert_gt(thawed, 0, "the fall candidate thawed into MPM")
+    assert_gt(ms.active_count(), 0, "particles seeded from the unsupported cell")
+    assert_eq(ts.voxel_data.size(), 0, "the thawed cell left the tracked set — it's MPM now, not static terrain")

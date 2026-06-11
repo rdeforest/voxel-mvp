@@ -8,6 +8,7 @@ var _substrate_preview: DcSubstratePreview
 var _dc_collision: DCCollisionManager
 var _awake_overlay: AwakeOverlay
 var _pbd_structure: PbdStructure
+var _mpm_structure: MpmStructure
 var _edit_store: EditStoreManager
 var _part_index: PartIndex
 var _console: ConsoleCommands
@@ -58,6 +59,13 @@ func _ready() -> void:
     _pbd_structure.setup(_integrity)
     _integrity.pbd = _pbd_structure
     _pbd_structure.set_enabled(true)   # PBD is authoritative; the old collapse systems stand down
+    # The PB-MPM substrate (doc 12) that will replace PBD. Created alongside; idle until the
+    # `physics_mode mpm` console command flips StructuralIntegrity.mpm_mode (and disables PBD).
+    _mpm_structure = MpmStructure.new()
+    _mpm_structure.name = "MpmStructure"
+    add_child(_mpm_structure)
+    _mpm_structure.setup(_edit_store.store)
+    _integrity.mpm = _mpm_structure
     _wire_console()
     # Pull the OS window forward and take keyboard focus on launch, so an F5 from
     # the editor doesn't leave keystrokes landing in the script. Deferred so the

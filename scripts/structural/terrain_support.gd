@@ -6,6 +6,12 @@ var voxel_data:           Dictionary[Vector3i, VoxelRecord] = {}
 var dirty_queue:          Array[Vector3i]                   = []
 var _lowest_registered_y: Dictionary                        = {}
 
+# Cells whose support has settled at/below FALL_THRESHOLD — genuinely unsupported, the thaw
+# trigger for the MPM substrate. Drained by the facade via take_fall_candidates() (which also
+# drops them from voxel_data, since they're becoming MPM particles, not static terrain).
+var fall_candidates:      Array[Vector3i]                   = []
+var _fall_set:            Dictionary                        = {}
+
 var store:                EditStore   # SDF source (generator + edits); injected by StructuralIntegrity
 
 
@@ -124,7 +130,24 @@ func process_dirty_queue() -> void:
         if absf(new_support - old_support) > VoxelConstants.SUPPORT_EPSILON:
             dirty_neighbors_of(pos)   # propagate the change through the support fixpoint
 
+        if new_support <= VoxelConstants.FALL_THRESHOLD and not _fall_set.has(pos):
+            _fall_set[pos] = true     # genuinely unsupported — a thaw candidate for MPM
+            fall_candidates.append(pos)
+
         processed += 1
+
+
+# Drain the unsupported cells (the MPM thaw trigger) and drop them from the tracked set — they're
+# becoming MPM particles, no longer static terrain. Returns only cells still tracked + solid.
+func take_fall_candidates() -> Array[Vector3i]:
+    var out: Array[Vector3i] = []
+    for pos in fall_candidates:
+        if voxel_data.has(pos):
+            out.append(pos)
+            _remove_voxel(pos)
+    fall_candidates.clear()
+    _fall_set.clear()
+    return out
 
 func _calculate_support(pos: Vector3i) -> float:
     if is_natural_terrain(pos + Vector3i(0, -1, 0)):

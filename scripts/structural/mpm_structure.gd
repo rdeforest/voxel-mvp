@@ -43,42 +43,49 @@ func setup(store: EditStore) -> void:
     add_child(mmi)
 
 
-# Thaw the solid terrain cells within `radius` of `center` into MPM particles: carve them from
-# the store (a hole opens, DC re-meshes), seed 8 particles per cell. Returns the count thawed.
+# Thaw the solid terrain cells within `radius` of `center` (the `mpmthaw` console path).
 func thaw_sphere(center: Vector3, radius: float, material_index := 1) -> int:
-    _material_index = material_index
-    var p_vol := (1.0 * 0.5) * (1.0 * 0.5) * (1.0 * 0.5)
-    var p_mass := RHO * p_vol
     var r2 := radius * radius
     var lo := Vector3i((center - Vector3.ONE * radius).floor())
     var hi := Vector3i((center + Vector3.ONE * radius).ceil())
-    var work: Array = []
-    var box_lo := Vector3(hi)
-    var box_hi := Vector3(lo)
+    var cells: Array[Vector3i] = []
     for z in range(lo.z, hi.z + 1):
         for y in range(lo.y, hi.y + 1):
             for x in range(lo.x, hi.x + 1):
                 var cell := Vector3i(x, y, z)
-                var cc := Vector3(cell) + Vector3(0.5, 0.5, 0.5)
-                if cc.distance_squared_to(center) > r2:
-                    continue
-                if _store.sample(cc) >= VoxelConstants.SDF_SOLID_THRESHOLD:
-                    continue # already air
-                for ox in [0.25, 0.75]:
-                    for oy in [0.25, 0.75]:
-                        for oz in [0.25, 0.75]:
-                            _sim.add_particle(Vector3(cell) + Vector3(ox, oy, oz), p_mass, p_vol)
-                work.append([cell, VoxelConstants.SDF_AIR])
-                VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))
-                box_lo = box_lo.min(Vector3(cell))
-                box_hi = box_hi.max(Vector3(cell) + Vector3.ONE)
+                if (Vector3(cell) + Vector3(0.5, 0.5, 0.5)).distance_squared_to(center) <= r2:
+                    cells.append(cell)
+    return thaw_cells(cells, material_index)
+
+
+# Thaw a set of (presumed solid) terrain cells into MPM particles: carve each from the store (a
+# hole opens, DC re-meshes), seed 8 particles per cell. Air cells are skipped. Returns the count
+# thawed. This is what the loss-of-support auto-trigger feeds.
+func thaw_cells(cells: Array, material_index := 1) -> int:
+    _material_index = material_index
+    var p_vol := 0.125
+    var p_mass := RHO * p_vol
+    var work: Array = []
+    var box_lo := Vector3(INF, INF, INF)
+    var box_hi := Vector3(-INF, -INF, -INF)
+    for cell in cells:
+        if _store.sample(Vector3(cell) + Vector3(0.5, 0.5, 0.5)) >= VoxelConstants.SDF_SOLID_THRESHOLD:
+            continue # already air
+        for ox in [0.25, 0.75]:
+            for oy in [0.25, 0.75]:
+                for oz in [0.25, 0.75]:
+                    _sim.add_particle(Vector3(cell) + Vector3(ox, oy, oz), p_mass, p_vol)
+        work.append([cell, VoxelConstants.SDF_AIR])
+        VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))
+        box_lo = box_lo.min(Vector3(cell))
+        box_hi = box_hi.max(Vector3(cell) + Vector3.ONE)
     if work.is_empty():
         return 0
     StoreWrite.cells(_store, work, func(_e): return -1) # carve to air
     VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL, TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box_lo, box_hi - box_lo))
     _settled_frames = 0
     _mm.instance_count = _sim.particle_count()
-    return _sim.particle_count() / 8
+    return work.size()
 
 
 func active_count() -> int:

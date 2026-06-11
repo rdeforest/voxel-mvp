@@ -58,6 +58,7 @@ func _table() -> Array:
         [pbddemo,         "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [mpmdemo,         "mpmdemo",   "PB-MPM demo: spawn a live block of continuum material that falls and rests ON the terrain. Usage: mpmdemo [size]"],
         [mpmthaw,         "mpmthaw",   "Thaw the REAL terrain at your aim into MPM: it carves out, falls/deforms, and freezes back when settled. Usage: mpmthaw [radius]"],
+        [physics_mode,    "physics_mode", "Switch the structural sim: 'pbd' (mass-spring, default) or 'mpm' (PB-MPM continuum — unsupported terrain thaws/falls/freezes). Usage: physics_mode [pbd|mpm]"],
         [physics_active,  "physics_active", "Toggle the structural physics simulation on your real structures (sag + collapse under load). Usage: physics_active [on|off]"],
         [perf,            "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
         [awake,           "awake",     "Highlight awake physics bodies (debris / collapsed parts) with a box. Usage: awake [on|off]"],
@@ -183,6 +184,20 @@ func mpmthaw(radius := 3.0) -> void:
         _mpm_structure.setup(edit_store.store)
     var n := _mpm_structure.thaw_sphere(rc.get_collision_point(), radius)
     LimboConsole.info("mpmthaw: thawed %d cells (r=%.1f) into MPM" % [n, radius])
+
+# Switch the authoritative structural sim. `mpm` disables PBD and routes loss-of-support cells
+# into the PB-MPM substrate (thaw → fall → freeze); `pbd` restores the mass-spring sim.
+func physics_mode(mode := "") -> void:
+    if mode == "mpm":
+        integrity.mpm_mode = true
+        pbd_structure.set_enabled(false)
+        LimboConsole.info("physics_mode: MPM (PB-MPM continuum) — PBD disabled")
+    elif mode == "pbd":
+        integrity.mpm_mode = false
+        pbd_structure.set_enabled(true)
+        LimboConsole.info("physics_mode: PBD (mass-spring)")
+    else:
+        LimboConsole.info("physics_mode: %s" % ("mpm" if integrity.mpm_mode else "pbd"))
 
 func physics_active(state := "") -> void:
     var on := _parse_toggle(state, pbd_structure.is_enabled())
