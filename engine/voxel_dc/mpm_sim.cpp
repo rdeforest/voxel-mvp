@@ -103,7 +103,40 @@ void MpmSim::_p2g(double dt) {
 	}
 }
 
-// Momentum→velocity, gravity, floor + domain-wall boundaries (contact resolved on the grid).
+// Outward normal of the collider at p: normalized SDF gradient (central differences).
+Vector3 MpmSim::_collider_normal(const Vector3 &p) const {
+	const double h = 0.5 * _dx;
+	const Vector3 g(
+			_collider->sample(p + Vector3(h, 0, 0)) - _collider->sample(p - Vector3(h, 0, 0)),
+			_collider->sample(p + Vector3(0, h, 0)) - _collider->sample(p - Vector3(0, h, 0)),
+			_collider->sample(p + Vector3(0, 0, h)) - _collider->sample(p - Vector3(0, 0, h)));
+	const double len = g.length();
+	return len > 1e-9 ? g / len : Vector3(0, 1, 0);
+}
+
+// Resolve contact for one grid node: if it's inside the collider and moving inward, remove
+// the inward-normal velocity and apply friction to what's left. SDF terrain when set, else
+// a flat floor plane (the bare-core fallback).
+void MpmSim::_apply_collider(const Vector3 &world, Vector3 &v) const {
+	if (_collider.is_valid()) {
+		if (_collider->sample(world) < 0.0) { // node inside solid terrain
+			const Vector3 nrm = _collider_normal(world);
+			const double vn = v.dot(nrm);
+			if (vn < 0.0) {
+				v -= nrm * vn; // strip the component driving into the surface
+				v *= (1.0 - _friction);
+			}
+		}
+		return;
+	}
+	if (world.y <= _floor_y && v.y < 0.0) {
+		v.y = 0.0;
+		v.x *= (1.0 - _friction);
+		v.z *= (1.0 - _friction);
+	}
+}
+
+// Momentum→velocity, gravity, collider + domain-wall boundaries (contact resolved on the grid).
 void MpmSim::_grid_update(double dt) {
 	for (int iz = 0; iz < _dim; iz++) {
 		for (int iy = 0; iy < _dim; iy++) {
@@ -114,11 +147,7 @@ void MpmSim::_grid_update(double dt) {
 				}
 				Vector3 v = _gv[n] / _gm[n];
 				v += _gravity * dt;
-				if (_origin.y + iy * _dx <= _floor_y && v.y < 0.0) {
-					v.y = 0.0;
-					v.x *= (1.0 - _friction);
-					v.z *= (1.0 - _friction);
-				}
+				_apply_collider(Vector3(_origin.x + ix * _dx, _origin.y + iy * _dx, _origin.z + iz * _dx), v);
 				// Keep material inside the grid: kill velocity heading out of the domain.
 				if ((ix < 2 && v.x < 0.0) || (ix >= _dim - 2 && v.x > 0.0)) {
 					v.x = 0.0;
@@ -236,6 +265,7 @@ Dictionary MpmSim::debug_svd(Basis m) const {
 void MpmSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("configure", "origin", "dim", "dx", "gravity", "E", "nu", "floor_y"), &MpmSim::configure);
 	ClassDB::bind_method(D_METHOD("set_material", "m"), &MpmSim::set_material);
+	ClassDB::bind_method(D_METHOD("set_sdf_collider", "store"), &MpmSim::set_sdf_collider);
 	ClassDB::bind_method(D_METHOD("debug_svd", "m"), &MpmSim::debug_svd);
 	ClassDB::bind_method(D_METHOD("add_particle", "pos", "mass", "volume"), &MpmSim::add_particle);
 	ClassDB::bind_method(D_METHOD("step", "dt"), &MpmSim::step);

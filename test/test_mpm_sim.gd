@@ -92,6 +92,51 @@ func test_corotated_block_also_falls_and_rests() -> void:
     assert_gt(sim.lowest_y(), FLOOR_Y - 0.6, "no tunnelling under fixed-corotated")
 
 
+# A store whose only solid is a flat-topped pillar (top at world y = `top`), well above the
+# generator surface so the pillar is the entire local collider.
+func _pillar_store(top: int) -> EditStoreManager:
+    var manager := EditStoreManager.new()
+    manager.setup()
+    manager.store.stamp_box(Vector3(0, top - 5, 0), Vector3(8, 10, 8), 0, 4, 1.0)
+    return manager
+
+
+func test_corotated_block_rests_on_an_sdf_pillar_without_penetrating() -> void:
+    # The bug-fix proof: a stiff body must rest ON arbitrary terrain (contact resolved on the
+    # grid via the SDF), not sink/pass through it — which is exactly what PBD couldn't do.
+    var surface := SparseVoxelOctree.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
+        EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
+    var top := int(surface) + 50
+    var store := _pillar_store(top)
+
+    var sim := MpmSim.new()
+    sim.configure(Vector3(-16, top - 6, -16), 32, DX, Vector3(0, -9.8, 0), 5000.0, 0.2, top - 100.0)
+    sim.set_sdf_collider(store.store)
+    sim.set_material(1)
+    var p_vol := (DX * 0.5) * (DX * 0.5) * (DX * 0.5)
+    var p_mass := RHO * p_vol
+    for cz in range(-2, 2):
+        for cy in range(top + 1, top + 3):
+            for cx in range(-2, 2):
+                for ox in [0.25, 0.75]:
+                    for oy in [0.25, 0.75]:
+                        for oz in [0.25, 0.75]:
+                            sim.add_particle(Vector3(cx + ox, cy + oy, cz + oz), p_mass, p_vol)
+    var start_y := sim.average_position().y
+
+    for _i in 2000:
+        sim.step(DT)
+
+    assert_true(sim.is_finite(), "stable resting on the SDF pillar")
+    assert_lt(sim.average_position().y, start_y - 0.5, "the block fell onto the pillar")
+    # Caught by the pillar within ~1 cell of grid-contact softness (the SDF surface is at
+    # `top`, but contact is enforced at grid nodes, so the rest sits up to a cell into the
+    # surface at dx=1 m — finer grid / a penetration push-out tightens this later). The point
+    # is it's CAUGHT, not fallen through (which would drop it metres to the grid floor).
+    assert_gt(sim.lowest_y(), float(top) - 1.5, "caught by the pillar, didn't fall through (grid-resolved SDF contact)")
+    assert_lt(sim.lowest_y(), float(top) + 2.0, "it actually reached the pillar top")
+
+
 func test_settles_rather_than_gaining_energy() -> void:
     # A spike sanity floor: by the end the block isn't *gaining* kinetic energy (no blow-up
     # masquerading as finite). Compared against the free-fall energy at impact, not zero —

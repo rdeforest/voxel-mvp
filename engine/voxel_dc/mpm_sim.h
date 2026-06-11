@@ -13,6 +13,7 @@
 // per the spike's go/no-go. APIC: Jiang 2015; MLS-MPM: Hu 2018.
 
 #include "mat3.h"
+#include "edit_store.h"
 
 #include "core/object/ref_counted.h"
 #include "core/templates/local_vector.h"
@@ -52,13 +53,19 @@ class MpmSim : public RefCounted {
 	// Kirchhoff stress τ for a deformation gradient, per the active material model.
 	Mat3 _kirchhoff(const Mat3 &f) const;
 
-	// Floor collider at world y = _floor_y: grid nodes at/below it lose downward velocity
-	// and have tangential velocity scaled by (1 − _friction). The first SDF-collider proof;
-	// the EditStore-SDF collider replaces this in a later increment.
+	// Static collider. With a `_collider` EditStore set, contact is resolved against its SDF
+	// (the real terrain) — grid nodes inside solid lose their inward-normal velocity (normal
+	// = SDF gradient), which is the grid-resolved contact PBD lacked. Without one, a flat
+	// floor at world y = _floor_y is the fallback (keeps the bare-core tests collider-free).
+	Ref<EditStore> _collider;
 	double _floor_y = 0.0;
 	double _friction = 0.5;
 
 	int _grid_count() const { return _dim * _dim * _dim; }
+
+	// Apply the static collider to a grid node's velocity (SDF terrain if set, else floor).
+	void _apply_collider(const Vector3 &world, Vector3 &v) const;
+	Vector3 _collider_normal(const Vector3 &p) const; // outward = normalized SDF gradient
 
 	// One MLS-MPM step, split into its three phases (share the quadratic-B-spline stencil).
 	void _p2g(double dt);
@@ -72,6 +79,7 @@ public:
 	// E = Young's modulus, nu = Poisson's ratio → Lamé μ, λ.
 	void configure(Vector3 origin, int dim, double dx, Vector3 gravity, double E, double nu, double floor_y);
 	void set_material(int m) { _material = m; }
+	void set_sdf_collider(const Ref<EditStore> &store) { _collider = store; }
 	int add_particle(Vector3 pos, double mass, double volume);
 	void step(double dt);
 
