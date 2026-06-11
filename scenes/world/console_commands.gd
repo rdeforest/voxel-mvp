@@ -24,6 +24,7 @@ var edit_store:        EditStoreManager
 var part_index:        PartIndex
 
 var _pbd_demo: PbdDemo   # lazily spawned by `pbddemo`
+var _mpm_demo: MpmDemo   # lazily spawned by `mpmdemo`
 
 
 # The LimboConsole autoload outlives the World scene. On reload (F9 / reset) the old
@@ -54,6 +55,7 @@ func _table() -> Array:
         [dcgen,           "dcgen",     "Phase B preview: render the octree-over-generator substrate (cyan) at your position. Usage: dcgen [on|off]"],
         [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
         [pbddemo,         "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
+        [mpmdemo,         "mpmdemo",   "PB-MPM demo: spawn a live block of continuum material that falls and rests ON the terrain. Usage: mpmdemo [size]"],
         [physics_active,  "physics_active", "Toggle the structural physics simulation on your real structures (sag + collapse under load). Usage: physics_active [on|off]"],
         [perf,            "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
         [awake,           "awake",     "Highlight awake physics bodies (debris / collapsed parts) with a box. Usage: awake [on|off]"],
@@ -154,6 +156,17 @@ func pbddemo(kind := "cantilever", size := 12) -> void:
         host.add_child(_pbd_demo)
     _pbd_demo.set_sim(sim)
     LimboConsole.info("pbddemo: %s size %d (%d members)" % [kind, size, sim.member_count()])
+
+# Spawn a live PB-MPM block of elastic material in front of the player; it falls and rests on the
+# real terrain (the EditStore SDF is its collider). Re-run to respawn.
+func mpmdemo(size := 4) -> void:
+    var fwd := -player.global_transform.basis.z
+    var center := player.global_position + fwd * 5.0 + Vector3.UP * 4.0
+    if _mpm_demo == null:
+        _mpm_demo = MpmDemo.new()
+        host.add_child(_mpm_demo)
+    _mpm_demo.setup(center, size, edit_store.store)
+    LimboConsole.info("mpmdemo: %d cubed elastic block at %s (PB-MPM, rests on terrain)" % [size, center])
 
 func physics_active(state := "") -> void:
     var on := _parse_toggle(state, pbd_structure.is_enabled())

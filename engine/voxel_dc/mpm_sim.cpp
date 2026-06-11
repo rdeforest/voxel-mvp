@@ -131,31 +131,32 @@ Vector3 MpmSim::_collider_normal(const Vector3 &p) const {
 	return len > 1e-9 ? g / len : Vector3(0, 1, 0);
 }
 
-// If a node's DISPLACED position lands inside the collider, push the displacement back out to
-// the surface along the outward normal (the displacement-form contact). SDF terrain if set,
-// else a flat floor plane.
+// Prevent the node's displacement from driving it FURTHER into the collider — the gentle,
+// stable contact (PB-MPM only removes the excess inward component; ejecting by the full
+// penetration depth is violent in a thick solid region and destabilises). A node outside may
+// descend until it reaches the surface; a node already inside may not go deeper. SDF terrain if
+// a collider is set, else a flat floor plane.
 void MpmSim::_apply_collider(const Vector3 &node_world, Vector3 &disp) const {
-	const Vector3 displaced = node_world + disp;
-	double s;
+	double s0;
 	Vector3 nrm;
 	if (_collider.is_valid()) {
-		s = _collider->sample(displaced);
-		if (s >= 0.0) {
-			return;
-		}
-		nrm = _collider_normal(displaced);
+		s0 = _collider->sample(node_world); // signed distance at the node (≥0 outside)
+		nrm = _collider_normal(node_world); // outward
 	} else {
-		s = displaced.y - _floor_y;
-		if (s >= 0.0) {
-			return;
-		}
+		s0 = node_world.y - _floor_y;
 		nrm = Vector3(0, 1, 0);
 	}
-	disp -= nrm * s; // s < 0 → move displaced out to the surface
+	const double dn = disp.dot(nrm);        // displacement along the outward normal (<0 = inward)
+	const double max_inward = MAX(s0, 0.0); // how far it may still descend before the surface
+	const double excess = -dn - max_inward; // inward motion beyond what's allowed
+	if (excess <= 0.0) {
+		return;
+	}
+	disp += nrm * excess; // remove only the excess inward part (no depth-based ejection)
 	if (_friction > 0.0) {
-		const double dn = disp.dot(nrm);
-		const Vector3 tang = disp - nrm * dn;
-		disp = nrm * dn + tang * (1.0 - _friction);
+		const double new_dn = disp.dot(nrm);
+		const Vector3 tang = disp - nrm * new_dn;
+		disp = nrm * new_dn + tang * (1.0 - _friction);
 	}
 }
 

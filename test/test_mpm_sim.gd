@@ -198,6 +198,41 @@ func test_a_dropped_block_wakes_the_sleeping_pile() -> void:
 
 # --- Pending: PB-MPM sand (Drucker-Prager on the integrated F + logJp) ---
 
+func test_elastic_block_rests_on_real_generator_terrain() -> void:
+    # The `mpmdemo` scenario headlessly: an elastic block dropped onto the REAL procedural
+    # terrain (the EditStore generator as the SDF collider) must fall and rest on it, finite.
+    var store := EditStoreManager.new()
+    store.setup()
+    var surface := SparseVoxelOctree.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
+        EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
+    var top := int(surface)
+
+    var sim := MpmSim.new()
+    sim.configure(Vector3(-20, top - 30, -20), 50, DX, Vector3(0, -9.8, 0), -1.0e9)
+    sim.set_iterations(4)
+    sim.set_elastic(1.0, 0.5)
+    sim.set_sdf_collider(store.store)
+    var p_vol := (DX * 0.5) * (DX * 0.5) * (DX * 0.5)
+    for cz in range(-2, 2):
+        for cy in range(top + 4, top + 6):
+            for cx in range(-2, 2):
+                for ox in [0.25, 0.75]:
+                    for oy in [0.25, 0.75]:
+                        for oz in [0.25, 0.75]:
+                            sim.add_particle(Vector3(cx + ox, cy + oy, cz + oz), RHO * p_vol, p_vol)
+    var start_y := sim.average_position().y
+
+    for _i in 150:
+        sim.step(0.05)
+
+    assert_true(sim.is_finite(), "stable on the real terrain")
+    assert_lt(sim.average_position().y, start_y, "the block fell")
+    # The C++ generator surface is ~168 here (the GDScript terrain_surface says 170 — a ~2 m
+    # mismatch); the block must rest near it, well above the grid floor at top-30.
+    assert_gt(sim.lowest_y(), float(top) - 6.0, "rests near the terrain surface, didn't fall through")
+    assert_lt(sim.lowest_y(), float(top) + 4.0, "it reached the terrain")
+
+
 func test_pbmpm_sand_repose_pile() -> void:
     # The PB-MPM sand path (Drucker-Prager return-mapping + logJp) is implemented in
     # mpm_material.cpp, but its parameters aren't dialled in: with deviatoric viscosity it
