@@ -254,3 +254,35 @@ func test_colored_box_stays_watertight():
     var audit := _edge_audit(idx)
     assert_eq(audit["boundary"], 0, "boundary edges (holes)")
     assert_eq(audit["nonmanifold"], 0, "non-manifold edges")
+
+
+# The OTHER direction: a Natural surface BESIDE explicit material must NOT bleed to that material
+# (the "ground around the log turns to wood" regression). A solid block, natural on the left half,
+# wood on the right, flat top — the top surface vertices over the natural half point UP, so their
+# inward sample is the natural body below; the wood is a sideways neighbour and must be excluded.
+func _split_block() -> Dictionary:
+    var data := PackedFloat32Array()
+    var indices := PackedByteArray()
+    data.resize(DIM * DIM * DIM)
+    indices.resize(DIM * DIM * DIM)
+    var top := 20.0
+    var i := 0
+    for z in DIM:
+        for y in DIM:
+            for x in DIM:
+                data[i] = float(y) - top          # solid below y=20, air above; flat top
+                indices[i] = WOOD if (float(y) < top and x >= 16) else 0   # right half wood, left natural
+                i += 1
+    return {"data": data, "indices": indices}
+
+func test_natural_surface_not_bled_to_explicit():
+    var arrays := _mesh_colored(_split_block())
+    var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+    var colors: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
+    var bled := 0
+    for j in verts.size():
+        # Top-surface vertices clearly on the natural (left) half, incl. one cell from the x=16
+        # boundary — these must stay natural; the old omnidirectional scan bled them to wood.
+        if verts[j].y > 18.0 and verts[j].x <= 15.0 and colors[j].a < 0.5:
+            bled += 1
+    assert_eq(bled, 0, "natural surface beside wood stayed natural (no outward bleed)")

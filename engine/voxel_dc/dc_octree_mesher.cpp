@@ -115,15 +115,21 @@ struct Clipmap {
 		return levels[level_index(p)].index_nearest(p);
 	}
 
-	// Like index_at, but if the nearest cell is Natural(0), scan the 26 neighbours one cell out (at
-	// THIS point's level cell size, so the scan stays single-level -> crack-free) and adopt the
-	// closest nonzero explicit id (ties -> lowest id, deterministic; no frame flicker). A placed
-	// part's boundary vertices round into the terrain cell just outside the part; this lets them
-	// read the part's material instead, so the surface is the placed material (wood) on top/sides
-	// and edges — pure, no terrain smear — leaving only the bottom interface layer (no explicit
-	// neighbour) reading natural. 26 (not 6) so box corners/edges, where the interior cell is a
-	// diagonal neighbour, are covered. Returns 0 only if nothing explicit is adjacent.
-	int index_prefer_explicit(const Vector3 &p) const {
+	// Material of the solid a surface vertex BOUNDS. A vertex bounds the body on the side its
+	// normal points away from, so we look STRAIGHT INWARD (toward -n): if the nearest cell is
+	// Natural(0) (the one-cell per-leaf boundary shell), scan the neighbours aligned with -n
+	// (offset·n̂ < -0.9, i.e. within ~25° of straight inward) and take the closest nonzero id
+	// (ties -> lowest, deterministic).
+	//
+	// Near-straight-inward, NOT a hemisphere, on purpose. A part's own face/edge/corner vertex
+	// has its normal pointing out of the part, so the cell straight behind it (axis for a face,
+	// the matching diagonal for an edge/corner) is the part interior -> it reads the part. But a
+	// terrain-surface vertex BESIDE a part points up out of the ground; the part is a sideways or
+	// down-AND-sideways neighbour — those offsets are not aligned with -n, so they're excluded and
+	// the ground stays natural instead of bleeding the part's material outward. (A plain inward
+	// hemisphere still bled: a down-sideways diagonal is "inward" yet reaches the part beside it.)
+	// Scan at the level's own cell size so it stays single-level -> crack-free.
+	int index_prefer_explicit(const Vector3 &p, const Vector3 &n) const {
 		const Level &lv = levels[level_index(p)];
 		int id = lv.index_nearest(p);
 		if (id > 0) {
@@ -138,7 +144,11 @@ struct Clipmap {
 					if (dx == 0 && dy == 0 && dz == 0) {
 						continue;
 					}
-					int nid = lv.index_nearest(p + Vector3(dx * c, dy * c, dz * c));
+					Vector3 off(dx, dy, dz);
+					if (off.normalized().dot(n) >= -0.9) {
+						continue; // not aligned with -n (straight inward); sideways neighbours excluded
+					}
+					int nid = lv.index_nearest(p + off * c);
 					if (nid <= 0) {
 						continue;
 					}
@@ -394,8 +404,9 @@ struct Octree {
 		if (emit_color) {
 			// Sample the solid voxel just behind the surface: the normal points
 			// outward, so step inward to land in the cell that carries the id. Prefer an
-			// adjacent explicit material so a placed part's faces don't bleed terrain.
-			int id = clip.index_prefer_explicit(v - n * 0.5);
+			// inward explicit material so a placed part's faces read the part, while a terrain
+			// vertex beside the part stays natural (the body it bounds is inward, not sideways).
+			int id = clip.index_prefer_explicit(v - n * 0.5, n);
 			if (id > 0 && id < int(palette.size())) {
 				const Color &c = palette[id];
 				colors.push_back(Color(c.r, c.g, c.b, 0.0)); // a=0 -> explicit material colour
