@@ -31,6 +31,13 @@ uniform vec2  wave_dir                              = vec2(0.7, 0.3);
 
 uniform float roughness      : hint_range(0.0, 1.0) = 0.9;
 
+// Grain on PLACED-material surfaces (wood, etc.) so a log reads as wood, not a flat colour.
+// World-space + static; anisotropic (fine across, coarse along) so it forms grain LINES. Subtle
+// defaults — tune live with `set grain_amount` / `set grain_scale`. (First pass; orientation is
+// world-space since the shader doesn't know the log's axis — grain runs along world Z.)
+uniform float grain_amount   : hint_range(0.0, 1.0) = 0.18;  // brightness striation depth
+uniform float grain_scale    : hint_range(0.1, 12.0) = 4.0;  // grain frequency
+
 // Debug: blend each triangle's per-LOD colour (vertex COLOR from the DC mesher)
 // over the grass/dirt material. 0 = off, 1 = full. Console: set debug_lod 0.3
 uniform float debug_lod      : hint_range(0.0, 1.0) = 0.0;
@@ -118,6 +125,13 @@ void fragment() {
     // default for meshes that emit no vertex colour) keeps the grass/dirt look.
     float material_mask = 1.0 - step(0.5, COLOR.a);
     albedo = mix(albedo, COLOR.rgb, material_mask);
+
+    // Wood/material grain: anisotropic static noise → grain lines; modulate brightness on placed-
+    // material surfaces only (natural terrain unaffected) so wood reads as wood, not flat colour.
+    vec2 guv = v_world_pos.xz * vec2(grain_scale, grain_scale * 0.12) + vec2(v_world_pos.y * grain_scale * 0.5, 0.0);
+    float grain = 0.5 + 0.5 * gnoise(guv);
+    float grain_b = 1.0 - grain_amount + grain * grain_amount * 2.0;
+    albedo *= mix(1.0, grain_b, material_mask);
 
     // debug_lod is the blend amount of the per-LOD colour over the material:
     // 0 = off, 0.3 = subtle tint, 1 = full LOD colour. (console: set debug_lod 0.3)
