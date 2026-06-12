@@ -41,6 +41,22 @@ static double nearest_particle_dist(const Vector3 &wp, int ix, int iy, int iz, i
 	return dmin;
 }
 
+// Bin the particles by their cell (relative to origin); key = linear bin index. Lets each grid
+// point test only nearby particles — O(grid + particles), not O(grid·particles).
+static HashMap<int, LocalVector<int>> bin_particles(const LocalVector<Vector3> &x, const Vector3 &origin, double inv_cell, int dim) {
+	HashMap<int, LocalVector<int>> bins;
+	for (uint32_t p = 0; p < x.size(); p++) {
+		const int bx = int(Math::floor((x[p].x - origin.x) * inv_cell));
+		const int by = int(Math::floor((x[p].y - origin.y) * inv_cell));
+		const int bz = int(Math::floor((x[p].z - origin.z) * inv_cell));
+		if (bx < 0 || by < 0 || bz < 0 || bx >= dim || by >= dim || bz >= dim) {
+			continue;
+		}
+		bins[bx + by * dim + bz * dim * dim].push_back(int(p));
+	}
+	return bins;
+}
+
 // Rasterise the current particles into the EditStore over their bounding box: each grid point's
 // SDF is (distance to the nearest particle − radius), so the surface is a union of spheres
 // around the cloud; cells inside take `material_index`. A spatial bin-hash makes it
@@ -67,18 +83,7 @@ Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double 
 	const int dim = int(Math::ceil(span / cell)) + 1;
 	const double inv_cell = 1.0 / cell;
 
-	// Bin particles by their cell (relative to origin); key = linear bin index. Lets each grid
-	// point test only nearby particles — O(grid + particles), not O(grid·particles).
-	HashMap<int, LocalVector<int>> bins;
-	for (uint32_t p = 0; p < _x.size(); p++) {
-		const int bx = int(Math::floor((_x[p].x - origin.x) * inv_cell));
-		const int by = int(Math::floor((_x[p].y - origin.y) * inv_cell));
-		const int bz = int(Math::floor((_x[p].z - origin.z) * inv_cell));
-		if (bx < 0 || by < 0 || bz < 0 || bx >= dim || by >= dim || bz >= dim) {
-			continue;
-		}
-		bins[bx + by * dim + bz * dim * dim].push_back(int(p));
-	}
+	const HashMap<int, LocalVector<int>> bins = bin_particles(_x, origin, inv_cell, dim);
 	const int R = int(Math::ceil(radius * inv_cell)) + 1; // bins to search around each node
 
 	PackedFloat32Array sdf;
