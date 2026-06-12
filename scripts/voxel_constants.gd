@@ -28,6 +28,10 @@ const GRID_ID := 0
 # behaviour change); the sub-metre flip sets it to 0.25.
 const RENDER_BASE_CELL := 0.25
 const RENDER_SUBDIV    := 4     # int(round(1.0 / RENDER_BASE_CELL)); power of two
+# log2(RENDER_SUBDIV) — extra LOD levels the render adds so the clipmap reaches the same WORLD
+# distance as at 1m (the finer base cell shrinks the octree's world extent by RENDER_SUBDIV, so we
+# add one octave of coverage per halving). MUST equal log2(RENDER_SUBDIV): 1.0→0, 0.5→1, 0.25→2.
+const RENDER_SUBDIV_LOG2 := 2
 
 
 # ============================================================================

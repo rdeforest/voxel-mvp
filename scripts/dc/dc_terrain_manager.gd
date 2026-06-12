@@ -17,7 +17,11 @@ extends Node3D
 # transition together. The mesher's point-location meshing stitches it crack-free
 # with no balance pass needed.
 
-const LEVELS            := 5      # LOD levels (0..4): 2048m coverage (128m fine core)
+# LOD levels. The base 5 gives 2048m world coverage at the 1m cell; sub-metre rendering shrinks
+# each level's world extent by RENDER_SUBDIV, so we add one level per octave (RENDER_SUBDIV_LOG2)
+# to keep the coarsest level — and the rendered horizon — at the same world distance. At 0.25 this
+# is 7 levels: ±16m of 0.25m fine core, coarsening to 16m cells out to 2048m.
+const LEVELS            := 5 + VoxelConstants.RENDER_SUBDIV_LOG2
 const LEVEL_DIM         := 129    # samples per axis per level; LEVEL_DIM-1 must be a power of 2
                                   # 129 -> ±64m of 1m cells, so dramatic 3D terrain (overhangs,
                                   # relief) renders fine instead of undersampling into floating
