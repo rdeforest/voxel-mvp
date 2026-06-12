@@ -43,6 +43,10 @@ const TERRAIN_MATERIAL_PATH := "res://assets/materials/terrain_surface.tres"
 var terrain_material: ShaderMaterial = load(TERRAIN_MATERIAL_PATH)
 
 var _mesher := DCOctreeMesher.new()   # reused: holds the persistent collapse-hysteresis state
+# A SEPARATE mesher for main-thread splices, so a splice can run while the worker is meshing a full
+# build on `_mesher` without racing its state. mesh_subregion is self-contained (fresh octree, no
+# hysteresis), so a second instance is safe.
+var _splice_mesher := DCOctreeMesher.new()
 var _task_id := -1
 var _job_origin: Vector3i
 var _job_arrays: Array = []
@@ -60,6 +64,14 @@ var _cache_origin: Vector3i
 const _EDIT_MARGIN := 3     # cells of slack around the edit box (covers the SDF influence)
 const _EDIT_APRON  := 4     # cells built beyond the core for stitching the patch seam
 const _MAX_SPLICE_SPAN := 40   # above this the main-thread splice mesh is too costly → off-thread full re-mesh
+
+# Edits that splice while a full re-mesh is in flight: the worker's store snapshot was taken at
+# dispatch, so its result predates these edits and would erase them when it lands. We re-splice
+# them onto the fresh full mesh in _finish (same frame → no flicker). [[box_origin, box_size], ...]
+var _pending_edits: Array = []
+var _dirty_during_job := false   # a during-job edit that couldn't splice (out of core / too big) →
+                                 # force one full re-mesh once the current job lands
+const _MAX_PENDING := 32         # cap the queue; on overflow, coalesce to one full re-mesh
 
 # Print per-recenter read/mesh timings to the output (tuning aid). Only fires while
 # the manager is enabled, which is opt-in, so it's quiet in normal play.
@@ -117,29 +129,49 @@ func start_default() -> void:
 
 
 func _on_terrain_edit(event: TerrainSdfChangedEvent) -> void:
-    # Incremental: re-mesh just the edited sub-box and splice it into the cached mesh, so a
-    # dig shows in a frame instead of waiting on the ~5s full clipmap rebuild. Falls back to
-    # a full re-mesh when the fast path can't apply.
+    # Incremental: re-mesh just the edited sub-box and splice it into the cached mesh, so a dig/
+    # build shows in a frame instead of waiting on the ~5s full clipmap rebuild. This runs even
+    # while a full re-mesh is in flight (splices use a separate mesher), so edits never wait on the
+    # worker. Edits that splice during a job are queued and re-applied in _finish, because the
+    # worker's snapshot predates them and would otherwise erase them when it lands.
     if not _enabled or _follow == null:
         return
-    if not _try_splice_edit(event):
-        _last_center = Vector3.INF   # fall back: full re-mesh next tick
+    var job_in_flight := _task_id != -1
+    if not _splice_box(event.box_origin, event.box_size):
+        # Not splice-able (no base yet / outside fine core / too big).
+        if job_in_flight:
+            _dirty_during_job = true     # can't dispatch now — one full re-mesh after the job lands
+        else:
+            _last_center = Vector3.INF   # fall back: full re-mesh next tick
+        return
+    if job_in_flight:
+        _queue_pending(event.box_origin, event.box_size)
 
 
-# Re-mesh a small box around the edit (DCOctreeMesher.mesh_subregion) and swap its triangles
-# for the cached mesh's in that box. Returns false (caller does a full re-mesh) when there's
-# no cached base, a full job is in flight, or the edit is outside the uniform fine core.
-func _try_splice_edit(event: TerrainSdfChangedEvent) -> bool:
-    if _task_id != -1 or _cache_arrays.is_empty():
+func _queue_pending(box_origin: Vector3, box_size: Vector3) -> void:
+    if _pending_edits.size() >= _MAX_PENDING:
+        _pending_edits.clear()
+        _dirty_during_job = true   # too many to track individually → one full re-mesh covers all
+        return
+    _pending_edits.append([box_origin, box_size])
+
+
+# Re-mesh a small box around an edit (DCOctreeMesher.mesh_subregion, on _splice_mesher) and swap
+# its triangles for the cached mesh's in that box. Returns false (caller falls back to a full
+# re-mesh) when there's no cached base, the edit is outside the uniform fine core, or it's too big
+# for a main-thread splice. Touches only main-thread _cache_* state, so it is safe to run while the
+# worker meshes a full build on _mesher.
+func _splice_box(box_origin: Vector3, box_size: Vector3) -> bool:
+    if _cache_arrays.is_empty():
         return false
     var root_half := float(1 << _ROOT_DEPTH) * 0.5
     var fine_half := float(_LEVEL_CELLS) * 0.5 - float(_EDIT_MARGIN + _EDIT_APRON + 2)
-    var off_center := (event.box_origin + event.box_size * 0.5) - (Vector3(_cache_origin) + Vector3.ONE * root_half)
+    var off_center := (box_origin + box_size * 0.5) - (Vector3(_cache_origin) + Vector3.ONE * root_half)
     if maxf(absf(off_center.x), maxf(absf(off_center.y), absf(off_center.z))) > fine_half:
         return false   # outside the 1m fine core — the splice would meet coarse LOD; full re-mesh
 
-    var core_min := Vector3i(event.box_origin.floor()) - Vector3i.ONE * _EDIT_MARGIN
-    var core_max := Vector3i((event.box_origin + event.box_size).ceil()) + Vector3i.ONE * _EDIT_MARGIN
+    var core_min := Vector3i(box_origin.floor()) - Vector3i.ONE * _EDIT_MARGIN
+    var core_max := Vector3i((box_origin + box_size).ceil()) + Vector3i.ONE * _EDIT_MARGIN
     var sub_origin := core_min - Vector3i.ONE * _EDIT_APRON
     var sub_hi := core_max + Vector3i.ONE * _EDIT_APRON
     var span := maxi(sub_hi.x - sub_origin.x, maxi(sub_hi.y - sub_origin.y, sub_hi.z - sub_origin.z))
@@ -155,9 +187,9 @@ func _try_splice_edit(event: TerrainSdfChangedEvent) -> bool:
     # already holds this edit by the time the splice runs.
     var sdf: PackedFloat32Array = _edit_store.fill_region(sub_origin, sub_dim, 1.0, PackedFloat32Array(), Vector3i.ZERO, Vector3i.ZERO, Vector3i.ZERO)
     var idx: PackedByteArray = _edit_store.fill_indices_region(sub_origin, sub_dim, 1.0)
-    var patch := _mesher.mesh_subregion(sdf, sub_dim, Vector3.ZERO, 1.0,
+    var patch := _splice_mesher.mesh_subregion(sdf, sub_dim, Vector3.ZERO, 1.0,
         sub_origin, sub_size, core_min, core_max, idx, MaterialPalette.colors())
-    _apply_splice(core_min, core_max, sub_origin, patch, _mesher.get_last_triangle_owners())
+    _apply_splice(core_min, core_max, sub_origin, patch, _splice_mesher.get_last_triangle_owners())
     return true
 
 
@@ -309,6 +341,8 @@ func _finish() -> void:
         _dump_write()
     if _job_arrays.is_empty():
         _mesh_instance.mesh = null
+        _pending_edits.clear()
+        _dirty_during_job = false
         return
     var mesh := ArrayMesh.new()
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _job_arrays)
@@ -321,6 +355,21 @@ func _finish() -> void:
         var verts: int = (_job_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
         print("DC clipmap: %d verts — read %d ms (main), mesh %d ms (worker)" % [
             verts, _job_read_ms, Time.get_ticks_msec() - _job_t0])
+    _reapply_pending_edits()
+
+
+# Re-splice the edits that landed during the just-finished job onto the fresh full mesh (the
+# worker's snapshot predated them). Same _finish call → same frame → the un-spliced full mesh is
+# never displayed (no flicker). A queued box no longer in the new fine core (player recentered)
+# can't splice → fall to a full re-mesh.
+func _reapply_pending_edits() -> void:
+    for entry in _pending_edits:
+        if not _splice_box(entry[0], entry[1]):
+            _dirty_during_job = true
+    _pending_edits.clear()
+    if _dirty_during_job:
+        _dirty_during_job = false
+        _last_center = Vector3.INF   # one more full re-mesh next tick covers the non-spliceable edits
 
 
 # Scan the currently displayed mesh for bad triangles (dcaudit cmd). Pure observer —
