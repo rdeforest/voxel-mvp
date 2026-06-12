@@ -64,16 +64,40 @@ static HashMap<int, LocalVector<int>> bin_particles(const LocalVector<Vector3> &
 	return bins;
 }
 
-// Rasterise the current particles into the EditStore over their bounding box: each grid point's
-// SDF is (distance to the nearest particle − radius), so the surface is a union of spheres
-// around the cloud; cells inside take `material_index`. A spatial bin-hash makes it
-// O(grid + particles); returns {origin, dim} of the region written.
-//
-// The freeze is a DEPOSIT, not a replace: it unions with the existing field (min of the two
-// SDFs) so it only ADDS the settled material and never erases the terrain the cloud's bounding
-// box spans. (write_region overwrites the whole box, so without the union every cell the cloud
-// doesn't occupy would punch the mountain to air — a cloud-sized cube carved out around the
-// chunk.) Existing solid keeps its own material; only cells the cloud newly fills take material_index.
+// Fill the dense SDF + material arrays for the region. Each cell unions the cloud (nearest-particle
+// sphere, dist − radius) with the existing field — the freeze is a DEPOSIT: min of the two SDFs, so
+// it only ADDS the settled material and never erases the terrain the cloud's bounding box spans.
+// (write_region overwrites the whole box, so without the union every cell the cloud doesn't occupy
+// would punch the mountain to air — a cloud-sized cube carved out around the chunk.) Material:
+// existing solid keeps its own; a newly-filled cell takes its nearest particle's (a mixed chunk
+// re-deposits per-cell), falling back to material_index.
+static void rasterize_region(Ref<EditStore> store, const Vector3 &origin, double cell, double radius,
+		int dim, int R, const HashMap<int, LocalVector<int>> &bins, const LocalVector<Vector3> &x,
+		const LocalVector<int32_t> &pmat, int material_index, float *sp, uint8_t *ip) {
+	for (int iz = 0; iz < dim; iz++) {
+		for (int iy = 0; iy < dim; iy++) {
+			for (int ix = 0; ix < dim; ix++) {
+				const Vector3 wp = origin + Vector3(ix, iy, iz) * cell;
+				int nearest = -1;
+				const double p_sdf = nearest_particle_dist(wp, ix, iy, iz, dim, R, bins, x, nearest) - radius;
+				const double existing = store->sample(wp);
+				const int n = ix + iy * dim + iz * dim * dim;
+				sp[n] = float(MIN(existing, p_sdf));
+				if (existing < 0.0) {
+					ip[n] = uint8_t(store->material_at(wp)); // existing terrain keeps its material
+				} else if (p_sdf < 0.0) {
+					const int pm = (nearest >= 0) ? int(pmat[nearest]) : 0;
+					ip[n] = uint8_t(pm != 0 ? pm : material_index); // nearest particle's material
+				} else {
+					ip[n] = 0; // air
+				}
+			}
+		}
+	}
+}
+
+// Rasterise the current particles into the EditStore over their bounding box (union deposit — see
+// rasterize_region). A spatial bin-hash makes it O(grid + particles); returns {origin, dim} written.
 Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double radius, int material_index) {
 	Dictionary out;
 	if (store.is_null() || _x.is_empty()) {
@@ -97,30 +121,8 @@ Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double 
 	PackedByteArray idx;
 	sdf.resize(dim * dim * dim);
 	idx.resize(dim * dim * dim);
-	float *sp = sdf.ptrw();
-	uint8_t *ip = idx.ptrw();
-	for (int iz = 0; iz < dim; iz++) {
-		for (int iy = 0; iy < dim; iy++) {
-			for (int ix = 0; ix < dim; ix++) {
-				const Vector3 wp = origin + Vector3(ix, iy, iz) * cell;
-				int nearest = -1;
-				const double p_sdf = nearest_particle_dist(wp, ix, iy, iz, dim, R, bins, _x, nearest) - radius;
-				const double existing = store->sample(wp);
-				const int n = ix + iy * dim + iz * dim * dim;
-				sp[n] = float(MIN(existing, p_sdf)); // union: deposit, never erase existing terrain
-				if (existing < 0.0) {
-					ip[n] = uint8_t(store->material_at(wp)); // existing terrain keeps its material
-				} else if (p_sdf < 0.0) {
-					// Cloud fills this cell: take the nearest particle's own material (a mixed chunk
-					// re-deposits per-cell). Fall back to material_index if it has none.
-					const int pm = (nearest >= 0) ? int(_pmat[nearest]) : 0;
-					ip[n] = uint8_t(pm != 0 ? pm : material_index);
-				} else {
-					ip[n] = 0; // air
-				}
-			}
-		}
-	}
+	rasterize_region(store, origin, cell, radius, dim, R, bins, _x, _pmat, material_index, sdf.ptrw(), idx.ptrw());
+
 	store->write_region(sdf, idx, dim, origin, cell);
 	out["origin"] = origin;
 	out["dim"] = dim;
