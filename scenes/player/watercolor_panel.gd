@@ -52,6 +52,7 @@ var _mat: ShaderMaterial
 var _post: ShaderMaterial
 var _panel: PanelContainer
 var _scroll: ScrollContainer
+var _fields: Array = []      # [widget, uniform, tag, is_color] — for re-reading after a loadstyle
 var _dragging := false
 var _drag_offset := Vector2.ZERO
 
@@ -105,6 +106,7 @@ func _build_ui() -> void:
         var cur: Variant = mat.get_shader_parameter(f[0])
         sb.value = float(cur) if cur != null else float(f[1])
         sb.value_changed.connect(_on_float_changed.bind(f[0], f[5]))
+        _fields.append([sb, f[0], f[5], false])
         row.add_child(lbl)
         row.add_child(sb)
         vb.add_child(row)
@@ -120,9 +122,22 @@ func _build_ui() -> void:
         var cur: Variant = mat.get_shader_parameter(c[0])
         cp.color = cur if cur != null else c[1]
         cp.color_changed.connect(_on_color_changed.bind(c[0], c[2]))
+        _fields.append([cp, c[0], c[2], true])
         row.add_child(lbl)
         row.add_child(cp)
         vb.add_child(row)
+
+
+# Re-read every field from its material (so a console `loadstyle` shows up in the panel on open).
+func _refresh() -> void:
+    for fld in _fields:
+        var cur: Variant = _target(fld[2]).get_shader_parameter(fld[1])
+        if cur == null:
+            continue
+        if fld[3]:
+            fld[0].color = cur                 # ColorPickerButton.color setter doesn't emit
+        else:
+            fld[0].set_value_no_signal(float(cur))
 
 
 func _on_float_changed(value: float, uniform: String, tag: String) -> void:
@@ -148,5 +163,7 @@ func _input(event: InputEvent) -> void:
 
 func _toggle() -> void:
     visible = not visible
+    if visible:
+        _refresh()   # pick up any console loadstyle since it was last open
     get_tree().paused = visible
     Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE if visible else Input.MOUSE_MODE_CAPTURED)

@@ -48,6 +48,9 @@ func _table() -> Array:
     return [
         [set_uniform,     "set",       "Set a terrain shader uniform (float). Usage: set <name> <value>"],
         [get_uniform,     "get",       "List terrain shader uniforms matching a glob (default *). Usage: get [pattern]"],
+        [savestyle,       "savestyle", "Save the current watercolour/terrain shader settings as a named preset. Usage: savestyle <name>"],
+        [loadstyle,       "loadstyle", "Load a saved shader-settings preset. Usage: loadstyle <name>"],
+        [liststyles,      "liststyles","List saved shader-settings presets."],
         [dcmanager,       "dcmanager", "Toggle the DC terrain manager (threaded re-mesh of a bubble around you). Usage: dcmanager [on|off]"],
         [dcerror,         "dcerror",   "Toggle error-driven terrain LOD (screen-space error vs distance bands). Usage: dcerror [on|off]"],
         [dceps,           "dceps",     "Set the error-driven LOD threshold in px (lower = more detail). Usage: dceps <px>"],
@@ -106,6 +109,84 @@ func get_uniform(pattern: String = "*") -> void:
         found += 1
     if found == 0:
         LimboConsole.info("no shader uniforms match '%s'" % pattern)
+
+
+# --- Shader-settings presets (the watercolour tuning + any terrain-shader overrides) ---
+
+const STYLES_DIR := "user://styles"
+const POST_MAT_PATH := "res://assets/materials/watercolor_post.tres"
+
+# The materials a style spans, keyed for the file: the terrain wash + the ink/vignette post-process.
+func _style_materials() -> Dictionary:
+    return {"terrain": dc_manager.terrain_material, "post": load(POST_MAT_PATH)}
+
+func _style_path(name: String) -> String:
+    return "%s/%s.txt" % [STYLES_DIR, name.validate_filename()]
+
+func savestyle(name := "") -> void:
+    if name == "":
+        LimboConsole.error("usage: savestyle <name>")
+        return
+    var data := {}
+    for key in _style_materials():
+        var mat: ShaderMaterial = _style_materials()[key]
+        var params := {}
+        if mat != null:
+            for prop in mat.get_property_list():
+                var pname: String = prop.name
+                if not pname.begins_with("shader_parameter/"):
+                    continue
+                var uniform := pname.substr("shader_parameter/".length())
+                var v: Variant = mat.get_shader_parameter(uniform)
+                if v != null:                       # null = at shader default, nothing to save
+                    params[uniform] = v
+        data[key] = params
+    DirAccess.make_dir_recursive_absolute(STYLES_DIR)
+    var f := FileAccess.open(_style_path(name), FileAccess.WRITE)
+    if f == null:
+        LimboConsole.error("can't write %s" % _style_path(name))
+        return
+    f.store_string(var_to_str(data))
+    f.close()
+    LimboConsole.info("saved style '%s' (%d terrain + %d post params)" % [name, data["terrain"].size(), data["post"].size()])
+
+func loadstyle(name := "") -> void:
+    if name == "":
+        LimboConsole.error("usage: loadstyle <name>")
+        return
+    var f := FileAccess.open(_style_path(name), FileAccess.READ)
+    if f == null:
+        LimboConsole.error("no style '%s' (try `liststyles`)" % name)
+        return
+    var data: Variant = str_to_var(f.get_as_text())
+    f.close()
+    if typeof(data) != TYPE_DICTIONARY:
+        LimboConsole.error("style '%s' is corrupt" % name)
+        return
+    var applied := 0
+    var mats := _style_materials()
+    for key in mats:
+        var mat: ShaderMaterial = mats[key]
+        if mat == null or not data.has(key):
+            continue
+        for uniform in data[key]:
+            mat.set_shader_parameter(uniform, data[key][uniform])
+            applied += 1
+    LimboConsole.info("loaded style '%s' (%d params)" % [name, applied])
+
+func liststyles() -> void:
+    var dir := DirAccess.open(STYLES_DIR)
+    if dir == null:
+        LimboConsole.info("no styles saved yet")
+        return
+    var found := 0
+    for fn in dir.get_files():
+        if fn.ends_with(".txt"):
+            LimboConsole.info("  " + fn.trim_suffix(".txt"))
+            found += 1
+    if found == 0:
+        LimboConsole.info("no styles saved yet")
+
 
 func dcmanager(state := "") -> void:
     var on := _parse_toggle(state, dc_manager.is_enabled())
