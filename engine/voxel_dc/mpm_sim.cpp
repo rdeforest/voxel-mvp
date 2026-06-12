@@ -18,7 +18,7 @@ void MpmSim::configure(Vector3 origin, int dim, double dx, Vector3 gravity, doub
 	_gm.resize(_grid_count());
 }
 
-int MpmSim::add_particle(Vector3 pos, double mass, double volume) {
+int MpmSim::add_particle(Vector3 pos, double mass, double volume, int material) {
 	_x.push_back(pos);
 	_d.push_back(Vector3());
 	_D.push_back(Mat3::zero());
@@ -26,6 +26,7 @@ int MpmSim::add_particle(Vector3 pos, double mass, double volume) {
 	_mass.push_back(mass);
 	_vol.push_back(volume);
 	_logJp.push_back(0.0);
+	_pmat.push_back(material);
 	_sleeping.push_back(0);
 	_still.push_back(0);
 	_awake_count++;
@@ -40,6 +41,7 @@ void MpmSim::clear() {
 	_mass.clear();
 	_vol.clear();
 	_logJp.clear();
+	_pmat.clear();
 	_sleeping.clear();
 	_still.clear();
 	_awake_count = 0;
@@ -349,7 +351,7 @@ void MpmSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("debug_svd", "m"), &MpmSim::debug_svd);
 	ClassDB::bind_method(D_METHOD("rasterize_to_store", "store", "cell", "radius", "material_index"), &MpmSim::rasterize_to_store);
 	ClassDB::bind_method(D_METHOD("thaw_from_store", "store", "origin", "dim", "cell", "ppa", "mass", "volume"), &MpmSim::thaw_from_store);
-	ClassDB::bind_method(D_METHOD("add_particle", "pos", "mass", "volume"), &MpmSim::add_particle);
+	ClassDB::bind_method(D_METHOD("add_particle", "pos", "mass", "volume", "material"), &MpmSim::add_particle, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("clear"), &MpmSim::clear);
 	ClassDB::bind_method(D_METHOD("max_displacement"), &MpmSim::max_displacement);
 	ClassDB::bind_method(D_METHOD("step", "dt"), &MpmSim::step);

@@ -9,9 +9,12 @@
 // particles from a field region — joins this file next.)
 
 // Nearest-particle distance to `wp`, searching only the bins within ±R of node (ix,iy,iz).
+// `nearest` reports the index of that closest particle (-1 if none in range), so the caller can
+// read its material — the freeze deposits each cell as its nearest particle's material.
 static double nearest_particle_dist(const Vector3 &wp, int ix, int iy, int iz, int dim, int R,
-		const HashMap<int, LocalVector<int>> &bins, const LocalVector<Vector3> &x) {
+		const HashMap<int, LocalVector<int>> &bins, const LocalVector<Vector3> &x, int &nearest) {
 	double dmin = 1e30;
+	nearest = -1;
 	for (int dz = -R; dz <= R; dz++) {
 		const int bz = iz + dz;
 		if (bz < 0 || bz >= dim) {
@@ -33,7 +36,11 @@ static double nearest_particle_dist(const Vector3 &wp, int ix, int iy, int iz, i
 				}
 				const LocalVector<int> &list = it->value;
 				for (uint32_t k = 0; k < list.size(); k++) {
-					dmin = MIN(dmin, wp.distance_to(x[list[k]]));
+					const double dist = wp.distance_to(x[list[k]]);
+					if (dist < dmin) {
+						dmin = dist;
+						nearest = list[k];
+					}
 				}
 			}
 		}
@@ -96,14 +103,20 @@ Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double 
 		for (int iy = 0; iy < dim; iy++) {
 			for (int ix = 0; ix < dim; ix++) {
 				const Vector3 wp = origin + Vector3(ix, iy, iz) * cell;
-				const double p_sdf = nearest_particle_dist(wp, ix, iy, iz, dim, R, bins, _x) - radius;
+				int nearest = -1;
+				const double p_sdf = nearest_particle_dist(wp, ix, iy, iz, dim, R, bins, _x, nearest) - radius;
 				const double existing = store->sample(wp);
 				const int n = ix + iy * dim + iz * dim * dim;
 				sp[n] = float(MIN(existing, p_sdf)); // union: deposit, never erase existing terrain
 				if (existing < 0.0) {
 					ip[n] = uint8_t(store->material_at(wp)); // existing terrain keeps its material
+				} else if (p_sdf < 0.0) {
+					// Cloud fills this cell: take the nearest particle's own material (a mixed chunk
+					// re-deposits per-cell). Fall back to material_index if it has none.
+					const int pm = (nearest >= 0) ? int(_pmat[nearest]) : 0;
+					ip[n] = uint8_t(pm != 0 ? pm : material_index);
 				} else {
-					ip[n] = (p_sdf < 0.0) ? uint8_t(material_index) : 0; // cloud fills this cell, or air
+					ip[n] = 0; // air
 				}
 			}
 		}
@@ -132,10 +145,11 @@ int MpmSim::thaw_from_store(Ref<EditStore> store, Vector3 origin, int dim, doubl
 				if (store->sample(c0 + half) >= 0.0) {
 					continue; // air cell — nothing to thaw
 				}
+				const int mat = store->material_at(c0 + half); // carried back on freeze
 				for (int sz = 0; sz < ppa; sz++) {
 					for (int sy = 0; sy < ppa; sy++) {
 						for (int sx = 0; sx < ppa; sx++) {
-							add_particle(c0 + Vector3((sx + 0.5) * step, (sy + 0.5) * step, (sz + 0.5) * step), mass, volume);
+							add_particle(c0 + Vector3((sx + 0.5) * step, (sy + 0.5) * step, (sz + 0.5) * step), mass, volume, mat);
 							added++;
 						}
 					}

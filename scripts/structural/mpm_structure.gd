@@ -69,10 +69,10 @@ func thaw_sphere(center: Vector3, radius: float, material_index := 1) -> int:
 # hole opens, DC re-meshes), seed 8 particles per cell. Air cells are skipped. Returns the count
 # thawed. This is what the loss-of-support auto-trigger feeds.
 func thaw_cells(cells: Array, material_index := 1) -> int:
+    _material_index = material_index   # freeze fallback only; each particle carries its own material
     var p_vol := 0.125
     var p_mass := RHO * p_vol
     var work: Array = []
-    var mat_votes := {}             # actual material of the thawed cells → count (freeze the dominant)
     var box_lo := Vector3(INF, INF, INF)
     var box_hi := Vector3(-INF, -INF, -INF)
     for cell in cells:
@@ -82,18 +82,16 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
         if _store.sample(center) >= VoxelConstants.SDF_SOLID_THRESHOLD:
             continue # already air
         var mat := _store.material_at(center)
-        mat_votes[mat] = mat_votes.get(mat, 0) + 1
         for ox in [0.25, 0.75]:
             for oy in [0.25, 0.75]:
                 for oz in [0.25, 0.75]:
-                    _sim.add_particle(Vector3(cell) + Vector3(ox, oy, oz), p_mass, p_vol)
+                    _sim.add_particle(Vector3(cell) + Vector3(ox, oy, oz), p_mass, p_vol, mat)
         work.append([cell, VoxelConstants.SDF_AIR])
         VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))
         box_lo = box_lo.min(Vector3(cell))
         box_hi = box_hi.max(Vector3(cell) + Vector3.ONE)
     if work.is_empty():
         return 0
-    _material_index = _dominant_material(mat_votes, material_index)
     StoreWrite.cells(_store, work, func(_e): return -1) # carve to air
     VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL, TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box_lo, box_hi - box_lo))
     _settled_frames = 0
@@ -103,18 +101,6 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
 
 func active_count() -> int:
     return _sim.particle_count() if _sim != null else 0
-
-
-# The most-thawed material — what the settled cloud freezes back as. The sim carries one material
-# per freeze, so a mixed thaw freezes as its majority; per-particle material is a later upgrade.
-func _dominant_material(votes: Dictionary, fallback: int) -> int:
-    var best := fallback
-    var best_n := -1
-    for mat in votes:
-        if votes[mat] > best_n:
-            best_n = votes[mat]
-            best = mat
-    return best
 
 
 # Drop all active material (no freeze-back). Called when leaving MPM mode so a large in-flight

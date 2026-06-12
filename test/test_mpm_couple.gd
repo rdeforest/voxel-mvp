@@ -104,6 +104,34 @@ func test_freeze_preserves_surrounding_terrain() -> void:
     assert_eq(store.store.material_at(Vector3(0.0, top + 1.0, 0.0)), WOOD, "the cloud kept its Wood material")
 
 
+# Per-particle material: a cloud carrying two materials must freeze back per-cell, each region
+# taking its nearest particle's material — not one material for the whole chunk.
+func test_freeze_carries_per_particle_material() -> void:
+    var top := _air_top()
+    var sim := MpmSim.new()
+    sim.configure(Vector3(-16, -16, -16), 32, 1.0, Vector3(0, -9.8, 0), -1000.0)
+    # Wood on the -X half, Stone on the +X half (8 particles/cell).
+    for cz in range(-2, 2):
+        for cy in range(top, top + 2):
+            for cx in range(-4, 4):
+                var mat := WOOD if cx < 0 else STONE
+                for ox in [0.25, 0.75]:
+                    for oy in [0.25, 0.75]:
+                        for oz in [0.25, 0.75]:
+                            sim.add_particle(Vector3(cx + ox, cy + oy, cz + oz), 50.0, 0.125, mat)
+
+    var store := EditStoreManager.new()
+    store.setup()
+    sim.rasterize_to_store(store.store, 1.0, 0.6, 0) # fallback 0 — must be unused, particles carry material
+
+    var wood_side := Vector3(-2.0, top + 1.0, 0.0)
+    var stone_side := Vector3(2.0, top + 1.0, 0.0)
+    assert_lt(store.store.sample(wood_side), 0.0, "wood side froze solid")
+    assert_lt(store.store.sample(stone_side), 0.0, "stone side froze solid")
+    assert_eq(store.store.material_at(wood_side), WOOD, "wood half kept its own material")
+    assert_eq(store.store.material_at(stone_side), STONE, "stone half kept its own material")
+
+
 func test_thaw_then_freeze_round_trips_a_box() -> void:
     # The fidelity test of the coupling (the information-loss question): a solid box in one store,
     # THAWED to particles and FROZEN back, must reproduce the same solid region in a second store.

@@ -34,6 +34,8 @@ class MpmSim : public RefCounted {
 	LocalVector<double> _mass;
 	LocalVector<double> _vol;   // initial volume V₀
 	LocalVector<double> _logJp; // sand: log of plastic volume (Drucker-Prager hardening)
+	LocalVector<int32_t> _pmat; // material index — the cell each particle was thawed from; carried
+	                            // back on freeze so a mixed chunk re-deposits per-cell, not as one material
 
 	// Background grid. One node per lattice point; index = i + j·dim + k·dim². The grid carries
 	// displacement-momentum during P2G, then mass-weighted displacement after GridUpdate.
@@ -115,7 +117,7 @@ public:
 	void set_sdf_collider(const Ref<EditStore> &store) { _collider = store; }
 	void set_sleeping(bool on) { _sleep_enabled = on; }
 	void set_sleep_params(double speed, int after, double wake_speed);
-	int add_particle(Vector3 pos, double mass, double volume);
+	int add_particle(Vector3 pos, double mass, double volume, int material = 0);
 	void clear(); // drop all particles (after a freeze-back); keeps the grid config
 	void step(double dt);
 
