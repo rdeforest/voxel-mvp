@@ -22,6 +22,10 @@ const FLOATS := [
     ["wc_turb",         0.14, 0.0,  1.0,  0.01, "t"],
     ["wc_edge",         0.45, 0.0,  1.0,  0.01, "t"],
     ["wc_edge_start",   0.45, 0.0,  1.0,  0.01, "t"],
+    ["wc_sprig_amount", 0.5,  0.0,  1.0,  0.01, "t"],
+    ["wc_sprig_freq",   2.5,  0.2,  10.0, 0.1,  "t"],
+    ["wc_sprig_patch",  0.4,  0.05, 2.0,  0.01, "t"],
+    ["wc_sprig_flat",   0.3,  0.0,  1.0,  0.01, "t"],
     ["ink_enable",      1.0,  0.0,  1.0,  1.0,  "p"],
     ["ink_depth_sens",  14.0, 0.0,  60.0, 0.5,  "p"],
     ["ink_normal_sens", 1.4,  0.0,  6.0,  0.05, "p"],
@@ -39,6 +43,7 @@ const FLOATS := [
 # [uniform, default-Color, target]
 const COLORS := [
     ["wc_paper_color", Color(0.96, 0.95, 0.91), "t"],
+    ["wc_sprig_color", Color(0.16, 0.30, 0.12), "t"],
     ["ink_color",      Color(0.13, 0.11, 0.15), "p"],
     ["vig_paper",      Color(0.97, 0.96, 0.93), "p"],
 ]

@@ -54,6 +54,12 @@ uniform float wc_turb_scale  : hint_range(0.05, 4.0) = 0.5;   // low-freq pigmen
 uniform float wc_turb        : hint_range(0.0, 1.0) = 0.14;   // turbulence depth
 uniform float wc_edge        : hint_range(0.0, 1.0) = 0.45;   // edge-darkening (silhouette pooling)
 uniform float wc_edge_start  : hint_range(0.0, 1.0) = 0.45;   // fresnel threshold for the pooling
+// Grass sprigs (loose drawn green marks on grass; denser where the ground tilts up).
+uniform float wc_sprig_amount: hint_range(0.0, 1.0) = 0.5;    // mark strength (0 = off)
+uniform float wc_sprig_freq  : hint_range(0.2, 10.0) = 2.5;   // mark frequency (size)
+uniform float wc_sprig_patch : hint_range(0.05, 2.0) = 0.4;   // patch sparseness (lower = sparser)
+uniform float wc_sprig_flat  : hint_range(0.0, 1.0) = 0.3;    // fraction of marks on FLAT ground vs rises
+uniform vec3  wc_sprig_color : source_color = vec3(0.16, 0.30, 0.12);
 
 // Debug: blend each triangle's per-LOD colour (vertex COLOR from the DC mesher)
 // over the grass/dirt material. 0 = off, 1 = full. Console: set debug_lod 0.3
@@ -172,6 +178,19 @@ void fragment() {
         // emphasise depth (this is the half that should follow the world, not the screen).
         float turb = 0.5 + 0.5 * gnoise(v_world_pos.xz * wc_turb_scale);
         wc *= 1.0 - wc_turb + turb * wc_turb * 2.0;
+        // Grass sprigs: loose drawn green marks on grass. World-anchored XZ-anisotropic streaks
+        // (clumpy strokes), thinned to a threshold so they read as separate marks, gated by the
+        // grass mask + a sparse patch noise (so they're sprigs, not a lawn), and denser where the
+        // ground tilts up (slope_cos drops) — roughly the base of things rising out of the grass.
+        // (Not standing blades — that needs geometry; these are the gestural marks of line-and-wash.)
+        if (wc_sprig_amount > 0.001 && grass_mask > 0.01) {
+            float streak = gnoise(v_world_pos.xz * vec2(wc_sprig_freq, wc_sprig_freq * 0.35));
+            streak = smoothstep(0.15, 0.45, 0.5 + 0.5 * streak);
+            float patch = smoothstep(0.45, 0.85, 0.5 + 0.5 * gnoise(v_world_pos.xz * wc_sprig_patch));
+            float rise  = mix(wc_sprig_flat, 1.0, smoothstep(0.98, 0.72, slope_cos));
+            float spr   = clamp(streak * patch * grass_mask * rise * wc_sprig_amount, 0.0, 1.0);
+            wc = mix(wc, wc_sprig_color, spr);
+        }
         // Edge darkening: pigment pools at silhouettes (grazing angle = fresnel).
         float fres = 1.0 - clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
         wc *= 1.0 - wc_edge * smoothstep(wc_edge_start, 1.0, fres);
