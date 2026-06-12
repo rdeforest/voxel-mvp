@@ -64,7 +64,7 @@ func execute() -> void:
     var shape := _shape()
     var xform := _xform()
     var work  := VoxelImprint.compute(store, shape, xform, CsgState.Op.ADD)
-    VoxelImprint.apply(store, work, material_name, VoxelImprint.world_box(shape, xform))
+    VoxelImprint.apply(store, work, material_name, VoxelImprint.world_box(shape, xform), shape, xform, CsgState.Op.ADD)
     # Record the placement's identity in the PartIndex sidecar (the field stays pure).
     VoxelEventBusSingleton.emit(
         PartPlacedEvent.CHANNEL,
@@ -90,21 +90,16 @@ func _xform() -> Transform3D:
     var centre := placed * Vector3(0.0, part.dimensions.y * 0.5, 0.0)
     return Transform3D(_basis(), centre)
 
-# Cells the part's box occupies (where the brush is solid) — for preview + the attachment
-# check. Independent of the store's current state.
+# The part's 1m footprint cells — for the placement/attachment check, the ghost, and the
+# PartPlaced sidecar. Uses the AABB footprint (footprint_from_aabb collapses a sub-metre-thin
+# dimension to the cell holding its midpoint), so a sub-metre-thin part still has a non-empty,
+# placeable 1m footprint — the integer-grid SDF test would miss a 0.5m log between sample points.
+# The actual geometry is written sub-metre by VoxelImprint; this is the coarse tracking footprint.
 func _part_cells() -> Array[Vector3i]:
     if _cells_computed:
         return _cells
     _cells_computed = true
-    var shape   := _shape()
-    var xform   := _xform()
-    var inverse := xform.affine_inverse()
-    VoxelUtils.for_each_in_bounding_box(
-        VoxelImprint.world_box(shape, xform).position,
-        VoxelImprint.world_box(shape, xform).size,
-        func(cell: Vector3i) -> void:
-            if shape.sdf(inverse * Vector3(cell)) < VoxelConstants.SDF_SOLID_THRESHOLD:
-                _cells.append(cell))
+    _cells = VoxelUtils.footprint_from_aabb(_xform() * _shape().local_aabb())   # world AABB of the placed box
     return _cells
 
 func _cells_aabb(cells: Array[Vector3i]) -> AABB:

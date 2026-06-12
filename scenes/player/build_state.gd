@@ -6,6 +6,7 @@ signal changed()
 var _parts: Array[Part] = [
     preload("res://assets/parts/beam/beam.tres"),
     preload("res://assets/parts/slab/slab.tres"),
+    preload("res://assets/parts/log/log.tres"),   # 0.5m sub-metre log (resolves at the 0.25 grid)
 ]
 var _materials:    Array[StringName] = [&"Wood", &"Stone", &"Metal", &"Dirt", &"Sand"]
 var _build_meshes: Array[BoxMesh]    = []

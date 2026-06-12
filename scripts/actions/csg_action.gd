@@ -63,7 +63,7 @@ func execute() -> void:
     _ensure_work()
     if op == CsgState.Op.ADD:
         _freeze_bodies_in_volume()
-    VoxelImprint.apply(store, _work, material_name, _world_box())
+    VoxelImprint.apply(store, _work, material_name, _world_box(), shape, xform, op)
 
 
 # --- Internals ---

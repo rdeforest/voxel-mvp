@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="Part" load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://bjij25oiltyca" path="res://scripts/schematics/part.gd" id="1_part"]
+
+[resource]
+script = ExtResource("1_part")
+dimensions = Vector3(0.5, 0.5, 4)
+material_name = &"Wood"

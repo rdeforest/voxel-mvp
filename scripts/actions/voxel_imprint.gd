@@ -41,12 +41,13 @@ static func compute(store: EditStore, shape: CsgShape, xform: Transform3D, op: i
     return work
 
 
-# Write `work` into the store (newly-solid cells take `material_name`; carved cells keep
-# their current material), then emit the primitive voxel events + terrain_sdf_changed over
-# `box` so the structural system tracks the change and the render/collision re-mesh.
-static func apply(store: EditStore, work: Array, material_name: StringName, box: AABB) -> void:
-    var solid_index := MaterialPalette.index_of(material_name)
-    StoreWrite.cells(store, work, func(entry): return solid_index if entry[3] else -1)
+# Imprint the brush into the store at the SUB-METRE leaf (so a sub-metre part is sub-metre solid),
+# then emit the structural events at 1m (from the 1m `work`, so the structural system isn't spammed
+# with 64x sub-metre events) + terrain_sdf_changed over `box` for the render/collision re-mesh.
+# `shape`/`xform`/`op` drive the fine geometry write; `work` (1m) drives the events.
+static func apply(store: EditStore, work: Array, material_name: StringName, box: AABB,
+        shape: CsgShape, xform: Transform3D, op: int) -> void:
+    _imprint_fine(store, shape, xform, op, material_name, box)
     var material := Materials.from_name(material_name)
     for entry in work:
         var cell: Vector3i = entry[0]
@@ -57,3 +58,38 @@ static func apply(store: EditStore, work: Array, material_name: StringName, box:
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
         TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box.position, box.size))
+
+
+# Combine the brush's analytic SDF with the store over a dense RENDER_BASE_CELL grid and
+# write_region it — the part/CSG geometry at the sub-metre leaf. The brush's own solid region takes
+# the part material; existing terrain keeps its material; air is 0 (matches the freeze union rule).
+static func _imprint_fine(store: EditStore, shape: CsgShape, xform: Transform3D, op: int,
+        material_name: StringName, box: AABB) -> void:
+    var inverse := xform.affine_inverse()
+    var solid_index := MaterialPalette.index_of(material_name)
+    var cell := VoxelConstants.RENDER_BASE_CELL
+    var lo := Vector3i((box.position / cell).floor()) - Vector3i.ONE
+    var hi := Vector3i(((box.position + box.size) / cell).ceil()) + Vector3i.ONE
+    var span := hi - lo
+    var dim := maxi(span.x, maxi(span.y, span.z)) + 1
+    var sdf := PackedFloat32Array()
+    var idx := PackedByteArray()
+    sdf.resize(dim * dim * dim)
+    idx.resize(dim * dim * dim)
+    var i := 0
+    for z in dim:
+        for y in dim:
+            for x in dim:
+                var wp := Vector3(lo + Vector3i(x, y, z)) * cell
+                var dist := clampf(shape.sdf(inverse * wp), VoxelConstants.SDF_SOLID, VoxelConstants.SDF_AIR)
+                var existing := store.sample(wp)
+                var combined: float = minf(existing, dist) if op == CsgState.Op.ADD else maxf(existing, -dist)
+                sdf[i] = combined
+                if op == CsgState.Op.ADD and dist < VoxelConstants.SDF_SOLID_THRESHOLD:
+                    idx[i] = solid_index                # the brush is solid here = the placed part
+                elif combined < VoxelConstants.SDF_SOLID_THRESHOLD:
+                    idx[i] = store.material_at(wp)       # existing terrain keeps its material
+                else:
+                    idx[i] = 0                           # air
+                i += 1
+    store.write_region(sdf, idx, dim, Vector3(lo) * cell, cell)
