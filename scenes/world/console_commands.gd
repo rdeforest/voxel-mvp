@@ -25,7 +25,6 @@ var part_index:        PartIndex
 
 var _pbd_demo: PbdDemo   # lazily spawned by `pbddemo`
 var _mpm_demo: MpmDemo   # lazily spawned by `mpmdemo`
-var _mpm_structure: MpmStructure   # lazily spawned by `mpmthaw`
 var _flood_viz: FloodViz   # lazily spawned by `floodviz`
 
 
@@ -180,11 +179,9 @@ func mpmthaw(radius := 3.0) -> void:
     if rc == null or not rc.is_colliding():
         LimboConsole.error("mpmthaw: aim at terrain first")
         return
-    if _mpm_structure == null:
-        _mpm_structure = MpmStructure.new()
-        host.add_child(_mpm_structure)
-        _mpm_structure.setup(edit_store.store)
-    var n := _mpm_structure.thaw_sphere(rc.get_collision_point(), radius)
+    # Thaw into the world's wired MpmStructure (the same one save-gating + physics_mode see), not a
+    # private console instance — otherwise the in-flight material is invisible to is_quiescent.
+    var n := integrity.mpm.thaw_sphere(rc.get_collision_point(), radius)
     LimboConsole.info("mpmthaw: thawed %d cells (r=%.1f) into MPM" % [n, radius])
 
 # Debug-flood connected solid terrain from the cell behind the player's aim, biased downward,
