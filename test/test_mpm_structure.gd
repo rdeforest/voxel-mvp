@@ -44,6 +44,40 @@ func test_thaw_simulate_freeze_loop_on_real_terrain() -> void:
     assert_true(solid_found, "the frozen material re-entered the store as solid terrain")
 
 
+# A free-standing solid block (surrounded by air) thawed in full must clear COMPLETELY — no
+# leftover surface shell. The old carve raised only each cell's base (min) corner, so the
+# +X/+Y/+Z face cells kept solid far corners — a 1..7/8-solid crust the probe found. The corner-
+# field carve raises a corner unless a kept-solid cell needs it, so an all-air-surrounded block
+# clears to nothing.
+func test_thaw_leaves_no_solid_shell() -> void:
+    var store := EditStoreManager.new()
+    store.setup()
+    var base := _surface() + 30   # well above terrain — air on every side
+    store.store.stamp_box(Vector3(0.5, float(base) + 2.5, 0.5), Vector3(4, 4, 4), 0, 1, 1.0)
+
+    var ms: MpmStructure = autofree(MpmStructure.new())
+    ms.setup(store.store)
+
+    # Collect the block's solid cells and thaw them all (no stepping — we check the carve itself).
+    var cells: Array[Vector3i] = []
+    for z in range(-4, 5):
+        for y in range(base - 2, base + 8):
+            for x in range(-4, 5):
+                if store.store.sample(Vector3(x + 0.5, y + 0.5, z + 0.5)) < VoxelConstants.SDF_SOLID_THRESHOLD:
+                    cells.append(Vector3i(x, y, z))
+    assert_gt(cells.size(), 0, "the block has solid cells to thaw")
+    ms.thaw_cells(cells)
+
+    # Every grid corner in/around the block must now be air — nothing left behind.
+    var solid_corners := 0
+    for z in range(-5, 6):
+        for y in range(base - 3, base + 9):
+            for x in range(-5, 6):
+                if store.store.sample(Vector3(x, y, z)) < VoxelConstants.SDF_SOLID_THRESHOLD:
+                    solid_corners += 1
+    assert_eq(solid_corners, 0, "the thawed block cleared completely — no solid shell left behind")
+
+
 func test_floodviz_reaches_a_connected_block_and_settles() -> void:
     # The flood scout: from a seed cell it should reach every connected solid cell and then stop
     # (frontier empty), colouring the visible surface cells. A floating 5³ block = 125 cells.

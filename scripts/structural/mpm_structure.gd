@@ -72,7 +72,7 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
     _material_index = material_index   # freeze fallback only; each particle carries its own material
     var p_vol := 0.125
     var p_mass := RHO * p_vol
-    var work: Array = []
+    var carved := {}   # Vector3i -> true: the cells actually thawed (center sampled solid)
     var box_lo := Vector3(INF, INF, INF)
     var box_hi := Vector3(-INF, -INF, -INF)
     for cell in cells:
@@ -86,17 +86,53 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
             for oy in [0.25, 0.75]:
                 for oz in [0.25, 0.75]:
                     _sim.add_particle(Vector3(cell) + Vector3(ox, oy, oz), p_mass, p_vol, mat)
-        work.append([cell, VoxelConstants.SDF_AIR])
+        carved[cell] = true
         VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))
         box_lo = box_lo.min(Vector3(cell))
         box_hi = box_hi.max(Vector3(cell) + Vector3.ONE)
-    if work.is_empty():
+    if carved.is_empty():
         return 0
-    StoreWrite.cells(_store, work, func(_e): return -1) # carve to air
+    StoreWrite.cells(_store, _carve_corners(carved), func(_e): return -1) # carve the corner field to air
     VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL, TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box_lo, box_hi - box_lo))
     _settled_frames = 0
     _mm.instance_count = _sim.particle_count()
-    return work.size()
+    return carved.size()
+
+
+# Carving a corner-sampled SDF cleanly. StoreWrite sets the value at the grid CORNER it's handed,
+# so the old per-cell `[cell, AIR]` raised only each cell's base (min) corner — the +X/+Y/+Z face
+# corners of the boundary cells stayed solid, leaving every thawed cell a 1..7/8-solid shell.
+# Instead: raise a grid corner to air UNLESS a kept-solid cell still needs it — a corner clears iff
+# none of its 8 surrounding cells is solid-and-not-thawed. Interior corners (all neighbours thawed)
+# clear; corners against the kept terrain stay, so the carve leaves a clean wall, not a crust.
+func _carve_corners(carved: Dictionary) -> Array:
+    var corner_work: Array = []
+    var seen := {}
+    for cell in carved:
+        for cx in [0, 1]:
+            for cy in [0, 1]:
+                for cz in [0, 1]:
+                    var corner: Vector3i = cell + Vector3i(cx, cy, cz)
+                    if seen.has(corner):
+                        continue
+                    seen[corner] = true
+                    if _corner_clears(corner, carved):
+                        corner_work.append([corner, VoxelConstants.SDF_AIR])
+    return corner_work
+
+
+# The 8 cells touching grid corner C have base corners C-{0,1}³. The corner can go air unless one
+# of them is kept solid (not thawed, and its centre samples solid).
+func _corner_clears(corner: Vector3i, carved: Dictionary) -> bool:
+    for dx in [0, 1]:
+        for dy in [0, 1]:
+            for dz in [0, 1]:
+                var nc: Vector3i = corner - Vector3i(dx, dy, dz)
+                if carved.has(nc):
+                    continue
+                if _store.sample(Vector3(nc) + Vector3(0.5, 0.5, 0.5)) < VoxelConstants.SDF_SOLID_THRESHOLD:
+                    return false   # a kept-solid neighbour needs this corner
+    return true
 
 
 func active_count() -> int:
