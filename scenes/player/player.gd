@@ -32,6 +32,9 @@ var _mouse_button_actions: Dictionary
 @onready var raycast:      RayCast3D           = $Head/RayCast3D
 
 const EDIT_REACH := 30.0
+# Aim sphere-trace step (world metres). Fixed and ≤ the render cell so a sub-metre feature is never
+# stepped over; EDIT_REACH/_MARCH_STEP samples per frame is cheap (an octree descent each).
+const _MARCH_STEP := 0.2
 
 # When an air-placement activity (Build) aims at nothing within reach, float the
 # target this far along the camera ray so parts can be placed over empty space.
@@ -243,8 +246,9 @@ func _try_edit_terrain() -> void:
 # activities (Build) fall back to a fixed distance along the camera ray so parts
 # can be positioned over empty space (then snapped / offset into place).
 func current_target() -> Aim:
-    if raycast.is_colliding():
-        return Aim.new(raycast.get_collision_point(), raycast.get_collision_normal(), true)
+    var hit := _raymarch_terrain()
+    if hit.hit:
+        return Aim.new(hit.position, hit.normal, true)
     var activity := current_activity()
     if activity != null and activity.allows_air_placement:
         var forward := -camera.global_transform.basis.z
@@ -253,6 +257,14 @@ func current_target() -> Aim:
             dist = maxf(AIR_PLACE_DISTANCE, activity.get_air_distance.call())
         return Aim.new(camera.global_position + forward * dist, Vector3.UP, false)
     return null
+
+
+# Sub-metre aim: sphere-trace the camera ray through the EditStore SDF (TerrainRaymarch) instead of
+# the physics raycast, whose cooked collision mesh is only ~1m and quantizes the aim — fatal for
+# placing sub-metre parts.
+func _raymarch_terrain() -> Dictionary:
+    return TerrainRaymarch.surface(integrity.store, camera.global_position,
+        -camera.global_transform.basis.z, EDIT_REACH, _MARCH_STEP)
 
 
 # --- Tool / activity UI ---
