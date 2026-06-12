@@ -64,14 +64,18 @@ void fragment() {
     float e = depth_edge * ink_depth_sens + normal_edge * ink_normal_sens;
     float ink = clamp((e - ink_thresh) * ink_gain, 0.0, 1.0) * ink_enable;
 
-    vec3 col = texture(screen_tex, uv).rgb;
-    col = mix(col, ink_color, ink);
+    vec3 base = texture(screen_tex, uv).rgb;
 
+    // Vignette fades only the WASH to paper, as a RECTANGLE (the paper edge), not a circle.
     if (vig_enable > 0.5) {
-        float aspect = VIEWPORT_SIZE.x / VIEWPORT_SIZE.y;
-        float r = length((uv - 0.5) * vec2(aspect, 1.0)) * 2.0;
-        col = mix(col, vig_paper, smoothstep(vig_inner, vig_outer, r));
+        vec2 d = abs(uv - vec2(0.5)) * 2.0;    // 0 at centre .. 1 at the nearest screen edge
+        float vr = max(d.x, d.y);              // rectangular falloff (square in UV = rect on screen)
+        base = mix(base, vig_paper, smoothstep(vig_inner, vig_outer, vr));
     }
+
+    // Ink is drawn ON TOP of the faded wash, so an object's OUTLINE keeps drawing past the fade
+    // into the paper margin (line-and-wash: the line extends where the colour has washed out).
+    vec3 col = mix(base, ink_color, ink);
 
     ALBEDO = col;   // unshaded → ALBEDO is the final colour (EMISSION does NOT apply when unshaded)
 }

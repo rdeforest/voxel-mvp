@@ -118,7 +118,9 @@ void fragment() {
     float grass_mask = smoothstep(slope_dirt_max, slope_grass_min, slope_cos);
 
     vec2 wp    = v_world_pos.xz * wave_scale;
-    float wave = wind_fbm(wp, wave_dir, TIME * wave_speed);
+    // Watercolour mode freezes the animation (TIME -> 0): the moving wave reads as rippling water,
+    // not grass. Static, it's just mottled pigment variation. (Sprigs of grass are a separate pass.)
+    float wave = wind_fbm(wp, wave_dir, TIME * wave_speed * (1.0 - wc_enable));
 
     // Brightness modulation + small hue shift in the green channel so the
     // grass varies between slightly warmer and cooler greens, not just
