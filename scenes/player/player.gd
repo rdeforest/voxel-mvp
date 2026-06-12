@@ -88,6 +88,8 @@ func _create_overlays() -> void:
     _probe_hud.player = self
     add_child(_probe_hud)
 
+    add_child(preload("res://scenes/player/watercolor_panel.gd").new())   # F10: watercolour tuning
+
 
 func _build_input_map() -> void:
     _key_actions = {
