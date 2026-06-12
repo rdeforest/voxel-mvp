@@ -19,7 +19,7 @@ func _ready() -> void:
     _label.add_theme_color_override("font_color", Color(0.85, 0.95, 1.0))
     _label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
     _label.add_theme_constant_override("outline_size", 4)
-    _label.position = Vector2(12, 10)
+    _label.position = Vector2(12, 72)   # below the Activity/Tool/Fly mode label (top-left, ~3 lines)
     add_child(_label)
 
 
