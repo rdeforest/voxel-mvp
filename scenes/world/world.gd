@@ -9,6 +9,7 @@ var _dc_collision: DCCollisionManager
 var _awake_overlay: AwakeOverlay
 var _pbd_structure: PbdStructure
 var _mpm_structure: MpmStructure
+var _detachment_scout: DetachmentScout
 var _edit_store: EditStoreManager
 var _part_index: PartIndex
 var _console: ConsoleCommands
@@ -78,6 +79,12 @@ func _wire_structural_sims() -> void:
     add_child(_mpm_structure)
     _mpm_structure.setup(_edit_store.store)
     _integrity.mpm = _mpm_structure
+
+    # The loss-of-support trigger: floods edits toward bedrock and thaws detached chunks into MPM.
+    _detachment_scout = DetachmentScout.new()
+    _detachment_scout.name = "DetachmentScout"
+    add_child(_detachment_scout)
+    _detachment_scout.setup(_edit_store.store, _integrity)
 
 func _wire_console() -> void:
     _console = ConsoleCommands.new()
