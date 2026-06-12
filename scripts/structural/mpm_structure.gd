@@ -16,12 +16,15 @@ const SETTLE_DISP := 0.01      # max displacement/step below which the material 
 const SETTLE_FRAMES := 30      # consecutive settled frames before freezing back
 const FREEZE_RADIUS := 0.6     # particle-skinning radius for the freeze rasterisation
 const MAX_PARTICLES := 6000    # hard cap — beyond this a step costs too much (a runaway-thaw guard)
+const CHUNK := 12              # freeze region is re-meshed in CHUNK³ boxes (keeps each edit small)
+const CHUNKS_PER_FRAME := 2    # bounded work/frame — the closest chunks re-mesh first
 
 var _sim: MpmSim
 var _store: EditStore
 var _mm: MultiMesh
 var _settled_frames := 0
 var _material_index := 1        # Stone — the material the frozen-back terrain takes
+var _pending_chunks: Array = [] # freeze re-mesh boxes still to emit (closest-to-camera first)
 
 
 func setup(store: EditStore) -> void:
@@ -101,6 +104,7 @@ func reset() -> void:
     if _sim != null:
         _sim.clear()
     _settled_frames = 0
+    _pending_chunks.clear()
     if _mm != null:
         _mm.instance_count = 0
 
@@ -112,6 +116,7 @@ func _physics_process(delta: float) -> void:
 # Step the active material and freeze it back into the terrain once it has settled. Split out so
 # the loop is headless-testable without the scene-tree physics callback.
 func tick(delta: float) -> void:
+    _emit_pending_chunks()
     if _sim == null or _sim.particle_count() == 0:
         return
     _sim.step(delta)
@@ -123,19 +128,48 @@ func tick(delta: float) -> void:
         _settled_frames = 0
 
 
-# Rasterise the settled particles back into the store as terrain (SDF + material), tell the DC
-# mesher to re-mesh that region, and drop the particles.
+# Re-mesh the frozen region a few bounded boxes per frame, closest to the camera first, so each
+# terrain_sdf_changed stays small (no main-thread freeze) and the nearby change shows promptly.
+func _emit_pending_chunks() -> void:
+    var n := 0
+    while not _pending_chunks.is_empty() and n < CHUNKS_PER_FRAME:
+        var box: Vector3 = _pending_chunks.pop_front()
+        VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL,
+            TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box, Vector3.ONE * float(CHUNK)))
+        n += 1
+
+
+# Rasterise the settled particles back into the store as terrain (fast, bin-hashed), then queue
+# the region for chunked re-meshing (closest first), and drop the particles.
 func _freeze() -> void:
     var region: Dictionary = _sim.rasterize_to_store(_store, 1.0, FREEZE_RADIUS, _material_index)
     if not region.is_empty():
-        var origin: Vector3 = region["origin"]
-        var dim: int = region["dim"]
-        VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL,
-            TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, origin, Vector3.ONE * float(dim)))
+        _queue_freeze_chunks(region["origin"], region["dim"])
     _sim.clear()
     _settled_frames = 0
     if _mm != null:
         _mm.instance_count = 0
+
+
+# Split the rasterised region into CHUNK³ boxes and sort them nearest-camera-first.
+func _queue_freeze_chunks(origin: Vector3, dim: int) -> void:
+    var vp := get_viewport()
+    var cam := vp.get_camera_3d() if vp != null else null
+    var eye := cam.global_position if cam != null else origin
+    var boxes: Array = []
+    var cx := 0
+    while cx < dim:
+        var cy := 0
+        while cy < dim:
+            var cz := 0
+            while cz < dim:
+                boxes.append(origin + Vector3(cx, cy, cz))
+                cz += CHUNK
+            cy += CHUNK
+        cx += CHUNK
+    boxes.sort_custom(func(a, b):
+        return eye.distance_squared_to(a + Vector3.ONE * (CHUNK * 0.5)) < eye.distance_squared_to(b + Vector3.ONE * (CHUNK * 0.5)))
+    _pending_chunks = boxes
 
 
 func _process(_dt: float) -> void:

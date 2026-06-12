@@ -59,6 +59,7 @@ var _cache_owners: PackedVector3Array = PackedVector3Array()
 var _cache_origin: Vector3i
 const _EDIT_MARGIN := 3     # cells of slack around the edit box (covers the SDF influence)
 const _EDIT_APRON  := 4     # cells built beyond the core for stitching the patch seam
+const _MAX_SPLICE_SPAN := 40   # above this the main-thread splice mesh is too costly → off-thread full re-mesh
 
 # Print per-recenter read/mesh timings to the output (tuning aid). Only fires while
 # the manager is enabled, which is opt-in, so it's quiet in normal play.
@@ -142,6 +143,8 @@ func _try_splice_edit(event: TerrainSdfChangedEvent) -> bool:
     var sub_origin := core_min - Vector3i.ONE * _EDIT_APRON
     var sub_hi := core_max + Vector3i.ONE * _EDIT_APRON
     var span := maxi(sub_hi.x - sub_origin.x, maxi(sub_hi.y - sub_origin.y, sub_hi.z - sub_origin.z))
+    if span > _MAX_SPLICE_SPAN:
+        return false   # too big to mesh on the main thread → fall back to the off-thread full re-mesh
     var sub_size := 1
     while sub_size < span:
         sub_size <<= 1

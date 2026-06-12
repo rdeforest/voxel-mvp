@@ -1,6 +1,7 @@
 #include "mpm_sim.h"
 
 #include "core/math/math_funcs.h"
+#include "core/templates/hash_map.h"
 
 // Thaw/freeze coupling between MpmSim and the EditStore (doc 12 — the one remaining research
 // risk: moving material between the simulated particle representation and the static field).
@@ -26,6 +27,21 @@ Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double 
 	const Vector3 origin(Math::floor(lo.x - margin), Math::floor(lo.y - margin), Math::floor(lo.z - margin));
 	const double span = MAX(hi.x - origin.x, MAX(hi.y - origin.y, hi.z - origin.z)) + margin;
 	const int dim = int(Math::ceil(span / cell)) + 1;
+	const double inv_cell = 1.0 / cell;
+
+	// Bin particles by their cell (relative to origin); key = linear bin index. Lets each grid
+	// point test only nearby particles — O(grid + particles), not O(grid·particles).
+	HashMap<int, LocalVector<int>> bins;
+	for (uint32_t p = 0; p < _x.size(); p++) {
+		const int bx = int(Math::floor((_x[p].x - origin.x) * inv_cell));
+		const int by = int(Math::floor((_x[p].y - origin.y) * inv_cell));
+		const int bz = int(Math::floor((_x[p].z - origin.z) * inv_cell));
+		if (bx < 0 || by < 0 || bz < 0 || bx >= dim || by >= dim || bz >= dim) {
+			continue;
+		}
+		bins[bx + by * dim + bz * dim * dim].push_back(int(p));
+	}
+	const int R = int(Math::ceil(radius * inv_cell)) + 1; // bins to search around each node
 
 	PackedFloat32Array sdf;
 	PackedByteArray idx;
@@ -38,8 +54,31 @@ Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double 
 			for (int ix = 0; ix < dim; ix++) {
 				const Vector3 wp = origin + Vector3(ix, iy, iz) * cell;
 				double dmin = 1e30;
-				for (uint32_t p = 0; p < _x.size(); p++) {
-					dmin = MIN(dmin, wp.distance_to(_x[p]));
+				for (int dz = -R; dz <= R; dz++) {
+					const int bz = iz + dz;
+					if (bz < 0 || bz >= dim) {
+						continue;
+					}
+					for (int dy = -R; dy <= R; dy++) {
+						const int by = iy + dy;
+						if (by < 0 || by >= dim) {
+							continue;
+						}
+						for (int dx = -R; dx <= R; dx++) {
+							const int bx = ix + dx;
+							if (bx < 0 || bx >= dim) {
+								continue;
+							}
+							HashMap<int, LocalVector<int>>::Iterator it = bins.find(bx + by * dim + bz * dim * dim);
+							if (!it) {
+								continue;
+							}
+							const LocalVector<int> &list = it->value;
+							for (uint32_t k = 0; k < list.size(); k++) {
+								dmin = MIN(dmin, wp.distance_to(_x[list[k]]));
+							}
+						}
+					}
 				}
 				const double s = dmin - radius;
 				const int n = ix + iy * dim + iz * dim * dim;
