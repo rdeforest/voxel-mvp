@@ -114,6 +114,44 @@ struct Clipmap {
 	int index_at(const Vector3 &p) const {
 		return levels[level_index(p)].index_nearest(p);
 	}
+
+	// Like index_at, but if the nearest cell is Natural(0), scan the 26 neighbours one cell out (at
+	// THIS point's level cell size, so the scan stays single-level -> crack-free) and adopt the
+	// closest nonzero explicit id (ties -> lowest id, deterministic; no frame flicker). A placed
+	// part's boundary vertices round into the terrain cell just outside the part; this lets them
+	// read the part's material instead, so the surface is the placed material (wood) on top/sides
+	// and edges — pure, no terrain smear — leaving only the bottom interface layer (no explicit
+	// neighbour) reading natural. 26 (not 6) so box corners/edges, where the interior cell is a
+	// diagonal neighbour, are covered. Returns 0 only if nothing explicit is adjacent.
+	int index_prefer_explicit(const Vector3 &p) const {
+		const Level &lv = levels[level_index(p)];
+		int id = lv.index_nearest(p);
+		if (id > 0) {
+			return id;
+		}
+		const double c = lv.cell;
+		int best = 0;
+		double best_d2 = 1e30;
+		for (int dz = -1; dz <= 1; ++dz) {
+			for (int dy = -1; dy <= 1; ++dy) {
+				for (int dx = -1; dx <= 1; ++dx) {
+					if (dx == 0 && dy == 0 && dz == 0) {
+						continue;
+					}
+					int nid = lv.index_nearest(p + Vector3(dx * c, dy * c, dz * c));
+					if (nid <= 0) {
+						continue;
+					}
+					double d2 = double(dx * dx + dy * dy + dz * dz);
+					if (d2 < best_d2 || (d2 == best_d2 && nid < best)) {
+						best_d2 = d2;
+						best = nid;
+					}
+				}
+			}
+		}
+		return best;
+	}
 };
 
 struct Cell {
@@ -355,8 +393,9 @@ struct Octree {
 		normals.push_back(n);
 		if (emit_color) {
 			// Sample the solid voxel just behind the surface: the normal points
-			// outward, so step inward to land in the cell that carries the id.
-			int id = clip.index_at(v - n * 0.5);
+			// outward, so step inward to land in the cell that carries the id. Prefer an
+			// adjacent explicit material so a placed part's faces don't bleed terrain.
+			int id = clip.index_prefer_explicit(v - n * 0.5);
 			if (id > 0 && id < int(palette.size())) {
 				const Color &c = palette[id];
 				colors.push_back(Color(c.r, c.g, c.b, 0.0)); // a=0 -> explicit material colour

@@ -192,3 +192,65 @@ func test_collapse_hysteresis_is_sticky():
     assert_gt(tris_near, tris_far, "near genuinely refines more than far (the LOD differs)")
     assert_lt(tris_sticky, tris_near, "hysteresis kept it coarser than a cold mesh at the same spot")
     assert_lte(tris_sticky, tris_far + tris_far / 20, "stayed ~as coarse as the warmed (far) state")
+
+
+# --- Material bleed (index_prefer_explicit) ---
+#
+# A placed part writes its material to the SOLID interior, but boundary cells (the surface shell)
+# read as Natural(0) — per-leaf material is sampled at leaf centre, so a leaf straddling the
+# part/terrain boundary lands on the terrain side. Without the fix, the mesher samples one cell at
+# v - n*0.5 and a boundary vertex reads that 0 shell -> natural colour -> the part's faces bleed
+# terrain. The fix scans the face-neighbours and prefers an adjacent explicit id, so a vertex with
+# a wood cell within one cell reads wood.
+
+const WOOD := 4
+
+# A solid wood box centred in the root, with its material written only to the INTERIOR (one-cell
+# shell of 0 at the surface — the per-leaf-boundary effect). Returns {data, indices}.
+func _wood_box(half: float, interior_inset: float) -> Dictionary:
+    var data := PackedFloat32Array()
+    var indices := PackedByteArray()
+    data.resize(DIM * DIM * DIM)
+    indices.resize(DIM * DIM * DIM)
+    var i := 0
+    for z in DIM:
+        for y in DIM:
+            for x in DIM:
+                var p := Vector3(x, y, z) - CENTER
+                var d: float = maxf(maxf(absf(p.x) - half, absf(p.y) - half), absf(p.z) - half)
+                data[i] = d
+                indices[i] = WOOD if d <= interior_inset else 0   # 0 on the surface shell
+                i += 1
+    return {"data": data, "indices": indices}
+
+func _mesh_colored(s: Dictionary) -> Array:
+    return DCOctreeMesher.new().mesh_clipmap(
+        [s.data], DIM, PackedVector3Array([Vector3.ZERO]), PackedFloat32Array([1.0]),
+        CENTER, 1e9, DEPTH, Vector3.ZERO, 0.0, 0.0, false, Vector3i.ZERO,
+        [s.indices], MaterialPalette.colors())
+
+
+func test_explicit_material_not_bled_into_natural():
+    # Boundary shell indexed 0; every surface vertex still has a wood cell within one cell, so the
+    # neighbour-preference must give them all the wood material (a==0) — no natural bleed.
+    var arrays := _mesh_colored(_wood_box(8.0, -1.0))
+    assert_false(arrays.is_empty(), "meshed the wood box")
+    var colors: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
+    assert_gt(colors.size(), 100, "got a tessellated, coloured box")
+    var natural := 0
+    var wood := MaterialPalette.colors()[WOOD]
+    for c in colors:
+        if c.a >= 0.5:
+            natural += 1
+        else:
+            assert_almost_eq(c.r, wood.r, 0.01, "explicit vertex carries the wood albedo")
+    assert_eq(natural, 0, "no wood-box vertex bled to natural")
+
+
+func test_colored_box_stays_watertight():
+    # The colour fix must not perturb geometry — the wood box meshes closed (no holes/cracks).
+    var arrays := _mesh_colored(_wood_box(8.0, -1.0))
+    var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+    var audit := _edge_audit(idx)
+    assert_eq(audit["boundary"], 0, "boundary edges (holes)")
+    assert_eq(audit["nonmanifold"], 0, "non-manifold edges")
