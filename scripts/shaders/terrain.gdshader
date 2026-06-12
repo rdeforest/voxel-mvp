@@ -38,6 +38,23 @@ uniform float roughness      : hint_range(0.0, 1.0) = 0.9;
 uniform float grain_amount   : hint_range(0.0, 1.0) = 0.18;  // brightness striation depth
 uniform float grain_scale    : hint_range(0.1, 12.0) = 4.0;  // grain frequency
 
+// --- Watercolour spike (line-and-wash). Toggle: `set wc_enable 1`. All tunable live. ---
+// The wash half: flatten to bands, lift toward paper white (dilution), WORLD-ANCHORED paper-tooth
+// granulation + pigment turbulence (so the paint sticks to the world, not the screen — the
+// temporal-coherence test), and edge-darkening (pigment pools at silhouettes). Rendered unshaded
+// (EMISSION) so the white paper is the light. The ink lines + vignette are a separate post-process.
+uniform float wc_enable      : hint_range(0.0, 1.0) = 0.0;
+uniform vec3  wc_paper_color : source_color = vec3(0.96, 0.95, 0.91);
+uniform float wc_dilute      : hint_range(0.0, 1.0) = 0.28;   // lift toward paper white
+uniform float wc_desat       : hint_range(0.0, 1.0) = 0.20;   // pull toward grey (washy)
+uniform float wc_bands       : hint_range(1.0, 8.0) = 4.0;    // value quantisation (flat washes)
+uniform float wc_paper_scale : hint_range(0.1, 16.0) = 6.0;   // paper-tooth frequency (world units)
+uniform float wc_granulate   : hint_range(0.0, 1.0) = 0.18;   // pigment-on-tooth density variation
+uniform float wc_turb_scale  : hint_range(0.05, 4.0) = 0.5;   // low-freq pigment turbulence frequency
+uniform float wc_turb        : hint_range(0.0, 1.0) = 0.14;   // turbulence depth
+uniform float wc_edge        : hint_range(0.0, 1.0) = 0.45;   // edge-darkening (silhouette pooling)
+uniform float wc_edge_start  : hint_range(0.0, 1.0) = 0.45;   // fresnel threshold for the pooling
+
 // Debug: blend each triangle's per-LOD colour (vertex COLOR from the DC mesher)
 // over the grass/dirt material. 0 = off, 1 = full. Console: set debug_lod 0.3
 uniform float debug_lod      : hint_range(0.0, 1.0) = 0.0;
@@ -133,12 +150,39 @@ void fragment() {
     float grain_b = 1.0 - grain_amount + grain * grain_amount * 2.0;
     albedo *= mix(1.0, grain_b, material_mask);
 
-    // debug_lod is the blend amount of the per-LOD colour over the material:
-    // 0 = off, 0.3 = subtle tint, 1 = full LOD colour. (console: set debug_lod 0.3)
-    ALBEDO    = mix(albedo, COLOR.rgb, debug_lod);
     ROUGHNESS = roughness;
 
-    // Normal visualiser: unlit, so a bad normal can't hide behind lighting.
-    ALBEDO   = mix(ALBEDO, vec3(0.0), debug_normal);
-    EMISSION = (v_world_normal * 0.5 + 0.5) * debug_normal;
+    if (wc_enable > 0.5) {
+        // --- Watercolour wash (unshaded; the white paper is the light) ---
+        vec3 wc = albedo;
+        float lum = dot(wc, vec3(0.299, 0.587, 0.114));
+        wc = mix(wc, vec3(lum), wc_desat);                 // desaturate toward washy grey
+        wc = mix(wc, wc_paper_color, wc_dilute);           // dilution: lift toward paper white
+        // Flatten into a few wash bands (quantise value, keep hue).
+        float lw = max(dot(wc, vec3(0.299, 0.587, 0.114)), 1e-3);
+        wc *= (floor(lw * wc_bands + 0.5) / wc_bands) / lw;
+        // WORLD-ANCHORED paper tooth (triplanar) — pigment density on the paper. Stays put as the
+        // camera moves (this is the shower-door test: it must NOT swim).
+        vec3 an = abs(v_world_normal);
+        an /= (an.x + an.y + an.z + 1e-4);
+        float paper = an.x * gnoise(v_world_pos.yz * wc_paper_scale)
+                    + an.y * gnoise(v_world_pos.xz * wc_paper_scale)
+                    + an.z * gnoise(v_world_pos.xy * wc_paper_scale);
+        paper = 0.5 + 0.5 * paper;
+        wc *= 1.0 - wc_granulate + paper * wc_granulate * 2.0;
+        // Low-frequency pigment turbulence (world-space density variation).
+        float turb = 0.5 + 0.5 * gnoise(v_world_pos.xz * wc_turb_scale);
+        wc *= 1.0 - wc_turb + turb * wc_turb * 2.0;
+        // Edge darkening: pigment pools at silhouettes (grazing angle = fresnel).
+        float fres = 1.0 - clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
+        wc *= 1.0 - wc_edge * smoothstep(wc_edge_start, 1.0, fres);
+        ALBEDO   = vec3(0.0);
+        EMISSION = wc;
+    } else {
+        // debug_lod blends the per-LOD colour over the material (console: set debug_lod 0.3).
+        ALBEDO   = mix(albedo, COLOR.rgb, debug_lod);
+        // Normal visualiser: unlit, so a bad normal can't hide behind lighting.
+        ALBEDO   = mix(ALBEDO, vec3(0.0), debug_normal);
+        EMISSION = (v_world_normal * 0.5 + 0.5) * debug_normal;
+    }
 }
