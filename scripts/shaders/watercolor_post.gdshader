@@ -73,6 +73,5 @@ void fragment() {
         col = mix(col, vig_paper, smoothstep(vig_inner, vig_outer, r));
     }
 
-    ALBEDO = vec3(0.0);
-    EMISSION = col;
+    ALBEDO = col;   // unshaded → ALBEDO is the final colour (EMISSION does NOT apply when unshaded)
 }
