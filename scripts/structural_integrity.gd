@@ -8,11 +8,13 @@ var terrain_support:    TerrainSupport
 var pbd:                PbdStructure       # set by world.gd; folded into is_quiescent
 var mpm:                MpmStructure       # set by world.gd; the PB-MPM substrate (replaces PBD)
 
-# When true, PBD is disabled (toggled by the `physics_mode` console command). The MPM detachment
-# trigger that thaws loose terrain is being rebuilt as an async bounded flood-to-ground (the
-# scalar-support trigger cascaded + locked up and was removed); until it lands, MPM mode just
-# stands PBD down and leaves the `mpmthaw` / `mpmdemo` tools for manual experimentation.
-var mpm_mode := false
+# When true (the default), PBD is disabled and PB-MPM is the structural sim (toggle with the
+# `physics_mode` console command). The MPM detachment trigger that thaws loose terrain is being
+# rebuilt as an async bounded flood-to-ground (the scalar-support trigger cascaded + locked up and
+# was removed); until it lands, nothing AUTO-collapses in MPM mode — loose terrain is thawed
+# manually via `mpmthaw` (`mpmdemo` for the standalone playground). `physics_mode pbd` restores
+# the old mass-spring auto-collapse.
+var mpm_mode := true
 
 # Inactive until the world finishes loading (WorldReadyEvent) — don't classify
 # support or tick falling bodies against a half-streamed SDF.

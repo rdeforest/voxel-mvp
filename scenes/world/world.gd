@@ -62,16 +62,16 @@ func _ready() -> void:
     # spawns under the cursor.
     _grab_os_focus.call_deferred()
 
-# The two structural sims. PBD is authoritative today; the PB-MPM substrate (doc 12) is created
-# alongside, idle until the `physics_mode mpm` console command flips StructuralIntegrity.mpm_mode
-# (and disables PBD). Replacing PBD outright (default mpm, delete PBD) is increment C.
+# The two structural sims. PB-MPM (doc 12) is the default substrate; PBD is created alongside but
+# stood down (StructuralIntegrity.mpm_mode defaults true), re-enabled by `physics_mode pbd`. The
+# full Replace-PBD (delete PBD / VoxelChunkBody / the falling-body classifier) is increment C.
 func _wire_structural_sims() -> void:
     _pbd_structure = PbdStructure.new()
     _pbd_structure.name = "PbdStructure"   # ActionFactories resolves the probe target by this name
     add_child(_pbd_structure)
     _pbd_structure.setup(_integrity)
     _integrity.pbd = _pbd_structure
-    _pbd_structure.set_enabled(true)       # PBD authoritative; the old collapse systems stand down
+    _pbd_structure.set_enabled(not _integrity.mpm_mode)   # MPM default → PBD idle
 
     _mpm_structure = MpmStructure.new()
     _mpm_structure.name = "MpmStructure"
