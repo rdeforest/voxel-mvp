@@ -131,6 +131,10 @@ func force_quiescent() -> void:
 func is_quiescent() -> bool:
     if not terrain_support.dirty_queue.is_empty():     return false
     if pbd != null and not pbd.is_settled():           return false
+    # MPM particles live in the C++ sim, not as RigidBody nodes, so the body scan below misses
+    # them. A save mid-thaw would persist the carved hole without the in-flight material (particles
+    # aren't serialised) — gate until the material has frozen back into the store.
+    if mpm != null and mpm.active_count() > 0:         return false
     for child in get_parent().get_children():
         var body := child as RigidBody3D
         if body != null and not body.sleeping:         return false
