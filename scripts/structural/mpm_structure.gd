@@ -18,6 +18,7 @@ const FREEZE_RADIUS := 0.6     # particle-skinning radius for the freeze rasteri
 const MAX_PARTICLES := 6000    # hard cap — beyond this a step costs too much (a runaway-thaw guard)
 const CHUNK := 12              # freeze region is re-meshed in CHUNK³ boxes (keeps each edit small)
 const CHUNKS_PER_FRAME := 2    # bounded work/frame — the closest chunks re-mesh first
+const SINGLE_EMIT_MAX := 24    # a settled clump this small re-meshes in ONE watertight box (no chunk seams)
 
 var _sim: MpmSim
 var _store: EditStore
@@ -33,6 +34,8 @@ func setup(store: EditStore) -> void:
     _sim.configure(Vector3.ZERO, GRID_DIM, 1.0, Vector3(0, -9.8, 0), -1.0e9)
     _sim.set_iterations(4)
     _sim.set_elastic(1.0, 0.5)
+    _sim.set_contact_friction(0.35)   # so it grips terrain instead of sliding forever (SSX)
+    _sim.set_damping(0.03)            # bleed energy so it actually comes to rest
     _sim.set_recenter(true)
     _sim.set_sdf_collider(store)
 
@@ -144,7 +147,14 @@ func _emit_pending_chunks() -> void:
 func _freeze() -> void:
     var region: Dictionary = _sim.rasterize_to_store(_store, 1.0, FREEZE_RADIUS, _material_index)
     if not region.is_empty():
-        _queue_freeze_chunks(region["origin"], region["dim"])
+        var origin: Vector3 = region["origin"]
+        var dim: int = region["dim"]
+        if dim <= SINGLE_EMIT_MAX:
+            # Small settled clump → one box, meshed in a single splice (watertight, no chunk seams).
+            VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL,
+                TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, origin, Vector3.ONE * float(dim)))
+        else:
+            _queue_freeze_chunks(origin, dim)
     _sim.clear()
     _settled_frames = 0
     if _mm != null:

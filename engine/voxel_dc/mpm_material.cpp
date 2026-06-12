@@ -121,7 +121,7 @@ void MpmSim::_integrate(double dt) {
 		_F[p] = u * diag3(s[0], s[1], s[2]) * v.transposed();
 
 		_x[p] += _d[p];
-		_d[p] += g_disp;
+		_d[p] = _d[p] * (1.0 - _damping) + g_disp; // damp the carried velocity so it settles
 
 		if (_collider.is_valid()) {
 			const double sd = _collider->sample(_x[p]);

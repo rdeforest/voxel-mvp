@@ -57,6 +57,9 @@ class MpmSim : public RefCounted {
 	double _elastic_relaxation = 0.5; // under-relaxed; high relax + many iters can over-drive
 	double _friction_angle = 35.0; // sand (degrees)
 	double _viscosity = 0.0;       // deviatoric damping (sand uses a little)
+	double _damping = 0.0;         // global velocity damping per step — dissipates energy so
+	                               // material actually comes to rest (PB-MPM otherwise conserves
+	                               // it: a frictionless body slides/bounces forever).
 
 	// When set, the world-fixed grid re-centres on the particle centroid each step so the
 	// material never reaches the domain walls (the grid is scratch — rebuilt every step — so
@@ -107,6 +110,7 @@ public:
 	void set_contact_friction(double f) { _friction = f; }
 	void set_sand_friction(double friction_angle_degrees) { _friction_angle = friction_angle_degrees; }
 	void set_viscosity(double v) { _viscosity = v; }
+	void set_damping(double d) { _damping = d; } // global velocity damping so material settles
 	void set_recenter(bool on) { _recenter = on; } // grid follows the material centroid
 	void set_sdf_collider(const Ref<EditStore> &store) { _collider = store; }
 	void set_sleeping(bool on) { _sleep_enabled = on; }

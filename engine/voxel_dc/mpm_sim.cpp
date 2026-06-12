@@ -341,6 +341,7 @@ void MpmSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_contact_friction", "f"), &MpmSim::set_contact_friction);
 	ClassDB::bind_method(D_METHOD("set_sand_friction", "friction_angle_degrees"), &MpmSim::set_sand_friction);
 	ClassDB::bind_method(D_METHOD("set_viscosity", "v"), &MpmSim::set_viscosity);
+	ClassDB::bind_method(D_METHOD("set_damping", "d"), &MpmSim::set_damping);
 	ClassDB::bind_method(D_METHOD("set_recenter", "on"), &MpmSim::set_recenter);
 	ClassDB::bind_method(D_METHOD("set_sdf_collider", "store"), &MpmSim::set_sdf_collider);
 	ClassDB::bind_method(D_METHOD("set_sleeping", "on"), &MpmSim::set_sleeping);
