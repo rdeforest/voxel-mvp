@@ -61,17 +61,24 @@ var _job_t0 := 0
 var _cache_arrays: Array = []
 var _cache_owners: PackedVector3Array = PackedVector3Array()
 var _cache_origin: Vector3i
-const _EDIT_MARGIN := 3     # cells of slack around the edit box (covers the SDF influence)
-const _EDIT_APRON  := 4     # cells built beyond the core for stitching the patch seam
-const _MAX_SPLICE_SPAN := 40   # above this the main-thread splice mesh is too costly → off-thread full re-mesh
+const _EDIT_MARGIN_M := 3.0   # WORLD metres of slack around the edit box (covers the SDF influence);
+                              # converted to base-cells per resolution so the world band stays constant
+const _EDIT_APRON  := 4       # base-cells built beyond the core for stitching the seam (mesher stencil)
+const _MAX_SPLICE_SPAN := 96  # base-cells; above this an edit does a full re-mesh instead of a splice
 
-# Edits that splice while a full re-mesh is in flight: the worker's store snapshot was taken at
-# dispatch, so its result predates these edits and would erase them when it lands. We re-splice
-# them onto the fresh full mesh in _finish (same frame → no flicker). [[box_origin, box_size], ...]
-var _pending_edits: Array = []
-var _dirty_during_job := false   # a during-job edit that couldn't splice (out of core / too big) →
-                                 # force one full re-mesh once the current job lands
-const _MAX_PENDING := 32         # cap the queue; on overflow, coalesce to one full re-mesh
+# Edit splices run ASYNC on a worker: at sub-metre a patch mesh is ~100ms — too slow for the main
+# thread. World boxes wait in the queue; one splice job meshes on _splice_mesher at a time, applied
+# (cheap array surgery) on the main thread when it lands (~1-2 frames). Edits seen during a full
+# build are re-queued on _finish (the build's snapshot may predate them).
+var _splice_queue: Array = []        # [[box_origin, box_size], ...] world boxes awaiting a splice
+var _splice_task_id := -1
+var _splice_core_min: Vector3i       # apply geometry captured at splice dispatch (base-cell units)
+var _splice_core_max: Vector3i
+var _splice_sub_origin: Vector3i
+var _splice_patch: Array = []        # worker output: the meshed patch
+var _splice_owners: PackedVector3Array = PackedVector3Array()  # ...and its per-triangle owner cells
+var _edits_during_build: Array = []  # edits seen while a full build ran → re-queued on finish
+const _MAX_QUEUE := 64               # cap; overflow → one full re-mesh covers the backlog
 
 # Print per-recenter read/mesh timings to the output (tuning aid). Only fires while
 # the manager is enabled, which is opt-in, so it's quiet in normal play.
@@ -132,68 +139,81 @@ func start_default() -> void:
 
 
 func _on_terrain_edit(event: TerrainSdfChangedEvent) -> void:
-    # Incremental: re-mesh just the edited sub-box and splice it into the cached mesh, so a dig/
-    # build shows in a frame instead of waiting on the ~5s full clipmap rebuild. This runs even
-    # while a full re-mesh is in flight (splices use a separate mesher), so edits never wait on the
-    # worker. Edits that splice during a job are queued and re-applied in _finish, because the
-    # worker's snapshot predates them and would otherwise erase them when it lands.
+    # Queue an async splice so a dig/build shows in ~1-2 frames (the patch meshes on a worker —
+    # at sub-metre a main-thread patch mesh would be a ~100ms hitch). Edits seen during a full
+    # build are also recorded so they re-queue against the fresh mesh in _finish (the build's
+    # snapshot may predate them).
     if not _enabled or _follow == null:
         return
-    var job_in_flight := _task_id != -1
-    if not _splice_box(event.box_origin, event.box_size):
-        # Not splice-able (no base yet / outside fine core / too big).
-        if job_in_flight:
-            _dirty_during_job = true     # can't dispatch now — one full re-mesh after the job lands
-        else:
-            _last_center = Vector3.INF   # fall back: full re-mesh next tick
+    _enqueue_splice(event.box_origin, event.box_size)
+    if _task_id != -1:
+        _edits_during_build.append([event.box_origin, event.box_size])
+
+
+func _enqueue_splice(box_origin: Vector3, box_size: Vector3) -> void:
+    if _splice_queue.size() >= _MAX_QUEUE:
+        _splice_queue.clear()
+        _last_center = Vector3.INF   # backlog too deep → one full re-mesh covers it
         return
-    if job_in_flight:
-        _queue_pending(event.box_origin, event.box_size)
+    _splice_queue.append([box_origin, box_size])
 
 
-func _queue_pending(box_origin: Vector3, box_size: Vector3) -> void:
-    if _pending_edits.size() >= _MAX_PENDING:
-        _pending_edits.clear()
-        _dirty_during_job = true   # too many to track individually → one full re-mesh covers all
-        return
-    _pending_edits.append([box_origin, box_size])
-
-
-# Re-mesh a small box around an edit (DCOctreeMesher.mesh_subregion, on _splice_mesher) and swap
-# its triangles for the cached mesh's in that box. Returns false (caller falls back to a full
-# re-mesh) when there's no cached base, the edit is outside the uniform fine core, or it's too big
-# for a main-thread splice. Touches only main-thread _cache_* state, so it is safe to run while the
-# worker meshes a full build on _mesher.
-func _splice_box(box_origin: Vector3, box_size: Vector3) -> bool:
-    if _cache_arrays.is_empty():
-        return false
+# Pop the next queued edit, work out its base-cell patch geometry, and dispatch the mesh to a
+# worker (_splice_mesher). Falls back to a full re-mesh when the edit is outside the fine core or
+# too big to splice. The store read happens on the worker (from a snapshot), so the main thread
+# only does the cheap geometry + dispatch.
+func _dispatch_splice() -> void:
+    var base_cell := VoxelConstants.RENDER_BASE_CELL
+    var entry: Array = _splice_queue.pop_front()
+    var box_origin: Vector3 = entry[0]
+    var box_size: Vector3 = entry[1]
+    var margin := int(ceil(_EDIT_MARGIN_M / base_cell))   # world band → base-cells
+    var lo := box_origin / base_cell                       # edit box in base-cell units
+    var hi := (box_origin + box_size) / base_cell
     var root_half := float(1 << _ROOT_DEPTH) * 0.5
-    var fine_half := float(_LEVEL_CELLS) * 0.5 - float(_EDIT_MARGIN + _EDIT_APRON + 2)
-    var off_center := (box_origin + box_size * 0.5) - (Vector3(_cache_origin) + Vector3.ONE * root_half)
+    var fine_half := float(_LEVEL_CELLS) * 0.5 - float(margin + _EDIT_APRON + 2)
+    var off_center := ((lo + hi) * 0.5) - (Vector3(_cache_origin) + Vector3.ONE * root_half)
     if maxf(absf(off_center.x), maxf(absf(off_center.y), absf(off_center.z))) > fine_half:
-        return false   # outside the 1m fine core — the splice would meet coarse LOD; full re-mesh
-
-    var core_min := Vector3i(box_origin.floor()) - Vector3i.ONE * _EDIT_MARGIN
-    var core_max := Vector3i((box_origin + box_size).ceil()) + Vector3i.ONE * _EDIT_MARGIN
+        _last_center = Vector3.INF   # outside the fine core — the splice would meet coarse LOD
+        return
+    var core_min := Vector3i(lo.floor()) - Vector3i.ONE * margin
+    var core_max := Vector3i(hi.ceil()) + Vector3i.ONE * margin
     var sub_origin := core_min - Vector3i.ONE * _EDIT_APRON
     var sub_hi := core_max + Vector3i.ONE * _EDIT_APRON
     var span := maxi(sub_hi.x - sub_origin.x, maxi(sub_hi.y - sub_origin.y, sub_hi.z - sub_origin.z))
     if span > _MAX_SPLICE_SPAN:
-        return false   # too big to mesh on the main thread → fall back to the off-thread full re-mesh
+        _last_center = Vector3.INF   # too big to splice → full re-mesh
+        return
     var sub_size := 1
     while sub_size < span:
         sub_size <<= 1
-    var sub_dim := sub_size + 1
+    _splice_core_min = core_min
+    _splice_core_max = core_max
+    _splice_sub_origin = sub_origin
+    var snap: EditStore = _edit_store.duplicate()
+    _splice_task_id = WorkerThreadPool.add_task(
+        _splice_job.bind(snap, sub_origin, sub_size + 1, sub_size, MaterialPalette.colors()), false, "DC splice")
 
-    # Read the edit box from the live store (cell 1, small box → cheap on the main thread).
-    # The dual-write subscribes the bus BEFORE this manager (see world._ready), so the store
-    # already holds this edit by the time the splice runs.
-    var sdf: PackedFloat32Array = _edit_store.fill_region(sub_origin, sub_dim, 1.0, PackedFloat32Array(), Vector3i.ZERO, Vector3i.ZERO, Vector3i.ZERO)
-    var idx: PackedByteArray = _edit_store.fill_indices_region(sub_origin, sub_dim, 1.0)
-    var patch := _splice_mesher.mesh_subregion(sdf, sub_dim, Vector3.ZERO, 1.0,
-        sub_origin, sub_size, core_min, core_max, idx, MaterialPalette.colors())
-    _apply_splice(core_min, core_max, sub_origin, patch, _splice_mesher.get_last_triangle_owners())
-    return true
+
+# Worker: read the edit region from the snapshot at the world cell, mesh the patch in lattice
+# (cell 1; the mesh instance scale maps it to world). No Node/main-thread access — results land in
+# _splice_patch/_splice_owners for _finish_splice to apply.
+func _splice_job(store: EditStore, sub_origin: Vector3i, sub_dim: int, sub_size: int, palette: PackedColorArray) -> void:
+    var world_cell := VoxelConstants.RENDER_BASE_CELL
+    var sdf: PackedFloat32Array = store.fill_region(sub_origin, sub_dim, world_cell, PackedFloat32Array(), Vector3i.ZERO, Vector3i.ZERO, Vector3i.ZERO)
+    var idx: PackedByteArray = store.fill_indices_region(sub_origin, sub_dim, world_cell)
+    _splice_patch = _splice_mesher.mesh_subregion(sdf, sub_dim, Vector3.ZERO, 1.0,
+        sub_origin, sub_size, _splice_core_min, _splice_core_max, idx, palette)
+    _splice_owners = _splice_mesher.get_last_triangle_owners()
+
+
+# Apply the finished patch to the cached mesh (cheap array surgery, main thread).
+func _finish_splice() -> void:
+    WorkerThreadPool.wait_for_task_completion(_splice_task_id)
+    _splice_task_id = -1
+    if _splice_patch.is_empty() or _cache_arrays.is_empty():
+        return
+    _apply_splice(_splice_core_min, _splice_core_max, _splice_sub_origin, _splice_patch, _splice_owners)
 
 
 # Swap the cached mesh's triangles in the core box for the patch's (DCEditSplicer does the
@@ -225,6 +245,12 @@ func _process(_dt: float) -> void:
         var center := _follow.global_position
         if center.distance_to(_last_center) > RECENTER_DISTANCE:
             _dispatch(center)
+    # Async edit splices run on their own worker, concurrent with a full build.
+    if _splice_task_id != -1:
+        if WorkerThreadPool.is_task_completed(_splice_task_id):
+            _finish_splice()
+    elif not _splice_queue.is_empty() and not _cache_arrays.is_empty():
+        _dispatch_splice()
     Perf.report("DC mesh (main)", (Time.get_ticks_usec() - t0) / 1000.0)
 
 
@@ -352,8 +378,7 @@ func _finish() -> void:
         _dump_write()
     if _job_arrays.is_empty():
         _mesh_instance.mesh = null
-        _pending_edits.clear()
-        _dirty_during_job = false
+        _edits_during_build.clear()
         return
     var mesh := ArrayMesh.new()
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _job_arrays)
@@ -366,21 +391,11 @@ func _finish() -> void:
         var verts: int = (_job_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
         print("DC clipmap: %d verts — read %d ms (main), mesh %d ms (worker)" % [
             verts, _job_read_ms, Time.get_ticks_msec() - _job_t0])
-    _reapply_pending_edits()
-
-
-# Re-splice the edits that landed during the just-finished job onto the fresh full mesh (the
-# worker's snapshot predated them). Same _finish call → same frame → the un-spliced full mesh is
-# never displayed (no flicker). A queued box no longer in the new fine core (player recentered)
-# can't splice → fall to a full re-mesh.
-func _reapply_pending_edits() -> void:
-    for entry in _pending_edits:
-        if not _splice_box(entry[0], entry[1]):
-            _dirty_during_job = true
-    _pending_edits.clear()
-    if _dirty_during_job:
-        _dirty_during_job = false
-        _last_center = Vector3.INF   # one more full re-mesh next tick covers the non-spliceable edits
+    # The worker's snapshot was taken at dispatch, so edits during the build may be absent from the
+    # fresh mesh. Re-queue them for an async splice onto it (a brief 1-2 frame gap, no main-thread hitch).
+    for entry in _edits_during_build:
+        _enqueue_splice(entry[0], entry[1])
+    _edits_during_build.clear()
 
 
 # Scan the currently displayed mesh for bad triangles (dcaudit cmd). Pure observer —

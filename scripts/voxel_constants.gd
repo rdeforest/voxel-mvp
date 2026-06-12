@@ -26,8 +26,8 @@ const GRID_ID := 0
 # fine. MUST be 1/2^n so the clipmap's `1<<k` level math stays an exact power-of-two relationship
 # to world (RENDER_SUBDIV = 1/RENDER_BASE_CELL, a power of two). Stage 0 keeps this at 1.0 (no
 # behaviour change); the sub-metre flip sets it to 0.25.
-const RENDER_BASE_CELL := 1.0
-const RENDER_SUBDIV    := 1     # int(round(1.0 / RENDER_BASE_CELL)); power of two
+const RENDER_BASE_CELL := 0.25
+const RENDER_SUBDIV    := 4     # int(round(1.0 / RENDER_BASE_CELL)); power of two
 
 
 # ============================================================================
