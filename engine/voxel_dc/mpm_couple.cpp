@@ -45,6 +45,12 @@ static double nearest_particle_dist(const Vector3 &wp, int ix, int iy, int iz, i
 // SDF is (distance to the nearest particle − radius), so the surface is a union of spheres
 // around the cloud; cells inside take `material_index`. A spatial bin-hash makes it
 // O(grid + particles); returns {origin, dim} of the region written.
+//
+// The freeze is a DEPOSIT, not a replace: it unions with the existing field (min of the two
+// SDFs) so it only ADDS the settled material and never erases the terrain the cloud's bounding
+// box spans. (write_region overwrites the whole box, so without the union every cell the cloud
+// doesn't occupy would punch the mountain to air — a cloud-sized cube carved out around the
+// chunk.) Existing solid keeps its own material; only cells the cloud newly fills take material_index.
 Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double radius, int material_index) {
 	Dictionary out;
 	if (store.is_null() || _x.is_empty()) {
@@ -85,10 +91,15 @@ Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double 
 		for (int iy = 0; iy < dim; iy++) {
 			for (int ix = 0; ix < dim; ix++) {
 				const Vector3 wp = origin + Vector3(ix, iy, iz) * cell;
-				const double s = nearest_particle_dist(wp, ix, iy, iz, dim, R, bins, _x) - radius;
+				const double p_sdf = nearest_particle_dist(wp, ix, iy, iz, dim, R, bins, _x) - radius;
+				const double existing = store->sample(wp);
 				const int n = ix + iy * dim + iz * dim * dim;
-				sp[n] = float(s);
-				ip[n] = (s < 0.0) ? uint8_t(material_index) : 0;
+				sp[n] = float(MIN(existing, p_sdf)); // union: deposit, never erase existing terrain
+				if (existing < 0.0) {
+					ip[n] = uint8_t(store->material_at(wp)); // existing terrain keeps its material
+				} else {
+					ip[n] = (p_sdf < 0.0) ? uint8_t(material_index) : 0; // cloud fills this cell, or air
+				}
 			}
 		}
 	}
