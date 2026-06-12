@@ -21,8 +21,11 @@ uniform float ink_width      : hint_range(0.5, 4.0)  = 1.2;   // sample step (px
 
 uniform float vig_enable     : hint_range(0.0, 1.0) = 1.0;
 uniform vec3  vig_paper      : source_color = vec3(0.97, 0.96, 0.93);
-uniform float vig_inner      : hint_range(0.0, 1.5) = 0.62;   // radius where the fade begins
-uniform float vig_outer      : hint_range(0.0, 1.5) = 1.05;   // radius of full paper
+uniform float vig_inner      : hint_range(0.0, 1.5) = 0.62;   // where the fade begins
+uniform float vig_outer      : hint_range(0.0, 1.5) = 1.05;   // where it reaches full paper
+uniform float vig_round      : hint_range(0.0, 1.0) = 0.5;    // 0 = hard rectangle, 1 = circle;
+                                                             // rounds the corners so diagonals fade
+                                                             // at the same rate as the edges
 
 float h21(vec2 p) {
     p = fract(p * vec2(123.34, 456.21));
@@ -69,7 +72,7 @@ void fragment() {
     // Vignette fades only the WASH to paper, as a RECTANGLE (the paper edge), not a circle.
     if (vig_enable > 0.5) {
         vec2 d = abs(uv - vec2(0.5)) * 2.0;    // 0 at centre .. 1 at the nearest screen edge
-        float vr = max(d.x, d.y);              // rectangular falloff (square in UV = rect on screen)
+        float vr = mix(max(d.x, d.y), length(d), vig_round);   // rectangle .. circle; rounds corners
         base = mix(base, vig_paper, smoothstep(vig_inner, vig_outer, vr));
     }
 

@@ -163,16 +163,13 @@ void fragment() {
         // Flatten into a few wash bands (quantise value, keep hue).
         float lw = max(dot(wc, vec3(0.299, 0.587, 0.114)), 1e-3);
         wc *= (floor(lw * wc_bands + 0.5) / wc_bands) / lw;
-        // WORLD-ANCHORED paper tooth (triplanar) — pigment density on the paper. Stays put as the
-        // camera moves (this is the shower-door test: it must NOT swim).
-        vec3 an = abs(v_world_normal);
-        an /= (an.x + an.y + an.z + 1e-4);
-        float paper = an.x * gnoise(v_world_pos.yz * wc_paper_scale)
-                    + an.y * gnoise(v_world_pos.xz * wc_paper_scale)
-                    + an.z * gnoise(v_world_pos.xy * wc_paper_scale);
-        paper = 0.5 + 0.5 * paper;
+        // Paper tooth in SCREEN space — the paper is the fixed sheet you draw ON; if it wraps the
+        // 3D surfaces (world-space) the world reads as papercraft, not a painting. (wc_paper_scale
+        // is now the tooth size in PIXELS.)
+        float paper = 0.5 + 0.5 * gnoise(SCREEN_UV * VIEWPORT_SIZE / max(wc_paper_scale, 0.1));
         wc *= 1.0 - wc_granulate + paper * wc_granulate * 2.0;
-        // Low-frequency pigment turbulence (world-space density variation).
+        // Pigment COLOUR turbulence stays WORLD-space — the splotches stick to surfaces and
+        // emphasise depth (this is the half that should follow the world, not the screen).
         float turb = 0.5 + 0.5 * gnoise(v_world_pos.xz * wc_turb_scale);
         wc *= 1.0 - wc_turb + turb * wc_turb * 2.0;
         // Edge darkening: pigment pools at silhouettes (grazing angle = fresnel).
