@@ -60,7 +60,7 @@ func execute() -> void:
     _freeze_bodies_in_volume()
 
     store.stamp_sphere(position, radius, VoxelConstants.STORE_OP_UNION,
-        MaterialPalette.index_of(material_name), 1.0)
+        MaterialPalette.index_of(material_name), VoxelConstants.RENDER_BASE_CELL)
 
     var origin     := position - Vector3.ONE *  radius
     var dimensions :=            Vector3.ONE * (radius * 2.0)

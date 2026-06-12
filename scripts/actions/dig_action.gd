@@ -49,7 +49,7 @@ func execute() -> void:
         push_error("DigAction.execute(): no store")
         return
 
-    store.stamp_sphere(position, radius, VoxelConstants.STORE_OP_SUBTRACT, 0, 1.0)
+    store.stamp_sphere(position, radius, VoxelConstants.STORE_OP_SUBTRACT, 0, VoxelConstants.RENDER_BASE_CELL)
 
     var origin     := position - Vector3.ONE *  radius
     var dimensions :=            Vector3.ONE * (radius * 2.0)
