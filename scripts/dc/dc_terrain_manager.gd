@@ -100,6 +100,9 @@ func setup(follow: Node3D, edit_store: EditStore) -> void:
     _follow  = follow
     _mesh_instance = MeshInstance3D.new()
     _mesh_instance.material_override = terrain_material
+    # The mesh is built in BASE-CELL lattice units; this scale maps it back to world. The full
+    # build and every splice produce lattice verts, so one instance scale covers both.
+    _mesh_instance.scale = Vector3.ONE * VoxelConstants.RENDER_BASE_CELL
     add_child(_mesh_instance)
     # Re-mesh on terrain edits too (not just movement), so digs/builds show. Bound method ->
     # the bus weakrefs us and auto-prunes on scene reload. v1 re-meshes the whole clipmap;
@@ -232,10 +235,16 @@ static func _half(n: int) -> int:
     return n / 2
 
 func _dispatch(center: Vector3) -> void:
-    var root_size := 1 << _ROOT_DEPTH                       # world extent of the coarsest level
+    # All octree geometry below is in BASE-CELL units (one unit = RENDER_BASE_CELL metres). The
+    # mesher meshes a pure integer lattice in these units; the store is read at the matching world
+    # cell (base_cell * 2^k); the output mesh is scaled back to world by base_cell at _finish. At
+    # base_cell = 1.0 this is identical to the old metre-based math.
+    var base_cell := VoxelConstants.RENDER_BASE_CELL
+    var center_bc := center / base_cell                    # follow target in base-cell units
+    var root_size := 1 << _ROOT_DEPTH                       # extent of the coarsest level (base-cells)
     # Snap the centre to the coarsest cell so every level's read origin lands on its
     # own LOD grid (floor-snap, so it's stable across the world origin).
-    var coarse_cell_origin := Vector3i((center / float(_COARSEST_CELL)).floor()) * _COARSEST_CELL
+    var coarse_cell_origin := Vector3i((center_bc / float(_COARSEST_CELL)).floor()) * _COARSEST_CELL
     var root_origin := coarse_cell_origin - Vector3i.ONE * _half(root_size)
     var center_lattice := Vector3.ONE * _half(root_size)    # follow target, lattice space
     # Per-level clipmap geometry (cheap, main thread); the store reads themselves run on the
@@ -267,7 +276,7 @@ func _dispatch(center: Vector3) -> void:
     var proj := 0.0
     var cam := get_viewport().get_camera_3d()
     if cam != null:
-        camera_lattice = cam.global_position - Vector3(root_origin)
+        camera_lattice = cam.global_position / base_cell - Vector3(root_origin)   # world -> base-cell lattice
         var vp_h := float(get_viewport().get_visible_rect().size.y)
         proj = vp_h / (2.0 * tan(deg_to_rad(cam.fov) * 0.5))
     if dump_next:
@@ -288,13 +297,15 @@ func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
         level_origins: PackedVector3Array, level_cells: PackedFloat32Array,
         center: Vector3, half0: float, camera: Vector3, proj: float, eps: float, err: bool,
         world_origin: Vector3i, palette: PackedColorArray) -> void:
+    var base_cell := VoxelConstants.RENDER_BASE_CELL
     var level_data: Array = []
     var level_indices: Array = []
     for k in LEVELS:
-        var cell: float = level_cells[k]
-        var wc := Vector3i(level_world_cells[k])
-        level_data.append(store.fill_region(wc, LEVEL_DIM, cell, PackedFloat32Array(), Vector3i.ZERO, Vector3i.ZERO, Vector3i.ZERO))
-        level_indices.append(store.fill_indices_region(wc, LEVEL_DIM, cell))
+        var cell: float = level_cells[k]            # LATTICE stride (1<<k) — what the mesher meshes
+        var world_cell := base_cell * cell          # WORLD spacing the store is sampled at
+        var wc := Vector3i(level_world_cells[k])     # level origin in world_cell units
+        level_data.append(store.fill_region(wc, LEVEL_DIM, world_cell, PackedFloat32Array(), Vector3i.ZERO, Vector3i.ZERO, Vector3i.ZERO))
+        level_indices.append(store.fill_indices_region(wc, LEVEL_DIM, world_cell))
     if _dump_armed:
         _dump_dict["level_data"] = level_data
         _dump_dict["origins"]    = level_origins
@@ -347,7 +358,7 @@ func _finish() -> void:
     var mesh := ArrayMesh.new()
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _job_arrays)
     _mesh_instance.mesh = mesh
-    _mesh_instance.global_position = Vector3(_job_origin)
+    _mesh_instance.global_position = Vector3(_job_origin) * VoxelConstants.RENDER_BASE_CELL   # base-cell origin -> world
     _cache_arrays = _job_arrays           # this full build is now the splice base
     _cache_owners = _job_owners
     _cache_origin = _job_origin

@@ -20,6 +20,15 @@ const VOXEL_CENTER_OFFSET := Vector3(VOXEL_HALF, VOXEL_HALF, VOXEL_HALF)
 # every event payload from day one so multi-grid (deferred) lands without churn.
 const GRID_ID := 0
 
+# Sub-metre RENDER/EDIT resolution — the finest world cell the DC render, edit imprints,
+# collision, and the MPM carve/freeze operate at. SEPARATE from VOXEL_SIZE: the gameplay /
+# structural / event grid stays at VOXEL_SIZE (1m), but the surface is sampled and meshed this
+# fine. MUST be 1/2^n so the clipmap's `1<<k` level math stays an exact power-of-two relationship
+# to world (RENDER_SUBDIV = 1/RENDER_BASE_CELL, a power of two). Stage 0 keeps this at 1.0 (no
+# behaviour change); the sub-metre flip sets it to 0.25.
+const RENDER_BASE_CELL := 1.0
+const RENDER_SUBDIV    := 1     # int(round(1.0 / RENDER_BASE_CELL)); power of two
+
 
 # ============================================================================
 # Support scalar
