@@ -84,12 +84,12 @@ func _finish(flood: GroundFlood) -> void:
 
 func _start_next() -> void:
     while not _pending.is_empty():
-        var seed: Vector3i = _pending.keys()[0]
-        if not _is_solid(seed) or _is_bedrock(seed):
-            _pending.erase(seed)   # carved/thawed away since it was queued, or it's ground itself
+        var seed_cell: Vector3i = _pending.keys()[0]
+        if not _is_solid(seed_cell) or _is_bedrock(seed_cell):
+            _pending.erase(seed_cell)   # carved/thawed away since it was queued, or it's ground itself
             continue
         _flood = GroundFlood.new()
-        _flood.start([seed], _store, MAX_DETACH)
+        _flood.start([seed_cell], _store, MAX_DETACH)
         return
 
 

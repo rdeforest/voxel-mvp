@@ -39,10 +39,10 @@ func _release_cell(cell: Vector3i) -> void:
         return
     var owner_id: int = _cell_to_part[cell]
     _cell_to_part.erase(cell)
-    var record: PartRecord = _records.get(owner_id)
-    if record != null:
-        record.cells.erase(cell)
-        if record.cells.is_empty():
+    var rec: PartRecord = _records.get(owner_id)
+    if rec != null:
+        rec.cells.erase(cell)
+        if rec.cells.is_empty():
             _records.erase(owner_id)
 
 

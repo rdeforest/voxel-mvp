@@ -282,7 +282,9 @@ func _uses_csg() -> bool:
 # expose the same edit-verb interface (cycle_material, rotate_x/y/z), so an edit input
 # routes to whichever is active instead of branching the same way in every handler.
 func _active_edit_state() -> Object:
-    return csg_state if _uses_csg() else build_state
+    if _uses_csg():
+        return csg_state
+    return build_state
 
 func _route_edit(verb: StringName) -> void:
     _active_edit_state().call(verb)

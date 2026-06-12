@@ -51,6 +51,6 @@ static func _severity(t: Dictionary) -> float:
     return t["dev"] + (200.0 if t["aspect"] > _SLIVER_ASPECT else 0.0)
 
 
-@warning_ignore("integer_division")
 static func _triangle_count(index_size: int) -> int:
+    @warning_ignore("integer_division")
     return index_size / 3
