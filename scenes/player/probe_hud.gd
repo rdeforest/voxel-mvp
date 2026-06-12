@@ -1,0 +1,33 @@
+extends CanvasLayer
+
+# Always-on probe read-out, top-left. Every frame it builds a probe at the current target (via
+# ActionFactories.probe_report, tool-independent) and shows the same lines the None-tool click
+# writes to the console — so you can sweep the camera over a scene and read each cell's SDF /
+# material / tracking live. The click still logs to the console (ProbeAction.execute); this is the
+# passive companion.
+
+var player: CharacterBody3D   # set by player._ready()
+
+var _label: Label
+
+
+func _ready() -> void:
+    layer = 0
+    _label = Label.new()
+    _label.add_theme_font_override("font", ThemeDB.fallback_font)  # monospace-ish; aligns columns
+    _label.add_theme_font_size_override("font_size", 14)
+    _label.add_theme_color_override("font_color", Color(0.85, 0.95, 1.0))
+    _label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+    _label.add_theme_constant_override("outline_size", 4)
+    _label.position = Vector2(12, 10)
+    add_child(_label)
+
+
+func _process(_delta: float) -> void:
+    if player == null or player.action_factories == null:
+        return
+    var aim: Aim = player.current_target()
+    if aim == null:
+        _label.text = "probe: (no target)"
+        return
+    _label.text = "\n".join(player.action_factories.probe_report(aim.position, aim.normal))

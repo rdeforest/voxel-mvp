@@ -39,6 +39,12 @@ func _store() -> EditStore:
 func make_probe(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     return ProbeAction.new(hit_pos, hit_normal, _build_state.placement_offset, _store(), _integrity, _pbd_structure())
 
+# The probe's read-out lines for an arbitrary target, tool-independent — the live probe HUD calls
+# this every frame so scanning the scene works no matter which tool is selected.
+func probe_report(hit_pos: Vector3, hit_normal: Vector3) -> PackedStringArray:
+    var probe := ProbeAction.new(hit_pos, hit_normal, _build_state.placement_offset, _store(), _integrity, _pbd_structure())
+    return probe.report()
+
 # PbdStructure is added to the world after the player's _ready, so it can't be
 # captured at construction — resolve it on first use and cache.
 func _pbd_structure() -> PbdStructure:

@@ -29,6 +29,18 @@ func validate() -> bool:
     return store != null
 
 
+# How many of the cell's 8 corners are inside solid — the DC mesher's own solidity test. A cell
+# with triangles but 0 solid corners is a stale-mesh artifact; 1..7 is a normal surface cell.
+func _corner_solid_count(cell: Vector3i) -> int:
+    var n := 0
+    for dx in [0, 1]:
+        for dy in [0, 1]:
+            for dz in [0, 1]:
+                if store.sample(Vector3(cell + Vector3i(dx, dy, dz))) < VoxelConstants.SDF_SOLID_THRESHOLD:
+                    n += 1
+    return n
+
+
 # Target the solid cell behind the hit surface (same convention as the voxel grid
 # overlay), shifted by the placement offset.
 func _target_cell() -> Vector3i:
@@ -37,43 +49,61 @@ func _target_cell() -> Vector3i:
 
 
 func execute() -> void:
+    for line in report():
+        LimboConsole.info(line)
+
+
+# The targeted cell's full read-out, as lines. Shared by the click (console log) and the live
+# probe HUD, so both always agree. Store SDF + material are shown for ANY cell (solid terrain that
+# isn't tracked still reports its material), which is what makes scanning a scene useful.
+func report() -> PackedStringArray:
     var cell := _target_cell()
+    var out := PackedStringArray()
 
-    var sdf       := store.sample(Vector3(cell))
-    var is_solid  := sdf < VoxelConstants.SDF_SOLID_THRESHOLD
-    var tracked   := integrity.terrain_support.voxel_data.has(cell)
+    var center   := Vector3(cell) + Vector3(0.5, 0.5, 0.5)
+    var sdf      := store.sample(center)   # center: matches the thaw/collision solidity convention
+    var is_solid := sdf < VoxelConstants.SDF_SOLID_THRESHOLD
+    var mat_idx  := store.material_at(center)
+    var corners  := _corner_solid_count(cell)
+    var tracked  := integrity.terrain_support.voxel_data.has(cell)
 
-    LimboConsole.info("Cell %s" % cell)
-    LimboConsole.info("  SDF      %.3f (%s)" % [sdf, "solid" if is_solid else "air"])
-    LimboConsole.info("  tracked  %s" % tracked)
+    out.append("Cell %s" % cell)
+    out.append("  SDF      %.3f (%s)" % [sdf, "solid" if is_solid else "air"])
+    # 0/8 with visible triangles = a stale-mesh artifact (mesh out of sync with the field);
+    # 1..7/8 = an ordinary surface cell (the zero-crossing legitimately passes through it).
+    out.append("  corners  %d/8 solid" % corners)
+    out.append("  material %d (%s)" % [mat_idx, MaterialPalette.name_of(mat_idx)])
+    out.append("  tracked  %s" % tracked)
     if tracked:
         var rec: VoxelRecord = integrity.terrain_support.voxel_data[cell]
-        LimboConsole.info("  support  %.3f"  % rec.support)
-        LimboConsole.info("  dirty    %s"    % rec.dirty)
-        LimboConsole.info("  material %s"    % rec.material.name)
-    _log_pbd(cell)
+        out.append("  support  %.3f" % rec.support)
+        out.append("  dirty    %s" % rec.dirty)
+    out.append_array(_pbd_lines(cell))
+    return out
 
 
-func _log_pbd(cell: Vector3i) -> void:
+func _pbd_lines(cell: Vector3i) -> PackedStringArray:
+    var out := PackedStringArray()
     if pbd == null:
-        LimboConsole.info("  PBD      (no structure)")
-        return
+        out.append("  PBD      (no structure)")
+        return out
     var p := pbd.probe(cell)
     if not p.get("enabled", false):
-        LimboConsole.info("  PBD      off (enable with `physics_active on`)")
-        return
+        out.append("  PBD      off (physics_mode pbd to enable)")
+        return out
     if not p.get("in_network", false):
-        LimboConsole.info("  PBD      cell not in network")
-        return
-    LimboConsole.info("  PBD node %d  %s  %s  %s" % [
+        out.append("  PBD      cell not in network")
+        return out
+    out.append("  PBD node %d  %s  %s  %s" % [
         p.node,
         "ANCHOR" if p.pinned else "dynamic",
         "asleep" if p.sleeping else "awake",
         "held (anchored)" if p.anchored else "FALLING (detached)",
     ])
-    LimboConsole.info("    peak load %.0f%% of limit, peak damage %.2f, %d live members" % [
+    out.append("    peak load %.0f%% of limit, peak damage %.2f, %d live members" % [
         p.peak_ratio * 100.0, p.peak_damage, p.members.size(),
     ])
+    return out
 
 
 func preview() -> ActionPreview:

@@ -35,6 +35,10 @@ static func index_of(name: StringName) -> int:
     return i if i >= 0 else NATURAL
 
 
+static func name_of(index: int) -> StringName:
+    return NAMES[index] if index >= 0 and index < NAMES.size() else &"?"
+
+
 static func color_of(index: int) -> Color:
     if index <= NATURAL or index >= NAMES.size():
         return NATURAL_COLOR

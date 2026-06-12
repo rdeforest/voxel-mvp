@@ -9,6 +9,7 @@ var tool_catalog:      ToolCatalog
 var _grid_overlay:     Node3D
 var _preview_renderer: Node3D
 var _help_overlay:     HelpOverlay
+var _probe_hud:        CanvasLayer
 
 var tool_index:        int       = 0
 var _activity_indices: Array[int] = []   # remembered per tool
@@ -79,6 +80,10 @@ func _create_overlays() -> void:
 
     _help_overlay = HelpOverlay.new()
     add_child(_help_overlay)
+
+    _probe_hud = preload("res://scenes/player/probe_hud.gd").new()
+    _probe_hud.player = self
+    add_child(_probe_hud)
 
 
 func _build_input_map() -> void:
