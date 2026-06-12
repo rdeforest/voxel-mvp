@@ -97,30 +97,22 @@ that's where the central thesis lives.
 
 ## License
 
-This project is licensed under the Creative Commons Attribution-ShareAlike 4.0
-International License (CC BY-SA 4.0). See `LICENSE`.
+This project is dual-licensed:
+
+- **Software** — MIT License (see `LICENSE-MIT`). Source code, shaders, and the
+  Godot project/scene/resource files.
+- **Original documentation and art** — CC BY-SA 4.0 (see `LICENSE-CC-BY-SA`).
+  The `docs/` prose, design documents, and project-authored art.
+
+`LICENSE` defines exactly which files fall on each side. The split follows
+Creative Commons' own guidance that software should carry a software license
+rather than a CC one.
 
 ### Third-party dependencies
 
 - **Godot Engine** — MIT License — <https://github.com/godotengine/godot>
 - **godot_voxel** (Zylann) — MIT License — <https://github.com/Zylann/godot_voxel>
+- **GUT** and **Limbo Console** — MIT License — vendored under `addons/`
 
-Both dependencies remain under their original MIT licenses; nothing in this
-project's choice of CC BY-SA affects them.
-
-### Note on CC BY-SA for software
-
-Creative Commons recommends against CC BY-SA for software, suggesting
-software-specific licenses (GPL, MPL) for stronger legal clarity around
-patent grants and code-specific provisions. CC BY-SA 4.0 is nonetheless
-legally applicable and was chosen here for share-alike semantics across the
-project's mixed content — code today, game-design documents already, and
-asset content eventually. Implications worth being aware of:
-
-- CC BY-SA 4.0 is one-way compatible with GPL-3.0: CC BY-SA content can be
-  relicensed under GPL-3.0, but not vice versa.
-- The license's patent-grant language is less battle-tested for software than
-  GPL or MPL.
-
-If those points matter to your downstream use, consult a lawyer who handles
-software licensing.
+These retain their original licenses; nothing in this project's licensing
+affects them.

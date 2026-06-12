@@ -1,61 +1,51 @@
 Voxel MVP
 Copyright (c) 2026 Robert de Forest
 
-This work is licensed under the Creative Commons Attribution-ShareAlike 4.0
-International License (CC BY-SA 4.0).
+This project is dual-licensed: its software is under the MIT License, and its
+original documentation and art are under Creative Commons Attribution-ShareAlike
+4.0 International (CC BY-SA 4.0). This follows the general guidance that software
+should carry a software license, not a Creative Commons one.
 
-The full legally-binding text of the license is available at:
+--------------------------------------------------------------------------------
+WHICH LICENSE APPLIES
+--------------------------------------------------------------------------------
 
-  https://creativecommons.org/licenses/by-sa/4.0/legalcode
+MIT License (see LICENSE-MIT) — the software:
 
-A human-readable summary (not legally binding; the linked full text is):
+  - Source code: *.gd, *.h, *.cpp, *.py, and shell/build scripts
+  - Shaders: *.gdshader
+  - Godot project, scene, and resource files: project.godot, *.tscn, *.tres,
+    *.import, *.cfg, *.godot
+  - Everything under engine/, scripts/, scenes/, test/, tools/, and bin/
 
-  You are free to:
-    Share    — copy and redistribute the material in any medium or format
-    Adapt    — remix, transform, and build upon the material for any purpose,
-               even commercially
+  Godot scene and resource files are functional engine wiring (node graphs and
+  parameter tables), not authored creative content, so they follow the code.
 
-  Under the following terms:
-    Attribution            — You must give appropriate credit, provide a link
-                             to the license, and indicate if changes were
-                             made. You may do so in any reasonable manner,
-                             but not in any way that suggests the licensor
-                             endorses you or your use.
-    ShareAlike             — If you remix, transform, or build upon the
-                             material, you must distribute your contributions
-                             under the same license as the original.
-    No additional restrictions — You may not apply legal terms or
-                             technological measures that legally restrict
-                             others from doing anything the license permits.
+CC BY-SA 4.0 (see LICENSE-CC-BY-SA) — original creative works authored for this
+project:
 
-  Notices:
-    You do not have to comply with the license for elements of the material
-    in the public domain or where your use is permitted by an applicable
-    exception or limitation.
+  - Documentation and design prose: *.md, everything under docs/, and the
+    project's diagrams (e.g. *.drawio)
+  - Original art authored for the project (e.g. icon.svg)
 
-    No warranties are given. The license may not give you all of the
-    permissions necessary for your intended use. For example, other rights
-    such as publicity, privacy, or moral rights may limit how you use the
-    material.
-
-================================================================================
+--------------------------------------------------------------------------------
 THIRD-PARTY COMPONENTS
-================================================================================
+--------------------------------------------------------------------------------
 
-This project depends on (and, when built, bundles) the following third-party
-components. They remain under their original licenses; nothing in this project's
-choice of CC BY-SA modifies their licensing.
+These retain their own licenses; nothing above changes their terms.
 
-  Godot Engine
-    License: MIT
-    Upstream: https://github.com/godotengine/godot
-    License text: https://github.com/godotengine/godot/blob/master/LICENSE.txt
+  Godot Engine — MIT — https://github.com/godotengine/godot
+    (built/bundled when you compile the project)
 
-  godot_voxel (Zylann's voxel module for Godot)
-    License: MIT
-    Upstream: https://github.com/Zylann/godot_voxel
-    License text: https://github.com/Zylann/godot_voxel/blob/master/LICENSE.md
+  godot_voxel (Zylann's voxel module) — MIT — https://github.com/Zylann/godot_voxel
+    (built/bundled when you compile the project)
 
-Both are MIT-licensed and impose only attribution requirements; CC BY-SA's
-share-alike requirement applies only to this project's own contributions, not
-to these dependencies.
+  GUT (Godot Unit Test) — MIT — vendored under addons/gut/
+    Bundled fonts and images under addons/gut/ carry their own licenses.
+
+  Limbo Console — MIT — vendored under addons/limbo_console/
+
+Reference and mood images collected under docs/roadmap/vision/ are third-party
+material gathered for design reference. They are not original works of this
+project and are not relicensed here; they remain the property of their
+respective owners.
