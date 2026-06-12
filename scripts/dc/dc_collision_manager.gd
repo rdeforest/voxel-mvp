@@ -18,9 +18,15 @@ extends Node3D
 # step runs over the whole region but is itself cheap (~0.15 ms — test_spike_collision_cook).
 # The SDF backstop (depenetrate, used by the player) is the always-correct floor.
 
-const PLAYER_REGION := 64    # edge in metres (2^DEPTH); covers the player body + ~24 m aim reach
-const DEBRIS_REGION := 32
-const RECOOK_DIST   := 8.0   # recook once a body drifts this far from its region centre
+# Collision is a small sub-metre FOOT PATCH around each body now that AIM is a separate SDF
+# raymarch (TerrainRaymarch) — the cook no longer has to span the aim reach, just the body. Cook
+# cost scales with cell COUNT, so a small region is cheap at any cell size; COLLISION_CELL is
+# coarser than the 0.25 render (walking doesn't need 0.25, and the SDF backstop covers anything
+# finer) to keep the patch large in world terms while the cook stays a couple ms.
+const COLLISION_CELL := 0.5  # world metres per collision cell (sub-metre; tunable vs render's 0.25)
+const PLAYER_REGION := 16    # cells per axis (2^DEPTH) → 16 * 0.5 = 8 m foot patch around the body
+const DEBRIS_REGION := 16
+const RECOOK_DIST   := 3.0   # recook once a body drifts this far (m) from its region centre
 const DWELL         := 1.0   # seconds an idle region lingers before eviction
 const COOK_BUDGET   := 2      # region (re)cooks per physics tick (player first)
 
@@ -84,7 +90,7 @@ func _covered_by_other(body: Node3D) -> bool:
         if other == body:
             continue
         var r: Dictionary = _regions[other]
-        if AABB(Vector3(r["origin"]), Vector3.ONE * float(r["size"])).has_point(p):
+        if AABB(Vector3(r["origin"]) * COLLISION_CELL, Vector3.ONE * float(r["size"]) * COLLISION_CELL).has_point(p):
             return true
     return false
 
@@ -111,13 +117,15 @@ func _cook_region(body: Node3D, size: int, dirty_origin := Vector3i.ZERO, dirty_
         depth += 1                          # depth = log2(size)
     var c := body.global_position
     var half := size >> 1
-    var origin := Vector3i(floori(c.x) - half, floori(c.y) - half, floori(c.z) - half)
+    # Origin in COLLISION-CELL units (so fill_region samples on the collision grid). World = * cell.
+    var origin := Vector3i(floori(c.x / COLLISION_CELL) - half, floori(c.y / COLLISION_CELL) - half, floori(c.z / COLLISION_CELL) - half)
     var dim := size + 1
     var old: Variant = _regions.get(body)
     var prev_buffer: PackedFloat32Array = old["buffer"] if old != null else PackedFloat32Array()
     var prev_origin: Vector3i = old["origin"] if old != null else Vector3i.ZERO
     # Scrolling buffer: reuse the overlap, re-sample only the shell that moved + the dirty box.
-    var data := _edit_store.fill_region(origin, dim, 1.0, prev_buffer, prev_origin, dirty_origin, dirty_size)
+    var data := _edit_store.fill_region(origin, dim, COLLISION_CELL, prev_buffer, prev_origin, dirty_origin, dirty_size)
+    # The mesher meshes the integer lattice (cell 1.0); _build_shape scales the verts to world.
     var arrays := _mesher.mesh_clipmap(
         [data], dim, PackedVector3Array([Vector3.ZERO]), PackedFloat32Array([1.0]),
         Vector3.ZERO, 1e9, depth)
@@ -126,7 +134,7 @@ func _cook_region(body: Node3D, size: int, dirty_origin := Vector3i.ZERO, dirty_
     var shape: CollisionShape3D = null
     if not arrays.is_empty():
         shape = _build_shape(arrays, origin)
-    _regions[body] = {"center": Vector3(origin) + Vector3.ONE * float(half), "origin": origin, "size": size, "shape": shape, "idle": 0.0, "buffer": data}
+    _regions[body] = {"center": (Vector3(origin) + Vector3.ONE * float(half)) * COLLISION_CELL, "origin": origin, "size": size, "shape": shape, "idle": 0.0, "buffer": data}
 
 func _build_shape(arrays: Array, origin: Vector3i) -> CollisionShape3D:
     var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
@@ -134,12 +142,12 @@ func _build_shape(arrays: Array, origin: Vector3i) -> CollisionShape3D:
     var faces := PackedVector3Array()
     faces.resize(idx.size())
     for i in idx.size():
-        faces[i] = verts[idx[i]]
+        faces[i] = verts[idx[i]] * COLLISION_CELL    # lattice [0, size] -> world metres
     var s := ConcavePolygonShape3D.new()
-    s.set_faces(faces)                       # mesh verts are in region-local space [0, size]
+    s.set_faces(faces)
     var cs := CollisionShape3D.new()
     cs.shape = s
-    cs.position = Vector3(origin)
+    cs.position = Vector3(origin) * COLLISION_CELL    # cell-origin -> world
     _body.add_child(cs)
     return cs
 
@@ -168,11 +176,12 @@ func _free_region(body: Variant) -> void:
 
 func _on_edit(event: TerrainSdfChangedEvent) -> void:
     var ebox := AABB(event.box_origin, event.box_size).grow(1.0)
-    var d_o := Vector3i(ebox.position.floor())
-    var d_s := Vector3i(ebox.size.ceil()) + Vector3i.ONE   # cover the box's cells inclusively
+    # Dirty box in COLLISION-CELL units (the fill_region scrolling-buffer re-sample window).
+    var d_o := Vector3i((ebox.position / COLLISION_CELL).floor())
+    var d_s := Vector3i((ebox.size / COLLISION_CELL).ceil()) + Vector3i.ONE
     for body in _regions.keys():
         var r: Dictionary = _regions[body]
-        if AABB(Vector3(r["origin"]), Vector3.ONE * float(r["size"])).intersects(ebox):
+        if AABB(Vector3(r["origin"]) * COLLISION_CELL, Vector3.ONE * float(r["size"]) * COLLISION_CELL).intersects(ebox):
             if is_instance_valid(body):
                 _cook_region(body, r["size"], d_o, d_s)
             else:
