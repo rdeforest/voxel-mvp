@@ -8,11 +8,43 @@
 // FREEZE: rasterise settled particles back into the field as SDF + material. (THAW — seeding
 // particles from a field region — joins this file next.)
 
+// Nearest-particle distance to `wp`, searching only the bins within ±R of node (ix,iy,iz).
+static double nearest_particle_dist(const Vector3 &wp, int ix, int iy, int iz, int dim, int R,
+		const HashMap<int, LocalVector<int>> &bins, const LocalVector<Vector3> &x) {
+	double dmin = 1e30;
+	for (int dz = -R; dz <= R; dz++) {
+		const int bz = iz + dz;
+		if (bz < 0 || bz >= dim) {
+			continue;
+		}
+		for (int dy = -R; dy <= R; dy++) {
+			const int by = iy + dy;
+			if (by < 0 || by >= dim) {
+				continue;
+			}
+			for (int dx = -R; dx <= R; dx++) {
+				const int bx = ix + dx;
+				if (bx < 0 || bx >= dim) {
+					continue;
+				}
+				HashMap<int, LocalVector<int>>::ConstIterator it = bins.find(bx + by * dim + bz * dim * dim);
+				if (!it) {
+					continue;
+				}
+				const LocalVector<int> &list = it->value;
+				for (uint32_t k = 0; k < list.size(); k++) {
+					dmin = MIN(dmin, wp.distance_to(x[list[k]]));
+				}
+			}
+		}
+	}
+	return dmin;
+}
+
 // Rasterise the current particles into the EditStore over their bounding box: each grid point's
 // SDF is (distance to the nearest particle − radius), so the surface is a union of spheres
-// around the cloud; cells inside take `material_index`. Returns {origin, dim} of the region
-// written. This is the freeze half of the coupling and the merge-back parts-as-voxels Stage 6
-// needs. O(grid · particles) — fine for an occasional settle event, not a per-frame path.
+// around the cloud; cells inside take `material_index`. A spatial bin-hash makes it
+// O(grid + particles); returns {origin, dim} of the region written.
 Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double radius, int material_index) {
 	Dictionary out;
 	if (store.is_null() || _x.is_empty()) {
@@ -53,34 +85,7 @@ Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double 
 		for (int iy = 0; iy < dim; iy++) {
 			for (int ix = 0; ix < dim; ix++) {
 				const Vector3 wp = origin + Vector3(ix, iy, iz) * cell;
-				double dmin = 1e30;
-				for (int dz = -R; dz <= R; dz++) {
-					const int bz = iz + dz;
-					if (bz < 0 || bz >= dim) {
-						continue;
-					}
-					for (int dy = -R; dy <= R; dy++) {
-						const int by = iy + dy;
-						if (by < 0 || by >= dim) {
-							continue;
-						}
-						for (int dx = -R; dx <= R; dx++) {
-							const int bx = ix + dx;
-							if (bx < 0 || bx >= dim) {
-								continue;
-							}
-							HashMap<int, LocalVector<int>>::Iterator it = bins.find(bx + by * dim + bz * dim * dim);
-							if (!it) {
-								continue;
-							}
-							const LocalVector<int> &list = it->value;
-							for (uint32_t k = 0; k < list.size(); k++) {
-								dmin = MIN(dmin, wp.distance_to(_x[list[k]]));
-							}
-						}
-					}
-				}
-				const double s = dmin - radius;
+				const double s = nearest_particle_dist(wp, ix, iy, iz, dim, R, bins, _x) - radius;
 				const int n = ix + iy * dim + iz * dim * dim;
 				sp[n] = float(s);
 				ip[n] = (s < 0.0) ? uint8_t(material_index) : 0;
