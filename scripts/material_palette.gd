@@ -16,9 +16,12 @@ const NAMES: Array[StringName] = [
     &"Sand",
     &"Wood",
     &"Metal",
+    &"Bedrock",   # 6 — deep, hard-but-diggable, always "ground" for the flood-to-ground trigger.
+                  # MUST stay index 6: TerrainField::BEDROCK_MATERIAL (terrain_field.h) mirrors it.
 ]
 
 const NATURAL := 0
+const BEDROCK := 6
 
 # A neutral placeholder for slot 0 (the shader never reads it — index 0 takes the
 # slope path) so the uploaded array stays aligned with NAMES.

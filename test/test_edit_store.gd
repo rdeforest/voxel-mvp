@@ -36,6 +36,19 @@ func test_unedited_defers_to_generator() -> void:
     assert_eq(es.leaf_count(), 0, "empty store has no stored leaves")
 
 
+func test_generator_material_is_bedrock_deep() -> void:
+    # The generator paints deep terrain Bedrock (index 6) — the flood-to-ground trigger's "ground".
+    # Shallow terrain stays Natural (0, slope-shaded); air is Natural; an edit's material wins.
+    var es := _store()
+    var s0 := _surface()
+    assert_eq(es.material_at(Vector3(CX, s0 - 10, CZ)), 0, "shallow terrain is Natural")
+    assert_eq(es.material_at(Vector3(CX, s0 + 10, CZ)), 0, "air is Natural")
+    assert_eq(es.material_at(Vector3(CX, s0 - 80, CZ)), MaterialPalette.BEDROCK, "deep terrain reads Bedrock")
+    # An edit overrides the generator material even deep down.
+    es.stamp_sphere(Vector3(CX, s0 - 80, CZ), 3.0, UNION, MaterialPalette.index_of(&"Wood"), 1.0)
+    assert_eq(es.material_at(Vector3(CX, s0 - 80, CZ)), MaterialPalette.index_of(&"Wood"), "edit material wins over generator Bedrock")
+
+
 func test_carve_over_generator() -> void:
     var es := _store()
     var s0 := _surface()

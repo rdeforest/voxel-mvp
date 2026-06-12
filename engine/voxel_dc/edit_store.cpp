@@ -217,7 +217,8 @@ int EditStore::material_at(Vector3 p) const {
 		return 0;
 	}
 	const int idx = _leaf_at(p);
-	return nodes[idx].has_corners ? int(nodes[idx].material) : 0;
+	// Unedited leaf -> the generator's material (so deep terrain reads Bedrock); edited -> stored.
+	return nodes[idx].has_corners ? int(nodes[idx].material) : _gen.material(p);
 }
 
 PackedFloat32Array EditStore::fill_region(Vector3i origin, int dim, double cell,

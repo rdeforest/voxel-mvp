@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="Materials" load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://bxkssplgw7hgv" path="res://scripts/materials/materials.gd" id="1_mat"]
+
+[resource]
+script = ExtResource("1_mat")
+name = "Bedrock"
+decay = 0.0
+max_support = 1.0
+albedo = Color(0.32, 0.3, 0.34, 1.0)
+angle_of_repose = 90.0
+failure_mode = "fracture"
+density = 3.0
+tension = 400.0
+compression = 1200.0
+compliance = 1e-08
+fatigue_seconds = 2.0
