@@ -9,7 +9,7 @@ var tool_catalog:      ToolCatalog
 var _grid_overlay:     Node3D
 var _preview_renderer: Node3D
 var _help_overlay:     HelpOverlay
-var _probe_hud:        CanvasLayer
+var _probe_hud:        ToolWindow
 
 var tool_index:        int       = 0
 var _activity_indices: Array[int] = []   # remembered per tool
@@ -26,8 +26,9 @@ var _mouse_button_actions: Dictionary
 
 @onready var head:         Node3D              = $Head
 @onready var camera:       Camera3D            = $Head/Camera3D
-@onready var mode_label:   Label               = $HUD/BoxContainer/ModeLabel
+@onready var hud:          Control             = $HUD
 @onready var edit_preview: MeshInstance3D      = $EditPreview
+var mode_label: Label   # the Status card's read-out (built in _create_overlays)
 @onready var integrity:    StructuralIntegrity = get_parent().get_node("StructuralIntegrity")
 @onready var raycast:      RayCast3D           = $Head/RayCast3D
 
@@ -84,9 +85,21 @@ func _create_overlays() -> void:
     _help_overlay = HelpOverlay.new()
     add_child(_help_overlay)
 
+    # Status card (tool / activity / material / rotation). A draggable paper-card ToolWindow that
+    # replaces the old fixed top-left ModeLabel; its read-out is mode_label, updated below.
+    var status := ToolWindow.new()
+    status.window_id    = "status"
+    status.window_title = "Status"
+    status.set_fraction(Vector2(0.012, 0.02))
+    hud.add_child(status)
+    mode_label = Label.new()
+    mode_label.add_theme_font_override("font", ThemeDB.fallback_font)
+    mode_label.add_theme_color_override("font_color", ToolWindow.INK)
+    status.content.add_child(mode_label)
+
     _probe_hud = preload("res://scenes/player/probe_hud.gd").new()
     _probe_hud.player = self
-    add_child(_probe_hud)
+    hud.add_child(_probe_hud)
 
     add_child(preload("res://scenes/player/watercolor_panel.gd").new())   # F10: watercolour tuning
     camera.add_child(preload("res://scenes/player/watercolor_post.gd").new())   # ink + vignette post-process

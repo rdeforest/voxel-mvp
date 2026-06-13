@@ -4,7 +4,8 @@ extends RefCounted
 # V6: parts dissolved into the EditStore (imprinted voxels) — the snapshot no longer
 # encodes Node3D parts or snap points. Parts now persist via the EditStore blob (their
 # SDF) + the tracked-voxel array (their support). Older saves load with `parts` ignored.
-const VERSION := 6
+# V7: HUD tool-window layout (id -> viewport fraction). Older saves load with windows at default.
+const VERSION := 7
 
 # Survives scene reloads (static var on a loaded script). Set by the `reset`
 # console command and consumed by world.gd on the next _ready. When true: the saved
@@ -49,7 +50,17 @@ static func encode(world: Node) -> Dictionary:
         "player":   _encode_player(player),
         "voxels":   _encode_voxels(integrity.terrain_support),
         "tunables": _encode_tunables(),
+        "windows":  _encode_windows(world),
     }
+
+# HUD tool-window layout: each "tool_window"-group node's id -> position as a viewport FRACTION
+# (resolution-independent, so a save made fullscreen restores right in a small window and vice versa).
+static func _encode_windows(world: Node) -> Dictionary:
+    var out: Dictionary = {}
+    for w in world.get_tree().get_nodes_in_group("tool_window"):
+        if w.window_id != "":
+            out[w.window_id] = w.get_fraction()
+    return out
 
 static func _terrain_material() -> ShaderMaterial:
     return load(DCTerrainManager.TERRAIN_MATERIAL_PATH) as ShaderMaterial   # the shared cached instance
@@ -101,6 +112,14 @@ static func apply(snap: Dictionary, world: Node) -> void:
     _apply_voxels(integrity, snap.get("voxels", []))
     _apply_player(player, snap.get("player", {}))
     _apply_tunables(snap.get("tunables", {}))
+    _apply_windows(world, snap.get("windows", {}))
+
+static func _apply_windows(world: Node, windows: Dictionary) -> void:
+    if windows.is_empty():
+        return
+    for w in world.get_tree().get_nodes_in_group("tool_window"):
+        if windows.has(w.window_id):
+            w.set_fraction(windows[w.window_id])
 
 static func _apply_tunables(tunables: Dictionary) -> void:
     if tunables.is_empty():

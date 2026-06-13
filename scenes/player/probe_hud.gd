@@ -1,10 +1,10 @@
-extends CanvasLayer
+extends ToolWindow
 
-# Always-on probe read-out, top-left. Every frame it builds a probe at the current target (via
-# ActionFactories.probe_report, tool-independent) and shows the same lines the None-tool click
-# writes to the console — so you can sweep the camera over a scene and read each cell's SDF /
-# material / tracking live. The click still logs to the console (ProbeAction.execute); this is the
-# passive companion.
+# Always-on probe read-out, now a draggable paper card (see ToolWindow). Every frame it builds a
+# probe at the current target (via ActionFactories.probe_report, tool-independent) and shows the
+# same lines the None-tool click writes to the console — so you can sweep the camera over a scene
+# and read each cell's SDF / material / tracking live. The click still logs to the console
+# (ProbeAction.execute); this is the passive companion.
 
 var player: CharacterBody3D   # set by player._ready()
 
@@ -12,15 +12,15 @@ var _label: Label
 
 
 func _ready() -> void:
-    layer = 0
+    window_id    = "probe"
+    window_title = "Probe"
+    set_fraction(Vector2(0.012, 0.22))
+    super._ready()
     _label = Label.new()
     _label.add_theme_font_override("font", ThemeDB.fallback_font)  # monospace-ish; aligns columns
-    _label.add_theme_font_size_override("font_size", 14)
-    _label.add_theme_color_override("font_color", Color(0.85, 0.95, 1.0))
-    _label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
-    _label.add_theme_constant_override("outline_size", 4)
-    _label.position = Vector2(12, 72)   # below the Activity/Tool/Fly mode label (top-left, ~3 lines)
-    add_child(_label)
+    _label.add_theme_font_size_override("font_size", 13)
+    _label.add_theme_color_override("font_color", INK)
+    content.add_child(_label)
 
 
 func _process(_delta: float) -> void:
