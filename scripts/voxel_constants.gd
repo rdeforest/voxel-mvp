@@ -28,6 +28,12 @@ const GRID_ID := 0
 # behaviour change); the sub-metre flip sets it to 0.25.
 const RENDER_BASE_CELL := 0.25
 const RENDER_SUBDIV    := 4     # int(round(1.0 / RENDER_BASE_CELL)); power of two
+
+# Transparent editing overlays (cell ghost, grid, build preview) must draw ON TOP of the
+# full-screen watercolour post-process quad — which reads the opaque screen and repaints every
+# pixel, wiping any transparent geometry drawn before it (render_priority 100 in
+# watercolor_post.tres). These overlays sit above that so they survive the post pass.
+const OVERLAY_RENDER_PRIORITY := 110
 # log2(RENDER_SUBDIV) — extra LOD levels the render adds so the clipmap reaches the same WORLD
 # distance as at 1m (the finer base cell shrinks the octree's world extent by RENDER_SUBDIV, so we
 # add one octave of coverage per halving). MUST equal log2(RENDER_SUBDIV): 1.0→0, 0.5→1, 0.25→2.

@@ -120,6 +120,7 @@ static func _make_preview_material(color: Color) -> StandardMaterial3D:
     mat.albedo_color = color
     mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
     mat.cull_mode    = BaseMaterial3D.CULL_DISABLED
+    mat.render_priority = VoxelConstants.OVERLAY_RENDER_PRIORITY  # draw over the post quad
     return mat
 
 

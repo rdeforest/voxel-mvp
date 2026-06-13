@@ -16,6 +16,7 @@ func _ready() -> void:
     _refused_mat.albedo_color = Color(0.6, 0.6, 0.6, 0.25)
     _refused_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
     _refused_mat.cull_mode    = BaseMaterial3D.CULL_DISABLED
+    _refused_mat.render_priority = VoxelConstants.OVERLAY_RENDER_PRIORITY  # draw over the post quad
     var stick := CylinderMesh.new()
     stick.top_radius    = 0.12
     stick.bottom_radius = 0.12
@@ -24,6 +25,7 @@ func _ready() -> void:
     mat.albedo_color  = Color(1.0, 0.95, 0.2)
     mat.shading_mode  = BaseMaterial3D.SHADING_MODE_UNSHADED
     mat.no_depth_test = true   # show through the translucent ghost
+    mat.render_priority = VoxelConstants.OVERLAY_RENDER_PRIORITY  # draw over the post quad
     _arrow = MeshInstance3D.new()
     _arrow.mesh              = stick
     _arrow.material_override = mat

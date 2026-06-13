@@ -147,4 +147,5 @@ static func _make_material(obscured: bool) -> StandardMaterial3D:
     mat.transparency               = BaseMaterial3D.TRANSPARENCY_ALPHA
     mat.cull_mode                  = BaseMaterial3D.CULL_DISABLED
     mat.no_depth_test              = obscured
+    mat.render_priority            = VoxelConstants.OVERLAY_RENDER_PRIORITY  # draw over the post quad
     return mat

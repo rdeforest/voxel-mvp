@@ -75,4 +75,5 @@ static func _make_material() -> StandardMaterial3D:
     mat.transparency               = BaseMaterial3D.TRANSPARENCY_ALPHA
     mat.no_depth_test              = false
     mat.cull_mode                  = BaseMaterial3D.CULL_DISABLED
+    mat.render_priority            = VoxelConstants.OVERLAY_RENDER_PRIORITY  # draw over the post quad
     return mat
