@@ -23,6 +23,16 @@ uniform float rock_band      : hint_range(0.5, 60.0) = 14.0;  // blend thickness
 uniform float rock_slope_cos : hint_range(0.0, 1.0)  = 0.55;  // faces steeper than this → rock
 uniform float rock_slope_soft: hint_range(0.0, 1.0)  = 0.20;  // steepness blend width
 
+// Sarsen-stone detail for natural rock (Stonehenge look): triplanar value mottle + a warm buff
+// undertone + Worley-cell lichen blotches + crevice darkening. Computed only on rock pixels.
+// All world-space (sticks to surfaces, survives the wash as mid-frequency mottle).
+uniform float rock_mottle_scale : hint_range(0.05, 3.0) = 0.7;   // 1/scale ≈ blotch size in metres
+uniform float rock_warmth       : hint_range(0.0, 1.0) = 0.40;   // buff/tan undertone strength
+uniform float rock_lichen       : hint_range(0.0, 1.0) = 0.35;   // fraction of cells bearing lichen
+uniform float rock_crevice      : hint_range(0.0, 1.0) = 0.35;   // darkening in the pits (fake AO)
+uniform vec3  rock_lichen_green : source_color = vec3(0.52, 0.56, 0.42);  // pale grey-green lichen
+uniform vec3  rock_lichen_ochre : source_color = vec3(0.62, 0.55, 0.36);  // ochre / rust lichen
+
 uniform float wave_scale     : hint_range(0.01, 5.0) = 1.4;   // base frequency; larger = denser pattern
 uniform float wave_speed     : hint_range(0.0, 10.0) = 0.9;
 uniform float wave_amount    : hint_range(0.0, 1.0) = 0.40;   // brightness modulation depth
@@ -62,7 +72,8 @@ uniform float wc_sprig_flat  : hint_range(0.0, 1.0) = 0.3;    // fraction of mar
 uniform vec3  wc_sprig_color : source_color = vec3(0.16, 0.30, 0.12);
 // Watercolour reflectance (paper §3.2): cangiante = highlights shift to a brighter HUE (not just
 // white); light-driven dilution = more bare paper shows where the surface faces the light.
-uniform float wc_paper_mode  : hint_range(0.0, 2.0) = 1.0;    // 0 none, 1 screen sheet, 2 world tooth
+uniform float wc_paper_mode  : hint_range(0.0, 3.0) = 1.0;    // 0 none, 1 screen noise, 2 world noise, 3 texture
+uniform sampler2D wc_paper_tex : repeat_enable, filter_linear_mipmap;  // substrate texture (mode 3)
 uniform vec3  wc_light_dir                          = vec3(0.4, -0.85, 0.35);  // light direction
 uniform vec3  wc_cangiante   : source_color = vec3(1.0, 0.96, 0.72);  // highlight hue-shift target
 uniform float wc_cangiante_amt : hint_range(0.0, 1.0) = 0.0;  // hue-shift strength in highlights (0=off)
@@ -101,6 +112,70 @@ float gnoise(vec2 p) {
         mix(dot(hash2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
             dot(hash2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x),
         u.y);
+}
+
+// Plain 4-octave fbm of gnoise, remapped to [0,1]. (gnoise sums to ±0.9375 over 4 octaves.)
+float fbm2(vec2 p) {
+    float total = 0.0;
+    float amp   = 0.5;
+    for (int i = 0; i < 4; i++) {
+        total += amp * gnoise(p);
+        p     *= 2.03;
+        amp   *= 0.5;
+    }
+    return 0.5 + 0.5 * total / 0.9375;
+}
+
+// Triplanar fbm: blend three planar fbms by the world normal, so it doesn't stretch on cliffs.
+float triplanar_fbm(vec3 p, vec3 n) {
+    vec3 an = abs(n); an /= (an.x + an.y + an.z + 1e-4);
+    return an.x * fbm2(p.yz) + an.y * fbm2(p.xz) + an.z * fbm2(p.xy);
+}
+
+// 3D hash for the Worley cells.
+vec3 hash33(vec3 p) {
+    p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    return fract((p.xxy + p.yxx) * p.zyx);
+}
+
+// Worley (cellular) noise: nearest feature-point distance + a per-cell id. Used for lichen blotches
+// — the id picks a tint per cell, the distance gives a soft blotch core. 3D so it wraps cliffs.
+vec2 worley3(vec3 p) {
+    vec3 ip = floor(p);
+    vec3 fp = fract(p);
+    float f1 = 1e9;
+    vec3 wcell = vec3(0.0);
+    for (int x = -1; x <= 1; x++)
+    for (int y = -1; y <= 1; y++)
+    for (int z = -1; z <= 1; z++) {
+        vec3 g = vec3(float(x), float(y), float(z));
+        vec3 d = g + hash33(ip + g) - fp;
+        float dist = dot(d, d);
+        if (dist < f1) { f1 = dist; wcell = ip + g; }
+    }
+    float id = fract(sin(dot(wcell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+    return vec2(sqrt(f1), id);
+}
+
+// Sarsen-stone albedo: warm-grey value mottle + lichen blotches + crevice darkening.
+vec3 sarsen_rock(vec3 wp, vec3 wn) {
+    // Broad value variation around the base grey (large blotches).
+    float v = triplanar_fbm(wp * rock_mottle_scale * 0.5, wn);
+    vec3 base = rock_color * (0.78 + 0.44 * v);
+    base = mix(base, base * vec3(1.12, 1.04, 0.86), rock_warmth * v);   // warm buff in the mids
+
+    // Lichen: per-cell tint, soft-cored, on a fraction of cells.
+    vec2 w = worley3(wp * rock_mottle_scale);
+    float covered = step(1.0 - rock_lichen, w.y);          // this cell bears lichen?
+    float blotch  = covered * (1.0 - smoothstep(0.0, 0.35, w.x));
+    vec3 lichen   = mix(rock_lichen_green, rock_lichen_ochre, step(0.5, fract(w.y * 7.0)));
+    base = mix(base, lichen, blotch * 0.8);
+
+    // Crevice darkening (fake AO from a finer fbm pooling in the low spots).
+    float crev = triplanar_fbm(wp * rock_mottle_scale * 2.0, wn);
+    base *= 1.0 - rock_crevice * smoothstep(0.6, 0.0, crev);
+    return base;
 }
 
 // 4-octave fbm with per-octave rotation and direction variation, so the
@@ -152,7 +227,9 @@ void fragment() {
     float rock_alt   = smoothstep(rock_line - rock_band, rock_line + rock_band, v_world_pos.y);
     float rock_steep = smoothstep(rock_slope_cos + rock_slope_soft, rock_slope_cos - rock_slope_soft, slope_cos);
     float rock_mask  = max(rock_alt, rock_steep);
-    albedo = mix(albedo, rock_color, rock_mask);
+    vec3 rock = rock_color;
+    if (rock_mask > 0.001) rock = sarsen_rock(v_world_pos, v_world_normal);  // sarsen only on rock pixels
+    albedo = mix(albedo, rock, rock_mask);
 
     // Per-voxel material (from the DC mesher's CHANNEL_INDICES sampling): COLOR.a
     // near 0 marks a vertex carrying an explicit material colour (a CSG stamp), so
@@ -181,22 +258,29 @@ void fragment() {
         // Flatten into a few wash bands (quantise value, keep hue).
         float lw = max(dot(wc, vec3(0.299, 0.587, 0.114)), 1e-3);
         wc *= (floor(lw * wc_bands + 0.5) / wc_bands) / lw;
-        // Paper tooth: NONE / SCREEN / WORLD (wc_paper_mode 0/1/2). Screen = a fixed sheet you draw
-        // ON (the paint stays put as you move — the "dream" look, but the world can read flat);
-        // World = the tooth sticks to surfaces (the shower-door is gone but it reads as papercraft);
-        // None = off. Larger wc_paper_scale = coarser tooth in both modes.
+        // Paper tooth: NONE / SCREEN noise / WORLD noise / TEXTURE (wc_paper_mode 0/1/2/3).
+        // Screen = a fixed sheet you draw ON (paint stays put as you move — the "dream" look);
+        // World = the tooth sticks to surfaces (shower-door gone but it reads as papercraft);
+        // Texture = a real scanned paper sheet sampled in screen-space (mode 1's look, real grain);
+        // None = off. Larger wc_paper_scale = coarser tooth in all modes.
         if (wc_paper_mode > 0.5) {
             float paper;
             if (wc_paper_mode < 1.5) {
                 paper = gnoise(SCREEN_UV * VIEWPORT_SIZE / max(wc_paper_scale, 0.1));   // screen sheet
-            } else {
+            } else if (wc_paper_mode < 2.5) {
                 float wf = 4.0 / max(wc_paper_scale, 0.1);                              // world freq
                 vec3 an = abs(v_world_normal); an /= (an.x + an.y + an.z + 1e-4);
                 paper = an.x * gnoise(v_world_pos.yz * wf)
                       + an.y * gnoise(v_world_pos.xz * wf)
                       + an.z * gnoise(v_world_pos.xy * wf);                             // world triplanar
+                paper = 0.5 + 0.5 * paper;
+            } else {
+                // Real scanned-paper sheet, screen-space. Tile so wc_paper_scale reads like the
+                // noise modes: larger = coarser grain. Centre on 0 so granulate darkens/lightens.
+                vec2 pt_uv = SCREEN_UV * VIEWPORT_SIZE / max(wc_paper_scale * 16.0, 0.1);
+                paper = texture(wc_paper_tex, pt_uv).r;                                 // luminance tooth
             }
-            paper = 0.5 + 0.5 * paper;
+            if (wc_paper_mode < 1.5) paper = 0.5 + 0.5 * paper;                         // screen noise → [0,1]
             wc *= 1.0 - wc_granulate + paper * wc_granulate * 2.0;
         }
         // Pigment COLOUR turbulence stays WORLD-space — the splotches stick to surfaces and

@@ -13,10 +13,14 @@ const POST_PATH := "res://assets/materials/watercolor_post.tres"
 # right before the material has an override. target "t" = terrain wash material, "p" = ink/vignette post.
 const FLOATS := [
     ["wc_enable",       0.0,  0.0,  1.0,  1.0,  "t", "Master toggle for the watercolour wash (0 off, 1 on)."],
+    ["rock_mottle_scale",0.7, 0.05, 3.0,  0.05, "t", "Sarsen stone blotch size. Lower = bigger lichen patches / mottle (1/scale ≈ metres)."],
+    ["rock_warmth",     0.40, 0.0,  1.0,  0.01, "t", "Sarsen warm buff/tan undertone strength (0 = cool grey)."],
+    ["rock_lichen",     0.35, 0.0,  1.0,  0.01, "t", "Fraction of stone covered in lichen blotches."],
+    ["rock_crevice",    0.35, 0.0,  1.0,  0.01, "t", "Sarsen crevice darkening (fake ambient occlusion in the pits)."],
     ["wc_dilute",       0.28, 0.0,  1.0,  0.01, "t", "Base dilution: lift the whole wash toward paper white (washiness)."],
     ["wc_desat",        0.20, 0.0,  1.0,  0.01, "t", "Desaturate toward washy grey (lower colour intensity)."],
     ["wc_bands",        4.0,  1.0,  8.0,  0.5,  "t", "Number of flat wash value-levels. Fewer = more posterised/graphic."],
-    ["wc_paper_mode",   1.0,  0.0,  2.0,  1.0,  "t", "Paper tooth space: 0 none, 1 SCREEN (fixed sheet, paint stays put), 2 WORLD (sticks to surfaces / papercraft)."],
+    ["wc_paper_mode",   1.0,  0.0,  3.0,  1.0,  "t", "Paper tooth space: 0 none, 1 SCREEN noise (fixed sheet), 2 WORLD noise (sticks to surfaces / papercraft), 3 TEXTURE (real scanned paper, screen-space)."],
     ["wc_paper_scale",  6.0,  0.1,  16.0, 0.1,  "t", "Paper tooth size. Larger = coarser grain (px in screen mode, world units in world mode)."],
     ["wc_granulate",    0.18, 0.0,  1.0,  0.01, "t", "Paper granulation: pigment darkening in the paper tooth."],
     ["wc_turb_scale",   0.5,  0.05, 4.0,  0.05, "t", "Pigment-turbulence frequency (size of the world-space colour splotches)."],
@@ -46,6 +50,8 @@ const FLOATS := [
 # [uniform, default-Color, target, tooltip]
 const COLORS := [
     ["wc_paper_color", Color(0.96, 0.95, 0.91), "t", "The paper white the wash dilutes toward."],
+    ["rock_lichen_green", Color(0.52, 0.56, 0.42), "t", "Sarsen lichen tint A (pale grey-green)."],
+    ["rock_lichen_ochre", Color(0.62, 0.55, 0.36), "t", "Sarsen lichen tint B (ochre / rust)."],
     ["wc_cangiante",   Color(1.00, 0.96, 0.72), "t", "Cangiante highlight hue-shift target (warm/bright). Pair with wc_cangiante_amt."],
     ["wc_sprig_color", Color(0.16, 0.30, 0.12), "t", "Grass sprig mark colour."],
     ["ink_color",      Color(0.13, 0.11, 0.15), "p", "Ink line colour. A warm brown-black reads more like real ink than pure black."],
@@ -96,46 +102,45 @@ func _build_ui() -> void:
     vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _scroll.add_child(vb)
 
-    for f in FLOATS:
-        var mat := _target(f[5])
-        var row := HBoxContainer.new()
-        var lbl := Label.new()
-        lbl.text = "%s [%s]" % [f[0], f[5]]
-        lbl.custom_minimum_size.x = 170
-        lbl.tooltip_text = f[6]
-        lbl.mouse_filter = Control.MOUSE_FILTER_STOP   # so the label shows its tooltip on hover
-        var sb := SpinBox.new()
-        sb.min_value = f[2]
-        sb.max_value = f[3]
-        sb.step = f[4]
-        sb.custom_minimum_size.x = 110
-        sb.tooltip_text = f[6]
-        var cur: Variant = mat.get_shader_parameter(f[0])
-        sb.value = float(cur) if cur != null else float(f[1])
-        sb.value_changed.connect(_on_float_changed.bind(f[0], f[5]))
-        _fields.append([sb, f[0], f[5], false])
-        row.add_child(lbl)
-        row.add_child(sb)
-        vb.add_child(row)
+    for f in FLOATS: _add_float_row(f, vb)
+    for c in COLORS: _add_color_row(c, vb)
 
-    for c in COLORS:
-        var mat := _target(c[2])
-        var row := HBoxContainer.new()
-        var lbl := Label.new()
-        lbl.text = "%s [%s]" % [c[0], c[2]]
-        lbl.custom_minimum_size.x = 170
-        lbl.tooltip_text = c[3]
-        lbl.mouse_filter = Control.MOUSE_FILTER_STOP
-        var cp := ColorPickerButton.new()
-        cp.custom_minimum_size = Vector2(110, 0)
-        cp.tooltip_text = c[3]
-        var cur: Variant = mat.get_shader_parameter(c[0])
-        cp.color = cur if cur != null else c[1]
-        cp.color_changed.connect(_on_color_changed.bind(c[0], c[2]))
-        _fields.append([cp, c[0], c[2], true])
-        row.add_child(lbl)
-        row.add_child(cp)
-        vb.add_child(row)
+
+func _add_float_row(f: Array, vb: VBoxContainer) -> void:
+    var sb := SpinBox.new()
+    sb.min_value = f[2]
+    sb.max_value = f[3]
+    sb.step      = f[4]
+    sb.custom_minimum_size.x = 110
+    var cur: Variant = _target(f[5]).get_shader_parameter(f[0])
+    sb.value = float(cur) if cur != null else float(f[1])
+    sb.value_changed.connect(_on_float_changed.bind(f[0], f[5]))
+    _fields.append([sb, f[0], f[5], false])
+    _add_row(vb, f[0], f[5], f[6], sb)
+
+
+func _add_color_row(c: Array, vb: VBoxContainer) -> void:
+    var cp := ColorPickerButton.new()
+    cp.custom_minimum_size = Vector2(110, 0)
+    var cur: Variant = _target(c[2]).get_shader_parameter(c[0])
+    cp.color = cur if cur != null else c[1]
+    cp.color_changed.connect(_on_color_changed.bind(c[0], c[2]))
+    _fields.append([cp, c[0], c[2], true])
+    _add_row(vb, c[0], c[2], c[3], cp)
+
+
+# A labelled row: "uniform [tag]" + its widget, both carrying the same hover tooltip.
+func _add_row(vb: VBoxContainer, uniform: String, tag: String, tip: String, widget: Control) -> void:
+    var lbl := Label.new()
+    lbl.text = "%s [%s]" % [uniform, tag]
+    lbl.custom_minimum_size.x = 170
+    lbl.tooltip_text   = tip
+    lbl.mouse_filter   = Control.MOUSE_FILTER_STOP   # so the label shows its tooltip on hover
+    widget.tooltip_text = tip
+    var row := HBoxContainer.new()
+    row.add_child(lbl)
+    row.add_child(widget)
+    vb.add_child(row)
 
 
 # Re-read every field from its material (so a console `loadstyle` shows up in the panel on open).
