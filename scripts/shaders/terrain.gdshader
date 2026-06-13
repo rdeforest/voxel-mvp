@@ -60,6 +60,13 @@ uniform float wc_sprig_freq  : hint_range(0.2, 10.0) = 2.5;   // mark frequency 
 uniform float wc_sprig_patch : hint_range(0.05, 2.0) = 0.4;   // patch sparseness (lower = sparser)
 uniform float wc_sprig_flat  : hint_range(0.0, 1.0) = 0.3;    // fraction of marks on FLAT ground vs rises
 uniform vec3  wc_sprig_color : source_color = vec3(0.16, 0.30, 0.12);
+// Watercolour reflectance (paper §3.2): cangiante = highlights shift to a brighter HUE (not just
+// white); light-driven dilution = more bare paper shows where the surface faces the light.
+uniform float wc_paper_mode  : hint_range(0.0, 2.0) = 1.0;    // 0 none, 1 screen sheet, 2 world tooth
+uniform vec3  wc_light_dir                          = vec3(0.4, -0.85, 0.35);  // light direction
+uniform vec3  wc_cangiante   : source_color = vec3(1.0, 0.96, 0.72);  // highlight hue-shift target
+uniform float wc_cangiante_amt : hint_range(0.0, 1.0) = 0.0;  // hue-shift strength in highlights (0=off)
+uniform float wc_dilute_light  : hint_range(0.0, 1.0) = 0.0;  // extra paper-lift where lit (0=off)
 
 // Debug: blend each triangle's per-LOD colour (vertex COLOR from the DC mesher)
 // over the grass/dirt material. 0 = off, 1 = full. Console: set debug_lod 0.3
@@ -74,9 +81,12 @@ varying vec3 v_world_pos;
 varying vec3 v_world_normal;
 
 
+// Non-periodic hash (Dave Hoskins, hash22). The old sin(p)*43758 hash visibly TILES (a repeating
+// ~50px pattern showed in the screen-space paper at distance); this one has no sine period.
 vec2 hash2(vec2 p) {
-    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-    return -1.0 + 2.0 * fract(sin(p) * 43758.5453);
+    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return -1.0 + 2.0 * fract((p3.xx + p3.yz) * p3.zy);
 }
 
 // Gradient (Perlin-ish) noise. No axis-aligned grid artefacts the way
@@ -163,17 +173,32 @@ void fragment() {
     if (wc_enable > 0.5) {
         // --- Watercolour wash (unshaded; the white paper is the light) ---
         vec3 wc = albedo;
+        float ndl = clamp(dot(normalize(v_world_normal), normalize(-wc_light_dir)), 0.0, 1.0);
         float lum = dot(wc, vec3(0.299, 0.587, 0.114));
         wc = mix(wc, vec3(lum), wc_desat);                 // desaturate toward washy grey
-        wc = mix(wc, wc_paper_color, wc_dilute);           // dilution: lift toward paper white
+        wc = mix(wc, wc_cangiante, ndl * wc_cangiante_amt); // cangiante: highlights shift to a brighter hue
+        wc = mix(wc, wc_paper_color, clamp(wc_dilute + ndl * wc_dilute_light, 0.0, 1.0)); // dilution (more where lit)
         // Flatten into a few wash bands (quantise value, keep hue).
         float lw = max(dot(wc, vec3(0.299, 0.587, 0.114)), 1e-3);
         wc *= (floor(lw * wc_bands + 0.5) / wc_bands) / lw;
-        // Paper tooth in SCREEN space — the paper is the fixed sheet you draw ON; if it wraps the
-        // 3D surfaces (world-space) the world reads as papercraft, not a painting. (wc_paper_scale
-        // is now the tooth size in PIXELS.)
-        float paper = 0.5 + 0.5 * gnoise(SCREEN_UV * VIEWPORT_SIZE / max(wc_paper_scale, 0.1));
-        wc *= 1.0 - wc_granulate + paper * wc_granulate * 2.0;
+        // Paper tooth: NONE / SCREEN / WORLD (wc_paper_mode 0/1/2). Screen = a fixed sheet you draw
+        // ON (the paint stays put as you move — the "dream" look, but the world can read flat);
+        // World = the tooth sticks to surfaces (the shower-door is gone but it reads as papercraft);
+        // None = off. Larger wc_paper_scale = coarser tooth in both modes.
+        if (wc_paper_mode > 0.5) {
+            float paper;
+            if (wc_paper_mode < 1.5) {
+                paper = gnoise(SCREEN_UV * VIEWPORT_SIZE / max(wc_paper_scale, 0.1));   // screen sheet
+            } else {
+                float wf = 4.0 / max(wc_paper_scale, 0.1);                              // world freq
+                vec3 an = abs(v_world_normal); an /= (an.x + an.y + an.z + 1e-4);
+                paper = an.x * gnoise(v_world_pos.yz * wf)
+                      + an.y * gnoise(v_world_pos.xz * wf)
+                      + an.z * gnoise(v_world_pos.xy * wf);                             // world triplanar
+            }
+            paper = 0.5 + 0.5 * paper;
+            wc *= 1.0 - wc_granulate + paper * wc_granulate * 2.0;
+        }
         // Pigment COLOUR turbulence stays WORLD-space — the splotches stick to surfaces and
         // emphasise depth (this is the half that should follow the world, not the screen).
         float turb = 0.5 + 0.5 * gnoise(v_world_pos.xz * wc_turb_scale);
