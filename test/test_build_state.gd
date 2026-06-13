@@ -53,7 +53,7 @@ class TestBuildStateRotationAndCycling:
     func test_part_cycle_wraps():
         var initial_name := bs.part_name()
         # Cycle forward through all parts back to start.
-        for i in 4:   # 4 parts in catalog
+        for i in 3:   # 3 parts in catalog (beam, log, slab)
             bs.next_part()
         assert_eq(bs.part_name(), initial_name)
 
