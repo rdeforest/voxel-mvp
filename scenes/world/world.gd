@@ -4,6 +4,7 @@ extends Node3D
 @onready var _player:    CharacterBody3D     = $Player
 
 var _dc_manager: DCTerrainManager
+var _inval_overlay: Node3D
 var _substrate_preview: DcSubstratePreview
 var _dc_collision: DCCollisionManager
 var _awake_overlay: AwakeOverlay
@@ -42,6 +43,10 @@ func _ready() -> void:
     add_child(_dc_manager)
     _dc_manager.setup(_player, _edit_store.store)   # render sources SDF + material from the store
     _dc_manager.start_default()   # DC is the terrain render
+    _inval_overlay = preload("res://scenes/player/invalidation_overlay.gd").new()
+    add_child(_inval_overlay)
+    _dc_manager.region_invalidated.connect(_inval_overlay.highlight)        # `dcinval` toggles it
+    _dc_manager.triangles_invalidated.connect(_inval_overlay.highlight_triangles)
     _substrate_preview = DcSubstratePreview.new()
     add_child(_substrate_preview)
     _substrate_preview.setup(_player, _edit_store.store)   # Phase B S3: render imprints generator + edits from the store (dcgen)
@@ -90,6 +95,7 @@ func _wire_console() -> void:
     _console = ConsoleCommands.new()
     _console.host              = self
     _console.dc_manager        = _dc_manager
+    _console.inval_overlay     = _inval_overlay
     _console.substrate_preview = _substrate_preview
     _console.pbd_structure     = _pbd_structure
     _console.integrity         = _integrity

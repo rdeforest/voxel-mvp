@@ -15,6 +15,7 @@ extends RefCounted
 
 var host:              Node
 var dc_manager:        DCTerrainManager
+var inval_overlay:     Node3D
 var substrate_preview: DcSubstratePreview
 var pbd_structure:     PbdStructure
 var integrity:         StructuralIntegrity
@@ -53,6 +54,8 @@ func _table() -> Array:
         [liststyles,      "liststyles","List saved shader-settings presets."],
         [dcmanager,       "dcmanager", "Toggle the DC terrain manager (threaded re-mesh of a bubble around you). Usage: dcmanager [on|off]"],
         [dcerror,         "dcerror",   "Toggle error-driven terrain LOD (screen-space error vs distance bands). Usage: dcerror [on|off]"],
+        [dcinval,         "dcinval",   "Toggle the invalidation overlay: blue=voxels an edit changed, green=region re-meshed, fading. Shows what each edit/move redoes."],
+        [dcbudget,        "dcbudget",  "Toggle the B2 detail budget: auto-tune eps toward a frame-time target (refine on slack, coarsen over budget). Usage: dcbudget [on|off]"],
         [dceps,           "dceps",     "Set the error-driven LOD threshold in px (lower = more detail). Usage: dceps <px>"],
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
@@ -192,6 +195,17 @@ func dcmanager(state := "") -> void:
     var on := _parse_toggle(state, dc_manager.is_enabled())
     dc_manager.set_enabled(on)
     LimboConsole.info("dcmanager: %s" % ("on" if on else "off"))
+
+func dcinval(_state := "") -> void:
+    var on: bool = inval_overlay.toggle()
+    dc_manager.debug_invalidation = on   # gates the (costly) per-edit triangle scan
+    LimboConsole.info("dcinval: %s — blue=voxels changed, green=triangles re-meshed (fades)" % ("on" if on else "off"))
+
+func dcbudget(state := "") -> void:
+    var on := _parse_toggle(state, dc_manager.budget_enabled)
+    dc_manager.budget_enabled = on
+    LimboConsole.info("dcbudget: %s (target %.0f ms/frame, eps now %.1f)" % [
+        ("on" if on else "off"), DCTerrainManager.BUDGET_TARGET_MS, dc_manager.eps_px])
 
 func dcerror(state := "") -> void:
     var on := _parse_toggle(state, dc_manager.error_driven)
