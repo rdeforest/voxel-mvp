@@ -38,3 +38,6 @@ it contains. Phases that have shipped also have a record under
   plan for migrating off Transvoxel onto our DC-QEF stack.
 - [`15-network-transition.md`](15-network-transition.md) — the one-shot work
   plan for building the decentralized replication layer.
+- [`16-persistent-octree-substrate.md`](16-persistent-octree-substrate.md) —
+  staged plan to make the render octree persistent + world-fixed (B3 / doc-10
+  completion), so movement refines incrementally instead of full-rebuilding.

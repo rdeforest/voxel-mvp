@@ -189,6 +189,16 @@ completion of [[edits-first-class]] (edited content must render identically to g
 terrain at every LOD, including as the LOD changes under camera motion). **Deferred** because
 B1 already solves the symptom we hit; recorded here so the path isn't lost.
 
+**B3 requires the world-anchored octree ([`10-adaptive-octree-substrate.md`](10-adaptive-octree-substrate.md)).**
+The current render is a *player-centred clipmap snapped to a 16 m grid*: to follow you it
+**re-snaps the root** (shifts the whole lattice frame by a coarse cell) every time you drift, so
+every cell lands at a new lattice position — i.e. *everything* "changed", which is exactly why a
+move triggers a full rebuild. You cannot diff-and-re-splice across a frame shift. The collapse-set
+diff B3 wants only makes sense when cells sit at **fixed world positions** and a move changes only
+*which LOD* a fixed cell is at — that is precisely the doc-10 substrate. So **B3 is not a tweak to
+the clipmap; B3 is doc 10** (persistent world-fixed adaptive octree) **plus** the collapse-diff
+re-splice on top. That's the architectural step, sized like B1's, not a quick follow-on.
+
 ## Recommended cut line & risks
 
 - **B1 now** (fixes the real complaint), **B2 thin** (delivers the dynamic core cheaply; the
