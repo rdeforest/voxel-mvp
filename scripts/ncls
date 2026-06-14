@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Non-comment lines of source counter
+
+c_files() {
+  find ${*:-*} -type f -name '*.cpp' -o -name '*.c' -o -name '*.h'
+}
+
+c_grep() {
+  xargs grep -cvE '^\s*(/\\*|//.*)$'
+}
+
+gd_files() {
+  find ${*:-*}  -type f -name '*.gd'
+}
+
+gd_grep() {
+  xargs grep -cvE '^\s*(#.*)$'
+}
+
+switch_columns_and_total() {
+  awk -F: '{print $2, $1; total += $2} END { print total }'
+}
+
+echo "C(++)? files"
+( cd engine/voxel_dc
+  c_files | c_grep | switch_columns_and_total
+)
+
+echo
+echo "Godot files"
+gd_files assets scenes scripts | gd_grep | switch_columns_and_total
+
