@@ -27,6 +27,7 @@ const _WHITE    := Color(1.0, 1.0, 1.0)
 const _COLORS   := [_GREEN, _YELLOW, _ORANGE, _RED]   # parallel to _LIMITS; over 100ms -> _WHITE
 
 var _times: Dictionary = {}    # label -> {ms: float, frame: int}
+var _status: Dictionary = {}   # key  -> {text: String, frame: int} — non-timing state (queue sizes, blockers)
 var _label: Label
 var _shown := false
 var _last_physics_frame := 0
@@ -82,6 +83,12 @@ func is_shown() -> bool:
     return _shown
 
 
+# A line of non-timing state (queue depth, what a worker is blocked on, …). Shown under the
+# timings; stale entries drop off like report()'s. Call every frame the state is meaningful.
+func status(key: String, text: String) -> void:
+    _status[key] = { "text": text, "frame": Engine.get_process_frames() }
+
+
 # Flag that a one-off event (a terrain mesh apply) happened this frame; the graph ticks it.
 func mark_event() -> void:
     _pending_mark = true
@@ -110,11 +117,23 @@ func _process(_dt: float) -> void:
     ]
     var labels := _times.keys()
     labels.sort()
+    var cpu_sum := 0.0
     for label in labels:
         var e: Dictionary = _times[label]
         if now - int(e.frame) > STALE_FRAMES:
             continue
+        cpu_sum += e.ms
         lines.append("%s  %.2f ms" % [label, e.ms])
+    # Accounted CPU vs the whole frame: a large, bouncing "other" with small/steady CPU means the
+    # cost is GPU / present / unmeasured — not in any timed subsystem (look at the shaders, not here).
+    lines.append("Σ CPU %.2f ms   |   other %.2f ms" % [cpu_sum, maxf(0.0, frame_ms - cpu_sum)])
+    var keys := _status.keys()
+    keys.sort()
+    for key in keys:
+        var s: Dictionary = _status[key]
+        if now - int(s.frame) > STALE_FRAMES:
+            continue
+        lines.append("%s: %s" % [key, s.text])
     _label.text = "\n".join(lines)
 
 
