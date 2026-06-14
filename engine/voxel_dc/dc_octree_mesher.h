@@ -28,7 +28,11 @@ class DCOctreeMesher : public RefCounted {
 	// Per-triangle owner cell origin (WORLD lattice) of the last mesh_clipmap/mesh_subregion
 	// call — lets the incremental path know which cached triangles a re-meshed sub-box
 	// replaces. One Vector3 (integer-valued) per emitted triangle.
-	PackedVector3Array _last_tri_owners;
+	PackedVector3Array  _last_tri_owners;
+	// Parallel to _last_tri_owners: the owner cell's SIZE (in base-cell lattice units) for
+	// each triangle. The B1 splice reads the max owner size in the edit box to align its
+	// sub-box to whole cells at the local displayed resolution (the alignment trap fix).
+	PackedFloat32Array  _last_tri_owner_sizes;
 
 public:
 	// Mesh a clipmap of nested baked SDF levels (finest first) into a Mesh.ARRAY_*
@@ -72,7 +76,11 @@ public:
 			const TypedArray<PackedByteArray> &level_indices = TypedArray<PackedByteArray>(),
 			const PackedColorArray &palette = PackedColorArray(),
 			bool uniform_core = false,
-			double prune_safety = 0.0);
+			double prune_safety = 0.0,
+			Vector3i emit_min = Vector3i(),
+			Vector3i emit_max = Vector3i(),
+			bool incremental = false,
+			int max_leaf = 0);
 
 	// Incremental edit patch: mesh a small UNIFORM (1 m) cube [sub_origin, sub_origin+sub_size]
 	// from a fresh SDF grid, emitting ONLY the triangles owned by cells whose origin lies in
@@ -95,7 +103,11 @@ public:
 
 	// Per-triangle owner cell origins (WORLD lattice) from the last mesh call — same order/count
 	// as the returned ARRAY_INDEX divided by 3.
-	PackedVector3Array get_last_triangle_owners() const { return _last_tri_owners; }
+	PackedVector3Array get_last_triangle_owners()      const { return _last_tri_owners; }
+	// Parallel to get_last_triangle_owners(): one float per triangle = owner cell size (lattice
+	// units). Used by the B1 splice to find the max displayed cell size in the edit box so it can
+	// align its sub-box to whole cells at the local LOD.
+	PackedFloat32Array get_last_triangle_owner_sizes() const { return _last_tri_owner_sizes; }
 
 protected:
 	static void _bind_methods();

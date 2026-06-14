@@ -48,8 +48,10 @@ func test_swaps_core_triangles_for_patch() -> void:
     var cache := _mesh([inb, out, inb, out])    # tris 0,2 in core; 1,3 outside
     var patch := _mesh([inb])                    # one replacement triangle, owner in core
 
-    var r := DCEditSplicer.splice(cache.arrays, cache.owners, CACHE_ORIGIN,
-        CORE_MIN, CORE_MAX, SUB_ORIGIN, patch.arrays, patch.owners)
+    var r := DCEditSplicer.splice(
+        {"arrays": cache.arrays, "owners": cache.owners, "sizes": PackedFloat32Array()},
+        {"arrays": patch.arrays, "owners": patch.owners, "sizes": PackedFloat32Array()},
+        CORE_MIN, CORE_MAX, Vector3(SUB_ORIGIN - CACHE_ORIGIN))
     var idx: PackedInt32Array = r.arrays[Mesh.ARRAY_INDEX]
     var ow: PackedVector3Array = r.owners
     assert_eq(idx.size(), 9, "2 kept + 1 patch = 3 triangles")
@@ -66,8 +68,10 @@ func test_empty_patch_is_removal_only() -> void:
     var inb := Vector3(0, 0, 0)
     var out := Vector3(100, 0, 0)
     var cache := _mesh([inb, out, inb])          # 2 in core, 1 outside
-    var r := DCEditSplicer.splice(cache.arrays, cache.owners, CACHE_ORIGIN,
-        CORE_MIN, CORE_MAX, SUB_ORIGIN, [], PackedVector3Array())
+    var r := DCEditSplicer.splice(
+        {"arrays": cache.arrays, "owners": cache.owners, "sizes": PackedFloat32Array()},
+        {"arrays": [], "owners": PackedVector3Array(), "sizes": PackedFloat32Array()},
+        CORE_MIN, CORE_MAX, Vector3(SUB_ORIGIN - CACHE_ORIGIN))
     assert_eq((r.arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size(), 3, "only the out-of-core triangle remains")
     assert_eq(r.owners.size(), 1)
     assert_true(_valid_compact(r.arrays), "removal-only result still compact")

@@ -1,98 +1,126 @@
 class_name DCEditSplicer
 
-# Pure mesh-array surgery for incremental edit patching (no Node/engine access, so it's
-# unit-testable). Given the cached full-clipmap mesh (Mesh.ARRAY_* + a per-triangle world
-# owner-cell origin) and a freshly re-meshed patch over a core box, it:
-#   1. drops the cached triangles whose owner cell lies inside [core_min, core_max),
-#   2. appends the patch's triangles, shifted from sub-local into cache-root-local space,
-#   3. compacts to only the referenced vertices (so repeated edits don't grow the pool).
-# The uniform 1m fine core guarantees the patch's per-cell vertices match the full build's,
-# so the boundary between kept and patched triangles is seam-coincident (crack-free). See
-# test/test_dc_incremental_splice.gd for the crack-free guarantee and test_dc_edit_splicer
-# for this surgery.
+# Replaces the cached terrain mesh's triangles inside an edit's CORE box with a freshly meshed
+# patch, leaving everything outside it untouched. Pure array surgery — no engine access — so the
+# crack-free guarantee (test_dc_incremental_splice) and the surgery itself (test_dc_edit_splicer)
+# stay unit-testable.
+#
+# A "mesh" is a bundle: { arrays = Mesh.ARRAY_*, owners = per-triangle world owner-cell origins,
+# sizes = per-triangle owner-cell sizes }. The patch was meshed in its own local space, so its
+# vertices move into the cache's space by `patch_shift`.
 
-static func _in_box(point: Vector3, box_min: Vector3i, box_max: Vector3i) -> bool:
-    return point.x >= box_min.x and point.x < box_max.x \
-        and point.y >= box_min.y and point.y < box_max.y \
-        and point.z >= box_min.z and point.z < box_max.z
+static func splice(cache: Dictionary, patch: Dictionary,
+        core_min: Vector3i, core_max: Vector3i, patch_shift: Vector3) -> Dictionary:
+    var pool := _vertex_pool(cache, patch, patch_shift)
+    var triangles := _kept_cache_triangles(cache, core_min, core_max)
+    _append(triangles, _patch_triangles(patch, _vertex_count(cache)))
+    return _compacted(pool, triangles)
 
-# Triangles are 3 indices; this is their count for an index array of size n.
-static func _first_third(n: int) -> int:
+
+# --- vertices: the cache's, then the patch's shifted into cache space ---
+
+static func _vertex_pool(cache: Dictionary, patch: Dictionary, shift: Vector3) -> Dictionary:
+    var verts   := PackedVector3Array(cache.arrays[Mesh.ARRAY_VERTEX])
+    var normals := PackedVector3Array(cache.arrays[Mesh.ARRAY_NORMAL])
+    var colors  := _colors_of(cache.arrays)
+    var has_color := colors.size() == verts.size() and verts.size() > 0
+    for i in _vertex_count(patch):
+        verts.append(patch.arrays[Mesh.ARRAY_VERTEX][i] + shift)
+        normals.append(patch.arrays[Mesh.ARRAY_NORMAL][i])
+        if has_color:
+            colors.append(_color_at(patch.arrays, i))
+    return {"verts": verts, "normals": normals, "colors": colors, "has_color": has_color}
+
+
+# --- triangles: index-triples + owner + size, referencing the vertex pool ---
+
+static func _kept_cache_triangles(cache: Dictionary, core_min: Vector3i, core_max: Vector3i) -> Dictionary:
+    var kept := _no_triangles()
+    var indices: PackedInt32Array = cache.arrays[Mesh.ARRAY_INDEX]
+    for tri in cache.owners.size():
+        if not _inside(cache.owners[tri], core_min, core_max):
+            _add(kept, indices, tri, 0, cache.owners[tri], _size_at(cache.sizes, tri))
+    return kept
+
+static func _patch_triangles(patch: Dictionary, vertex_base: int) -> Dictionary:
+    var added := _no_triangles()
+    if _vertex_count(patch) == 0:
+        return added
+    var indices: PackedInt32Array = patch.arrays[Mesh.ARRAY_INDEX]
+    for tri in _triangle_count(indices):
+        _add(added, indices, tri, vertex_base, patch.owners[tri], _size_at(patch.sizes, tri))
+    return added
+
+
+# --- compaction: keep only the vertices the surviving triangles reference ---
+
+static func _compacted(pool: Dictionary, triangles: Dictionary) -> Dictionary:
+    var slot_of := {}
+    var verts   := PackedVector3Array()
+    var normals := PackedVector3Array()
+    var colors  := PackedColorArray()
+    var indices: PackedInt32Array = triangles.indices
+    for slot in indices.size():
+        var src: int = indices[slot]
+        if not slot_of.has(src):
+            slot_of[src] = verts.size()
+            verts.append(pool.verts[src])
+            normals.append(pool.normals[src])
+            if pool.has_color:
+                colors.append(pool.colors[src])
+        indices[slot] = slot_of[src]
+    return {"arrays": _surface(verts, normals, colors, indices, pool.has_color),
+            "owners": triangles.owners, "sizes": triangles.sizes}
+
+
+# --- tiny helpers, each named for the one thing it answers ---
+
+static func _vertex_count(mesh: Dictionary) -> int:
+    var arrays: Array = mesh.arrays
+    return (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() if not arrays.is_empty() else 0
+
+static func _triangle_count(indices: PackedInt32Array) -> int:
     @warning_ignore("integer_division")
-    return n / 3
+    return indices.size() / 3
 
-# Copy triangle `tri`'s three indices from `source` into `dest`, shifted by `base`.
-static func _append_triangle(dest: PackedInt32Array, source: PackedInt32Array, tri: int, base: int) -> void:
-    dest.append(source[tri * 3] + base)
-    dest.append(source[tri * 3 + 1] + base)
-    dest.append(source[tri * 3 + 2] + base)
+static func _inside(point: Vector3, lo: Vector3i, hi: Vector3i) -> bool:
+    return point.x >= lo.x and point.x < hi.x \
+       and point.y >= lo.y and point.y < hi.y \
+       and point.z >= lo.z and point.z < hi.z
 
+static func _no_triangles() -> Dictionary:
+    return {"indices": PackedInt32Array(), "owners": PackedVector3Array(), "sizes": PackedFloat32Array()}
 
-# Returns {"arrays": Mesh.ARRAY_* Array, "owners": PackedVector3Array} for the spliced mesh.
-static func splice(cache_arrays: Array, cache_owners: PackedVector3Array, cache_origin: Vector3i,
-        core_min: Vector3i, core_max: Vector3i, sub_origin: Vector3i,
-        patch: Array, patch_owners: PackedVector3Array) -> Dictionary:
-    var cache_verts:   PackedVector3Array = cache_arrays[Mesh.ARRAY_VERTEX]
-    var cache_normals: PackedVector3Array = cache_arrays[Mesh.ARRAY_NORMAL]
-    var cache_indices: PackedInt32Array   = cache_arrays[Mesh.ARRAY_INDEX]
-    var cache_colors := PackedColorArray()
-    if cache_arrays[Mesh.ARRAY_COLOR] != null:
-        cache_colors = cache_arrays[Mesh.ARRAY_COLOR]
-    var has_color := cache_colors.size() == cache_verts.size() and cache_verts.size() > 0
+static func _add(triangles: Dictionary, source: PackedInt32Array, tri: int, vertex_base: int,
+        owner: Vector3, size: float) -> void:
+    triangles.indices.append(source[tri * 3]     + vertex_base)
+    triangles.indices.append(source[tri * 3 + 1] + vertex_base)
+    triangles.indices.append(source[tri * 3 + 2] + vertex_base)
+    triangles.owners.append(owner)
+    triangles.sizes.append(size)
 
-    # Vertex pool: the cached verts, then the patch's verts shifted into cache-root-local
-    # space. patch_vertex_base is where the patch's verts start, so its indices can be offset.
-    var pool_verts   := cache_verts.duplicate()
-    var pool_normals := cache_normals.duplicate()
-    var pool_colors  := cache_colors.duplicate()
-    var patch_vertex_base := cache_verts.size()
-    if not patch.is_empty():
-        var patch_offset := Vector3(sub_origin - cache_origin)
-        var patch_verts:   PackedVector3Array = patch[Mesh.ARRAY_VERTEX]
-        var patch_normals: PackedVector3Array = patch[Mesh.ARRAY_NORMAL]
-        var patch_colors := PackedColorArray()
-        if patch[Mesh.ARRAY_COLOR] != null:
-            patch_colors = patch[Mesh.ARRAY_COLOR]
-        for i in patch_verts.size():
-            pool_verts.append(patch_verts[i] + patch_offset)
-            pool_normals.append(patch_normals[i])
-            if has_color:
-                pool_colors.append(patch_colors[i] if i < patch_colors.size() else Color(0, 0, 0, 1))
+static func _append(into: Dictionary, more: Dictionary) -> void:
+    into.indices.append_array(more.indices)
+    into.owners.append_array(more.owners)
+    into.sizes.append_array(more.sizes)
 
-    # Indices + owners: kept cached triangles (owner outside the core) then all patch triangles.
-    var out_indices := PackedInt32Array()
-    var out_owners  := PackedVector3Array()
-    for tri in cache_owners.size():
-        if _in_box(cache_owners[tri], core_min, core_max):
-            continue
-        _append_triangle(out_indices, cache_indices, tri, 0)
-        out_owners.append(cache_owners[tri])
-    if not patch.is_empty():
-        var patch_indices: PackedInt32Array = patch[Mesh.ARRAY_INDEX]
-        for tri in _first_third(patch_indices.size()):
-            _append_triangle(out_indices, patch_indices, tri, patch_vertex_base)
-            out_owners.append(patch_owners[tri])
+static func _colors_of(arrays: Array) -> PackedColorArray:
+    return PackedColorArray(arrays[Mesh.ARRAY_COLOR]) if arrays[Mesh.ARRAY_COLOR] != null else PackedColorArray()
 
-    # Compact to only the referenced vertices.
-    var vertex_map := {}
-    var out_verts   := PackedVector3Array()
-    var out_normals := PackedVector3Array()
-    var out_colors  := PackedColorArray()
-    for slot in out_indices.size():
-        var src := out_indices[slot]
-        if not vertex_map.has(src):
-            vertex_map[src] = out_verts.size()
-            out_verts.append(pool_verts[src])
-            out_normals.append(pool_normals[src])
-            if has_color:
-                out_colors.append(pool_colors[src])
-        out_indices[slot] = vertex_map[src]
+static func _color_at(arrays: Array, i: int) -> Color:
+    var colors := _colors_of(arrays)
+    return colors[i] if i < colors.size() else Color(0, 0, 0, 1)
 
+static func _size_at(sizes: PackedFloat32Array, tri: int) -> float:
+    return sizes[tri] if tri < sizes.size() else 1.0
+
+static func _surface(verts: PackedVector3Array, normals: PackedVector3Array, colors: PackedColorArray,
+        indices: PackedInt32Array, has_color: bool) -> Array:
     var arrays: Array = []
     arrays.resize(Mesh.ARRAY_MAX)
-    arrays[Mesh.ARRAY_VERTEX] = out_verts
-    arrays[Mesh.ARRAY_NORMAL] = out_normals
+    arrays[Mesh.ARRAY_VERTEX] = verts
+    arrays[Mesh.ARRAY_NORMAL] = normals
     if has_color:
-        arrays[Mesh.ARRAY_COLOR] = out_colors
-    arrays[Mesh.ARRAY_INDEX] = out_indices
-    return {"arrays": arrays, "owners": out_owners}
+        arrays[Mesh.ARRAY_COLOR] = colors
+    arrays[Mesh.ARRAY_INDEX] = indices
+    return arrays

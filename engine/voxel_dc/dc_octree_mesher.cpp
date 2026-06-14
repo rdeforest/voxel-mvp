@@ -189,6 +189,9 @@ struct Octree {
 	double eps_px = 0.0;     // screen-space error threshold (px)
 	bool error_driven = false;
 	int max_leaf_size = 0;   // min-grid floor: never collapse above this (a flat world keeps >=2 cells/axis, so it meshes instead of collapsing to one empty cell)
+	int max_leaf_cap = 0;    // >0: caller's hard cap on the leaf size (the incremental splice sets it
+	                         // to the local displayed cell size, so a splice never collapses COARSER
+	                         // than the cache — coarser leaves would land off the cache's lattice and crack)
 	Vector3i world_origin;   // world coords of lattice (0,0,0): makes the hysteresis keys world-stable
 	HashSet<Vector4i> *prev_collapse = nullptr; // last frame's collapsed world-nodes (read)
 	HashSet<Vector4i> *curr_collapse = nullptr; // this frame's collapsed world-nodes (write)
@@ -212,7 +215,8 @@ struct Octree {
 	PackedVector3Array normals;
 	PackedColorArray colors;       // per-vertex material colour (rgb); a=0 material, a=1 natural
 	PackedInt32Array indices;
-	PackedVector3Array tri_owners; // WORLD owner-cell origin per emitted triangle
+	PackedVector3Array tri_owners;      // WORLD owner-cell origin per emitted triangle
+	PackedFloat32Array tri_owner_sizes; // parallel: owner cell SIZE (lattice units)
 
 	// World-lattice origin of a cell (cells store origin relative to the octree root).
 	Vector3i cell_world_origin(int idx) const {
@@ -452,7 +456,8 @@ struct Octree {
 	// Emit one triangle wound so its front face points `outward` (Godot is CW-from-front,
 	// so reverse when the right-hand normal already points outward). `owner` (world lattice)
 	// is the cell that owns this edge — tagged per triangle for the incremental splice.
-	void emit_tri(int i0, int i1, int i2, const Vector3 &outward, const Vector3 &owner) {
+	// `owner_size` is the owner cell's size in lattice units, for the B1 alignment fix.
+	void emit_tri(int i0, int i1, int i2, const Vector3 &outward, const Vector3 &owner, float owner_size) {
 		Vector3 n = (verts[i1] - verts[i0]).cross(verts[i2] - verts[i0]);
 		if (n.dot(outward) >= 0.0) {
 			indices.push_back(i0); indices.push_back(i2); indices.push_back(i1);
@@ -460,16 +465,17 @@ struct Octree {
 			indices.push_back(i0); indices.push_back(i1); indices.push_back(i2);
 		}
 		tri_owners.push_back(owner);
+		tri_owner_sizes.push_back(owner_size);
 	}
 
 	// Decide winding PER TRIANGLE, not once for the whole quad: a quad spanning a LOD
 	// size jump is non-planar, so a single flip decision leaves one of its two triangles
 	// back-facing — a culled, see-through gap. Orienting each triangle to `outward`
 	// independently keeps the surface consistently wound across the seam.
-	void emit_poly(const int ring[], int rc, const Vector3 &outward, const Vector3 &owner) {
-		emit_tri(ring[0], ring[1], ring[2], outward, owner);
+	void emit_poly(const int ring[], int rc, const Vector3 &outward, const Vector3 &owner, float owner_size) {
+		emit_tri(ring[0], ring[1], ring[2], outward, owner, owner_size);
 		if (rc == 4) {
-			emit_tri(ring[0], ring[2], ring[3], outward, owner);
+			emit_tri(ring[0], ring[2], ring[3], outward, owner, owner_size);
 		}
 	}
 
@@ -520,7 +526,7 @@ struct Octree {
 		}
 		double t = fa / (fa - fb);
 		Vector3 outward = clip.gradient(to_v3(lo).lerp(to_v3(hi), t));
-		emit_poly(ring, rc, outward, to_v3(cell_world_origin(leaf_idx)));
+		emit_poly(ring, rc, outward, to_v3(cell_world_origin(leaf_idx)), float(cells[leaf_idx].size));
 	}
 
 	void emit_leaf_edges(int leaf_idx) {
@@ -540,7 +546,7 @@ struct Octree {
 		// Keep a flat world at >=2 cells/axis so it meshes (a fully-collapsed flat region
 		// is one empty cell — no quad). half the root => the 8 root children may collapse,
 		// nothing coarser.
-		max_leaf_size = MAX(1, root_size >> 1);
+		max_leaf_size = max_leaf_cap > 0 ? max_leaf_cap : MAX(1, root_size >> 1);
 		accumulate(0); // QEF up the tree + error-driven collapse
 		// Pass 1: a vertex per surviving surface leaf. Pass 2: stitch edges.
 		int n = int(cells.size());
@@ -575,7 +581,11 @@ Array DCOctreeMesher::mesh_clipmap(
 		const TypedArray<PackedByteArray> &level_indices,
 		const PackedColorArray &palette,
 		bool uniform_core,
-		double prune_safety) {
+		double prune_safety,
+		Vector3i emit_min,
+		Vector3i emit_max,
+		bool incremental,
+		int max_leaf) {
 	Array out;
 	const int n = level_data.size();
 	if (n == 0 || dim < 2 || level_origins.size() != n || level_cells.size() != n || depth < 1) {
@@ -591,11 +601,36 @@ Array DCOctreeMesher::mesh_clipmap(
 	const int64_t per_level = int64_t(dim) * dim * dim;
 	const bool with_indices = level_indices.size() == n && palette.size() > 0;
 
+	// Incremental splice mode: erase the stale entries for EVERY cell this sub-octree will
+	// re-evaluate — the whole octree ROOT range [lattice_world_origin, +1<<depth), not just the
+	// emit box. The apron cells (inside the root, outside the emit box) are re-decided too; if
+	// their old entries survive they read was_collapsed=true → the lax eps*HYST threshold → they
+	// over-collapse and corrupt the stitching of the emitted core cells. After clearing, every
+	// re-evaluated cell decides fresh, and we write decisions back into _prev_collapse in place
+	// (curr aliased onto prev), so cells OUTSIDE the root keep their history. No swap.
+	if (incremental && error_driven) {
+		const Vector3i root_lo = lattice_world_origin;
+		const Vector3i root_hi = lattice_world_origin + Vector3i(1, 1, 1) * (1 << depth);
+		LocalVector<Vector4i> to_erase;
+		for (const Vector4i &key : _prev_collapse) {
+			Vector3i wo(key.x, key.y, key.z);
+			if (wo.x >= root_lo.x && wo.x < root_hi.x &&
+					wo.y >= root_lo.y && wo.y < root_hi.y &&
+					wo.z >= root_lo.z && wo.z < root_hi.z) {
+				to_erase.push_back(key);
+			}
+		}
+		for (const Vector4i &key : to_erase) {
+			_prev_collapse.erase(key);
+		}
+	}
+
 	Octree oct;
 	oct.emit_color = with_indices;
 	oct.palette = palette;
 	oct.uniform_core = uniform_core;   // keep the 1m fine core uniform so edit patches splice cleanly
 	oct.prune_safety = prune_safety;   // >0: surface-sparse build (skip provably-empty regions)
+	oct.max_leaf_cap = max_leaf;       // >0: splice caps collapse at the local displayed cell size
 	oct.root_size = 1 << depth;
 	oct.max_depth = depth;
 	oct.camera = camera;
@@ -604,7 +639,17 @@ Array DCOctreeMesher::mesh_clipmap(
 	oct.error_driven = error_driven;
 	oct.world_origin = lattice_world_origin;
 	oct.prev_collapse = &_prev_collapse;
-	oct.curr_collapse = &_curr_collapse;
+	// Incremental: write new collapse decisions back into _prev_collapse directly, so
+	// cells outside the box keep their history (they're never visited in the sub-octree
+	// build, so their entries are already correct). No swap needed after run().
+	oct.curr_collapse = incremental ? &_prev_collapse : &_curr_collapse;
+	// Emit-box filter: when emit_min != emit_max (caller set them), restrict output to
+	// triangles owned by cells inside [emit_min, emit_max). Same mechanism as mesh_subregion.
+	if (emit_min != emit_max) {
+		oct.emit_filter = true;
+		oct.emit_min = emit_min;
+		oct.emit_max = emit_max;
+	}
 	oct.clip.center = center;
 	oct.clip.half0 = half0;
 	oct.clip.levels.resize(n);
@@ -631,13 +676,16 @@ Array DCOctreeMesher::mesh_clipmap(
 	oct.run();
 
 	// This frame's collapse decisions become next frame's history (and bound the set to
-	// the current window — untouched nodes drop out).
-	if (error_driven) {
+	// the current window — untouched nodes drop out). For incremental splices the set was
+	// updated IN-PLACE above (curr aliased onto prev), so no swap is needed — cells outside
+	// the box were never touched and keep their history.
+	if (error_driven && !incremental) {
 		SWAP(_prev_collapse, _curr_collapse);
 		_curr_collapse.clear();
 	}
 
-	_last_tri_owners = oct.tri_owners;
+	_last_tri_owners      = oct.tri_owners;
+	_last_tri_owner_sizes = oct.tri_owner_sizes;
 	if (oct.verts.is_empty()) {
 		return out;
 	}
@@ -663,7 +711,8 @@ Array DCOctreeMesher::mesh_subregion(
 		const PackedByteArray &indices,
 		const PackedColorArray &palette) {
 	Array out;
-	_last_tri_owners = PackedVector3Array();
+	_last_tri_owners      = PackedVector3Array();
+	_last_tri_owner_sizes = PackedFloat32Array();
 	if (dim < 2 || sub_size < 1 || data.size() != int64_t(dim) * dim * dim) {
 		ERR_PRINT("DCOctreeMesher::mesh_subregion: bad arguments");
 		return out;
@@ -700,7 +749,8 @@ Array DCOctreeMesher::mesh_subregion(
 
 	oct.run();
 
-	_last_tri_owners = oct.tri_owners;
+	_last_tri_owners      = oct.tri_owners;
+	_last_tri_owner_sizes = oct.tri_owner_sizes;
 	if (oct.verts.is_empty()) {
 		return out;
 	}
@@ -718,14 +768,16 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("mesh_clipmap", "level_data", "dim", "level_origins", "level_cells", "center", "half0", "depth",
 					"camera", "proj", "eps_px", "error_driven", "lattice_world_origin", "level_indices", "palette",
-					"uniform_core", "prune_safety"),
+					"uniform_core", "prune_safety", "emit_min", "emit_max", "incremental", "max_leaf"),
 			&DCOctreeMesher::mesh_clipmap,
 			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(Vector3i()),
-			DEFVAL(TypedArray<PackedByteArray>()), DEFVAL(PackedColorArray()), DEFVAL(false), DEFVAL(0.0));
+			DEFVAL(TypedArray<PackedByteArray>()), DEFVAL(PackedColorArray()), DEFVAL(false), DEFVAL(0.0),
+			DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(false), DEFVAL(0));
 	ClassDB::bind_method(
 			D_METHOD("mesh_subregion", "data", "dim", "data_origin", "cell", "sub_origin", "sub_size",
 					"core_min", "core_max", "indices", "palette"),
 			&DCOctreeMesher::mesh_subregion,
 			DEFVAL(PackedByteArray()), DEFVAL(PackedColorArray()));
-	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"), &DCOctreeMesher::get_last_triangle_owners);
+	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
+	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);
 }

@@ -58,12 +58,19 @@ func test_edit_during_build_is_recorded_for_requeue():
     m._task_id = -1             # reset so teardown doesn't touch a fake task
 
 
-func test_dispatch_out_of_core_falls_back_to_full_remesh():
+# B1 removed the fine-core fallback: out-of-core edits splice at the local LOD instead of
+# falling back to a full rebuild. A far edit now dispatches a worker (no fallback).
+# The oversized-edit guard (_MAX_SPLICE_SPAN) still exists for truly huge edits.
+func test_dispatch_oversized_edit_falls_back_to_full_remesh():
     var m := _mgr()
-    m._cache_arrays = [1]       # non-empty base so _dispatch_splice proceeds past the cache guard
-    m._cache_origin = Vector3i.ZERO
-    m._last_center = Vector3.ZERO
-    m._splice_queue = [[Vector3(9000, 9000, 9000), Vector3.ONE]]   # far outside the fine core
+    m._cache.arrays   = [1]       # non-empty so the cache guard passes
+    m._cache.origin   = Vector3i.ZERO
+    m._last_center    = Vector3.ZERO
+    # Populate fake level geometry so _dispatch_splice doesn't early-return.
+    m._clipmap.level_cells = PackedFloat32Array([1.0])
+    # A huge edit that exceeds _MAX_SPLICE_SPAN — should still fall back to full rebuild.
+    var huge := float(m._MAX_SPLICE_SPAN + 10) * VoxelConstants.RENDER_BASE_CELL
+    m._splice_queue = [[Vector3.ZERO, Vector3.ONE * huge, Time.get_ticks_usec()]]
     m._dispatch_splice()
-    assert_eq(m._splice_task_id, -1, "no worker dispatched for an out-of-core edit")
-    assert_eq(m._last_center, Vector3.INF, "it falls back to a full re-mesh")
+    assert_eq(m._splice_task_id, -1, "no worker dispatched for an oversized edit")
+    assert_eq(m._last_center, Vector3.INF, "oversized edit falls back to full re-mesh")

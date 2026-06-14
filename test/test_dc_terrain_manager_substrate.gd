@@ -36,7 +36,7 @@ func test_full_build_renders_terrain_in_world_space() -> void:
     mgr._dispatch(focus)
     mgr._finish()   # blocks on the worker, installs the mesh + cache
 
-    var arrays: Array = mgr._cache_arrays
+    var arrays: Array = mgr._cache.arrays
     assert_false(arrays.is_empty(), "full build produced a cached mesh")
     var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
     assert_gt(verts.size(), 500, "meaningfully tessellated terrain")
@@ -72,7 +72,7 @@ func test_async_splice_applies_an_edit() -> void:
     mgr.error_driven = false
     mgr._dispatch(focus)
     mgr._finish()
-    var verts_before: int = (mgr._cache_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+    var verts_before: int = (mgr._cache.arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
     assert_gt(verts_before, 500, "primed a base mesh")
 
     # Carve a hole into the store at the focus, then fire the edit + pump _process until the async
@@ -92,5 +92,5 @@ func test_async_splice_applies_an_edit() -> void:
     assert_true(done, "the worker splice job completed")
     mgr._process(0.016)   # is_task_completed → _finish_splice applies
     assert_eq(mgr._splice_task_id, -1, "the async splice applied")
-    var verts_after: int = (mgr._cache_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+    var verts_after: int = (mgr._cache.arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
     assert_ne(verts_after, verts_before, "the spliced dig changed the cached mesh (edit is reflected)")

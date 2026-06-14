@@ -36,3 +36,8 @@ or condensed.
   target structural simulation: continuum physics via the Material Point
   Method, replacing PBD so terrain/parts/debris deform, fracture, and settle
   under one solver (Stages 5–6 become emergent). Vision + spike plan.
+- [`13-incremental-lod-splice.md`](13-incremental-lod-splice.md) — make edits
+  patch the displayed mesh incrementally at any distance/LOD (not full-rebuild),
+  and size detail to a runtime budget instead of a constant fine core. B1 (multi-
+  LOD splice) + B2 (budget-driven eps_px); B3 (incremental LOD on camera move)
+  deferred but recorded.
