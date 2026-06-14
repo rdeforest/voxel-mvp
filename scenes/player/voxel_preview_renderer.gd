@@ -64,7 +64,7 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
     _visible_im.clear_surfaces()
     _obscured_im.clear_surfaces()
-    if player == null:
+    if player == null or not player.is_focused():
         return
     var mode: EditMode = player.current_activity()
     if mode == null:

@@ -13,7 +13,7 @@ var _refused_mat: StandardMaterial3D   # "won't do anything" tint for an inert a
 func _ready() -> void:
     _refused_mat = StandardMaterial3D.new()
     _refused_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-    _refused_mat.albedo_color = Color(0.6, 0.6, 0.6, 0.25)
+    _refused_mat.albedo_color = Color(0.6, 0.6, 0.6, 0.15)
     _refused_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
     _refused_mat.cull_mode    = BaseMaterial3D.CULL_DISABLED
     _refused_mat.render_priority = VoxelConstants.OVERLAY_RENDER_PRIORITY  # draw over the post quad
@@ -35,6 +35,9 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
     if player == null:
+        return
+    if not player.is_focused():
+        visible = false
         return
 
     var mode: EditMode = player.current_activity()

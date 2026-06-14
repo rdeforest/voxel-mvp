@@ -18,9 +18,9 @@ func _init(action_factories: ActionFactories, build_state: BuildState, csg_state
 # rather than over `self`. Capturing self would create a cycle that
 # prevents the RefCounted catalog from freeing when the player exits.
 func _build_catalog(af: ActionFactories, bs: BuildState, cs: CsgState) -> Array[Tool]:
-    var build_mat := _make_preview_material(Color(1.0, 1.0, 0.5, 0.4))
-    var csg_add   := _make_preview_material(Color(0.4, 1.0, 0.5, 0.35))   # green  — union
-    var csg_sub   := _make_preview_material(Color(1.0, 0.4, 0.35, 0.35))  # red    — difference
+    var build_mat := _make_preview_material(Color(1.0, 1.0, 0.5, 0.20))
+    var csg_add   := _make_preview_material(Color(0.4, 1.0, 0.5, 0.18))   # green  — union
+    var csg_sub   := _make_preview_material(Color(1.0, 0.4, 0.35, 0.18))  # red    — difference
     var csg_mat   := func(): return csg_add if cs.op == CsgState.Op.ADD else csg_sub
 
     # Most activities show no mesh ghost — the world-space VoxelPreviewRenderer draws

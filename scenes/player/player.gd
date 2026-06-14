@@ -21,6 +21,12 @@ var wireframe_enabled := false
 # works. Set true on the event.
 var _active := false
 
+# Focused = the game has the mouse (captured): look, tools, and ghosts are live. Unfocused = the
+# mouse is free (console open, or Esc) so you can click UI; tools and ghosts go quiet until you
+# click back into the window. Opening the console unfocuses; Esc closes the console or unfocuses.
+var _focused := true
+var _console_open := false
+
 var _key_actions:          Dictionary
 var _mouse_button_actions: Dictionary
 
@@ -41,7 +47,7 @@ const _MARCH_STEP := 0.2
 # target this far along the camera ray so parts can be placed over empty space.
 # A mode can override the distance via EditMode.get_air_distance (CSG floats its
 # ghost at 2x its largest dimension so a big shape doesn't fill the screen).
-const AIR_PLACE_DISTANCE := 4.0
+const AIR_PLACE_DISTANCE := 12.0
 
 # Free-placement chord (Build only): hold Shift + (W|A|E), scroll wheel.
 const WHEEL_STEP := 0.05
@@ -63,6 +69,7 @@ func _ready() -> void:
     VoxelEventBusSingleton.subscribe(WorldReadyEvent.CHANNEL, _on_world_ready)
 
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+    LimboConsole.toggled.connect(_on_console_toggled)
 
     edit_preview.player     = self
     raycast.target_position = Vector3(0, 0, -EDIT_REACH)
@@ -151,23 +158,41 @@ func current_activity() -> EditMode:
 
 # --- Input dispatch ---
 
+func is_focused() -> bool:
+    return _focused
+
+func _set_focused(on: bool) -> void:
+    _focused = on
+    Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE)
+
+func _on_console_toggled(shown: bool) -> void:
+    _console_open = shown
+    if shown:
+        _set_focused(false)   # free the mouse for the console; click back in to resume
+
+
 func _unhandled_input(event: InputEvent) -> void:
     if event is InputEventKey and event.pressed:
         _on_key_pressed(event)
-    elif event is InputEventMouseMotion:
+    elif event is InputEventMouseMotion and _focused:
         _camera_rig.handle_mouse_motion(event)
     elif event is InputEventMouseButton:
         _on_mouse_button_pressed(event)
 
 func _on_key_pressed(event: InputEventKey) -> void:
     if event.is_action_pressed("ui_cancel"):
-        Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+        if _console_open:
+            LimboConsole.close_console()
+        else:
+            _set_focused(false)
         return
     # `?` toggles the keybinding chart. Match the resolved character (layout-
     # agnostic), with Shift+/ as a fallback if unicode isn't populated.
     if event.unicode == 0x3F or (event.keycode == KEY_SLASH and event.shift_pressed):
         _help_overlay.toggle()
         return
+    if not _focused:
+        return   # mouse is free (console / Esc): tool + overlay keys are off until you click back in
     if _key_actions.has(event.keycode):
         _key_actions[event.keycode].call()
 
@@ -175,7 +200,8 @@ func _on_mouse_button_pressed(event: InputEventMouseButton) -> void:
     if not event.pressed:
         return
     if Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
-        Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+        if not _console_open:
+            _set_focused(true)   # click back into the window resumes; this click doesn't also edit
         return
     if _handle_placement_wheel(event):
         return

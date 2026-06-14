@@ -155,6 +155,9 @@ func _input(p_event: InputEvent) -> void:
 	if p_event.is_action_pressed("limbo_console_toggle"):
 		toggle_console()
 		get_viewport().set_input_as_handled()
+	elif _control.visible and p_event.is_action_pressed("ui_cancel"):
+		close_console()   # Esc closes the console, like the toggle key (local change)
+		get_viewport().set_input_as_handled()
 	# Check to see if the history gui should open
 	elif _control.visible and p_event.is_action_pressed("limbo_console_search_history"):
 		toggle_history()
