@@ -120,6 +120,36 @@ func test_scroll_rebuild_matches_full_sample() -> void:
     assert_eq(scrolled, fresh, "scrolled rebuild equals a full-sample rebuild at the new center")
 
 
+func test_small_move_remeshes_far_move_rebuilds() -> void:
+    # The move-latency goal: a move within the retained fine data re-COLLAPSES the octree
+    # (DCOctreeMesher.remesh — no rebuild); only a move past REBUILD_DISTANCE re-sources data.
+    var focus := Vector3(0, _surface(0, 0), 0)
+    var mgr := DCTerrainManager.new()
+    add_child_autofree(mgr)
+    var follow := Node3D.new(); add_child_autofree(follow); follow.global_position = focus
+    mgr.setup(follow, _store())
+    mgr._enabled = true
+    mgr.error_driven = false
+    mgr._dispatch(focus); mgr._finish()
+    assert_eq(mgr._build_center, focus, "the full build set the build centre")
+
+    follow.global_position = focus + Vector3(DCTerrainManager.REMESH_DISTANCE + 1.0, 0, 0)
+    mgr._process(0.016)
+    assert_ne(mgr._remesh_task_id, -1, "a small move dispatched an in-place remesh")
+    assert_eq(mgr._task_id, -1, "...not a full rebuild")
+    for _i in 3000:
+        if WorkerThreadPool.is_task_completed(mgr._remesh_task_id):
+            break
+        OS.delay_msec(1)
+    mgr._finish_remesh()
+    assert_eq(mgr._build_center, focus, "a remesh did NOT move the build centre (data unchanged)")
+
+    follow.global_position = focus + Vector3(DCTerrainManager.REBUILD_DISTANCE + 1.0, 0, 0)
+    mgr._process(0.016)
+    assert_ne(mgr._task_id, -1, "a move past REBUILD_DISTANCE dispatched a full rebuild")
+    mgr._finish()
+
+
 func test_async_splice_applies_an_edit() -> void:
     # Prime a full build, dig into the store, then drive the async splice (dispatch -> worker ->
     # apply) and confirm the cached mesh changed — the edit shows without a full re-mesh.

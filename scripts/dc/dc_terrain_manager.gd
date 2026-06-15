@@ -36,7 +36,11 @@ const LEVEL_DIM         := 129    # samples per axis per level; LEVEL_DIM-1 must
                                   # 129 -> ±64m of 1m cells, so dramatic 3D terrain (overhangs,
                                   # relief) renders fine instead of undersampling into floating
                                   # islands. ~8x the mesh compute of 65 (perf is fine until <30fps).
-const RECENTER_DISTANCE := 8.0    # re-mesh once the follow target drifts this far (m)
+# Movement re-meshing: small moves re-COLLAPSE the retained octree for the new view (cheap, no field
+# sampling, no rebuild — DCOctreeMesher.remesh); a FULL rebuild fires only when you walk far enough from
+# the build centre to need fresh fine data ahead (the retained fine data spans ~±half0 around it).
+const REMESH_DISTANCE  := 2.0     # re-collapse the retained octree once the view drifts this far (m)
+const REBUILD_DISTANCE := 12.0    # ...but past this from the build centre, re-source data (full rebuild)
 
 # Derived: octree root spans the coarsest level. ROOT = (LEVEL_DIM-1) << (LEVELS-1).
 const _LEVEL_CELLS      := LEVEL_DIM - 1                 # 128
@@ -65,7 +69,8 @@ var _mesher := DCOctreeMesher.new()   # reused: holds the persistent collapse-hy
 # is shared — requirement (c) for crack-free LOD-boundary splices. Splices are serialized
 # (only dispatched when _task_id == -1) so there is no data race.
 var _task_id := -1
-var _last_center := Vector3.INF
+var _last_center := Vector3.INF   # last build OR remesh view position (re-collapse cadence)
+var _build_center := Vector3.INF   # last FULL build position (the retained fine data is centred here)
 var _last_proj := 0.0   # proj of the last build; a live FOV/zoom change re-meshes (telescope refines)
 # Async in-place re-mesh: a FOV/eps change re-collapses the RETAINED octree on a worker (no rebuild, no
 # field re-sample) instead of a full rebuild. Mutually exclusive with the build + splice (shared _mesher).
@@ -233,8 +238,10 @@ func set_debug_backface(on: bool) -> void:
     _mesh_instance.material_override = (load(BACKFACE_MATERIAL_PATH) if on else terrain_material)
 
 # Force a full re-mesh (worker rebuild) on the next tick — for changes that alter the octree's
-# STRUCTURE (error_driven, uniform_core) or when no build is retained.
+# STRUCTURE (error_driven, uniform_core, prune) or when no build is retained. Invalidating the build
+# centre makes the next tick exceed REBUILD_DISTANCE → a full rebuild (not just a re-collapse).
 func remesh() -> void:
+    _build_center = Vector3.INF
     _last_center = Vector3.INF
 
 
@@ -551,14 +558,16 @@ func _process(dt: float) -> void:
             _finish_splice()
     elif not frozen:
         var center := _follow.global_position
+        var build_drift := center.distance_to(_build_center)
         var drift := center.distance_to(_last_center)
         var fov_changed := not is_equal_approx(_view_proj(), _last_proj)
-        if drift > RECENTER_DISTANCE:
-            if Perf.is_shown() and is_finite(drift):
-                print("recenter: walked %.1fm → full rebuild (re-source data)" % drift)
+        if build_drift > REBUILD_DISTANCE:
+            if Perf.is_shown() and is_finite(build_drift):
+                print("recenter: %.1fm from build → full rebuild (re-source fine data)" % build_drift)
             _dispatch(center)
-        elif fov_changed:
-            _dispatch_remesh(_view_proj(), eps_px)   # in-place re-collapse on a worker (no rebuild)
+        elif drift > REMESH_DISTANCE or fov_changed:
+            _last_center = center
+            _dispatch_remesh(_view_proj(), eps_px)   # re-collapse the retained octree for the new view
         elif not _splice_queue.is_empty() and not _cache.arrays.is_empty():
             _dispatch_splice()
     Perf.report("DC mesh (main)", (Time.get_ticks_usec() - t0) / 1000.0)
@@ -663,6 +672,7 @@ func _dispatch(center: Vector3) -> void:
     _job.origin  = root_origin
     _job.arrays  = []
     _last_center = center
+    _build_center = center   # the retained fine data is centred here; moves re-collapse until ~half0 away
     var half0 := float(_LEVEL_CELLS) * 0.5
     # Invalidation overlay: a full rebuild re-meshes the whole clipmap; show the fine (level-0)
     # region as the representative "this got redone" box (green) — so movement lights it up.
