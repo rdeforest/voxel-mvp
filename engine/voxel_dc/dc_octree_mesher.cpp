@@ -318,6 +318,15 @@ struct EditStoreSource : public SdfSource {
 	LocalVector<float> accel_data; // backs accel.data
 	bool has_accel = false;
 
+	// (P2, doc 17) graded data floor: the build descends only as fine as a cell would RENDER. A cell of
+	// size s at distance d projects to ~s*proj/d px, so the floor where that ≈ eps_px is s = eps_px*d/proj
+	// → floor_k = eps_px/proj. Far cells stop coarse (few cells → horizon coverage is affordable); near
+	// cells reach 1. World-fixed grid, camera-driven depth — the same screen-error rule as the collapse
+	// (doc 10 §"world-fixed cell grid, camera-driven refinement"; doc 13 §B3). 0 = uniform fine floor.
+	Vector3 cam;           // camera in OCTREE-LOCAL lattice (set per build)
+	double floor_k = 0.0;
+	double floor_cap = 1e9;
+
 	EditStoreSource(const EditStore *s, const Vector3 &wo, double bc) :
 			store(s), world_origin(wo), base_cell(bc) {}
 
@@ -356,15 +365,30 @@ struct EditStoreSource : public SdfSource {
 		return g.length_squared() > 0.0 ? g.normalized() : Vector3(0, 1, 0);
 	}
 
-	double target_cell_size(const Vector3 &p) const override { return 1.0; } // uniform fine floor (lattice unit)
+	// Graded data floor (P2): build only as fine as a cell renders. floor_k == 0 → uniform fine (floor 1).
+	double target_cell_size(const Vector3 &p) const override {
+		if (floor_k <= 0.0) {
+			return 1.0;
+		}
+		return CLAMP(floor_k * (p - cam).length(), 1.0, floor_cap);
+	}
 
 	// Exact surface-sparse prune (P1): a cell is surface-free iff the accel grid's min/max over it (plus a
-	// 1-cell margin) is strictly one side of the isosurface. Without an accel grid, abstain to a dense build
-	// (the no-window tests rely on this). NOTE: only safe when accel covers every cell that gets built — the
-	// caller bakes it over the whole resident window before building (a box outside the grid abstains TRUE,
-	// which here means "prune", so an uncovered built cell would wrongly vanish).
+	// 1-cell margin) is strictly one side of the isosurface. Only prune cells the accel grid FULLY covers —
+	// outside it, return false (build the cell). The accel covers the fine bubble where empty cells are many
+	// and worth skipping; far cells build at the graded (coarse) floor without it, so they're few and cheap.
+	// (Returning Level's out-of-grid abstain — TRUE = prune — would wrongly vanish far cells.)
 	bool surface_free(const Vector3 &cmin, const Vector3 &cmax) const override {
-		return has_accel && accel.surface_free(cmin, cmax);
+		if (!has_accel) {
+			return false;
+		}
+		Vector3 lo = accel.origin;
+		Vector3 hi = accel.origin + Vector3(accel.dim - 1, accel.dim - 1, accel.dim - 1);
+		if (cmin.x - 1.0 < lo.x || cmin.y - 1.0 < lo.y || cmin.z - 1.0 < lo.z ||
+				cmax.x + 1.0 > hi.x || cmax.y + 1.0 > hi.y || cmax.z + 1.0 > hi.z) {
+			return false; // not fully inside the accel grid → build it (don't prune blindly)
+		}
+		return accel.surface_free(cmin, cmax);
 	}
 	bool is_finest_level(const Vector3 &p) const override { return false; } // no clipmap core to pin
 
@@ -1242,7 +1266,8 @@ Array DCOctreeMesher::mesh_world(
 		bool error_driven,
 		const PackedColorArray &palette,
 		Vector3i win_min,
-		Vector3i win_max) {
+		Vector3i win_max,
+		double floor_k) {
 	Array out;
 	if (store.is_null() || depth < 1 || base_cell <= 0.0) {
 		ERR_PRINT("DCOctreeMesher::mesh_world: bad arguments");
@@ -1273,15 +1298,29 @@ Array DCOctreeMesher::mesh_world(
 	// Resident WINDOW (doc 16 Stage B): when win_min != win_max, build only the cells overlapping the
 	// window box (WORLD lattice) and mark the rest absent — the large root can span the roam region while
 	// the build cost stays bounded to the window. Default (win_min == win_max) = build the whole root.
+	// P2 (doc 17): graded data floor — the build descends only as fine as a cell renders (floor_k =
+	// eps_px/proj), so far cells stop coarse and a large window stays affordable. 0 = uniform fine.
+	_persist->world_src.cam = camera;
+	_persist->world_src.floor_k = floor_k;
 	if (win_min != win_max) {
 		oct.build_box = true;
 		oct.window_mode = true;
 		oct.build_min = win_min;
 		oct.build_max = win_max;
-		// P1 (doc 17): bake the surface-sparse accel grid over the window (octree-local) and turn the prune
-		// on, so the build skips the ~99.8% of empty cells. Only when windowed — a windowless build's accel
-		// would span the whole root (huge). Costs ~one cheap field-sample pass; saves the dense tree build.
-		_persist->world_src.bake_accel(win_min - world_origin, win_max - world_origin);
+		// Bake the surface-sparse accel grid (P1) and turn the prune on. The accel covers where the floor
+		// is fine and empty cells are many: the whole window when uniform, else just the fine bubble around
+		// the camera (radius ~1/floor_k, where the floor reaches 1) — far cells build coarse without it.
+		Vector3i wlo = win_min - world_origin;
+		Vector3i whi = win_max - world_origin;
+		Vector3i alo = wlo;
+		Vector3i ahi = whi;
+		if (floor_k > 0.0) {
+			int ar = int(Math::ceil(1.0 / floor_k));
+			Vector3i c(int(Math::round(camera.x)), int(Math::round(camera.y)), int(Math::round(camera.z)));
+			alo = Vector3i(MAX(c.x - ar, wlo.x), MAX(c.y - ar, wlo.y), MAX(c.z - ar, wlo.z));
+			ahi = Vector3i(MIN(c.x + ar, whi.x), MIN(c.y + ar, whi.y), MIN(c.z + ar, whi.z));
+		}
+		_persist->world_src.bake_accel(alo, ahi);
 		oct.prune_safety = 1.0;
 	}
 	oct.run();
@@ -1349,10 +1388,10 @@ void DCOctreeMesher::_bind_methods() {
 			DEFVAL(PackedByteArray()), DEFVAL(PackedColorArray()));
 	ClassDB::bind_method(
 			D_METHOD("mesh_world", "store", "world_origin", "depth", "base_cell",
-					"camera", "proj", "eps_px", "error_driven", "palette", "win_min", "win_max"),
+					"camera", "proj", "eps_px", "error_driven", "palette", "win_min", "win_max", "floor_k"),
 			&DCOctreeMesher::mesh_world,
 			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(PackedColorArray()),
-			DEFVAL(Vector3i()), DEFVAL(Vector3i()));
+			DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(0.0));
 	ClassDB::bind_method(
 			D_METHOD("grow_world", "camera", "proj", "eps_px", "win_min", "win_max"),
 			&DCOctreeMesher::grow_world);
