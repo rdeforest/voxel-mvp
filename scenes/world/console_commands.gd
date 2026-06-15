@@ -57,6 +57,7 @@ func _table() -> Array:
         [dcinval,         "dcinval",   "Toggle the invalidation overlay: blue=voxels an edit changed, green=region re-meshed, fading. Shows what each edit/move redoes."],
         [dcbudget,        "dcbudget",  "Toggle the B2 detail budget: auto-tune the LOD threshold toward a frame-time target (refine on slack, coarsen over budget). Usage: dcbudget [on|off]"],
         [dceps,           "dceps",     "Set the screen-error LOD threshold (px; lower = more detail). Usage: dceps <px>"],
+        [fov,             "fov",       "Set the camera field-of-view in degrees (low = telescope/zoom → distant terrain refines under screen-error LOD). Usage: fov <degrees>"],
         [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight + magenta backfaces (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
@@ -218,6 +219,14 @@ func dceps(px: float) -> void:
     dc_manager.eps_px = maxf(0.1, px)
     dc_manager.remesh()
     LimboConsole.info("dceps: %.2fpx" % dc_manager.eps_px)
+
+func fov(degrees: float) -> void:
+    var cam := host.get_viewport().get_camera_3d()
+    if cam == null:
+        LimboConsole.error("fov: no active camera")
+        return
+    cam.fov = clampf(degrees, 1.0, 179.0)   # the DC manager polls FOV each frame → auto re-mesh
+    LimboConsole.info("fov: %.1f°" % cam.fov)
 
 # Freeze the render so a defect holds still, fly through it (noclip), and colour backfaces magenta
 # so a backwards triangle (gap fills magenta) reads differently from a missing one (gap stays open).
