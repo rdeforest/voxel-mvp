@@ -10,27 +10,36 @@
 
 ### Active thread (2026-06-15): DC render — finish 16 via the WORLD-FIXED INCREMENTAL OCTREE
 
-**Read `docs/MANIFESTO.md`, then the `## START HERE` brief at the top of
-`docs/roadmap/implementation/started/16-persistent-octree-substrate.md`.** That brief is the
-authoritative handoff — it has the hump, the plan, the foundations to reuse, and the manifesto traps to
-avoid. Summary:
+**Read `docs/MANIFESTO.md`, then doc 16 — especially `## Stage A scaffold — LANDED`,
+`Persistence — LANDED`, and `THE GOAL` in
+`docs/roadmap/implementation/started/16-persistent-octree-substrate.md`.** (The `## START HERE`
+block there is now history — the decision it asks for is MADE; read it for the hump/traps, not as a todo.)
 
-**The hump:** movement triggers a FULL rebuild of a **camera-centered** clipmap octree (~4.8s; terrain
-lags seconds behind you — a *correctness* failure, not a perf nicety). Stage 1 (screen-error LOD) shipped
-and is merged to master. This session built the right *foundations* on branch
-`feat/dc-persistent-octree-cache` (persistent octree + `remesh()`, exact surface-sparse prune, scroll-fill,
-async in-place remesh, move→remesh) — but they're improvements to the *camera-centered* clipmap, which is
-the wrong structure. The fix is THE GOAL in doc 16: a **world-fixed incremental octree** (data resolution
-world-fixed/detail-driven, render LOD screen-error; a move re-collapses + builds only the leading band,
-interior reused). Per the manifesto this is enabling STRUCTURE — mandatory, do it, no deferring.
+**The hump:** movement rebuilds a **camera-centered** clipmap octree (terrain lags — a *correctness*
+failure). The fix (doc 16 THE GOAL): a **world-fixed** octree, render LOD screen-error, a move
+re-collapses + builds only the leading band, interior reused.
 
-**Process note (own it):** last session repeatedly hit the Enterprise traps the manifesto forbids
-(defer-the-hard-part, chase worker wall-clock at 300fps, a surface-prune that broke watertightness = the
-literal #8 cautionary tale). Re-read the manifesto at the START of the rewrite, not after being told.
+**DECIDED + LANDED this session (branch `feat/dc-persistent-octree-cache`, headless-tested, live render
+untouched):**
+- **Decision** (doc 16, manifesto-cited): retire the clipmap data model; **bottom-up exact** build (NOT
+  top-down lazy-refine — that decides from coarse corners and drops sub-cell features); ride on
+  **`DCOctreeMesher`** (it has the screen-error + crack-free meshing `SparseVoxelOctree`/`DcSubstratePreview`
+  lacks). Enabler: `EditStore::sample` is C++/worker-safe, so the concentric clipmap grids are a vestige.
+- **`b2b8430` scaffold** — `SdfSource` seam (`Clipmap` is now one impl → live render byte-identical);
+  `EditStoreSource` (samples the field directly, world-anchored); `mesh_world(...)` (one world-fixed octree,
+  screen-error collapse). `test/test_dc_world_octree.gd` on the real Phase-B terrain.
+- **`5931201` persistence** — `mesh_world` retains its octree; `remesh()` re-collapses on camera move with
+  no resample (tested: re-walk == fresh build). The prerequisite for incremental movement.
+- GUT: 226 pass / 1 pre-existing pending / 0 fail. **Nothing is GUI-verified — `mesh_world` isn't wired to
+  anything visible yet** (no `dcworld` command exists). Build gotcha: see [[build-symlink-path-compare]].
 
-**NEXT:** the rewrite per doc 16's START HERE — decide first whether to retire the clipmap data model
-(Stage C, manifesto-preferred) before world-anchoring (A) + incremental growth (B). Gate every step on
-watertight-WITH-collapse + interior-byte-identical-on-move + GUT green + `dcinval` thin band.
+**NEXT — Stage B incremental growth (the hard part):** on a move, build only the leading-edge cells from
+the world-fixed field and graft into the retained octree; evict the trailing edge; gate on **interior
+byte-identical** before/after a small move. Then the exact surface-sparse prune over direct sampling +
+graded data floor for horizon coverage (the O(volume) wall blocks a full `dcworld` render until then),
+then a `dcworld` manager modeled on `DcSubstratePreview` makes it the live render and retires the clipmap +
+geomorph + the `dcgen`/SVO render. Gate every step on watertight-WITH-collapse + GUT green + (once visible)
+`dcinval` thin band.
 
 ### Active thread (2026-06-11): MPM continuum-physics substrate — spike done, VERDICT = GO
 
