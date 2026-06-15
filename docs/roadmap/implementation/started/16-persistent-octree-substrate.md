@@ -2,15 +2,13 @@
 
 ## Progress at a glance (single source of truth — update on every commit)
 
-Branch: `feat/dc-screen-error-lod` (not yet merged to master).
-
-**Stage 1 — Screen-error criterion**
+**Stage 1 — Screen-error criterion — ✓ DONE** (merged to master via `feat/dc-screen-error-lod`)
 - [x] `camera`/`proj`/`eps_px` restored in `mesh_clipmap`; collapse on `we·proj/dist > eps_px`
 - [x] Manager computes camera-lattice + proj from the live `Camera3D`; threaded to worker + splice
 - [x] B2 budget tunes `eps_px` (default on); FOV-change re-mesh trigger
 - [x] Test knobs: `fov` / `dceps` / `dccore` console cmds; fullscreen + uncapped-fps + vsync-off defaults
 - [x] Full GUT suite green (215 tests) incl. a camera/FOV-dependence test
-- [ ] **In-game validation** — tune ~2px via `dceps`, confirm `fov` (telescope) refines distant terrain, and walking coarsens-behind / refines-ahead (needs GPU eyes)
+- [x] **In-game validation** — screen-error confirmed: flat coarsens, detail/near stays fine, telescope refines distant
 
 **Stage 2 — Persistent node cache + invalidation** *(the movement payoff)*
 - [ ] not started
