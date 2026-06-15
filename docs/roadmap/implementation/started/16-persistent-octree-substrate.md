@@ -1,5 +1,36 @@
 # Persistent Octree Substrate — staged plan (B3 / doc-10 completion)
 
+## THE GOAL — world-fixed incremental octree (no compromise)
+
+The correct end state, per the manifesto (one field / one representation / persists everywhere / the
+grid is a world-fixed spatial database): **a single persistent octree anchored to WORLD coordinates**.
+Cells sit at fixed world positions and keep their triangles. The two things that are conflated today —
+*where the data is fine* and *where we draw fine triangles* — are **separated**:
+- **Data resolution is world-fixed**: fine where there is detail/edits, fixed in space, so fine data
+  exists *ahead* of the camera because terrain is there, not because you're looking at it.
+- **Render LOD is screen-error** (camera-driven `we·proj/dist`) — already working (Stage 1).
+
+So **moving = re-collapse over data that's already fine ahead + build only the leading-edge band**;
+the interior octree (cells, QEFs, triangles) is reused. No full rebuild on movement. This retires the
+camera-centered clipmap levels and the geomorph blend (the screen-error octree already stitches LOD
+jumps crack-free via point-location).
+
+**Why this is mandatory, not an optimization (manifesto #8):** the move rebuild's staleness is a
+*correctness* failure (the displayed terrain lags seconds behind you), and a camera-centered data model
+is the wrong *structure*. This is enabling structure, not wall-clock chasing. The session's retention,
+scroll-fill, surface-sparse prune, and `remesh()` are its foundations — kept.
+
+**Staged build (small reversible steps toward the FULL end — never a smaller end):**
+- **A — World-anchor the octree/data window** so cells hold fixed world positions as the camera roams a
+  resident window (prerequisite for reuse). Retire the camera-recentred root.
+- **B — Incremental growth**: on a move, build only the leading-edge cells from the (scrolled) world-
+  fixed data and graft into the retained octree; evict the trailing edge. Interior reused.
+- **C — Retire clipmap levels + geomorph**: one world-fixed adaptive data source feeding the octree;
+  data resolution driven by detail, not camera distance.
+- Each stage: tested (watertight + interior-byte-identical-on-move), shippable, leaves the game working.
+
+---
+
 ## Progress at a glance (single source of truth — update on every commit)
 
 **Stage 1 — Screen-error criterion — ✓ DONE** (merged to master via `feat/dc-screen-error-lod`)
