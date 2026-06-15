@@ -157,6 +157,12 @@ const _MAX_QUEUE := 64               # cap; overflow → one full re-mesh covers
 # the manager is enabled, which is opt-in, so it's quiet in normal play.
 var log_timings := true
 
+# Surface-sparse build: stop descending a cell once it's provably surface-free (|field| at the cell
+# centre exceeds the field's worst-case change to a corner, padded by this factor for the geomorph
+# blend's nonlinearity). 0 = dense build-to-floor everywhere (the old ~2M-cell, multi-second rebuild).
+# >1 is conservative (prunes less, never holes a real surface); the watertight tests are the guard.
+var prune_safety := 2.0
+
 # Screen-space-error LOD: the mesher builds to the data floor then collapses bottom-up
 # wherever one vertex's projected error (we * proj / dist) is within eps_px on screen
 # (DCOctreeMesher::accumulate) — flat/distant regions go coarse, near/curved stay fine,
@@ -735,9 +741,10 @@ func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
         uniform,  # uniform_core: KEEP the fine core (level 0) at 1m so edits near the player splice
                   # with a small box. `dccore off` drops it (the core coarsens too — uniform huge
                   # triangles at high eps, but edits there may crack / force a full rebuild).
-        0.0)    # surface-sparse prune DISABLED: the local-gradient bound is unreliable on
-                # godot_voxel's lossy-encoded + geomorph-blended multi-level SDF (it over-prunes
-                # real surface -> big slivers). Safe at lod 0 only; needs a mip-robust bound.
+        prune_safety)  # surface-sparse build: skip provably surface-free cells (the dense build's
+                       # ~2M-cell cost is mostly empty terrain). Re-enabled on the analytic store field
+                       # (accurate finite diffs, unlike godot_voxel's lossy SDF); the safety factor pads
+                       # the gradient estimate against the geomorph blend. Watertight tests guard it.
     _job.owners      = _mesher.get_last_triangle_owners()
     _job.sizes = _mesher.get_last_triangle_owner_sizes()
 

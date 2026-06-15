@@ -18,10 +18,20 @@ leaf cache) was rejected: it can't predict collapse-on-recede without retaining 
 - [x] **2c — async in-place remesh** (uses the retained octree — 2a). FOV/eps changes re-collapse the retained tree **on a worker** (`DCOctreeMesher.remesh`, no rebuild, no field sampling), applied next frame. First tried synchronous (hitched + made the budget oscillate — a lag spike per interval, caught in GUI test) → moved to the worker. The build / remesh / splice jobs are now **serialized** on the shared `_mesher` (also fixes a latent build-while-splice race). So eps/budget tuning and zoom no longer trigger a "DC FULL rebuild". (Retained octree is now load-bearing — kept.)
 - [x] **2d** (edit half) — edits already re-mesh only the touched region via the build-box splice (no change needed); FOV/resize covered by 2c's `remesh`.
 
-**PERF FINDING (corrected):** "no perf pressure" was wrong — 300fps is the main thread; the meshing
-runs on a worker, and its wall-clock latency IS the visible lag on moves/edits. So the move re-mesh is
-worth optimizing now. Move lag = the full rebuild re-samples ALL levels (~10M generator evals); edit lag
-= the splice's patch-mesh (~100ms, a separate bottleneck — patch meshing, not field sampling).
+**PERF FINDING (the big one):** the move rebuild was **8.7 SECONDS** (measured in-game, 7 LOD levels,
+~120k verts) — NOT the field sampling, but the **dense bottom-up build**: it descends EVERY cell in the
+fine region to the data floor (~2M cells at ±16m / 0.25m) and samples all of them, even though terrain
+is a thin sheet and ~95% are empty. Scroll-fill / remesh / retention all missed this — they optimized
+sampling + stationary re-collapse, not the dense build. 300fps misled me (it's the main thread; the 8.7s
+is the worker, so the terrain just lagged seconds behind movement).
+- [x] **surface-sparse build (THE fix)** — re-enabled the build's prune (`prune_safety` 0→2.0): stop
+  descending a provably surface-free cell (|field| at centre exceeds its worst-case change to a corner).
+  It was disabled for over-pruning godot_voxel's lossy SDF; the render now reads the **analytic** store
+  field (accurate finite diffs), and at a conservative factor it skips ~empty cells only. Guarded by NEW
+  watertight tests on the real heightfield terrain — single-level AND geomorph-blended — proving the
+  pruned surface == the dense surface (no holes). `dcprune <factor>` tunes it (0 = old dense build).
+  Should cut the 8.7s by ~20-40×. **GUI-verify the new rebuild ms.**
+- [x] **2b/3 — scroll-fill the move rebuild** *(secondary win)*: a recenter re-samples only the shell that scrolled in, reusing the previous build's grids via `EditStore.fill_region`. (Cuts the *sampling*; the prune cuts the *build* — together they attack the move rebuild from both sides.)
 - [x] **2b/3 — scroll-fill the move rebuild** *(the move-latency win)*: a recenter now re-samples only the shell that scrolled in, reusing the previous build's per-level grids via `EditStore.fill_region` (the proven mechanism the collision manager uses) — the dominant generator cost is cut. Edits clear the buffers (next build re-samples, no stale reuse). Test: a scrolled rebuild == a full-sample rebuild byte-for-byte. *(This is the pragmatic win; the full world-anchored-octree-that-keeps-interior-triangles is deferred — not needed at current scale, and the scroll-fill captures the latency.)*
 - [x] **2e** — correctness tests landed (remesh==fresh-build; set_eps in-place; scroll==full-sample). Visual `dcinval` thin-band check is a GUI step.
 

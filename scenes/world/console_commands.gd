@@ -59,6 +59,7 @@ func _table() -> Array:
         [dceps,           "dceps",     "Set the screen-error LOD threshold (px; lower = more detail). Usage: dceps <px>"],
         [fov,             "fov",       "Set the camera field-of-view in degrees (low = telescope/zoom → distant terrain refines under screen-error LOD). Usage: fov <degrees>"],
         [dccore,          "dccore",    "Toggle the uniform 1m fine core: ON pins fine cells around you (clean edit splices); OFF lets the core collapse by screen-error too (uniform huge tris at high dceps, but edits may crack). Usage: dccore [on|off]"],
+        [dcprune,         "dcprune",   "Set the surface-sparse build safety factor (skips empty cells → fast rebuild). 0 = dense (slow, all cells); ~2 = conservative. Lower = more pruning but risks holes. Usage: dcprune <factor>"],
         [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight + magenta backfaces (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
@@ -219,6 +220,12 @@ func dcerror(state := "") -> void:
 func dceps(px: float) -> void:
     dc_manager.set_eps(maxf(0.1, px))   # cheap in-place re-collapse (retained octree), no field re-sample
     LimboConsole.info("dceps: %.2fpx" % dc_manager.eps_px)
+
+func dcprune(factor: float) -> void:
+    dc_manager.prune_safety = maxf(0.0, factor)
+    dc_manager.remesh()
+    LimboConsole.info("dcprune: %.2f (%s)" % [dc_manager.prune_safety,
+        "dense build" if dc_manager.prune_safety == 0.0 else "surface-sparse"])
 
 func fov(degrees: float) -> void:
     var cam := host.get_viewport().get_camera_3d()

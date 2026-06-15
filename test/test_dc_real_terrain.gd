@@ -79,6 +79,44 @@ func test_cpp_mesher_sound_on_real_terrain():
     assert_eq(audit["interior"], 0, "interior boundary edges (cracks)")
 
 
+# The surface-sparse build (prune_safety > 0) must skip ONLY surface-free cells: same surface, still
+# crack-free, on the real heightfield terrain (non-unit-distance — what broke the old prune). Over-
+# pruning shows as holes (interior boundary edges) and a dropped vertex count. This is the guard that
+# lets the prune be enabled in production to kill the multi-second dense rebuild.
+func test_surface_sparse_prune_stays_watertight():
+    var data := _bake_data()
+    var origins := PackedVector3Array([Vector3.ZERO])
+    var cells := PackedFloat32Array([1.0])
+    var dense := DCOctreeMesher.new().mesh_clipmap([data], DIM, origins, cells, Vector3.ZERO, 1e9, DEPTH)
+    var pruned := DCOctreeMesher.new().mesh_clipmap([data], DIM, origins, cells, Vector3.ZERO, 1e9, DEPTH,
+        Vector3.ZERO, 0.0, 0.0, false, Vector3i.ZERO, [], PackedColorArray(), false, 2.0)
+    var dv: PackedVector3Array = dense[Mesh.ARRAY_VERTEX]
+    var pv: PackedVector3Array = pruned[Mesh.ARRAY_VERTEX]
+    var pi: PackedInt32Array   = pruned[Mesh.ARRAY_INDEX]
+    var audit := _crack_audit(pv, pi)
+    assert_eq(audit["interior"], 0, "pruned build stays crack-free (no over-prune holes)")
+    assert_eq(audit["nonmanifold"], 0, "pruned build stays manifold")
+    assert_almost_eq(float(pv.size()), float(dv.size()), float(dv.size()) * 0.02,
+        "pruned surface == dense surface (only surface-free cells skipped)")
+
+
+# The geomorph blend (across the LOD band) was the other half of why the prune was disabled — the
+# finite-diff gradient is sampled across blended levels there. A 2-level clipmap: the pruned build must
+# keep the same surface as the dense one (over-pruning in the band would drop verts).
+func test_surface_sparse_prune_on_blended_levels():
+    var data := [_bake_lod(WORLD_ORIGIN, 0), _bake_lod(WORLD_ORIGIN + Vector3i(-16, -16, -16), 1)]
+    var origins := PackedVector3Array([Vector3.ZERO, Vector3(-16, -16, -16)])
+    var cells := PackedFloat32Array([1.0, 2.0])
+    var center := Vector3(16, 16, 16)
+    var dense := DCOctreeMesher.new().mesh_clipmap(data, DIM, origins, cells, center, 8.0, DEPTH)
+    var pruned := DCOctreeMesher.new().mesh_clipmap(data, DIM, origins, cells, center, 8.0, DEPTH,
+        Vector3.ZERO, 0.0, 0.0, false, Vector3i.ZERO, [], PackedColorArray(), false, 2.0)
+    var dv: PackedVector3Array = dense[Mesh.ARRAY_VERTEX]
+    var pv: PackedVector3Array = pruned[Mesh.ARRAY_VERTEX]
+    assert_almost_eq(float(pv.size()), float(dv.size()), float(dv.size()) * 0.03,
+        "blended-level pruned surface == dense surface (no over-prune in the geomorph band)")
+
+
 func _bake_lod(origin: Vector3i, lod: int) -> PackedFloat32Array:
     var buf := VoxelBuffer.new()
     buf.create(DIM, DIM, DIM)
