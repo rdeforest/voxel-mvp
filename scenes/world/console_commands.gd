@@ -269,13 +269,16 @@ func dcgen(state := "") -> void:
     substrate_preview.set_enabled(on)
     LimboConsole.info("dcgen: %s (live octree-over-generator render, cyan)" % ("on" if on else "off"))
 
-# `dcworld on` renders the doc-16 world-fixed incremental octree (mesh_world + grow_world on move),
-# amber, overlaid. Dense build → a small bubble until the surface-sparse prune lands.
-func dcworld(state := "") -> void:
+# `dcworld on [radius_m]` renders the doc-16 world-fixed incremental octree (mesh_world + grow_world on
+# move), amber, overlaid, at production density (0.25 m). Dense build → a small bubble until the prune
+# lands; raise the radius to grow it (and watch the rebuild hitch grow — that hitch is the prune's point).
+func dcworld(state := "", radius := 0.0) -> void:
+    if radius > 0.0:
+        world_preview.set_radius(radius)
     var on := _parse_toggle(state, world_preview.is_enabled())
     world_preview.set_enabled(on)
-    LimboConsole.info("dcworld: %s (world-fixed incremental octree, amber bubble)%s" % [
-        "on" if on else "off",
+    LimboConsole.info("dcworld: %s (world-fixed octree, %.2gm bubble @ %.2gm cells)%s" % [
+        "on" if on else "off", world_preview.win_radius_m, world_preview.base_cell,
         " — tip: `dcmanager off` to see it alone" if on else ""])
 
 # Spawn a live PBD structural-physics demo in front of the player (stress-coloured

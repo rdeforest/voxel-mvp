@@ -10,25 +10,27 @@ extends MeshInstance3D
 # run on a WorkerThreadPool task (pure C++, no Node/RenderingServer); the ArrayMesh swap is
 # on the main thread. `dcworld` toggles it. Shown amber, overlaid for comparison.
 #
-# KNOWN LIMIT (not a bug — the missing prune + data floor, doc 16 NEXT): the build is DENSE to
-# the floor, so coverage is a small BUBBLE around you (a hard rim where terrain stops = the
-# window edge). Distance coverage waits on the surface-sparse prune over direct sampling.
+# DENSITY: base_cell defaults to RENDER_BASE_CELL (0.25 m) so the preview matches the live
+# clipmap render's resolution. The build is DENSE to the floor, so 0.25 m costs 64× the cells
+# of 1 m for the same metric bubble — hence the modest radius. That cost is exactly what the
+# surface-sparse prune over direct sampling (doc 16 NEXT) removes; until then, coverage is a
+# small BUBBLE around you with a hard rim where terrain stops (the window edge — NOT a bug).
 
-const BASE_CELL    := 1.0    # 1 lattice unit = 1 metre (matches the headless tests)
-const DEPTH        := 9      # root = 2^9 = 512-unit world cube; the window roams inside it
-const ROOT_SIZE    := 1 << DEPTH
-const ROOT_SNAP    := 64     # snap the root origin to this lattice grid (cells stay world-aligned)
-const ROOT_MARGIN  := 96     # re-root once the player is this close to a root face
-const WIN_RADIUS   := 24     # resident window half-extent around the player (dense build → keep modest)
-const RECENTER     := 8.0    # grow the window once the player drifts this far (m)
-const EPS_PX       := 2.0    # screen-error LOD threshold (px)
+const DEPTH        := 11      # root = 2^11 = 2048-unit cube; the window roams inside it (size is free —
+const ROOT_SIZE    := 1 << DEPTH  #   cells outside the window are cheap absent leaves)
+const ROOT_SNAP    := 64      # snap the root origin to this LATTICE grid (cells stay world-aligned)
+const RECENTER     := 6.0     # grow the window once the player drifts this far (m)
+const EPS_PX       := 2.0     # screen-error LOD threshold (px)
+
+var base_cell    := VoxelConstants.RENDER_BASE_CELL  # metres per lattice unit (matches production density)
+var win_radius_m := 12.0                             # resident window half-extent around the player (m)
 
 var _follow:     Node3D
 var _edit_store: EditStore        # live store; snapshotted per re-root so the worker reads immutably
 var _enabled := false
 
 var _mesher := DCOctreeMesher.new()  # persistent — holds the retained octree across frames
-var _root_origin_i := Vector3i.ZERO
+var _root_origin_i := Vector3i.ZERO  # LATTICE coords of the root's (0,0,0) corner
 var _built := false
 var _dirty := false                  # an edit happened → full rebuild to pick it up
 var _last_center := Vector3.INF
@@ -64,6 +66,12 @@ func is_enabled() -> bool:
     return _enabled
 
 
+# Tune the bubble live (the `dcworld <radius>` arg). A change forces a re-root next frame.
+func set_radius(radius_m: float) -> void:
+    win_radius_m = maxf(2.0, radius_m)
+    _built = false
+
+
 func set_enabled(on: bool) -> void:
     _enabled = on
     if on:
@@ -87,27 +95,29 @@ func _process(_dt: float) -> void:
         _dispatch_grow(p)
 
 
-# Root origin snapped to the ROOT_SNAP grid, centred on the player — cells never shift under a
-# fixed feature, and re-roots land on stable boundaries.
+# Root origin (LATTICE) snapped to the ROOT_SNAP grid, centred on the player — cells never shift
+# under a fixed feature, and re-roots land on stable boundaries.
 func _snap_root(p: Vector3) -> Vector3i:
-    var o := ((p - Vector3.ONE * (ROOT_SIZE * 0.5)) / ROOT_SNAP).floor() * ROOT_SNAP
+    var pl := p / base_cell                               # player in lattice units
+    var o := ((pl - Vector3.ONE * (ROOT_SIZE * 0.5)) / ROOT_SNAP).floor() * ROOT_SNAP
     return Vector3i(o)
 
 
 func _outside_root(p: Vector3) -> bool:
-    var lo := Vector3(_root_origin_i) + Vector3.ONE * ROOT_MARGIN
-    var hi := Vector3(_root_origin_i) + Vector3.ONE * (ROOT_SIZE - ROOT_MARGIN)
+    var margin := win_radius_m + 32.0                     # re-root before the window can reach a root face
+    var base := Vector3(_root_origin_i) * base_cell       # root corner in world metres
+    var lo := base + Vector3.ONE * margin
+    var hi := base + Vector3.ONE * (ROOT_SIZE * base_cell - margin)
     return p.x < lo.x or p.y < lo.y or p.z < lo.z or p.x > hi.x or p.y > hi.y or p.z > hi.z
 
 
-# The resident window around the player, in WORLD lattice, clamped to the root box.
+# The resident window around the player, in WORLD LATTICE, clamped to the root box.
 func _window(p: Vector3) -> Array:
-    var c := Vector3i(p.round())
+    var r := int(ceil(win_radius_m / base_cell))          # radius in lattice units
+    var c := Vector3i((p / base_cell).round())
     var lo := _root_origin_i
     var hi := _root_origin_i + Vector3i.ONE * ROOT_SIZE
-    var wmin := (c - Vector3i.ONE * WIN_RADIUS).clamp(lo, hi)
-    var wmax := (c + Vector3i.ONE * WIN_RADIUS).clamp(lo, hi)
-    return [wmin, wmax]
+    return [(c - Vector3i.ONE * r).clamp(lo, hi), (c + Vector3i.ONE * r).clamp(lo, hi)]
 
 
 # px per world unit at unit distance (FOV + viewport height only). 0 with no camera.
@@ -119,10 +129,11 @@ func _view_proj() -> float:
     return vp_h / (2.0 * tan(deg_to_rad(cam.fov) * 0.5))
 
 
+# Camera in the octree's lattice frame (world / base_cell − root origin), for screen-error collapse.
 func _camera_lattice() -> Vector3:
     var cam := get_viewport().get_camera_3d()
     var cam_world := cam.global_position if cam != null else (_follow.global_position if _follow != null else Vector3.ZERO)
-    return cam_world / BASE_CELL - Vector3(_root_origin_i)
+    return cam_world / base_cell - Vector3(_root_origin_i)
 
 
 # Full rebuild at a snapped root with a fresh EditStore snapshot — re-root, edit, or first build.
@@ -150,14 +161,14 @@ func _stage_job(p: Vector3, is_grow: bool) -> void:
     _job_cam = _camera_lattice()
     _job_proj = _view_proj()
     _job_is_grow = is_grow
-    _task_id = WorkerThreadPool.add_task(_run_job, false, "dcworld build" if not is_grow else "dcworld grow")
+    _task_id = WorkerThreadPool.add_task(_run_job, false, "dcworld grow" if is_grow else "dcworld build")
 
 
 func _run_job() -> void:
     if _job_is_grow:
         _job_arrays = _mesher.grow_world(_job_cam, _job_proj, EPS_PX, _job_win_min, _job_win_max)
     else:
-        _job_arrays = _mesher.mesh_world(_job_store, _root_origin_i, DEPTH, BASE_CELL,
+        _job_arrays = _mesher.mesh_world(_job_store, _root_origin_i, DEPTH, base_cell,
                 _job_cam, _job_proj, EPS_PX, true, PackedColorArray(), _job_win_min, _job_win_max)
 
 
@@ -168,9 +179,9 @@ func _finish() -> void:
         return
     var t0 := Time.get_ticks_usec()
     mesh = _arrays_to_mesh(_job_arrays)
-    # mesh_world verts are lattice-local to the root origin; place + scale back to world.
-    global_position = Vector3(_root_origin_i) * BASE_CELL
-    scale = Vector3.ONE * BASE_CELL
+    # mesh_world verts are lattice-local to the root corner; place + scale back to world metres.
+    global_position = Vector3(_root_origin_i) * base_cell
+    scale = Vector3.ONE * base_cell
     visible = true
     Perf.report("dcworld swap (main)", (Time.get_ticks_usec() - t0) / 1000.0)
     Perf.mark_event()
