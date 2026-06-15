@@ -105,11 +105,29 @@ cadence on the proven `DcSubstratePreview` GDScript, and the `dcgen`/SVO render 
 `mesh_world` supersedes it (least-duplication path — we delete a parallel mesher, not copy the
 screen-error core into SVO). SVO may remain as a Phase-B *storage* oracle.
 
-**NEXT (Stage B):** incremental leading-edge growth on move — build only the cells newly in range from the
-(world-fixed) field and graft into the retained octree, evict the trailing edge, interior byte-identical
-(the gate). Then the exact surface-sparse prune over direct sampling (when the window outgrows a single
-dense root) + graded data floor for horizon coverage, then a `dcworld` manager (modeled on
-`DcSubstratePreview`) makes it the live render and retires the clipmap + geomorph + the SVO `dcgen` path.
+**Stage B incremental growth — LANDED (2026-06-15, headless): B0 window + B1 grow/evict.**
+- **B0 — windowed build.** `mesh_world` gained `win_min`/`win_max` (WORLD lattice): a large root spans the
+  roam region while the build descends only the cells overlapping the window (the existing `build_box`),
+  marking the rest *absent* (no QEF, no vertex, not meshed — the window edge is the resident mesh's open
+  rim). New `window_mode` flag gates the absent marking so the clipmap **splice is untouched** (it needs
+  its out-of-box cells meshed to stitch the patch rim). Gate: a whole-root window == the no-window build
+  byte-for-byte; a sub-window builds strictly less.
+- **B1 — incremental grow + evict (the core).** `grow_world(camera,proj,eps,win_min,win_max)` re-windows
+  the RETAINED octree: `reconcile(0)` grafts cells that entered (`grow_subtree` + `accumulate_qef` sample
+  ONLY the new band) and evicts cells that left (`kill_subtree` clears the orphaned subtree so the flat-
+  array mesh loops skip it); `reaccumulate(0)` rolls ancestor QEFs up from cached children with **no field
+  sampling**; then `recollapse_and_mesh`. **Gate (the brief's): `grow A→B` == fresh `mesh_world` of B —
+  same surface + winding — while sampling only the leading edge** (`get_last_build_sample_count` proves the
+  interior wasn't resampled). Round-trip A→B→A is lossless. The "byte-identical" gate compares the triangle
+  set order-independently: the incremental tree's array layout differs (grown cells appended, evicted ones
+  leaked), so vertex *order* differs, but positions are bit-identical and the surface matches exactly.
+  Tests: `test/test_dc_world_octree.gd` (`test_grow_world_equals_fresh_build`, `..._round_trip_is_lossless`).
+
+**NEXT:** **B1b** — reclaim evicted cells via a free-list (B1 leaks them; bound the resident set across a
+traverse). Then the exact surface-sparse prune over direct sampling + graded data floor for horizon
+coverage (the O(volume) wall), then a `dcworld` manager (modeled on `DcSubstratePreview`) wires `mesh_world`
++ `grow_world` as the live render — the first GPU eyes on this path (`dcinval` thin-band gate) — and retires
+the clipmap + geomorph + the SVO `dcgen` path.
 
 ## THE GOAL — world-fixed incremental octree (no compromise)
 

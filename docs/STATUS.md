@@ -33,13 +33,24 @@ untouched):**
 - GUT: 226 pass / 1 pre-existing pending / 0 fail. **Nothing is GUI-verified — `mesh_world` isn't wired to
   anything visible yet** (no `dcworld` command exists). Build gotcha: see [[build-symlink-path-compare]].
 
-**NEXT — Stage B incremental growth (the hard part):** on a move, build only the leading-edge cells from
-the world-fixed field and graft into the retained octree; evict the trailing edge; gate on **interior
-byte-identical** before/after a small move. Then the exact surface-sparse prune over direct sampling +
-graded data floor for horizon coverage (the O(volume) wall blocks a full `dcworld` render until then),
-then a `dcworld` manager modeled on `DcSubstratePreview` makes it the live render and retires the clipmap +
-geomorph + the `dcgen`/SVO render. Gate every step on watertight-WITH-collapse + GUT green + (once visible)
-`dcinval` thin band.
+**LANDED this session (2026-06-15) — Stage B incremental growth, headless (B0 + B1, NOT yet committed):**
+- **B0 — windowed build.** `mesh_world(... win_min, win_max)`: a large root spans the roam region; the build
+  descends only cells overlapping the window (reusing `build_box`), the rest *absent* (no QEF/vertex/mesh —
+  window edge = resident-mesh rim). New `window_mode` flag keeps the absent marking off the clipmap splice.
+- **B1 — `grow_world(camera,proj,eps,win_min,win_max)` (the core).** Re-windows the RETAINED octree:
+  `reconcile` grafts entered cells (sampling ONLY the new band) + `kill_subtree`-evicts left cells;
+  `reaccumulate` rolls ancestor QEFs up from cached children (no resample); `recollapse_and_mesh`.
+  **Gate met: `grow A→B` == fresh `mesh_world` of B (same surface+winding, order-independent) while
+  sampling only the leading edge** (`get_last_build_sample_count`); round-trip A→B→A lossless.
+  Tests in `test/test_dc_world_octree.gd`. **GUT now 231 / 230 pass / 1 pre-existing pending / 0 fail.**
+  Still **headless-only — nothing GUI-verified** (no `dcworld` yet).
+
+**NEXT — B1b + visibility:** (1) **B1b** reclaim evicted cells via a free-list (B1 leaks the orphaned
+subtree — fine for correctness, unbounded memory across a long traverse); gate: resident cell count bounded.
+(2) the exact surface-sparse prune over direct sampling + graded data floor for horizon coverage (the
+O(volume) wall blocks a full-view-distance render). (3) a `dcworld` manager modeled on `DcSubstratePreview`
+wires `mesh_world`+`grow_world` as the live render — **first GPU eyes** (`dcinval` thin-band gate) — and
+retires the clipmap + geomorph + the `dcgen`/SVO render. Gate each step: watertight-WITH-collapse + GUT green.
 
 ### Active thread (2026-06-11): MPM continuum-physics substrate — spike done, VERDICT = GO
 

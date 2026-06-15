@@ -150,6 +150,120 @@ func test_mesh_world_remesh_rewalk_equals_fresh_build():
               "the nearer re-walk kept more detail (collapse re-decided on the retained tree, not re-sampled)")
 
 
+# Stage B0 — the resident WINDOW: mesh_world can build only the cells overlapping a window box (WORLD
+# lattice), marking the rest ABSENT (no QEF, no vertex, not meshed), so a large root can span the roam
+# region while the build cost stays bounded to the window. A window covering the WHOLE root must reproduce
+# the no-window full build byte-for-byte — the absent-leaf path can't corrupt the dense case.
+func test_mesh_world_full_window_equals_no_window():
+    var s := _store()
+    var origin := _region_origin(s)
+    var cam := Vector3(16, 16, 220)
+    var full: Array = DCOctreeMesher.new().mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true)
+    # win covering [origin, origin + SIZE) — every cell overlaps, nothing absent.
+    var whole := origin + Vector3i(SIZE, SIZE, SIZE)
+    var win: Array = DCOctreeMesher.new().mesh_world(
+            s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), origin, whole)
+    assert_eq(win[Mesh.ARRAY_VERTEX], full[Mesh.ARRAY_VERTEX], "whole-root window == no-window vertices")
+    assert_eq(win[Mesh.ARRAY_INDEX],  full[Mesh.ARRAY_INDEX],  "...and indices (absent path is inert on the full build)")
+
+
+# A window strictly smaller than the surface extent must build LESS: a real (non-empty) surface, but fewer
+# vertices than the full build, because the out-of-window cells are absent and contribute no geometry.
+func test_mesh_world_subwindow_builds_less():
+    var s := _store()
+    var origin := _region_origin(s)
+    var full_v: PackedVector3Array = _world_arrays(s, origin, false)[Mesh.ARRAY_VERTEX]
+    # central column (x,z in [8,24), full height) — contains the surface near xz centre, excludes the edges.
+    var wmin := origin + Vector3i(8, 0, 8)
+    var wmax := origin + Vector3i(24, SIZE, 24)
+    var win: Array = DCOctreeMesher.new().mesh_world(
+            s, origin, DEPTH, 1.0, Vector3.ZERO, 0.0, 0.0, false, PackedColorArray(), wmin, wmax)
+    var wv: PackedVector3Array = win[Mesh.ARRAY_VERTEX]
+    assert_gt(wv.size(), 0, "sub-window still meshed the surface inside it")
+    assert_lt(wv.size(), full_v.size(), "sub-window built less than the full root (out-of-window cells absent)")
+
+
+# Stage B1 — incremental window growth (THE gate): grow_world re-windows the RETAINED octree from window
+# A to window B — grafting the cells that entered (sampling ONLY them) and evicting the cells that left —
+# and its mesh must be IDENTICAL to a from-scratch mesh_world of window B, while resampling only the
+# leading-edge band (not the whole window). This is the incremental-correctness gate the brief demands:
+# an incremental build must equal a from-scratch build.
+#
+# "Identical" = the same SURFACE, not the same array order. The incremental tree appends grown cells and
+# leaks evicted ones, so its cell array is laid out differently → place_vertex emits vertices in a
+# different order. That's an implementation artifact; what must match is the set of triangles (each as its
+# 3 world positions, same winding). Vertex positions ARE bit-identical for corresponding cells (same QEF
+# math), so a string signature compares exactly.
+const WIN_FULL := Vector3i(SIZE, SIZE, SIZE)
+
+func _vlt(p: Vector3, q: Vector3) -> bool:
+    if p.x != q.x: return p.x < q.x
+    if p.y != q.y: return p.y < q.y
+    return p.z < q.z
+
+func _vstr(p: Vector3) -> String:
+    return "%.9f,%.9f,%.9f" % [p.x, p.y, p.z]
+
+# Sorted triangle signatures: each triangle canonicalised by rotating to its lexicographically smallest
+# vertex (preserves winding), formatted to full precision, then the whole list sorted. Two meshes with the
+# same surface produce equal signature lists regardless of vertex/triangle ordering.
+func _tri_sigs(arrays: Array) -> PackedStringArray:
+    var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+    var idx:   PackedInt32Array   = arrays[Mesh.ARRAY_INDEX]
+    var sigs := PackedStringArray()
+    for i in range(0, idx.size(), 3):
+        var t := [verts[idx[i]], verts[idx[i + 1]], verts[idx[i + 2]]]
+        var mi := 0
+        for k in range(1, 3):
+            if _vlt(t[k], t[mi]):
+                mi = k
+        sigs.append("%s|%s|%s" % [_vstr(t[mi]), _vstr(t[(mi + 1) % 3]), _vstr(t[(mi + 2) % 3])])
+    sigs.sort()
+    return sigs
+
+func test_grow_world_equals_fresh_build():
+    var s := _store()
+    var origin := _region_origin(s)
+    var cam := Vector3(16, 16, 120)
+    # A = left ¾ of the root (x ∈ [0,24)); B = right ¾ (x ∈ [8,32)). Overlap x∈[8,24); B gains x[24,32),
+    # loses x[0,8). Full extent in y,z. The surface spans x, so both windows carry real surface.
+    var a_min := origin;                       var a_max := origin + Vector3i(24, SIZE, SIZE)
+    var b_min := origin + Vector3i(8, 0, 0);   var b_max := origin + WIN_FULL
+    var m := DCOctreeMesher.new()
+    m.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), a_min, a_max)
+    var grown: Array = m.grow_world(cam, 500.0, 2.0, b_min, b_max)
+    var grow_samples: int = m.get_last_build_sample_count()
+
+    var fm := DCOctreeMesher.new()
+    var fresh: Array = fm.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), b_min, b_max)
+    var fresh_samples: int = fm.get_last_build_sample_count()
+
+    var gv: PackedVector3Array = grown[Mesh.ARRAY_VERTEX]
+    var fv: PackedVector3Array = fresh[Mesh.ARRAY_VERTEX]
+    assert_eq(gv.size(), fv.size(), "grow A→B has the same vertex count as a fresh build of B (no garbage)")
+    assert_eq(_tri_sigs(grown), _tri_sigs(fresh), "grow A→B == fresh build of B (same surface, same winding)")
+    assert_gt(grow_samples, 0, "grow sampled the new leading-edge band")
+    assert_lt(grow_samples, fresh_samples, "grow resampled ONLY the leading edge, not the whole window (the B1 win)")
+
+
+# Round trip: A → B → A must return to the original A mesh, byte-for-byte — eviction then re-growth is
+# lossless (the retained cells that survived A→B are reused; the ones evicted are rebuilt identically).
+func test_grow_world_round_trip_is_lossless():
+    var s := _store()
+    var origin := _region_origin(s)
+    var cam := Vector3(16, 16, 120)
+    var a_min := origin;                       var a_max := origin + Vector3i(24, SIZE, SIZE)
+    var b_min := origin + Vector3i(8, 0, 0);   var b_max := origin + WIN_FULL
+    var m := DCOctreeMesher.new()
+    var built_a: Array = m.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), a_min, a_max)
+    m.grow_world(cam, 500.0, 2.0, b_min, b_max)
+    var back_a: Array = m.grow_world(cam, 500.0, 2.0, a_min, a_max)
+    var bv: PackedVector3Array = back_a[Mesh.ARRAY_VERTEX]
+    var av: PackedVector3Array = built_a[Mesh.ARRAY_VERTEX]
+    assert_eq(bv.size(), av.size(), "A→B→A has the same vertex count as the original A build")
+    assert_eq(_tri_sigs(back_a), _tri_sigs(built_a), "A→B→A returns to the A surface (evict+regrow is lossless)")
+
+
 # Direct field sampling == sampling a baked grid of the same field: the crossing topology is decided by
 # the field's SIGN at integer cell corners — identical whether read direct (mesh_world) or via a
 # fill_region grid (mesh_clipmap) — so the two meshes share a vertex count (positions differ only by the

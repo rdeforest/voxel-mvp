@@ -33,6 +33,10 @@ class DCOctreeMesher : public RefCounted {
 	// sub-box to whole cells at the local displayed resolution (the alignment trap fix).
 	PackedFloat32Array  _last_tri_owner_sizes;
 
+	// Leaves whose Hermite data was sampled by the last build/grow (the field-derived build cost). After a
+	// grow_world this counts ONLY the leading-edge band — proof the retained interior was not resampled.
+	int _last_build_samples = 0;
+
 public:
 	~DCOctreeMesher();
 
@@ -122,7 +126,18 @@ public:
 			double proj = 0.0,
 			double eps_px = 0.0,
 			bool error_driven = false,
-			const PackedColorArray &palette = PackedColorArray());
+			const PackedColorArray &palette = PackedColorArray(),
+			Vector3i win_min = Vector3i(), // resident window (WORLD lattice); win_min == win_max ⇒ whole root
+			Vector3i win_max = Vector3i());
+
+	// Incremental window growth (doc 16 Stage B): re-window the RETAINED world octree (from a prior
+	// mesh_world) — graft cells newly in [win_min, win_max), sampling only them; evict cells that left;
+	// re-collapse + mesh against camera/proj/eps. Byte-identical to a fresh mesh_world of the new window,
+	// but the interior is reused (not resampled). Empty Array if no world octree is retained.
+	Array grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max);
+
+	// Field-sampled leaf count of the last build/grow — after grow_world, just the leading-edge band.
+	int get_last_build_sample_count() const { return _last_build_samples; }
 
 	// Per-triangle owner cell origins (WORLD lattice) from the last mesh call — same order/count
 	// as the returned ARRAY_INDEX divided by 3.

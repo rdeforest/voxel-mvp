@@ -375,6 +375,9 @@ struct Cell {
 	int children[8];
 	int vertex = -1;
 	bool leaf = true;
+	bool absent = false; // window_mode: a leaf OUTSIDE the resident window — no QEF, no vertex, not
+	                     // meshed. The window boundary is the resident mesh's open rim (like the clipmap's
+	                     // outer edge). Distinct from a splice's build-box-miss leaf, which IS meshed.
 	Qef qef; // accumulated up the tree (own crossings for a leaf; children's sum otherwise)
 };
 
@@ -412,6 +415,13 @@ struct Octree {
 	bool build_box = false;        // restrict the build to cells overlapping [build_min, build_max)
 	Vector3i build_min;            // (WORLD lattice) — a splice builds only the edit box + apron, on the
 	Vector3i build_max;            // FULL build's frame, so its cells share that lattice → crack-free
+	bool window_mode = false;      // mesh_world only: a build-box-miss leaf is ABSENT (not sampled, not
+	                               // meshed) — the box is the resident WINDOW, its edge the mesh rim. A
+	                               // splice leaves window_mode off: its out-of-box cells ARE meshed so the
+	                               // patch rim can stitch to them (the full build supplies their triangles).
+	int build_samples = 0;         // leaves whose Hermite data was sampled this build (accumulate_qef) —
+	                               // the field-derived build cost. A grow re-samples only the new band, so
+	                               // this proves the retained interior was NOT resampled (the B1 win).
 	LocalVector<Cell> cells;
 	PackedVector3Array verts;
 	PackedVector3Array normals;
@@ -490,7 +500,14 @@ struct Octree {
 	// collapse_pass dirtied the flags (Stage 2: the retained octree re-collapses without re-sampling).
 	void accumulate_qef(int idx) {
 		if (cells[idx].children[0] < 0) {
-			cells[idx].qef = leaf_qef(idx);
+			// An absent leaf (outside the window) contributes an empty QEF (count 0) — a bit-exact no-op
+			// in its ancestors' sums, so a windowed/incremental build's QEFs equal a full build's.
+			if (cells[idx].absent) {
+				cells[idx].qef = Qef();
+			} else {
+				cells[idx].qef = leaf_qef(idx);
+				++build_samples;
+			}
 			return;
 		}
 		Qef sum;
@@ -552,6 +569,16 @@ struct Octree {
 		orphan_subtree(idx);
 	}
 
+	// Tree depth of a cell of the given lattice size (root_size → 0; size 1 → max_depth). Used by the
+	// incremental grow to resume build() at the right depth when expanding an existing leaf into a subtree.
+	int cell_depth(int size) const {
+		int d = 0;
+		for (int s = root_size; s > size; s >>= 1) {
+			++d;
+		}
+		return d;
+	}
+
 	int build(const Vector3i &origin, int size, int depth) {
 		int idx = int(cells.size());
 		Cell c;
@@ -566,7 +593,10 @@ struct Octree {
 			return idx;
 		}
 		if (build_box && !cell_overlaps_build_box(origin, size)) {
-			return idx; // outside the splice's edit box+apron — leaf, don't descend (no data sampled)
+			if (window_mode) {
+				cells[idx].absent = true; // outside the resident window — placeholder leaf, never meshed
+			}
+			return idx; // outside the box — leaf, don't descend (no data sampled)
 		}
 		Vector3 center = to_v3(origin) + Vector3(1, 1, 1) * (size * 0.5);
 		// Surface-sparse prune: stop here if the cell is provably surface-free, instead of subdividing
@@ -773,6 +803,7 @@ struct Octree {
 	}
 
 	void run() {
+		build_samples = 0;
 		build(Vector3i(0, 0, 0), root_size, 0);
 		// Keep a flat world at >=2 cells/axis so it meshes (a fully-collapsed flat region
 		// is one empty cell — no quad). half the root => the 8 root children may collapse,
@@ -806,6 +837,100 @@ struct Octree {
 				emit_leaf_edges(i);
 			}
 		}
+	}
+
+	// --- Incremental window growth (doc 16 Stage B) -------------------------------------------------
+	// Expand an existing absent leaf into a full subtree at its place in the tree, building children with
+	// the current window box (so in-window descendants reach the floor, out-of-window ones are absent) —
+	// identical structure to what a from-scratch windowed build() would produce for this node.
+	void grow_subtree(int idx) {
+		Vector3i origin = cells[idx].origin;
+		int size = cells[idx].size;
+		int half = size >> 1;
+		int d = cell_depth(size) + 1;
+		cells[idx].leaf = false;
+		cells[idx].absent = false;
+		for (int i = 0; i < 8; ++i) {
+			Vector3i co = origin + Vector3i(CB[i][0], CB[i][1], CB[i][2]) * half;
+			int child = build(co, half, d); // build() may reallocate cells — re-index after each call
+			cells[idx].children[i] = child;
+		}
+	}
+
+	// Clear an orphaned subtree so its stale cells emit nothing. The cells stay in `cells` (B1 leaks them;
+	// B1b reclaims via a free-list), but with an empty QEF a leaf places no vertex and an internal node
+	// stays non-leaf — so the flat-array mesh loops skip the whole detached subtree.
+	void kill_subtree(int idx) {
+		for (int i = 0; i < 8; ++i) {
+			int ch = cells[idx].children[i];
+			if (ch >= 0) {
+				kill_subtree(ch);
+			}
+		}
+		cells[idx].qef = Qef();
+		cells[idx].vertex = -1;
+	}
+
+	// Reconcile the tree to the current window box (build_min/build_max): graft cells that newly overlap
+	// (sampling ONLY them) and evict cells that left (detach their subtree to an absent leaf). The result
+	// is structurally identical to a from-scratch windowed build of this window — same cells, same absent
+	// granularity — because both terminate at the shallowest cell not overlapping the window.
+	void reconcile(int idx) {
+		bool overlaps = cell_overlaps_build_box(cells[idx].origin, cells[idx].size);
+		int sz = cells[idx].size;
+		if (cells[idx].children[0] < 0) {
+			Vector3 center = to_v3(cells[idx].origin) + Vector3(1, 1, 1) * (sz * 0.5);
+			bool at_floor = sz <= 1 || double(sz) <= src->target_cell_size(center);
+			if (at_floor) {
+				// A floor leaf can't be subdivided; flip its presence to match the window.
+				if (overlaps && cells[idx].absent) {
+					cells[idx].absent = false;
+					cells[idx].qef = leaf_qef(idx);
+					++build_samples;
+				} else if (!overlaps) {
+					cells[idx].absent = true; // reaccumulate() clears its QEF
+				}
+				return;
+			}
+			if (overlaps && cells[idx].absent) {
+				grow_subtree(idx);   // leading edge: build the new band
+				accumulate_qef(idx); // sample ONLY the new subtree's leaves
+			}
+			return; // still-absent leaf outside the window: nothing
+		}
+		if (overlaps) {
+			for (int i = 0; i < 8; ++i) {
+				reconcile(cells[idx].children[i]);
+			}
+		} else {
+			// Trailing edge: this whole subtree left the window → kill the children (so their stale cells
+			// emit nothing) and detach to an absent leaf, exactly the placeholder a fresh build leaves here.
+			for (int i = 0; i < 8; ++i) {
+				kill_subtree(cells[idx].children[i]);
+				cells[idx].children[i] = -1;
+			}
+			cells[idx].leaf = true;
+			cells[idx].absent = true;
+		}
+	}
+
+	// Roll accumulated QEFs back up the tree from the (cached) leaf QEFs — NO field sampling. A retained
+	// leaf keeps its cached QEF; an absent leaf contributes empty; an internal node = the in-order sum of
+	// its children. Bit-identical to a full accumulate_qef() because the summands and order are identical.
+	void reaccumulate(int idx) {
+		if (cells[idx].children[0] < 0) {
+			if (cells[idx].absent) {
+				cells[idx].qef = Qef();
+			}
+			return; // present leaf: keep cached QEF (the no-resample property)
+		}
+		Qef sum;
+		for (int i = 0; i < 8; ++i) {
+			int ch = cells[idx].children[i];
+			reaccumulate(ch);
+			sum.add(cells[ch].qef);
+		}
+		cells[idx].qef = sum;
 	}
 };
 
@@ -1057,7 +1182,9 @@ Array DCOctreeMesher::mesh_world(
 		double proj,
 		double eps_px,
 		bool error_driven,
-		const PackedColorArray &palette) {
+		const PackedColorArray &palette,
+		Vector3i win_min,
+		Vector3i win_max) {
 	Array out;
 	if (store.is_null() || depth < 1 || base_cell <= 0.0) {
 		ERR_PRINT("DCOctreeMesher::mesh_world: bad arguments");
@@ -1085,10 +1212,48 @@ Array DCOctreeMesher::mesh_world(
 	oct.world_origin = world_origin;
 	oct.uniform_core = false; // the whole world octree collapses by screen-error; no fine bubble to pin
 	oct.prune_safety = 0.0;   // EditStoreSource::surface_free abstains → dense build to floor (scaffold)
+	// Resident WINDOW (doc 16 Stage B): when win_min != win_max, build only the cells overlapping the
+	// window box (WORLD lattice) and mark the rest absent — the large root can span the roam region while
+	// the build cost stays bounded to the window. Default (win_min == win_max) = build the whole root.
+	if (win_min != win_max) {
+		oct.build_box = true;
+		oct.window_mode = true;
+		oct.build_min = win_min;
+		oct.build_max = win_max;
+	}
 	oct.run();
 
 	_last_tri_owners      = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
+	_last_build_samples   = oct.build_samples;
+	return pack_output(oct);
+}
+
+// Incremental window growth (doc 16 Stage B): re-window the RETAINED world octree (from a prior
+// mesh_world) to [win_min, win_max) (WORLD lattice) — graft the cells that newly entered, sampling ONLY
+// them; evict the cells that left — then re-collapse + mesh against camera/proj/eps. The interior cells
+// (in both windows) keep their tree, QEFs, and vertices: a move re-samples just the leading-edge band,
+// not the whole vicinity. By construction the result is byte-identical to a from-scratch mesh_world of
+// the new window. Benign no-op (empty Array) if nothing is retained — caller falls back to mesh_world.
+Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max) {
+	if (_persist == nullptr) {
+		return Array();
+	}
+	Octree &oct = _persist->oct;
+	oct.build_box = true;
+	oct.window_mode = true;
+	oct.build_min = win_min;
+	oct.build_max = win_max;
+	oct.build_samples = 0;
+	oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge
+	oct.reaccumulate(0); // roll up ancestor QEFs from cached children — no field sampling
+	oct.camera = camera;
+	oct.proj = proj;
+	oct.eps_px = eps_px;
+	oct.recollapse_and_mesh();
+	_last_tri_owners      = oct.tri_owners;
+	_last_tri_owner_sizes = oct.tri_owner_sizes;
+	_last_build_samples   = oct.build_samples;
 	return pack_output(oct);
 }
 
@@ -1108,10 +1273,15 @@ void DCOctreeMesher::_bind_methods() {
 			DEFVAL(PackedByteArray()), DEFVAL(PackedColorArray()));
 	ClassDB::bind_method(
 			D_METHOD("mesh_world", "store", "world_origin", "depth", "base_cell",
-					"camera", "proj", "eps_px", "error_driven", "palette"),
+					"camera", "proj", "eps_px", "error_driven", "palette", "win_min", "win_max"),
 			&DCOctreeMesher::mesh_world,
-			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(PackedColorArray()));
+			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(PackedColorArray()),
+			DEFVAL(Vector3i()), DEFVAL(Vector3i()));
+	ClassDB::bind_method(
+			D_METHOD("grow_world", "camera", "proj", "eps_px", "win_min", "win_max"),
+			&DCOctreeMesher::grow_world);
 	ClassDB::bind_method(D_METHOD("remesh", "camera", "proj", "eps_px"), &DCOctreeMesher::remesh);
+	ClassDB::bind_method(D_METHOD("get_last_build_sample_count"), &DCOctreeMesher::get_last_build_sample_count);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);
 }
