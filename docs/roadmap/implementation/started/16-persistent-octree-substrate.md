@@ -1,5 +1,31 @@
 # Persistent Octree Substrate — staged plan (B3 / doc-10 completion)
 
+## Progress at a glance (single source of truth — update on every commit)
+
+Branch: `feat/dc-screen-error-lod` (not yet merged to master).
+
+**Stage 1 — Screen-error criterion**
+- [x] `camera`/`proj`/`eps_px` restored in `mesh_clipmap`; collapse on `we·proj/dist > eps_px`
+- [x] Manager computes camera-lattice + proj from the live `Camera3D`; threaded to worker + splice
+- [x] B2 budget tunes `eps_px` (default on); FOV-change re-mesh trigger
+- [x] Test knobs: `fov` / `dceps` / `dccore` console cmds; fullscreen + uncapped-fps + vsync-off defaults
+- [x] Full GUT suite green (215 tests) incl. a camera/FOV-dependence test
+- [ ] **In-game validation** — tune ~2px via `dceps`, confirm `fov` (telescope) refines distant terrain, and walking coarsens-behind / refines-ahead (needs GPU eyes)
+
+**Stage 2 — Persistent node cache + invalidation** *(the movement payoff)*
+- [ ] not started
+
+**Stage 3 — Top-down lazy build** *(speed)*
+- [ ] not started
+
+**Stage 4 — Eviction** *(bound the resident set)*
+- [ ] not started
+
+**Stage 5 — Retire the full-rebuild + godot_voxel render fallback**
+- [ ] not started
+
+---
+
 *The B1-style stage plan for the one piece of [doc 10](../../design/10-adaptive-octree-substrate.md)
 that's still missing: making the render octree **persistent and world-fixed** so movement refines
 it **incrementally** instead of triggering a full rebuild. This is "B3" from
