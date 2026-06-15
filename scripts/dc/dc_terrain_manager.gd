@@ -85,12 +85,16 @@ class DcMesh:
 
 var _job   := DcMesh.new()
 var _cache := DcMesh.new()
-# Scrolling SDF buffers (move-latency fix): a full rebuild re-samples only the shell that scrolled in,
-# reusing the previous build's overlap via EditStore.fill_region (the mechanism the collision manager
-# uses). One PackedFloat32Array + world-cell origin per LOD level. Cleared by edits (the next full build
-# then re-samples so the edit isn't stale-reused); empty → full sample (first build / post-edit).
+# Scrolling SDF buffers (move + edit latency fix): the previous full build's per-level grids, reused via
+# EditStore.fill_region (the mechanism the collision manager uses) so a rebuild re-samples only the shell
+# that scrolled in, and a splice re-samples only the edited box — instead of all ~10M points each time.
+# One PackedFloat32Array + world-cell origin per LOD level; empty → full sample (first build).
 var _scroll_buffers: Array = []
 var _scroll_wcs: Array = []
+# Accumulated world-space AABB of edits NOT yet baked into _scroll_buffers. fill_region re-samples this
+# box (the rest is reused), so an edit isn't stale-reused. Reset when a full build re-bakes the buffers.
+var _dirty_lo := Vector3.INF
+var _dirty_hi := -Vector3.INF
 var _build_read_ms := 0   # the in-flight build's store-read time (ms)
 var _build_t0 := 0        # ...and when it started (ms)
 
@@ -295,11 +299,28 @@ func _on_terrain_edit(event: TerrainSdfChangedEvent) -> void:
     # snapshot may predate them).
     if not _enabled or _follow == null:
         return
-    _scroll_buffers = []   # an edit invalidates scroll reuse — the next full build re-samples the field
-    _scroll_wcs = []
+    _expand_dirty(event.box_origin, event.box_size)   # re-sample this box on the next reuse (don't stale it)
     _enqueue_splice(event.box_origin, event.box_size)
     if _task_id != -1:
         _edits_during_build.append([event.box_origin, event.box_size])
+
+
+# Grow the dirty AABB (world space) to include an edited box.
+func _expand_dirty(box_origin: Vector3, box_size: Vector3) -> void:
+    _dirty_lo = _dirty_lo.min(box_origin)
+    _dirty_hi = _dirty_hi.max(box_origin + box_size)
+
+
+# The dirty AABB as a [origin, size) box in a level's CELL units (what fill_region's dirty params take),
+# padded by the DC stencil. Zero size when nothing is dirty (lo > hi) → fill_region reuses everything.
+# Takes captured bounds (not instance state) so a worker reads a stable snapshot.
+func _dirty_cell_box(dirty_lo: Vector3, dirty_hi: Vector3, world_cell: float) -> Dictionary:
+    if dirty_lo.x > dirty_hi.x:
+        return {"origin": Vector3i.ZERO, "size": Vector3i.ZERO}
+    var pad := Vector3i.ONE * (_EDIT_STENCIL_CELLS + 1)
+    var lo := Vector3i((dirty_lo / world_cell).floor()) - pad
+    var hi := Vector3i((dirty_hi / world_cell).ceil()) + pad
+    return {"origin": lo, "size": hi - lo}
 
 
 func _enqueue_splice(box_origin: Vector3, box_size: Vector3) -> void:
@@ -371,9 +392,12 @@ func _start_splice(edit: Dictionary, core: Dictionary) -> void:
     _trace_edit_us     = edit.queued_us
     _trace_dispatch_us = Time.get_ticks_usec()
     var apron := Vector3i.ONE * _splice_apron(core)
+    var prev_buffers: Array = _scroll_buffers if _scroll_buffers.size() == LEVELS else []
+    var prev_wcs: Array = _scroll_wcs if _scroll_wcs.size() == LEVELS else []
     _splice_task_id = WorkerThreadPool.add_task(
         _splice_job.bind(_edit_store.duplicate(), core.min, core.max,
-            core.min - apron, core.max + apron, MaterialPalette.colors()),
+            core.min - apron, core.max + apron, MaterialPalette.colors(),
+            prev_buffers, prev_wcs, _dirty_lo, _dirty_hi),
         false, "DC splice")
 
 func _request_full_rebuild() -> void:
@@ -395,7 +419,8 @@ func _extent(lo: Vector3i, hi: Vector3i) -> int:
 # over the core and stitches crack-free; the build-box leaf-terminates everything else, so cost stays
 # proportional to the edit. Patch verts land in the cache's frame (no shift). No Node/main access.
 func _splice_job(store: EditStore, core_min: Vector3i, core_max: Vector3i,
-        build_min: Vector3i, build_max: Vector3i, palette: PackedColorArray) -> void:
+        build_min: Vector3i, build_max: Vector3i, palette: PackedColorArray,
+        prev_buffers: Array, prev_wcs: Array, dirty_lo: Vector3, dirty_hi: Vector3) -> void:
     _trace_work_start_us = Time.get_ticks_usec()
     var base_cell := VoxelConstants.RENDER_BASE_CELL
     var level_data: Array = []
@@ -403,7 +428,12 @@ func _splice_job(store: EditStore, core_min: Vector3i, core_max: Vector3i,
     for k in LEVELS:
         var world_cell := base_cell * _clipmap.level_cells[k]
         var wc := Vector3i(_clipmap.level_world_cells[k])
-        level_data.append(store.fill_region(wc, LEVEL_DIM, world_cell, PackedFloat32Array(), Vector3i.ZERO, Vector3i.ZERO, Vector3i.ZERO))
+        # Reuse the last build's grid (same frame → shift 0), re-sampling ONLY the edited box — instead
+        # of all ~10M points. Empty prev → full sample (no build retained yet).
+        var prev: PackedFloat32Array = prev_buffers[k] if k < prev_buffers.size() else PackedFloat32Array()
+        var prev_wc: Vector3i = prev_wcs[k] if k < prev_wcs.size() else Vector3i.ZERO
+        var d := _dirty_cell_box(dirty_lo, dirty_hi, world_cell)
+        level_data.append(store.fill_region(wc, LEVEL_DIM, world_cell, prev, prev_wc, d.origin, d.size))
         level_idxs.append(store.fill_indices_region(wc, LEVEL_DIM, world_cell))
     _splice_patch = _mesher.mesh_clipmap(
         level_data, LEVEL_DIM, _clipmap.level_origins, _clipmap.level_cells,
@@ -639,7 +669,7 @@ func _dispatch(center: Vector3) -> void:
     _task_id = WorkerThreadPool.add_task(
         _mesh_job.bind(job_store, level_world_cells, level_origins, level_cells, center_lattice, half0,
             camera_lattice, proj, eps_px, error_driven, uniform_core, root_origin,
-            MaterialPalette.colors(), prev_buffers, prev_wcs), false, "DC terrain mesh")
+            MaterialPalette.colors(), prev_buffers, prev_wcs, _dirty_lo, _dirty_hi), false, "DC terrain mesh")
 
 
 # Runs on a worker thread: read each clipmap level from the (immutable) store snapshot, then
@@ -649,7 +679,7 @@ func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
         level_origins: PackedVector3Array, level_cells: PackedFloat32Array,
         center: Vector3, half0: float, camera: Vector3, proj: float, eps: float, err: bool,
         uniform: bool, world_origin: Vector3i, palette: PackedColorArray,
-        prev_buffers: Array, prev_wcs: Array) -> void:
+        prev_buffers: Array, prev_wcs: Array, dirty_lo: Vector3, dirty_hi: Vector3) -> void:
     var base_cell := VoxelConstants.RENDER_BASE_CELL
     var level_data: Array = []
     var level_indices: Array = []
@@ -660,11 +690,11 @@ func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
         var world_cell := base_cell * cell          # WORLD spacing the store is sampled at
         var wc := Vector3i(level_world_cells[k])     # level origin in world_cell units
         # Scroll reuse: previous grid + its origin → fill_region copies the overlap, samples only the
-        # shifted-in shell. Empty prev → full sample (first build / post-edit). No dirty box: an edit
-        # already cleared the buffers, so a scrolled build is pure-move (its overlap is edit-free).
+        # shifted-in shell PLUS the dirty (edited) box. Empty prev → full sample (first build).
         var prev: PackedFloat32Array = prev_buffers[k] if k < prev_buffers.size() else PackedFloat32Array()
         var prev_wc: Vector3i = prev_wcs[k] if k < prev_wcs.size() else Vector3i.ZERO
-        var data := store.fill_region(wc, LEVEL_DIM, world_cell, prev, prev_wc, Vector3i.ZERO, Vector3i.ZERO)
+        var d := _dirty_cell_box(dirty_lo, dirty_hi, world_cell)
+        var data := store.fill_region(wc, LEVEL_DIM, world_cell, prev, prev_wc, d.origin, d.size)
         level_data.append(data)
         level_indices.append(store.fill_indices_region(wc, LEVEL_DIM, world_cell))
         new_buffers.append(data)
@@ -741,11 +771,14 @@ func _finish() -> void:
         if Perf.is_shown():
             Toast.show_message("FULL rebuild %d ms (%d verts)" % [ms, verts], Color(1.0, 0.7, 0.4))
 
-    # Save this build's grids for the next build's scroll reuse — UNLESS an edit landed during the build
-    # (its snapshot predates the edit, so reusing it would stale-drop the edit; leave scroll invalidated).
+    # Save this build's grids for the next reuse, and clear the dirty box (the build re-sampled it) —
+    # UNLESS an edit landed during the build (its snapshot predates that edit). Then keep the old buffers
+    # + dirty box so the next build re-samples the missed edit.
     if _edits_during_build.is_empty():
         _scroll_buffers = _job.scroll_buffers
         _scroll_wcs = _job.scroll_wcs
+        _dirty_lo = Vector3.INF
+        _dirty_hi = -Vector3.INF
 
     # The worker's snapshot was taken at dispatch, so edits during the build may be absent from the
     # fresh mesh. Re-queue them for an async splice onto it (a brief 1-2 frame gap, no main-thread hitch).

@@ -25,7 +25,9 @@ worth optimizing now. Move lag = the full rebuild re-samples ALL levels (~10M ge
 - [x] **2b/3 — scroll-fill the move rebuild** *(the move-latency win)*: a recenter now re-samples only the shell that scrolled in, reusing the previous build's per-level grids via `EditStore.fill_region` (the proven mechanism the collision manager uses) — the dominant generator cost is cut. Edits clear the buffers (next build re-samples, no stale reuse). Test: a scrolled rebuild == a full-sample rebuild byte-for-byte. *(This is the pragmatic win; the full world-anchored-octree-that-keeps-interior-triangles is deferred — not needed at current scale, and the scroll-fill captures the latency.)*
 - [x] **2e** — correctness tests landed (remesh==fresh-build; set_eps in-place; scroll==full-sample). Visual `dcinval` thin-band check is a GUI step.
 
-**STILL OPEN:** edit lag (the ~100ms patch-mesh) — needs its own diagnosis (mesh cost, not field sampling); **Stage 4** (eviction) and **Stage 5** (retire fallback) — no pressure yet.
+- [x] **edit lag — FIXED:** the splice re-sampled ALL levels in full (~10M evals) just to mesh a tiny box — that was the ~100ms. Now it reuses the last build's grids (`_scroll_buffers`, same frame → shift 0) and re-samples only the dirty (edited) box via `fill_region`. Unified dirty-box model: edits accumulate an AABB instead of clearing the buffers, so both the move rebuild and the splice re-sample only what changed; a full build re-bakes + resets the dirty box. (The dirty box covers ALL pending edits, so a splice's apron can't reuse a stale neighbouring edit.)
+
+**STILL OPEN:** **Stage 4** (eviction) and **Stage 5** (retire fallback) — no pressure yet (memory / cleanup).
 
 **Stage 3 — Top-down lazy build** *(speed)* — **merged into 2b/3** (world-fixed scrolling window) above; the lazy/world-anchored build is the same rework.
 
