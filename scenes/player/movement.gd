@@ -5,6 +5,7 @@ const SPEED         := 8.0
 const JUMP_VELOCITY := 9.0
 
 var fly_enabled := false
+var noclip := false        # fly + pass through terrain (examine mode): set position directly, no collision
 
 var _body:    CharacterBody3D
 var _camera:  Node3D
@@ -19,16 +20,17 @@ func _init(body: CharacterBody3D, camera: Node3D) -> void:
 
 func tick(delta: float) -> void:
     if fly_enabled:
-        _tick_fly()
+        _tick_fly(delta)
     else:
         _tick_ground(delta)
 
 
 # Airplane-style free flight: no gravity, and "forward" follows the full camera
 # aim (pitch included), so you climb and dive by looking up/down — no up/down or
-# crouch keys needed. Still collides (move_and_slide), so you can't pass through
-# terrain. Shift stays reserved as a chord modifier, same as on the ground.
-func _tick_fly() -> void:
+# crouch keys needed. With noclip, position is set directly (no move_and_slide), so you
+# pass through terrain to examine geometry from the far side. Shift stays reserved as a
+# chord modifier, same as on the ground.
+func _tick_fly(delta: float) -> void:
     var move := Vector3.ZERO
     if not Input.is_key_pressed(KEY_SHIFT):
         var input_dir := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
@@ -38,7 +40,10 @@ func _tick_fly() -> void:
         _body.velocity = move * SPEED
     else:
         _body.velocity = _body.velocity.move_toward(Vector3.ZERO, SPEED)
-    _body.move_and_slide()
+    if noclip:
+        _body.global_position += _body.velocity * delta
+    else:
+        _body.move_and_slide()
 
 
 func _tick_ground(delta: float) -> void:

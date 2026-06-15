@@ -382,6 +382,13 @@ func _toggle_fly() -> void:
     _movement.fly_enabled = not _movement.fly_enabled
     _update_mode_label()
 
+# Examine mode (console `examine`): noclip free-flight so you can fly through terrain to
+# inspect geometry from the far side. Off restores grounded movement.
+func set_examine_movement(on: bool) -> void:
+    _movement.fly_enabled = on
+    _movement.noclip = on
+    _update_mode_label()
+
 func _toggle_wireframe() -> void:
     wireframe_enabled = not wireframe_enabled
     get_viewport().debug_draw = (

@@ -48,6 +48,7 @@ var _follow:  Node3D
 
 var _mesh_instance: MeshInstance3D
 var _enabled := false
+var frozen := false        # examine mode: stop dispatching re-meshes so the current mesh holds still
 
 
 # The grass surface material worn by our mesh when DC is the default render. A standalone
@@ -55,6 +56,8 @@ var _enabled := false
 # the snapshot tunables load() the SAME instance and edit it live.
 const TERRAIN_MATERIAL_PATH := "res://assets/materials/terrain_surface.tres"
 var terrain_material: ShaderMaterial = load(TERRAIN_MATERIAL_PATH)
+# Examine-mode override: double-sided, magenta backfaces (tell a backwards triangle from a hole).
+const BACKFACE_MATERIAL_PATH := "res://assets/materials/dc_backface_debug.tres"
 
 var _mesher := DCOctreeMesher.new()   # reused: holds the persistent collapse-hysteresis state
 
@@ -191,6 +194,11 @@ func set_enabled(on: bool) -> void:
 
 func is_enabled() -> bool:
     return _enabled
+
+# Examine mode: swap the terrain mesh to the double-sided backface-debug material (magenta
+# backfaces) or back to the normal grass material. No re-mesh — just the material override.
+func set_debug_backface(on: bool) -> void:
+    _mesh_instance.material_override = (load(BACKFACE_MATERIAL_PATH) if on else terrain_material)
 
 # Force a re-mesh on the next tick (after a live LOD-param change).
 func remesh() -> void:
@@ -427,7 +435,7 @@ func _process(dt: float) -> void:
     else:
         var center := _follow.global_position
         var drift := center.distance_to(_last_center)
-        if drift > RECENTER_DISTANCE:
+        if drift > RECENTER_DISTANCE and not frozen:
             if Perf.is_shown() and is_finite(drift):
                 print("recenter: walked %.1fm → full rebuild (this is the movement re-mesh, B3)" % drift)
             _dispatch(center)
@@ -435,7 +443,7 @@ func _process(dt: float) -> void:
     if _splice_task_id != -1:
         if WorkerThreadPool.is_task_completed(_splice_task_id):
             _finish_splice()
-    elif not _splice_queue.is_empty() and not _cache.arrays.is_empty() and _task_id == -1:
+    elif not frozen and not _splice_queue.is_empty() and not _cache.arrays.is_empty() and _task_id == -1:
         _dispatch_splice()
     Perf.report("DC mesh (main)", (Time.get_ticks_usec() - t0) / 1000.0)
     if Perf.is_shown():
