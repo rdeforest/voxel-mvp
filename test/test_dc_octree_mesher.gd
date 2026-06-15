@@ -184,6 +184,38 @@ func test_screen_error_responds_to_distance_and_fov():
     assert_gt(tris_zoom, tris_far, "narrow FOV (telescope) refines distant terrain")
 
 
+# Stage 2a: the retained octree re-walked at a new camera must EQUAL a from-scratch build at that
+# camera. The tree + per-node QEFs are field-derived (camera-independent), so only the collapse pass
+# differs — remesh() re-decides collapse on the cached tree without re-sampling the field. This is the
+# invariant the whole persistent-octree movement path rests on.
+func test_remesh_rewalk_equals_fresh_build():
+    var data := _level(Vector3.ZERO, 1.0)
+    var origins := PackedVector3Array([Vector3.ZERO])
+    var cells := PackedFloat32Array([1.0])
+    var far  := CENTER + Vector3(0, 0, 220)
+    var near := CENTER + Vector3(0, 0, 80)
+
+    var m := DCOctreeMesher.new()
+    var built_far := m.mesh_clipmap([data], DIM, origins, cells, CENTER, 1e9, DEPTH, far, PROJ, 1.0, true)
+    # Re-walk at the SAME camera reproduces the build exactly.
+    var rewalk_far: Array = m.remesh(far, PROJ, 1.0)
+    assert_eq(rewalk_far[Mesh.ARRAY_VERTEX], built_far[Mesh.ARRAY_VERTEX], "remesh at the build camera reproduces its vertices")
+    assert_eq(rewalk_far[Mesh.ARRAY_INDEX],  built_far[Mesh.ARRAY_INDEX],  "...and its indices")
+
+    # Re-walk at a NEARER camera equals a fresh build there — no field re-sample, identical result.
+    var rewalk_near: Array = m.remesh(near, PROJ, 1.0)
+    var fresh_near := DCOctreeMesher.new().mesh_clipmap([data], DIM, origins, cells, CENTER, 1e9, DEPTH, near, PROJ, 1.0, true)
+    assert_eq(rewalk_near[Mesh.ARRAY_VERTEX], fresh_near[Mesh.ARRAY_VERTEX], "re-walk at a new camera equals a fresh build there")
+    assert_eq(rewalk_near[Mesh.ARRAY_INDEX],  fresh_near[Mesh.ARRAY_INDEX],  "...indices too")
+    assert_gt((rewalk_near[Mesh.ARRAY_INDEX] as PackedInt32Array).size(),
+              (rewalk_far[Mesh.ARRAY_INDEX] as PackedInt32Array).size(),
+              "the nearer re-walk kept more detail (collapse re-decided, not re-sampled)")
+
+func test_remesh_without_build_is_empty():
+    assert_true((DCOctreeMesher.new().remesh(Vector3.ZERO, 500.0, 1.0) as Array).is_empty(),
+        "remesh with no retained build returns empty, not a crash")
+
+
 # --- Material bleed (index_prefer_explicit) ---
 #
 # A placed part writes its material to the SOLID interior, but boundary cells (the surface shell)

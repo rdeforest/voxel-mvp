@@ -13,8 +13,14 @@
 #include "core/templates/hash_set.h"
 #include "core/variant/typed_array.h"
 
+struct DCOctreePersist; // pimpl: the retained octree (Octree is .cpp-local) — see remesh()
+
 class DCOctreeMesher : public RefCounted {
 	GDCLASS(DCOctreeMesher, RefCounted)
+
+	// The last full build's octree (tree + per-node QEFs + field snapshot), kept alive so remesh()
+	// can re-decide collapse against a new camera without re-sampling. Null until the first build.
+	DCOctreePersist *_persist = nullptr;
 
 	// Per-triangle owner cell origin (WORLD lattice) of the last mesh_clipmap/mesh_subregion
 	// call — lets the incremental path know which cached triangles a re-meshed sub-box
@@ -26,6 +32,13 @@ class DCOctreeMesher : public RefCounted {
 	PackedFloat32Array  _last_tri_owner_sizes;
 
 public:
+	~DCOctreeMesher();
+
+	// Re-walk the retained octree (from the last full mesh_clipmap) against a new camera/proj/eps and
+	// re-mesh — no rebuild, no field sampling. The Stage 2 movement path: collapse is re-decided per
+	// node from the cached QEFs, only the changed cells flip. Empty Array if no build is retained.
+	Array remesh(Vector3 camera, double proj, double eps_px);
+
 	// Mesh a clipmap of nested baked SDF levels (finest first) into a Mesh.ARRAY_*
 	// array (VERTEX/NORMAL/INDEX), or an empty Array if the region has no surface.
 	// Everything is in the octree's lattice space (1 unit = 1 world metre); the

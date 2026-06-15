@@ -616,6 +616,53 @@ struct Octree {
 
 } // namespace
 
+// The retained octree (Stage 2): a full build keeps its tree + per-node QEFs + the field snapshot
+// alive so remesh() can re-decide collapse against a new camera without re-sampling. Octree is
+// .cpp-local, so this is a pimpl the header forward-declares.
+struct DCOctreePersist {
+	Octree oct;
+	LocalVector<PackedFloat32Array> held;      // keeps level SDF data alive (Level.data points in)
+	LocalVector<PackedByteArray> held_idx;     // ...and the per-level material indices
+};
+
+// Pack an octree's meshed surface into a Mesh.ARRAY_* array (empty if no surface).
+static Array pack_output(const Octree &oct) {
+	Array out;
+	if (oct.verts.is_empty()) {
+		return out;
+	}
+	out.resize(Mesh::ARRAY_MAX);
+	out[Mesh::ARRAY_VERTEX] = oct.verts;
+	out[Mesh::ARRAY_NORMAL] = oct.normals;
+	if (!oct.colors.is_empty()) {
+		out[Mesh::ARRAY_COLOR] = oct.colors;
+	}
+	out[Mesh::ARRAY_INDEX] = oct.indices;
+	return out;
+}
+
+DCOctreeMesher::~DCOctreeMesher() {
+	if (_persist != nullptr) {
+		memdelete(_persist);
+	}
+}
+
+// Re-walk the retained octree against a new camera/proj/eps and re-mesh — no build, no field
+// sampling (Stage 2 movement path). Requires a prior full mesh_clipmap to have retained a tree.
+Array DCOctreeMesher::remesh(Vector3 camera, double proj, double eps_px) {
+	if (_persist == nullptr) {
+		return Array(); // nothing retained yet — a benign no-op (caller falls back to mesh_clipmap)
+	}
+	Octree &oct = _persist->oct;
+	oct.camera = camera;
+	oct.proj = proj;
+	oct.eps_px = eps_px;
+	oct.recollapse_and_mesh();
+	_last_tri_owners = oct.tri_owners;
+	_last_tri_owner_sizes = oct.tri_owner_sizes;
+	return pack_output(oct);
+}
+
 Array DCOctreeMesher::mesh_clipmap(
 		const TypedArray<PackedFloat32Array> &level_data,
 		int dim,
@@ -644,15 +691,34 @@ Array DCOctreeMesher::mesh_clipmap(
 		return out;
 	}
 
+	// Retain ONLY a full build (no emit/build box) so remesh() can re-walk it; a splice is restricted
+	// to a sub-box, so it builds into a transient octree and leaves the retained full build intact.
+	const bool retain = (emit_min == emit_max) && (build_min == build_max);
+	Octree transient_oct;
+	LocalVector<PackedFloat32Array> transient_held;
+	LocalVector<PackedByteArray> transient_held_idx;
+	Octree *octp = &transient_oct;
+	LocalVector<PackedFloat32Array> *heldp = &transient_held;
+	LocalVector<PackedByteArray> *held_idxp = &transient_held_idx;
+	if (retain) {
+		if (_persist != nullptr) {
+			memdelete(_persist);
+		}
+		_persist = memnew(DCOctreePersist);
+		octp = &_persist->oct;
+		heldp = &_persist->held;
+		held_idxp = &_persist->held_idx;
+	}
+
 	// Hold the level arrays for the call so their data pointers stay valid.
-	LocalVector<PackedFloat32Array> held;
+	LocalVector<PackedFloat32Array> &held = *heldp;
 	held.resize(n);
-	LocalVector<PackedByteArray> held_idx;
+	LocalVector<PackedByteArray> &held_idx = *held_idxp;
 	held_idx.resize(n);
 	const int64_t per_level = int64_t(dim) * dim * dim;
 	const bool with_indices = level_indices.size() == n && palette.size() > 0;
 
-	Octree oct;
+	Octree &oct = *octp;
 	oct.emit_color = with_indices;
 	oct.palette = palette;
 	oct.uniform_core = uniform_core;   // keep the 1m fine core uniform so edit patches splice cleanly
@@ -706,17 +772,7 @@ Array DCOctreeMesher::mesh_clipmap(
 
 	_last_tri_owners      = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
-	if (oct.verts.is_empty()) {
-		return out;
-	}
-	out.resize(Mesh::ARRAY_MAX);
-	out[Mesh::ARRAY_VERTEX] = oct.verts;
-	out[Mesh::ARRAY_NORMAL] = oct.normals;
-	if (!oct.colors.is_empty()) {
-		out[Mesh::ARRAY_COLOR] = oct.colors;
-	}
-	out[Mesh::ARRAY_INDEX] = oct.indices;
-	return out;
+	return pack_output(oct);
 }
 
 Array DCOctreeMesher::mesh_subregion(
@@ -771,17 +827,7 @@ Array DCOctreeMesher::mesh_subregion(
 
 	_last_tri_owners      = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
-	if (oct.verts.is_empty()) {
-		return out;
-	}
-	out.resize(Mesh::ARRAY_MAX);
-	out[Mesh::ARRAY_VERTEX] = oct.verts;
-	out[Mesh::ARRAY_NORMAL] = oct.normals;
-	if (!oct.colors.is_empty()) {
-		out[Mesh::ARRAY_COLOR] = oct.colors;
-	}
-	out[Mesh::ARRAY_INDEX] = oct.indices;
-	return out;
+	return pack_output(oct);
 }
 
 void DCOctreeMesher::_bind_methods() {
@@ -798,6 +844,7 @@ void DCOctreeMesher::_bind_methods() {
 					"core_min", "core_max", "indices", "palette"),
 			&DCOctreeMesher::mesh_subregion,
 			DEFVAL(PackedByteArray()), DEFVAL(PackedColorArray()));
+	ClassDB::bind_method(D_METHOD("remesh", "camera", "proj", "eps_px"), &DCOctreeMesher::remesh);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);
 }

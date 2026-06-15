@@ -11,13 +11,13 @@
 - [x] **In-game validation** — screen-error confirmed: flat coarsens, detail/near stays fine, telescope refines distant
 
 **Stage 2 — Persistent node cache + invalidation** *(the movement payoff)* — branch `feat/dc-persistent-octree-cache`
-Approach A (GDScript-owned cache, reuse the build-box mesh op). Key insight: cache each displayed
-leaf's residual `we`; a move recomputes `we·proj/dist` per cached leaf (cheap, no field sampling) to
-find verdict flips, so only those regions re-mesh.
-- [ ] **2a** — mesher exposes per-displayed-leaf `{world origin, size, we}`; manager caches it beside the mesh (plumbing, no behavior change)
+Approach B (persistent C++ octree — "octree survives frames"). The field-derived per-node QEF is built
+once; the camera-derived collapse verdict is re-decided cheaply per move. Approach A (GDScript displayed-
+leaf cache) was rejected: it can't predict collapse-on-recede without retaining internal nodes.
+- [x] **2a** — split `accumulate()` → `accumulate_qef()` + `collapse_pass()`; retain the octree on `DCOctreeMesher` (pimpl); `remesh(camera,proj,eps)` re-walk entry; test proves a re-walk == a fresh build at that camera (byte-identical)
 - [ ] **2b** — world-fixed root: anchor the lattice to a global grid; re-snap only when the camera nears the root boundary, not every recenter
-- [ ] **2c** — incremental recenter: recompute `we·proj/dist` per cached leaf vs the new camera, build-box re-mesh only verdict-flipped regions + leading edge, evict trailing; interior triangles unchanged
-- [ ] **2d** — FOV/resize invalidation via the same verdict diff (proj change re-tests all)
+- [ ] **2c** — incremental re-walk on move: manager calls `remesh()` (re-decide collapse vs new camera, re-mesh only flipped subtrees) instead of a full rebuild
+- [ ] **2d** — edit dirties touched nodes (re-sample field + re-accumulate QEF there only); FOV/resize re-walk all
 - [ ] **2e** — test: walking re-meshes a thin band (`dcinval`), interior byte-identical before/after a small move; full GUT suite green
 
 **Stage 3 — Top-down lazy build** *(speed)*
