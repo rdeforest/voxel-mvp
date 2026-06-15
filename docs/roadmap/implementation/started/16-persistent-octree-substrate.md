@@ -27,15 +27,13 @@ worth optimizing now. Move lag = the full rebuild re-samples ALL levels (~10M ge
 
 - [x] **edit lag — FIXED:** the splice re-sampled ALL levels in full (~10M evals) just to mesh a tiny box — that was the ~100ms. Now it reuses the last build's grids (`_scroll_buffers`, same frame → shift 0) and re-samples only the dirty (edited) box via `fill_region`. Unified dirty-box model: edits accumulate an AABB instead of clearing the buffers, so both the move rebuild and the splice re-sample only what changed; a full build re-bakes + resets the dirty box. (The dirty box covers ALL pending edits, so a splice's apron can't reuse a stale neighbouring edit.)
 
-**STILL OPEN:** **Stage 4** (eviction) and **Stage 5** (retire fallback) — no pressure yet (memory / cleanup).
+**Stage 3 — Top-down lazy build** *(speed)* — **merged into 2b/3** (scroll-fill) above.
 
-**Stage 3 — Top-down lazy build** *(speed)* — **merged into 2b/3** (world-fixed scrolling window) above; the lazy/world-anchored build is the same rework.
+**Stage 4 — Eviction** *(bound the resident set)* — **N/A in the current architecture.** The resident set is already bounded: the camera-centered clipmap is a FIXED-size window (LEVELS × LEVEL_DIM³), re-used via scroll. Eviction only becomes a thing if we ever build the full world-anchored *unbounded* octree (deferred — scroll-fill captured the latency without it). Nothing to evict today.
 
-**Stage 4 — Eviction** *(bound the resident set)*
-- [ ] not started
+**Stage 5 — Retire the godot_voxel render fallback** *(cleanup)* — **deferred on purpose.** The `dcsolo` / godot_voxel per-block render is the comparison baseline, and Robert keeps old paths to compare against (see the project preference). Retire it later, deliberately, once DC is trusted across more scenarios — not now.
 
-**Stage 5 — Retire the full-rebuild + godot_voxel render fallback**
-- [ ] not started
+**NET (this branch, `feat/dc-persistent-octree-cache`):** the persistent octree's payoff is realized as *latency* — moves and edits re-sample only what changed (scroll + dirty-box), and FOV/zoom/eps re-collapse with no field reads. The headline "octree literally survives frames and keeps interior triangles" full rewrite is deferred (no scale pressure); the scroll-fill delivers the same user-visible win.
 
 ---
 
