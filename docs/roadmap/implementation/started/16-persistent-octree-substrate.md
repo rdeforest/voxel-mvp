@@ -92,11 +92,24 @@ The world-fixed octree's foundation is in (decision + scaffold, GUT-green, live 
   cells defeat the rim test, as the trusted suite already acknowledges) → it's the in-game `dcinval`
   GUI gate.
 
-**NEXT (Stage A proper → B):** wire `mesh_world` into `DCTerrainManager` behind a transitional
-`dcworld` toggle (becomes default + retires the clipmap once trusted — NOT a permanent opt-in); then
-persist+reuse the world octree across frames, incremental leading-edge growth on move (interior
-byte-identical), eviction, and finally retire the clipmap levels + geomorph. The exact surface-sparse
-prune over direct sampling comes when the window grows past a single dense root.
+**Persistence — LANDED (2026-06-15, follow-up):** `mesh_world` now RETAINS its octree in `DCOctreePersist`
+(holding the `EditStoreSource` + a `Ref<EditStore>` so `oct.src` stays valid), so the existing
+`remesh(camera, proj, eps)` re-collapses the world octree against a new camera with **no field resample**.
+Test: a re-walk at the build camera reproduces it byte-for-byte; a nearer re-walk equals a fresh build
+there and keeps more detail. This is the prerequisite for incremental movement.
+
+**Vehicle decision (2026-06-15):** THE GOAL rides on `DCOctreeMesher` (it has the GOAL-mandatory
+screen-error LOD + crack-free meshing that `SparseVoxelOctree`/`DcSubstratePreview` lacks — SVO is
+distance-graded, view-independent). The world-fixed *manager* will MODEL its re-root/refine/edit-dirty
+cadence on the proven `DcSubstratePreview` GDScript, and the `dcgen`/SVO render is retired once
+`mesh_world` supersedes it (least-duplication path — we delete a parallel mesher, not copy the
+screen-error core into SVO). SVO may remain as a Phase-B *storage* oracle.
+
+**NEXT (Stage B):** incremental leading-edge growth on move — build only the cells newly in range from the
+(world-fixed) field and graft into the retained octree, evict the trailing edge, interior byte-identical
+(the gate). Then the exact surface-sparse prune over direct sampling (when the window outgrows a single
+dense root) + graded data floor for horizon coverage, then a `dcworld` manager (modeled on
+`DcSubstratePreview`) makes it the live render and retires the clipmap + geomorph + the SVO `dcgen` path.
 
 ## THE GOAL — world-fixed incremental octree (no compromise)
 

@@ -816,9 +816,13 @@ struct Octree {
 // .cpp-local, so this is a pimpl the header forward-declares.
 struct DCOctreePersist {
 	Octree oct;
-	Clipmap clip;                              // the field source oct.src points at (must outlive oct)
+	Clipmap clip;                              // clipmap path: the field source oct.src points at
 	LocalVector<PackedFloat32Array> held;      // keeps level SDF data alive (Level.data points in)
 	LocalVector<PackedByteArray> held_idx;     // ...and the per-level material indices
+	// World-fixed path (mesh_world): the EditStore field source oct.src points at, plus a Ref keeping the
+	// store alive — so remesh() can re-collapse the retained world octree against a new camera (no resample).
+	Ref<EditStore> world_store;
+	EditStoreSource world_src{ nullptr, Vector3(), 1.0 };
 };
 
 // Pack an octree's meshed surface into a Mesh.ARRAY_* array (empty if no surface).
@@ -1059,9 +1063,17 @@ Array DCOctreeMesher::mesh_world(
 		ERR_PRINT("DCOctreeMesher::mesh_world: bad arguments");
 		return out;
 	}
-	EditStoreSource source(store.ptr(), Vector3(world_origin), base_cell);
-	Octree oct;
-	oct.src = &source;
+	// Retain the world octree (like a full mesh_clipmap) so remesh() can re-collapse it against a new
+	// camera with no field resampling — the persistent-octree foundation for incremental movement. The
+	// EditStoreSource + a Ref to the store live in the persist so oct.src stays valid across remesh().
+	if (_persist != nullptr) {
+		memdelete(_persist);
+	}
+	_persist = memnew(DCOctreePersist);
+	_persist->world_store = store;
+	_persist->world_src = EditStoreSource(store.ptr(), Vector3(world_origin), base_cell);
+	Octree &oct = _persist->oct;
+	oct.src = &_persist->world_src;
 	oct.emit_color = palette.size() > 0;
 	oct.palette = palette;
 	oct.root_size = 1 << depth;

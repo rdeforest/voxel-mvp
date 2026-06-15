@@ -128,6 +128,28 @@ func test_mesh_world_collapse_produces_finite_surface():
         assert_true(is_finite(v.x) and is_finite(v.y) and is_finite(v.z), "no degenerate (inf/nan) vertex")
 
 
+# Persistence (the incremental-movement foundation): mesh_world RETAINS its octree, so remesh() re-decides
+# collapse against a new camera with NO field resampling. A re-walk at the build camera must reproduce the
+# build byte-for-byte; a re-walk at a nearer camera must equal a fresh build there (and keep more detail).
+func test_mesh_world_remesh_rewalk_equals_fresh_build():
+    var s := _store()
+    var origin := _region_origin(s)
+    var far  := Vector3(16, 16, 220)
+    var near := Vector3(16, 16, 80)
+    var m := DCOctreeMesher.new()
+    var built_far: Array = m.mesh_world(s, origin, DEPTH, 1.0, far, 500.0, 1.0, true)
+    var rewalk_far: Array = m.remesh(far, 500.0, 1.0)
+    assert_eq(rewalk_far[Mesh.ARRAY_VERTEX], built_far[Mesh.ARRAY_VERTEX], "remesh at the build camera reproduces its vertices")
+    assert_eq(rewalk_far[Mesh.ARRAY_INDEX],  built_far[Mesh.ARRAY_INDEX],  "...and its indices")
+    var rewalk_near: Array = m.remesh(near, 500.0, 1.0)
+    var fresh_near: Array = DCOctreeMesher.new().mesh_world(s, origin, DEPTH, 1.0, near, 500.0, 1.0, true)
+    assert_eq(rewalk_near[Mesh.ARRAY_VERTEX], fresh_near[Mesh.ARRAY_VERTEX], "re-walk at a new camera equals a fresh build there (no resample)")
+    assert_eq(rewalk_near[Mesh.ARRAY_INDEX],  fresh_near[Mesh.ARRAY_INDEX],  "...indices too")
+    assert_gt((rewalk_near[Mesh.ARRAY_INDEX] as PackedInt32Array).size(),
+              (rewalk_far[Mesh.ARRAY_INDEX] as PackedInt32Array).size(),
+              "the nearer re-walk kept more detail (collapse re-decided on the retained tree, not re-sampled)")
+
+
 # Direct field sampling == sampling a baked grid of the same field: the crossing topology is decided by
 # the field's SIGN at integer cell corners — identical whether read direct (mesh_world) or via a
 # fill_region grid (mesh_clipmap) — so the two meshes share a vertex count (positions differ only by the
