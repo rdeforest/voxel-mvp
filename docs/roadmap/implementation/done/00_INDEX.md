@@ -12,6 +12,12 @@ contains. Three kinds of doc live here:
 
 ## Phase scope docs (shipped)
 
+- [`14-dc-qef-transition.md`](14-dc-qef-transition.md) — the Transvoxel→Dual
+  Contouring render migration; DC is the production render with crack-free LOD
+  (via the path-b own-meshing layer). Crease-normal storage deferred (conditional).
+- [`16-persistent-octree-substrate.md`](16-persistent-octree-substrate.md) — the
+  world-fixed incremental octree substrate (`mesh_world` + `grow_world`), built,
+  proven headless, and previewable (`dcworld`); productionization is doc 17.
 - [`02-phase-0-foundation.md`](02-phase-0-foundation.md) — scoped the v0.0
   foundation: walking around a procedural voxel world.
 - [`03-phase-2-terrain-modification.md`](03-phase-2-terrain-modification.md)

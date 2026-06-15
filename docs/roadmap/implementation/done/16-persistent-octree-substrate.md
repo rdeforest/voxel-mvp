@@ -1,5 +1,33 @@
 # Persistent Octree Substrate — staged plan (B3 / doc-10 completion)
 
+## STATUS: DONE (2026-06-15) — substrate built, proven, previewable
+
+The world-fixed incremental octree this doc set out to build **exists, is proven headless, and is
+visible:**
+- **`mesh_world`** — one octree anchored to WORLD coordinates, sampling the `EditStore` field directly
+  (no clipmap, no geomorph), bottom-up exact, screen-error collapse, **windowed build** (large root,
+  bounded build, absent rim).
+- **`grow_world`** — a move grafts the leading-edge band (sampling only it), evicts the trailing edge,
+  reuses the interior; **byte-identical to a from-scratch build**, free-list-bounded resident set.
+- **Persistence / `remesh`** — re-collapse against a new camera with no field resample.
+- **`DcWorldPreview` / `dcworld`** — renders it live at production density (0.25 m) as an amber overlay;
+  first GPU eyes on the path.
+- Tests: `test/test_dc_world_octree.gd` (9 cases). GUT green throughout.
+
+**What this doc did NOT finish — moved to [doc 17](../started/17-world-octree-to-production.md):** the surface-sparse
+prune over direct sampling (the O(volume) wall → coverage is a small bubble), the graded data floor for
+horizon coverage, and **making it the live render / retiring the clipmap** (this doc's Stage C). Those are
+the productionization phase, split out so this doc closes on its achieved deliverable: the substrate.
+
+**Known limit logged (deferred):** reversed triangles on convex ridges — a quad bending over a ridge gets
+one shared `outward`, back-facing one of its two triangles. Pre-existing and present in the live clipmap
+render too (more often), so not a world-octree bug. Rare. Fix hypothesis + detail in doc 17.
+
+*Everything below is the build record (how it was done, the traps), not an active todo.*
+
+---
+
+
 ## START HERE — next session (finish 16 = build the world-fixed incremental octree)
 
 **Read `docs/MANIFESTO.md` in full first, then "THE GOAL" below.** The previous session fell into the

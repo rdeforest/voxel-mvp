@@ -1,7 +1,7 @@
 # DC-QEF Geometry: The Field-Based Representation
 
 *The spec, not the migration. For the one-shot transition work plan, see
-[`../implementation/started/14-dc-qef-transition.md`](../implementation/started/14-dc-qef-transition.md).*
+[`../implementation/done/14-dc-qef-transition.md`](../implementation/done/14-dc-qef-transition.md).*
 
 ## TL;DR
 

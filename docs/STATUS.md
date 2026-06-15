@@ -8,61 +8,29 @@
 
 ## Resumption Brief
 
-### Active thread (2026-06-15): DC render — finish 16 via the WORLD-FIXED INCREMENTAL OCTREE
+### Active thread (2026-06-15): DC render → PRODUCTION via doc 17 (world-octree productionization)
 
-**Read `docs/MANIFESTO.md`, then doc 16 — especially `## Stage A scaffold — LANDED`,
-`Persistence — LANDED`, and `THE GOAL` in
-`docs/roadmap/implementation/started/16-persistent-octree-substrate.md`.** (The `## START HERE`
-block there is now history — the decision it asks for is MADE; read it for the hump/traps, not as a todo.)
+**Docs 14 + 16 are DONE** (`docs/roadmap/implementation/done/`). 14: DC replaced Transvoxel as the
+production render, crack-free LOD via path-b. 16: the **world-fixed incremental octree substrate**
+(`mesh_world` + `grow_world`) is built, proven headless (`test/test_dc_world_octree.gd`, 9 cases), and
+visible (`dcworld`). The active thread is now **[doc 17](roadmap/implementation/started/17-world-octree-to-production.md)
+— make the world-fixed octree the live render and retire the clipmap.** Read `docs/MANIFESTO.md` + doc 17.
 
-**The hump:** movement rebuilds a **camera-centered** clipmap octree (terrain lags — a *correctness*
-failure). The fix (doc 16 THE GOAL): a **world-fixed** octree, render LOD screen-error, a move
-re-collapses + builds only the leading band, interior reused.
+**Where the octree stands (branch `feat/dc-persistent-octree-cache`):** `mesh_world` (windowed build,
+absent rim), `grow_world` (graft leading edge / evict trailing / reuse interior — byte-identical to a fresh
+build, free-list-bounded), `remesh` (re-collapse, no resample). `DcWorldPreview`/`dcworld [on|off] [radius]`
+renders it at production density (0.25 m), amber overlay, threaded. GUT 232 / 231 pass / 1 pending / 0 fail.
 
-**DECIDED + LANDED this session (branch `feat/dc-persistent-octree-cache`, headless-tested, live render
-untouched):**
-- **Decision** (doc 16, manifesto-cited): retire the clipmap data model; **bottom-up exact** build (NOT
-  top-down lazy-refine — that decides from coarse corners and drops sub-cell features); ride on
-  **`DCOctreeMesher`** (it has the screen-error + crack-free meshing `SparseVoxelOctree`/`DcSubstratePreview`
-  lacks). Enabler: `EditStore::sample` is C++/worker-safe, so the concentric clipmap grids are a vestige.
-- **`b2b8430` scaffold** — `SdfSource` seam (`Clipmap` is now one impl → live render byte-identical);
-  `EditStoreSource` (samples the field directly, world-anchored); `mesh_world(...)` (one world-fixed octree,
-  screen-error collapse). `test/test_dc_world_octree.gd` on the real Phase-B terrain.
-- **`5931201` persistence** — `mesh_world` retains its octree; `remesh()` re-collapses on camera move with
-  no resample (tested: re-walk == fresh build). The prerequisite for incremental movement.
-- GUT: 226 pass / 1 pre-existing pending / 0 fail. **Nothing is GUI-verified — `mesh_world` isn't wired to
-  anything visible yet** (no `dcworld` command exists). Build gotcha: see [[build-symlink-path-compare]].
+**The one wall:** the build is DENSE to the floor, so 0.25 m coverage is a small BUBBLE (O(volume)). Doc 17:
+(1) surface-sparse prune over DIRECT sampling — the hard part is there's no pre-baked grid to mip against
+(the Lipschitz/gradient route is the over-prune trap, [[dc-sdf-not-unit-distance]]); (2) graded data floor
+for horizon coverage; (3) promote `dcworld` to the live render, retire clipmap + geomorph + `dcgen`/SVO.
+Gate each step: watertight-WITH-collapse + GUT green + `dcinval` thin band + GPU eyes.
 
-**LANDED this session (2026-06-15) — Stage B incremental growth, headless (B0 + B1, NOT yet committed):**
-- **B0 — windowed build.** `mesh_world(... win_min, win_max)`: a large root spans the roam region; the build
-  descends only cells overlapping the window (reusing `build_box`), the rest *absent* (no QEF/vertex/mesh —
-  window edge = resident-mesh rim). New `window_mode` flag keeps the absent marking off the clipmap splice.
-- **B1 — `grow_world(camera,proj,eps,win_min,win_max)` (the core).** Re-windows the RETAINED octree:
-  `reconcile` grafts entered cells (sampling ONLY the new band) + `kill_subtree`-evicts left cells;
-  `reaccumulate` rolls ancestor QEFs up from cached children (no resample); `recollapse_and_mesh`.
-  **Gate met: `grow A→B` == fresh `mesh_world` of B (same surface+winding, order-independent) while
-  sampling only the leading edge** (`get_last_build_sample_count`); round-trip A→B→A lossless.
-- **B1b — bounded resident set.** `kill_subtree` returns evicted slots to a `free_list`; the next grow's
-  `alloc_cell` reuses them. Gate: a 22-move sweep grows storage only 12073→14793 (+22%, vs ~278k leaked) and
-  the swept surface still matches a fresh build. `get_octree_cell_count` exposes the bound.
-  Tests in `test/test_dc_world_octree.gd`. **GUT now 232 / 231 pass / 1 pre-existing pending / 0 fail.**
-  Still **headless-only — nothing GUI-verified** (no `dcworld` yet).
-
-- **`dcworld` — wired, AWAITING GPU EYES (2026-06-15).** `DcWorldPreview` (`scripts/dc/dc_world_preview.gd`,
-  modeled on `DcSubstratePreview`): a persistent `DCOctreeMesher`; re-root = `mesh_world`, move = `grow_world`,
-  edit = full rebuild; threaded on `WorkerThreadPool`; amber overlay. `dcworld [on|off]` console cmd. Boots
-  clean (`--editor --quit` parse + 12s headless run, no script errors). **Not yet eyeballed** — that's the
-  next session's first task on the laptop.
-  - **Expected (NOT bugs — the missing prune/floor):** coverage is a small BUBBLE (±24 m) with a hard rim
-    where terrain stops (the window edge); dense build to floor; no distance LOD detail because everything
-    in the bubble is near-camera. **Real bugs to watch for:** cracks/see-through *inside* the bubble, wrong
-    surface shape, terrain lagging behind movement, flicker on move, terrain not following at all.
-
-**NEXT — visibility:** GUI-verify `dcworld` (triage per above). Then (1) the exact surface-sparse prune over
-direct sampling + graded data floor for horizon coverage — the O(volume) wall blocks a full-view-distance
-render (`EditStoreSource::surface_free` abstains → dense build to floor; the hard part: no pre-baked grid to
-mip against, unlike the clipmap). Then `dcworld` becomes the live render and retires the clipmap + geomorph +
-the `dcgen`/SVO render. Gate each step: watertight-WITH-collapse + GUT green.
+**GPU eyes pending on `dcworld`** (first eyeball this session found one reversed triangle — see Known limits;
+pre-existing, in the live render too, logged). When judging it: coverage-bubble + hard rim + uniform density
+are EXPECTED (the missing prune); cracks INSIDE the bubble, wrong shape, or terrain lagging/not-following are
+REAL bugs.
 
 ### Active thread (2026-06-11): MPM continuum-physics substrate — spike done, VERDICT = GO
 
@@ -444,6 +412,14 @@ is the authoritative narrative; this list is the cheat sheet.
 
 ### Known limits (recorded, not fixed)
 
+- **Reversed triangles on convex ridges (shared DC meshing/winding).** A quad straddling a ridge is
+  non-planar but `emit_poly` orients both its triangles to ONE shared `outward` (edge-crossing gradient),
+  back-facing the one whose true facing opposes it. **Pre-existing, in the LIVE clipmap render too** (24
+  reversed vs `mesh_world`'s 18 across 81 sample 64³ regions) — NOT a world-octree bug. Rare (~1 per few
+  thousand triangles). Fix hypothesis (per-triangle outward from vertex normals) + detail in doc 17.
+- **DC crease normals not stored (smooth-only shading on creases).** The C++ mesher uses field-gradient
+  normals; sharp edges on edits/structures may read soft. Conditional-deferred (doc 14 Bite E storage half);
+  port crease normals if the art pass needs crisp edges.
 - **Flatten preview Z-fights with the surface it's matching.** Cosmetic;
   cleanest fix is a small forward offset on the preview plane normal.
 - **`_resume_unfinished_floods` budget starvation:** components larger

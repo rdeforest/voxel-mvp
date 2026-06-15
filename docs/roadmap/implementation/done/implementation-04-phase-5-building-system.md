@@ -75,7 +75,7 @@ a gameplay mechanic.
   semantics* but compute differently (terrain: worklist-fixpoint flood
   fill; parts: per-frame recompute bottom-up). The unified answer comes
   with DC-QEF — one field, one mesher, one propagation algorithm.
-  Captured in [the DC-QEF transition chapter](../started/14-dc-qef-transition.md).
+  Captured in [the DC-QEF transition chapter](../done/14-dc-qef-transition.md).
 
 ## Deferred to v0.1+ (with reasons)
 

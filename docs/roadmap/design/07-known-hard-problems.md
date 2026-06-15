@@ -152,7 +152,7 @@ network design.
 ## DC-QEF LOD seam handling
 
 Treated in detail in the
-[DC-QEF transition chapter](../implementation/started/14-dc-qef-transition.md).
+[DC-QEF transition chapter](../implementation/done/14-dc-qef-transition.md).
 Summary: naive DC across an octree LOD boundary cracks. Transvoxel
 exists *specifically* to stitch LOD cracks; replacing it with DC means
 solving those seams ourselves via restricted/balanced octree +

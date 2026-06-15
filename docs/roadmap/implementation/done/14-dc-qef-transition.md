@@ -1,5 +1,30 @@
 # DC-QEF Transition
 
+## STATUS: DONE — DC is the production render (crack-free LOD via path-b)
+
+The migration this doc planned landed: **our Dual Contouring replaced godot_voxel's Transvoxel as the
+terrain render**, smooth + sharp on one mesher, crack-free across LOD.
+- **Bites A–D, F** (plain DC → QEF robustness → sharp features → octree DC + seams → `VoxelMesher`
+  subclass) all shipped, in the C++ `voxel_dc` module (`engine/voxel_dc/`): `VoxelMesherDC` (per-block,
+  collision) + `DCOctreeMesher` (octree clipmap, render). The checkboxes below were never ticked but the
+  work is in production — see `CLAUDE.md` "Terrain meshing / rendering".
+- **LOD seams (the doc's "real work")** were solved NOT by the per-block `transition_surfaces` plan in
+  "Bite F2" below (that approach was **superseded** — real boundary loops span multiple cube faces) but by
+  building **our own meshing/render layer** over godot_voxel's data (path-b): the `DCOctreeMesher` clipmap
+  stitches any LOD jump crack-free via point-location. The `dc_seam` loop-extraction/zipper it produced is
+  kept as reusable record.
+- The world-fixed octree successor (the cleaner substrate that dissolves the LOD-size-step residual) is
+  [doc 16](16-persistent-octree-substrate.md) → its productionization is [doc 17](../started/17-world-octree-to-production.md).
+
+**Deferred (conditional, logged):** Bite E's *storage* half — godot_voxel stores scalar SDF only, so crisp
+creases need point+normal at crossings stored/recomputed; the C++ mesher uses field-gradient normals (no
+crease-split) and reads fine on terrain. Port crease normals only **if** sharp edges on edits/structures
+read too soft (`CLAUDE.md` "#7 NOTE"). Not blocking; revisit when the art pass needs it.
+
+*Everything below is the original transition plan, kept as the record of how it was done.*
+
+---
+
 *The one-shot migration plan. The permanent spec is at
 [`../../design/03-dc-qef-geometry.md`](../../design/03-dc-qef-geometry.md).
 When this work lands, this chapter becomes history — kept around as

@@ -19,12 +19,10 @@ Work underway — partially landed or actively in progress.
 - [`started/05-phase-5_5-architectural-maturation.md`](started/05-phase-5_5-architectural-maturation.md)
   — the decoupling refactor that readies the architecture for v0.1 (5.5a/b
   shipped; later sub-phases pending).
-- [`started/14-dc-qef-transition.md`](started/14-dc-qef-transition.md) — the
-  one-shot plan for migrating off Transvoxel onto our DC-QEF stack (F1 shipped;
-  seam work in progress).
-- [`started/16-persistent-octree-substrate.md`](started/16-persistent-octree-substrate.md)
-  — staged plan to make the render octree persistent + world-fixed (B3 / doc-10
-  completion), so movement refines incrementally instead of full-rebuilding.
+- [`started/17-world-octree-to-production.md`](started/17-world-octree-to-production.md)
+  — make the world-fixed incremental octree (built + proven in done/16) the live
+  render: surface-sparse prune over direct sampling, graded data floor, retire the
+  clipmap. (Docs 14 + 16 shipped → `done/`.)
 
 ## Planned
 

@@ -115,7 +115,7 @@ if necessary.
 future-proofing.
 
 **The DC-QEF transition (see
-[`../implementation/started/14-dc-qef-transition.md`](../implementation/started/14-dc-qef-transition.md))
+[`../implementation/done/14-dc-qef-transition.md`](../implementation/done/14-dc-qef-transition.md))
 replaces godot_voxel's meshing layer but keeps its storage, streaming,
 and LOD.** This is *not* a Hytale-style rewrite — it's surgical
 replacement of one layer (~15–20% of what godot_voxel does for us) to

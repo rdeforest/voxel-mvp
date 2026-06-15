@@ -22,7 +22,7 @@ Procedural terrain, FPS controller, gravity, day/night cycle.
   Non-retrofittable.
 - TransVoxel mesher for smooth terrain (will be replaced by DC-QEF in
   v0.2; see
-  [`../started/14-dc-qef-transition.md`](../started/14-dc-qef-transition.md)).
+  [`../done/14-dc-qef-transition.md`](../done/14-dc-qef-transition.md)).
 
 ## Validation
 

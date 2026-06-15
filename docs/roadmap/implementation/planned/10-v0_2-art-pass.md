@@ -5,7 +5,7 @@ gameplay. Plus the first vehicle and the first non-SDF channel.
 **Status:** Pending; after v0.5.
 
 This is also where the DC-QEF transition most likely lands. See
-[`14-dc-qef-transition.md`](../started/14-dc-qef-transition.md) for the work plan.
+[`14-dc-qef-transition.md`](../done/14-dc-qef-transition.md) for the work plan.
 The transition is independent of the art tasks below and can be
 sequenced before, after, or interleaved depending on momentum.
 

@@ -72,7 +72,7 @@ this whole thing actually works" frontier.
 The DC-QEF migration is *not* a version. It's a transition that
 happens *during* a version (most likely v0.2) and changes what's
 possible in subsequent versions. See
-[`14-dc-qef-transition.md`](started/14-dc-qef-transition.md) for the work plan.
+[`14-dc-qef-transition.md`](done/14-dc-qef-transition.md) for the work plan.
 
 The transition replaces godot_voxel's meshing layer — keeping its
 storage, streaming, and LOD. It is *not* the kind of rewrite that
