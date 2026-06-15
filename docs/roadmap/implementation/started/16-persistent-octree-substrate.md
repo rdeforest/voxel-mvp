@@ -18,14 +18,25 @@ rebuild. The fix is to make **data world-fixed** and the **build incremental** (
 band, reuse the interior). That's THE GOAL below.
 
 **Do this — decisively, in small tested steps toward the FULL end (never a smaller end):**
-1. **First decision (don't skip):** the clipmap is intrinsically camera-centered, so world-anchoring
-   bolted onto it is awkward. Choose, and document the choice + why (cite the manifesto):
-   - **(i, manifesto-preferred)** retire the clipmap data model FIRST (Stage C): one **world-fixed
-     adaptive data source** feeding the octree — data resolution driven by DETAIL/edits, not camera
-     distance — then world-anchor (A) + incremental growth (B) fall out cleanly. Don't optimize the wrong
-     structure.
-   - **(ii)** world-anchor within the clipmap (A → B → C) only if it proves materially simpler after you
-     read the data model.
+1. **DECIDED (2026-06-15): option (i) — retire the clipmap data model.** One world-fixed octree
+   sampling the field directly; no concentric clipmap levels, no geomorph. **Enabler (the decisive
+   find):** `EditStore::sample(Vector3)` is already a C++ method (generator + edits, worker-safe), so the
+   7 concentric 129³ clipmap grids + `fill_region` batching are a **godot_voxel-era vestige** — the
+   octree can sample any world point at any resolution on demand. World-anchoring + incremental growth
+   fall out cleanly; world-anchoring *within* the clipmap (ii) is strictly more awkward and was rejected.
+   Per manifesto "one field / one representation / the grid is a world-fixed spatial database" (#7) and
+   "don't optimize the wrong structure" (Enterprise trap).
+
+   **Sub-decision — the build is BOTTOM-UP EXACT, not top-down lazy-refine.** A top-down refine criterion
+   (split a cell by its own coarse-corner residual) is a *compromise*: it decides from a coarse sample, so
+   a sub-cell spire that threads between the corners is silently lost — the manifesto's "looks right until
+   it doesn't." Keep the proven path: build to the fine floor wherever there is surface (the EXACT min/max
+   prune **cannot** miss a crossing), accumulate fine QEF up the tree, collapse by screen-error from real
+   fine data. The feasibility worry (a fine floor over a ~1 km horizon = tens of millions of cells) is
+   **worker-thread wall-clock that scales with DETAIL, never framerate or world size** → manifesto #8 says
+   do not trade correctness for it; and incremental growth builds only the thin leading-edge band per move.
+   The "refine criterion" chicken-and-egg only exists if you go top-down — so don't. (Top-down→GPU is a
+   *later* hardware-driven candidate, doc 16 tail, not now.)
 2. **Build incrementally.** Each step gated by ALL of: watertight on real heightfield terrain **WITH
    collapse** (`error_driven=true` — the test gap that bit last time; see `test/test_dc_real_terrain.gd`);
    **interior byte-identical** before/after a small move (the incremental-correctness gate — an
@@ -56,6 +67,36 @@ likely the per-rebuild mip allocation over 7×129³, or steep terrain having mor
 detail loss (coarse clipmap undersampling — gone once data resolution is world-fixed).
 
 ---
+
+## Stage A scaffold — LANDED (2026-06-15): the direct-sampling seam
+
+The world-fixed octree's foundation is in (decision + scaffold, GUT-green, live render untouched):
+- **`SdfSource` seam** (`dc_octree_mesher.cpp`) — the octree no longer hard-codes the `Clipmap`; it
+  holds a `const SdfSource *src` (value/gradient/target_cell_size/surface_free/index_prefer_explicit/
+  is_finest_level). `Clipmap` is now one impl (math unchanged → the live clipmap render is **byte-
+  identical**, guarded by the full DC suite still green). `DCOctreePersist` holds the `Clipmap` beside
+  the retained octree.
+- **`EditStoreSource`** — samples `EditStore::sample`/`material_at` DIRECTLY (the enabler), world-anchored
+  (1 lattice unit = base_cell m; lattice (0,0,0) at world_origin). No concentric levels, no geomorph.
+  `surface_free` abstains for now → dense build to floor (exact sparse prune over direct sampling = a
+  later stage; per #8 the extra worker cost is detail-scaling, not framerate).
+- **`mesh_world(store, world_origin, depth, base_cell, camera, proj, eps_px, error_driven, palette)`** —
+  builds + meshes ONE world-fixed octree over `EditStoreSource`, bottom-up exact (build→accumulate→
+  screen-error collapse). Bound; the live render still runs `mesh_clipmap` until this is trusted.
+- **Tests** (`test/test_dc_world_octree.gd`) — on the REAL Phase-B `EditStore` terrain: (1) no-collapse
+  is **crack-free** (interior boundary edges == 0) AND its audit equals the trusted baked-grid path
+  (faithful direct sampling); (2) WITH collapse produces a finite surface, no inf/nan verts; (3) direct
+  sampling == baked-grid topology (same vertex count). nonmanifold isn't asserted ==0 (this region has
+  zero-area grazing-corner degenerates — the known deferred artifact — in BOTH paths; we assert
+  equivalence). Crack-free-WITH-collapse on a cut region isn't headlessly auditable (collapsed boundary
+  cells defeat the rim test, as the trusted suite already acknowledges) → it's the in-game `dcinval`
+  GUI gate.
+
+**NEXT (Stage A proper → B):** wire `mesh_world` into `DCTerrainManager` behind a transitional
+`dcworld` toggle (becomes default + retires the clipmap once trusted — NOT a permanent opt-in); then
+persist+reuse the world octree across frames, incremental leading-edge growth on move (interior
+byte-identical), eviction, and finally retire the clipmap levels + geomorph. The exact surface-sparse
+prune over direct sampling comes when the window grows past a single dense root.
 
 ## THE GOAL — world-fixed incremental octree (no compromise)
 

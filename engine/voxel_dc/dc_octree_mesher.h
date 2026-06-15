@@ -8,6 +8,8 @@
 // point-location). This is the production terrain mesher; covered by
 // test/test_dc_octree_mesher.gd and test/test_dc_real_terrain.gd.
 
+#include "edit_store.h"
+
 #include "core/math/vector4i.h"
 #include "core/object/ref_counted.h"
 #include "core/templates/hash_set.h"
@@ -103,6 +105,23 @@ public:
 			Vector3i core_min,
 			Vector3i core_max,
 			const PackedByteArray &indices = PackedByteArray(),
+			const PackedColorArray &palette = PackedColorArray());
+
+	// World-fixed octree (doc 16 THE GOAL, scaffold): build + mesh ONE octree over the world-aligned
+	// box [world_origin, world_origin + 2^depth) in lattice units (1 unit = base_cell metres), sampling
+	// the EditStore field (generator + edits) DIRECTLY per cell — no concentric clipmap, no geomorph.
+	// Bottom-up exact (build to floor where there's surface, accumulate fine QEF, collapse by screen
+	// error). camera is the viewpoint in this lattice frame; proj = viewport_height / (2*tan(fov/2)).
+	// Returns Mesh.ARRAY_* (lattice-local). The world-fixed substrate the live clipmap render migrates to.
+	Array mesh_world(
+			Ref<EditStore> store,
+			Vector3i world_origin,
+			int depth,
+			double base_cell,
+			Vector3 camera = Vector3(),
+			double proj = 0.0,
+			double eps_px = 0.0,
+			bool error_driven = false,
 			const PackedColorArray &palette = PackedColorArray());
 
 	// Per-triangle owner cell origins (WORLD lattice) from the last mesh call — same order/count

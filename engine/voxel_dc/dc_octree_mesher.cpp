@@ -1,6 +1,7 @@
 #include "dc_octree_mesher.h"
 
 #include "dc_qef.h"
+#include "edit_store.h"
 #include "octree_geometry.h"
 #include "sdf_field.h"
 
@@ -147,9 +148,23 @@ struct Level {
 	}
 };
 
+// The octree's field source: everything the build + mesh need to know about the field, abstracted
+// so the octree doesn't care WHERE the SDF comes from. Two implementations: the camera-centered
+// `Clipmap` (concentric baked grids — the godot_voxel-era render path) and `EditStoreSource` (samples
+// the world-fixed EditStore field directly — the world-fixed-octree substrate, doc 16 THE GOAL).
+struct SdfSource {
+	virtual ~SdfSource() {}
+	virtual double value(const Vector3 &p) const = 0;
+	virtual Vector3 gradient(const Vector3 &p) const = 0;
+	virtual double target_cell_size(const Vector3 &p) const = 0;        // the data-resolution floor at p
+	virtual bool surface_free(const Vector3 &cmin, const Vector3 &cmax) const = 0; // no zero-crossing in box
+	virtual int index_prefer_explicit(const Vector3 &p, const Vector3 &n) const = 0; // material id behind a vertex
+	virtual bool is_finest_level(const Vector3 &p) const = 0;           // for uniform_core (pin the fine bubble)
+};
+
 // The clipmap: pick the finest level whose box contains the point (single-valued
 // in position -> crack-free), sample it. target_cell_size drives subdivision.
-struct Clipmap {
+struct Clipmap : public SdfSource {
 	LocalVector<Level> levels;
 	Vector3 center;
 	double half0 = 1.0;
@@ -181,7 +196,7 @@ struct Clipmap {
 	// dependence isn't noticeable. (The proper fix — one fine field + error-collapse,
 	// no discrete LOD levels near the player — retires geomorph entirely; substrate
 	// Phase A. This keeps the finest band stable until then.)
-	double value(const Vector3 &p) const {
+	double value(const Vector3 &p) const override {
 		int k = level_index(p);
 		double v = levels[k].at(p);
 		if (k > 0 && k + 1 < int(levels.size())) {
@@ -196,7 +211,7 @@ struct Clipmap {
 		return v;
 	}
 
-	Vector3 gradient(const Vector3 &p) const {
+	Vector3 gradient(const Vector3 &p) const override {
 		double h = double(1 << level_index(p)); // local cell size
 		Vector3 g(
 				value(p + Vector3(h, 0, 0)) - value(p - Vector3(h, 0, 0)),
@@ -205,8 +220,13 @@ struct Clipmap {
 		return g.length_squared() > 0.0 ? g.normalized() : Vector3(0, 1, 0);
 	}
 
-	double target_cell_size(const Vector3 &p) const {
+	double target_cell_size(const Vector3 &p) const override {
 		return double(1 << level_index(p));
+	}
+
+	// The finest clipmap level (level 0, the 1m core bubble) — uniform_core pins it against collapse.
+	bool is_finest_level(const Vector3 &p) const override {
+		return level_index(p) == 0;
 	}
 
 	void build_mips() {
@@ -218,7 +238,7 @@ struct Clipmap {
 	// A node is surface-free only if EVERY level's grid agrees (no level sees a crossing in the box).
 	// The finest level covering the box catches sub-cell features a coarser mip smoothed away, so this
 	// never over-prunes regardless of the blend.
-	bool surface_free(const Vector3 &cmin, const Vector3 &cmax) const {
+	bool surface_free(const Vector3 &cmin, const Vector3 &cmax) const override {
 		for (uint32_t k = 0; k < levels.size(); ++k) {
 			if (!levels[k].surface_free(cmin, cmax)) {
 				return false;
@@ -245,7 +265,7 @@ struct Clipmap {
 	// the ground stays natural instead of bleeding the part's material outward. (A plain inward
 	// hemisphere still bled: a down-sideways diagonal is "inward" yet reaches the part beside it.)
 	// Scan at the level's own cell size so it stays single-level -> crack-free.
-	int index_prefer_explicit(const Vector3 &p, const Vector3 &n) const {
+	int index_prefer_explicit(const Vector3 &p, const Vector3 &n) const override {
 		const Level &lv = levels[level_index(p)];
 		int id = lv.index_nearest(p);
 		if (id > 0) {
@@ -280,6 +300,75 @@ struct Clipmap {
 	}
 };
 
+// World-fixed field source (doc 16 THE GOAL): samples the EditStore field (generator + edits)
+// DIRECTLY at each cell — no concentric clipmap levels, no geomorph blend. The octree's lattice is
+// world-anchored (1 lattice unit = base_cell metres; lattice (0,0,0) sits at world_origin), so a
+// fixed feature always falls in the same cells regardless of viewpoint. `surface_free` returns false
+// for now (dense build to the floor — the exact sparse prune over direct sampling is a later stage;
+// per manifesto #8 the extra worker-thread cost is detail-scaling, never framerate).
+struct EditStoreSource : public SdfSource {
+	const EditStore *store;
+	Vector3 world_origin; // lattice coords of octree (0,0,0)
+	double base_cell;     // world metres per lattice unit
+
+	EditStoreSource(const EditStore *s, const Vector3 &wo, double bc) :
+			store(s), world_origin(wo), base_cell(bc) {}
+
+	Vector3 to_world(const Vector3 &p) const { return (world_origin + p) * base_cell; }
+
+	double value(const Vector3 &p) const override {
+		return store->sample(to_world(p));
+	}
+
+	Vector3 gradient(const Vector3 &p) const override {
+		const double h = 1.0; // one lattice cell — central difference, same convention as Clipmap
+		Vector3 g(
+				value(p + Vector3(h, 0, 0)) - value(p - Vector3(h, 0, 0)),
+				value(p + Vector3(0, h, 0)) - value(p - Vector3(0, h, 0)),
+				value(p + Vector3(0, 0, h)) - value(p - Vector3(0, 0, h)));
+		return g.length_squared() > 0.0 ? g.normalized() : Vector3(0, 1, 0);
+	}
+
+	double target_cell_size(const Vector3 &p) const override { return 1.0; } // uniform fine floor (lattice unit)
+	bool surface_free(const Vector3 &cmin, const Vector3 &cmax) const override { return false; } // dense build (no prune yet)
+	bool is_finest_level(const Vector3 &p) const override { return false; } // no clipmap core to pin
+
+	// Material id of the solid a vertex bounds — the inward-scan from Clipmap::index_prefer_explicit,
+	// sampling the store's material channel instead of a baked grid (a vertex bounds the body straight
+	// inward of its normal; sideways neighbours excluded so ground beside a part stays natural).
+	int index_prefer_explicit(const Vector3 &p, const Vector3 &n) const override {
+		int id = store->material_at(to_world(p));
+		if (id > 0) {
+			return id;
+		}
+		int best = 0;
+		double best_d2 = 1e30;
+		for (int dz = -1; dz <= 1; ++dz) {
+			for (int dy = -1; dy <= 1; ++dy) {
+				for (int dx = -1; dx <= 1; ++dx) {
+					if (dx == 0 && dy == 0 && dz == 0) {
+						continue;
+					}
+					Vector3 off(dx, dy, dz);
+					if (off.normalized().dot(n) >= -0.9) {
+						continue; // not aligned with -n (straight inward)
+					}
+					int nid = store->material_at(to_world(p + off));
+					if (nid <= 0) {
+						continue;
+					}
+					double d2 = double(dx * dx + dy * dy + dz * dz);
+					if (d2 < best_d2 || (d2 == best_d2 && nid < best)) {
+						best_d2 = d2;
+						best = nid;
+					}
+				}
+			}
+		}
+		return best;
+	}
+};
+
 struct Cell {
 	Vector3i origin;
 	int size = 0;
@@ -297,7 +386,7 @@ struct Cell {
 // owns each edge; a coarser neighbour returned twice collapses the quad to a
 // triangle -> seamless across the size jumps the collapse introduces).
 struct Octree {
-	Clipmap clip;
+	const SdfSource *src = nullptr;  // field source (Clipmap or EditStoreSource); set by the caller, must outlive run()
 	int root_size = 0;
 	int max_depth = 0;
 	Vector3 camera;          // viewpoint in root-local lattice space (screen-error LOD)
@@ -359,14 +448,14 @@ struct Octree {
 			const int *pb = CB[EDGES[e][1]];
 			Vector3i ca = o + Vector3i(pa[0], pa[1], pa[2]) * s;
 			Vector3i cb = o + Vector3i(pb[0], pb[1], pb[2]) * s;
-			double fa = clip.value(to_v3(ca));
-			double fb = clip.value(to_v3(cb));
+			double fa = src->value(to_v3(ca));
+			double fb = src->value(to_v3(cb));
 			if ((fa < 0.0) == (fb < 0.0) || fa == fb) {
 				continue;
 			}
 			double t = fa / (fa - fb);
 			Vector3 p = to_v3(ca).lerp(to_v3(cb), t);
-			qef.add_plane(p, clip.gradient(p));
+			qef.add_plane(p, src->gradient(p));
 		}
 		return qef;
 	}
@@ -448,7 +537,7 @@ struct Octree {
 		// cell boundaries to splice against (incremental meshing). Outer levels still coarsen.
 		if (uniform_core) {
 			Vector3 c = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
-			if (clip.level_index(c) == 0) {
+			if (src->is_finest_level(c)) {
 				return;
 			}
 		}
@@ -486,10 +575,10 @@ struct Octree {
 		// estimate did → over-pruned → degenerate geometry). A surface-free cell has no crossing edge,
 		// so the stitch loses nothing.
 		if (prune_safety > 0.0 && size > 1 &&
-				clip.surface_free(to_v3(origin), to_v3(origin) + Vector3(1, 1, 1) * double(size))) {
+				src->surface_free(to_v3(origin), to_v3(origin) + Vector3(1, 1, 1) * double(size))) {
 			return idx;
 		}
-		if (double(size) <= clip.target_cell_size(center)) {
+		if (double(size) <= src->target_cell_size(center)) {
 			return idx; // at the data resolution floor — can't refine further
 		}
 		// Always build down to the data floor; error-driven coarsening happens bottom-up
@@ -539,7 +628,7 @@ struct Octree {
 			// outward, so step inward to land in the cell that carries the id. Prefer an
 			// inward explicit material so a placed part's faces read the part, while a terrain
 			// vertex beside the part stays natural (the body it bounds is inward, not sideways).
-			int id = clip.index_prefer_explicit(v - n * 0.5, n);
+			int id = src->index_prefer_explicit(v - n * 0.5, n);
 			if (id > 0 && id < int(palette.size())) {
 				const Color &c = palette[id];
 				colors.push_back(Color(c.r, c.g, c.b, 0.0)); // a=0 -> explicit material colour
@@ -615,8 +704,8 @@ struct Octree {
 		lo[w] += sw * s;
 		Vector3i hi = lo;
 		hi[axis] += s;
-		double fa = clip.value(to_v3(lo));
-		double fb = clip.value(to_v3(hi));
+		double fa = src->value(to_v3(lo));
+		double fb = src->value(to_v3(hi));
 		if ((fa < 0.0) == (fb < 0.0) || fa == fb) {
 			return;
 		}
@@ -662,7 +751,7 @@ struct Octree {
 		// sign(fb - fa); fa, fb are opposite-signed, checked above). So trust the gradient, but if its
 		// axial component CONTRADICTS that sign it jumped a thin feature — veto it to the axial facing.
 		double t = fa / (fa - fb);
-		Vector3 outward = clip.gradient(to_v3(lo).lerp(to_v3(hi), t));
+		Vector3 outward = src->gradient(to_v3(lo).lerp(to_v3(hi), t));
 		double axis_face = (fb > fa) ? 1.0 : -1.0;
 		if (outward[axis] * axis_face < 0.0) {
 			outward = Vector3();
@@ -727,6 +816,7 @@ struct Octree {
 // .cpp-local, so this is a pimpl the header forward-declares.
 struct DCOctreePersist {
 	Octree oct;
+	Clipmap clip;                              // the field source oct.src points at (must outlive oct)
 	LocalVector<PackedFloat32Array> held;      // keeps level SDF data alive (Level.data points in)
 	LocalVector<PackedByteArray> held_idx;     // ...and the per-level material indices
 };
@@ -801,9 +891,11 @@ Array DCOctreeMesher::mesh_clipmap(
 	// to a sub-box, so it builds into a transient octree and leaves the retained full build intact.
 	const bool retain = (emit_min == emit_max) && (build_min == build_max);
 	Octree transient_oct;
+	Clipmap transient_clip;
 	LocalVector<PackedFloat32Array> transient_held;
 	LocalVector<PackedByteArray> transient_held_idx;
 	Octree *octp = &transient_oct;
+	Clipmap *clipp = &transient_clip;
 	LocalVector<PackedFloat32Array> *heldp = &transient_held;
 	LocalVector<PackedByteArray> *held_idxp = &transient_held_idx;
 	if (retain) {
@@ -812,6 +904,7 @@ Array DCOctreeMesher::mesh_clipmap(
 		}
 		_persist = memnew(DCOctreePersist);
 		octp = &_persist->oct;
+		clipp = &_persist->clip;
 		heldp = &_persist->held;
 		held_idxp = &_persist->held_idx;
 	}
@@ -825,6 +918,8 @@ Array DCOctreeMesher::mesh_clipmap(
 	const bool with_indices = level_indices.size() == n && palette.size() > 0;
 
 	Octree &oct = *octp;
+	Clipmap &clip = *clipp;
+	oct.src = &clip;
 	oct.emit_color = with_indices;
 	oct.palette = palette;
 	oct.uniform_core = uniform_core;   // keep the 1m fine core uniform so edit patches splice cleanly
@@ -851,9 +946,9 @@ Array DCOctreeMesher::mesh_clipmap(
 		oct.build_min = build_min;
 		oct.build_max = build_max;
 	}
-	oct.clip.center = center;
-	oct.clip.half0 = half0;
-	oct.clip.levels.resize(n);
+	clip.center = center;
+	clip.half0 = half0;
+	clip.levels.resize(n);
 	for (int k = 0; k < n; ++k) {
 		held[k] = level_data[k];
 		if (held[k].size() != per_level) {
@@ -871,11 +966,11 @@ Array DCOctreeMesher::mesh_clipmap(
 				lv.idx = held_idx[k].ptr();
 			}
 		}
-		oct.clip.levels[k] = lv;
+		clip.levels[k] = lv;
 	}
 
 	if (prune_safety > 0.0) {
-		oct.clip.build_mips(); // min/max pyramids for the exact surface-sparse prune
+		clip.build_mips(); // min/max pyramids for the exact surface-sparse prune
 	}
 	oct.run();
 
@@ -907,6 +1002,8 @@ Array DCOctreeMesher::mesh_subregion(
 	// One uniform level at the data resolution; no error-driven collapse, so the cube is
 	// meshed at 1m throughout — identical per-cell vertices to the full build's fine core.
 	Octree oct;
+	Clipmap clip;
+	oct.src = &clip;
 	oct.emit_color = with_indices;
 	oct.palette = palette;
 	oct.root_size = sub_size;
@@ -919,9 +1016,9 @@ Array DCOctreeMesher::mesh_subregion(
 	oct.emit_filter = true;
 	oct.emit_min = core_min;
 	oct.emit_max = core_max;
-	oct.clip.center = Vector3();
-	oct.clip.half0 = double(sub_size) * 4.0; // one level, so level_index is always 0 anyway
-	oct.clip.levels.resize(1);
+	clip.center = Vector3();
+	clip.half0 = double(sub_size) * 4.0; // one level, so level_index is always 0 anyway
+	clip.levels.resize(1);
 	Level lv;
 	lv.data = data.ptr();
 	lv.origin = data_origin;
@@ -930,8 +1027,52 @@ Array DCOctreeMesher::mesh_subregion(
 	if (with_indices) {
 		lv.idx = indices.ptr();
 	}
-	oct.clip.levels[0] = lv;
+	clip.levels[0] = lv;
 
+	oct.run();
+
+	_last_tri_owners      = oct.tri_owners;
+	_last_tri_owner_sizes = oct.tri_owner_sizes;
+	return pack_output(oct);
+}
+
+// World-fixed octree (doc 16 THE GOAL, scaffold): build + mesh ONE octree rooted at the WORLD-aligned
+// box [world_origin, world_origin + 2^depth) (lattice units; 1 unit = base_cell metres), sampling the
+// EditStore field DIRECTLY — no concentric clipmap, no geomorph. Bottom-up exact: build to the floor
+// where there is surface, accumulate fine QEF up the tree, collapse by screen-error (we*proj/dist vs
+// eps_px) from real fine data. camera is the viewpoint in this lattice frame (world/base_cell -
+// world_origin). Returns Mesh.ARRAY_* (lattice-local; caller scales by base_cell + positions at
+// world_origin). This is the seam the persistent/incremental world octree grows from; the live render
+// still runs mesh_clipmap until this path is trusted.
+Array DCOctreeMesher::mesh_world(
+		Ref<EditStore> store,
+		Vector3i world_origin,
+		int depth,
+		double base_cell,
+		Vector3 camera,
+		double proj,
+		double eps_px,
+		bool error_driven,
+		const PackedColorArray &palette) {
+	Array out;
+	if (store.is_null() || depth < 1 || base_cell <= 0.0) {
+		ERR_PRINT("DCOctreeMesher::mesh_world: bad arguments");
+		return out;
+	}
+	EditStoreSource source(store.ptr(), Vector3(world_origin), base_cell);
+	Octree oct;
+	oct.src = &source;
+	oct.emit_color = palette.size() > 0;
+	oct.palette = palette;
+	oct.root_size = 1 << depth;
+	oct.max_depth = depth;
+	oct.camera = camera;
+	oct.proj = proj;
+	oct.eps_px = eps_px;
+	oct.error_driven = error_driven;
+	oct.world_origin = world_origin;
+	oct.uniform_core = false; // the whole world octree collapses by screen-error; no fine bubble to pin
+	oct.prune_safety = 0.0;   // EditStoreSource::surface_free abstains → dense build to floor (scaffold)
 	oct.run();
 
 	_last_tri_owners      = oct.tri_owners;
@@ -953,6 +1094,11 @@ void DCOctreeMesher::_bind_methods() {
 					"core_min", "core_max", "indices", "palette"),
 			&DCOctreeMesher::mesh_subregion,
 			DEFVAL(PackedByteArray()), DEFVAL(PackedColorArray()));
+	ClassDB::bind_method(
+			D_METHOD("mesh_world", "store", "world_origin", "depth", "base_cell",
+					"camera", "proj", "eps_px", "error_driven", "palette"),
+			&DCOctreeMesher::mesh_world,
+			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(PackedColorArray()));
 	ClassDB::bind_method(D_METHOD("remesh", "camera", "proj", "eps_px"), &DCOctreeMesher::remesh);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);
