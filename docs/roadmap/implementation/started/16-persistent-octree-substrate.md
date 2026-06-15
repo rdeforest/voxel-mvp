@@ -18,9 +18,14 @@ leaf cache) was rejected: it can't predict collapse-on-recede without retaining 
 - [x] **2c** — manager wires `remesh()` for POSITION-STABLE changes (FOV/zoom, eps/budget, window-resize): instant re-collapse of the retained octree, no field re-sample. Test proves it takes the cheap path, not a full rebuild.
 - [x] **2d** (edit half) — edits already re-mesh only the touched region via the build-box splice (no change needed); FOV/resize covered by 2c's `remesh`.
 
-**ARCHITECTURAL FINDING (reshapes 2b + Stage 3):** the clipmap LOD levels are **camera-centered** — each level's SDF is sampled around the build center — so `remesh()` is exact only when the camera doesn't TRANSLATE. A move past the fine band still needs fresh data *ahead* of the camera, which is the world-fixed scrolling window. So the original 2b ("world-fixed root") and Stage 3 ("lazy build") **merge** into one piece:
-- [ ] **2b/3 — world-fixed scrolling window** *(the translation payoff — the doc's "architectural heart", and the big remaining piece)*: rework the camera-centered clipmap to a world-anchored octree; a move re-samples + re-meshes only the leading-edge band and reuses the interior (which keeps its world position + triangles). Subsumes the old Stage-3 lazy build.
-- [ ] **2e** — test: walking re-meshes a thin band (`dcinval`), interior byte-identical before/after a small move
+**PERF FINDING (corrected):** "no perf pressure" was wrong — 300fps is the main thread; the meshing
+runs on a worker, and its wall-clock latency IS the visible lag on moves/edits. So the move re-mesh is
+worth optimizing now. Move lag = the full rebuild re-samples ALL levels (~10M generator evals); edit lag
+= the splice's patch-mesh (~100ms, a separate bottleneck — patch meshing, not field sampling).
+- [x] **2b/3 — scroll-fill the move rebuild** *(the move-latency win)*: a recenter now re-samples only the shell that scrolled in, reusing the previous build's per-level grids via `EditStore.fill_region` (the proven mechanism the collision manager uses) — the dominant generator cost is cut. Edits clear the buffers (next build re-samples, no stale reuse). Test: a scrolled rebuild == a full-sample rebuild byte-for-byte. *(This is the pragmatic win; the full world-anchored-octree-that-keeps-interior-triangles is deferred — not needed at current scale, and the scroll-fill captures the latency.)*
+- [x] **2e** — correctness tests landed (remesh==fresh-build; set_eps in-place; scroll==full-sample). Visual `dcinval` thin-band check is a GUI step.
+
+**STILL OPEN:** edit lag (the ~100ms patch-mesh) — needs its own diagnosis (mesh cost, not field sampling); **Stage 4** (eviction) and **Stage 5** (retire fallback) — no pressure yet.
 
 **Stage 3 — Top-down lazy build** *(speed)* — **merged into 2b/3** (world-fixed scrolling window) above; the lazy/world-anchored build is the same rework.
 

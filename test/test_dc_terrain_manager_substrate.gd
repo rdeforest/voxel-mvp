@@ -80,6 +80,38 @@ func test_set_eps_remeshes_in_place_from_retained_octree() -> void:
     assert_gt((mgr._cache.arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), 500, "in-place remesh left a valid cached mesh")
 
 
+func test_scroll_rebuild_matches_full_sample() -> void:
+    # Stage 2 move path: a SCROLLED rebuild (reuse the previous build's grids, re-sample only the
+    # shifted-in shell) must produce the SAME mesh as a fresh FULL-sample rebuild at the new center.
+    # The field is static, so a reused overlap cell holds the same world-position sample a fresh fill
+    # would take — proving the scroll reuse doesn't corrupt the SDF.
+    var store := _store()
+    var a := Vector3(0, _surface(0, 0), 0)
+    var b := Vector3(20, _surface(20, 0), 0)
+
+    var m1 := DCTerrainManager.new()
+    add_child_autofree(m1)
+    var f1 := Node3D.new(); add_child_autofree(f1); f1.global_position = a
+    m1.setup(f1, store)
+    m1._enabled = true
+    m1.error_driven = false
+    m1._dispatch(a); m1._finish()
+    assert_eq(m1._scroll_buffers.size(), DCTerrainManager.LEVELS, "build A filled the scroll buffers")
+    m1._dispatch(b); m1._finish()   # scrolled rebuild at B (reuses A's overlap)
+    var scrolled: PackedVector3Array = m1._cache.arrays[Mesh.ARRAY_VERTEX]
+
+    var m2 := DCTerrainManager.new()
+    add_child_autofree(m2)
+    var f2 := Node3D.new(); add_child_autofree(f2); f2.global_position = b
+    m2.setup(f2, store)
+    m2._enabled = true
+    m2.error_driven = false
+    m2._dispatch(b); m2._finish()   # full sample at B (no prev)
+    var fresh: PackedVector3Array = m2._cache.arrays[Mesh.ARRAY_VERTEX]
+
+    assert_eq(scrolled, fresh, "scrolled rebuild equals a full-sample rebuild at the new center")
+
+
 func test_async_splice_applies_an_edit() -> void:
     # Prime a full build, dig into the store, then drive the async splice (dispatch -> worker ->
     # apply) and confirm the cached mesh changed — the edit shows without a full re-mesh.
