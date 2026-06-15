@@ -23,7 +23,19 @@ is a world-fixed spatial database / no half-measures), and the `dcworld` triage 
 
 ## Stages
 
-### P1 — Surface-sparse prune over DIRECT sampling (the O(volume) wall)
+### P1 — Surface-sparse prune over DIRECT sampling — DONE (2026-06-15)
+**Landed.** `EditStoreSource` bakes a transient min/max accel grid over the resident window (octree-local,
+one field sample per lattice unit — ~30× cheaper than the dense tree build) and `surface_free` runs the
+clipmap's exact min/max test against it; `mesh_world`/`grow_world` enable the prune whenever a window is set.
+Measured (0.25 m, depth 11): build **848→166 ms @ r=12 m**, **6610→749 ms @ r=24 m** (5–9×); grow +1 m
+530→262 ms. Proven **surface- and order-preserving**: a whole-root windowed+pruned build is BYTE-IDENTICAL
+to the dense build (`test_mesh_world_full_window_equals_no_window` now also asserts the prune fired). The
+prune is conservative (checks actual samples) so it can't miss a crossing — never the Lipschitz over-prune.
+*Remaining nit:* `grow_world` re-bakes the whole-window accel each move; bake only the band later.
+
+*(original plan below)*
+
+### ~~P1 — Surface-sparse prune over DIRECT sampling (the O(volume) wall)~~ (superseded by the above)
 The clipmap's exact min/max prune (`Level::build_mip` / `surface_free`) works because the clipmap has a
 **pre-baked grid to mip against**. `EditStoreSource` samples the analytic field directly — **there is no
 grid** — so `EditStoreSource::surface_free` abstains and the build descends every cell to the floor.

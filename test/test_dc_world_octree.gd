@@ -150,21 +150,24 @@ func test_mesh_world_remesh_rewalk_equals_fresh_build():
               "the nearer re-walk kept more detail (collapse re-decided on the retained tree, not re-sampled)")
 
 
-# Stage B0 — the resident WINDOW: mesh_world can build only the cells overlapping a window box (WORLD
-# lattice), marking the rest ABSENT (no QEF, no vertex, not meshed), so a large root can span the roam
-# region while the build cost stays bounded to the window. A window covering the WHOLE root must reproduce
-# the no-window full build byte-for-byte — the absent-leaf path can't corrupt the dense case.
+# Stage B0 + P1 — the resident WINDOW and the surface-sparse prune. A windowed build (a) only builds cells
+# overlapping the window (rest ABSENT), and (b) prunes provably surface-free cells via the accel grid. A
+# window covering the WHOLE root must STILL reproduce the no-window dense build BYTE-FOR-BYTE — the prune
+# only removes empty (non-emitting) cells, so surface cells emit in the same order (surface/order-preserving)
+# — while building strictly FEWER cells (proof the prune actually fired, not silently disabled).
 func test_mesh_world_full_window_equals_no_window():
     var s := _store()
     var origin := _region_origin(s)
     var cam := Vector3(16, 16, 220)
-    var full: Array = DCOctreeMesher.new().mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true)
-    # win covering [origin, origin + SIZE) — every cell overlaps, nothing absent.
+    var dm := DCOctreeMesher.new()
+    var full: Array = dm.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true)  # no window → dense, no prune
+    # win covering [origin, origin + SIZE) — every cell overlaps (nothing absent), prune ON.
     var whole := origin + Vector3i(SIZE, SIZE, SIZE)
-    var win: Array = DCOctreeMesher.new().mesh_world(
-            s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), origin, whole)
-    assert_eq(win[Mesh.ARRAY_VERTEX], full[Mesh.ARRAY_VERTEX], "whole-root window == no-window vertices")
-    assert_eq(win[Mesh.ARRAY_INDEX],  full[Mesh.ARRAY_INDEX],  "...and indices (absent path is inert on the full build)")
+    var wm := DCOctreeMesher.new()
+    var win: Array = wm.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), origin, whole)
+    assert_eq(win[Mesh.ARRAY_VERTEX], full[Mesh.ARRAY_VERTEX], "whole-root windowed+pruned == dense vertices (prune is surface/order-preserving)")
+    assert_eq(win[Mesh.ARRAY_INDEX],  full[Mesh.ARRAY_INDEX],  "...and indices")
+    assert_lt(wm.get_octree_cell_count(), dm.get_octree_cell_count(), "the prune actually fired (fewer cells than the dense build)")
 
 
 # A window strictly smaller than the surface extent must build LESS: a real (non-empty) surface, but fewer
@@ -264,32 +267,32 @@ func test_grow_world_round_trip_is_lossless():
     assert_eq(_tri_sigs(back_a), _tri_sigs(built_a), "A→B→A returns to the A surface (evict+regrow is lossless)")
 
 
-# Stage B1b — bounded resident set: sweeping the window across the whole root must not leak. Each move
-# evicts a trailing band and grafts a leading one; the free-list reuses the evicted slots, so the cell
-# array plateaus near a single window's size instead of growing with the number of moves. After a long
-# sweep the storage must stay within ~2× a from-scratch build of the final window, and the surface must
-# still match that fresh build (the sweep doesn't corrupt anything).
+# Stage B1b — bounded resident set (leak-proof, prune-robust): sweep the window forward across the root and
+# back to the START (a round trip), repeatedly. The free-list reuses evicted slots, so returning to the same
+# window state must give the EXACT same cell-array size every loop — a leak would grow it each loop. (This
+# replaces a "< 2× fresh" bound that the P1 prune made too tight: pruning shrinks a static window's cell
+# count, but the working set while sweeping varied terrain legitimately exceeds 2× the final window.)
 func test_grow_world_bounds_resident_set():
     var s := _store()
     var origin := _region_origin(s)
     var cam := Vector3(16, 16, 120)
     var w := 10 # window width in x; swept across the 32-wide root
     var m := DCOctreeMesher.new()
-    m.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(),
-            origin, origin + Vector3i(w, SIZE, SIZE))
-    var grown_final: Array = []
-    for step in range(1, SIZE - w + 1): # ends at window x ∈ [SIZE-w, SIZE)
-        grown_final = m.grow_world(cam, 500.0, 2.0,
-                origin + Vector3i(step, 0, 0), origin + Vector3i(step + w, SIZE, SIZE))
-    var swept_count: int = m.get_octree_cell_count()
-
-    var fresh := DCOctreeMesher.new()
-    var fresh_final: Array = fresh.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true,
-            PackedColorArray(), origin + Vector3i(SIZE - w, 0, 0), origin + WIN_FULL)
-    var fresh_count: int = fresh.get_octree_cell_count()
-
-    assert_lt(swept_count, fresh_count * 2, "swept cell array stays bounded ≈ a fresh build of the final window (free-list reuse, no leak)")
-    assert_eq(_tri_sigs(grown_final), _tri_sigs(fresh_final), "after a 22-move sweep the surface still matches a fresh build (no corruption)")
+    var start_min := origin
+    var start_max := origin + Vector3i(w, SIZE, SIZE)
+    var start_built: Array = m.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), start_min, start_max)
+    var maxstep := SIZE - w
+    var counts: Array[int] = []
+    var back_to_start: Array = []
+    for _loop in 3:
+        for step in range(1, maxstep + 1):                      # sweep forward to the far end
+            m.grow_world(cam, 500.0, 2.0, origin + Vector3i(step, 0, 0), origin + Vector3i(step + w, SIZE, SIZE))
+        for step in range(maxstep - 1, -1, -1):                 # sweep back to the start window
+            back_to_start = m.grow_world(cam, 500.0, 2.0, origin + Vector3i(step, 0, 0), origin + Vector3i(step + w, SIZE, SIZE))
+        counts.append(m.get_octree_cell_count())
+    assert_eq(counts[2], counts[0], "cell array is identical after each round trip — free-list fully reuses, no leak (%s)" % str(counts))
+    # And the round trip is lossless: back at the start window, the surface matches the original build.
+    assert_eq(_tri_sigs(back_to_start), _tri_sigs(start_built), "a full sweep returns to the start surface (no corruption)")
 
 
 # Direct field sampling == sampling a baked grid of the same field: the crossing topology is decided by

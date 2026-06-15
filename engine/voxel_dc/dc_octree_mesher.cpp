@@ -311,6 +311,13 @@ struct EditStoreSource : public SdfSource {
 	Vector3 world_origin; // lattice coords of octree (0,0,0)
 	double base_cell;     // world metres per lattice unit
 
+	// (P1, doc 17) transient min/max acceleration grid over the resident window, in OCTREE-LOCAL lattice
+	// (one sample per lattice unit), so surface_free can skip building the ~99.8% of empty cells. Baking is
+	// ~30x cheaper than the dense tree build (measured), and the exact min/max test can't miss a crossing.
+	Level accel;
+	LocalVector<float> accel_data; // backs accel.data
+	bool has_accel = false;
+
 	EditStoreSource(const EditStore *s, const Vector3 &wo, double bc) :
 			store(s), world_origin(wo), base_cell(bc) {}
 
@@ -318,6 +325,26 @@ struct EditStoreSource : public SdfSource {
 
 	double value(const Vector3 &p) const override {
 		return store->sample(to_world(p));
+	}
+
+	// Bake the accel grid over the OCTREE-LOCAL lattice box [lo, hi] (a cube of side = max span + 1, so it
+	// covers the window even when clamped non-cubic at a root face). One field sample per lattice unit.
+	void bake_accel(const Vector3i &lo, const Vector3i &hi) {
+		int dim = MAX(hi.x - lo.x, MAX(hi.y - lo.y, hi.z - lo.z)) + 1;
+		accel.origin = Vector3(lo);
+		accel.cell = 1.0;
+		accel.dim = dim;
+		accel_data.resize(int64_t(dim) * dim * dim);
+		for (int z = 0; z < dim; ++z) {
+			for (int y = 0; y < dim; ++y) {
+				for (int x = 0; x < dim; ++x) {
+					accel_data[x + dim * (y + dim * z)] = float(value(Vector3(lo.x + x, lo.y + y, lo.z + z)));
+				}
+			}
+		}
+		accel.data = accel_data.ptr();
+		accel.build_mip();
+		has_accel = true;
 	}
 
 	Vector3 gradient(const Vector3 &p) const override {
@@ -330,7 +357,15 @@ struct EditStoreSource : public SdfSource {
 	}
 
 	double target_cell_size(const Vector3 &p) const override { return 1.0; } // uniform fine floor (lattice unit)
-	bool surface_free(const Vector3 &cmin, const Vector3 &cmax) const override { return false; } // dense build (no prune yet)
+
+	// Exact surface-sparse prune (P1): a cell is surface-free iff the accel grid's min/max over it (plus a
+	// 1-cell margin) is strictly one side of the isosurface. Without an accel grid, abstain to a dense build
+	// (the no-window tests rely on this). NOTE: only safe when accel covers every cell that gets built — the
+	// caller bakes it over the whole resident window before building (a box outside the grid abstains TRUE,
+	// which here means "prune", so an uncovered built cell would wrongly vanish).
+	bool surface_free(const Vector3 &cmin, const Vector3 &cmax) const override {
+		return has_accel && accel.surface_free(cmin, cmax);
+	}
 	bool is_finest_level(const Vector3 &p) const override { return false; } // no clipmap core to pin
 
 	// Material id of the solid a vertex bounds — the inward-scan from Clipmap::index_prefer_explicit,
@@ -1234,7 +1269,7 @@ Array DCOctreeMesher::mesh_world(
 	oct.error_driven = error_driven;
 	oct.world_origin = world_origin;
 	oct.uniform_core = false; // the whole world octree collapses by screen-error; no fine bubble to pin
-	oct.prune_safety = 0.0;   // EditStoreSource::surface_free abstains → dense build to floor (scaffold)
+	oct.prune_safety = 0.0;   // off unless a window is set (below) — a windowless build stays dense to floor
 	// Resident WINDOW (doc 16 Stage B): when win_min != win_max, build only the cells overlapping the
 	// window box (WORLD lattice) and mark the rest absent — the large root can span the roam region while
 	// the build cost stays bounded to the window. Default (win_min == win_max) = build the whole root.
@@ -1243,6 +1278,11 @@ Array DCOctreeMesher::mesh_world(
 		oct.window_mode = true;
 		oct.build_min = win_min;
 		oct.build_max = win_max;
+		// P1 (doc 17): bake the surface-sparse accel grid over the window (octree-local) and turn the prune
+		// on, so the build skips the ~99.8% of empty cells. Only when windowed — a windowless build's accel
+		// would span the whole root (huge). Costs ~one cheap field-sample pass; saves the dense tree build.
+		_persist->world_src.bake_accel(win_min - world_origin, win_max - world_origin);
+		oct.prune_safety = 1.0;
 	}
 	oct.run();
 
@@ -1267,6 +1307,13 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	oct.window_mode = true;
 	oct.build_min = win_min;
 	oct.build_max = win_max;
+	// P1: re-bake the accel grid over the NEW window so the leading-edge band is covered (an uncovered box
+	// abstains TRUE = prune, which would vanish the band). The retained interior isn't rebuilt, so its
+	// prune decisions (from the original window's accel) stand — geometrically identical (empty either way).
+	if (_persist->world_src.has_accel) {
+		_persist->world_src.bake_accel(win_min - oct.world_origin, win_max - oct.world_origin);
+		oct.prune_safety = 1.0;
+	}
 	oct.build_samples = 0;
 	oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge
 	oct.reaccumulate(0); // roll up ancestor QEFs from cached children — no field sampling
