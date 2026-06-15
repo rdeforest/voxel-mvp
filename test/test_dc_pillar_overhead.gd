@@ -49,7 +49,7 @@ func _run(label: String) -> void:
         [_level(1.0), _level(2.0), _level(4.0)], DIM,
         PackedVector3Array([Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]),
         PackedFloat32Array([1.0, 2.0, 4.0]),
-        cam, 16.0, DEPTH, cam, 771.0, 8.0, true, Vector3i())
+        cam, 16.0, DEPTH, 8.0, true, Vector3i())
     var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
     var idx:   PackedInt32Array   = arrays[Mesh.ARRAY_INDEX]
     var a := _edge_audit(idx)
@@ -73,7 +73,7 @@ func test_pillar_from_above() -> void:
         [_level(1.0), _level(2.0), _level(4.0)], DIM,
         PackedVector3Array([Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]),
         PackedFloat32Array([1.0, 2.0, 4.0]),
-        cam, 16.0, DEPTH, cam, 771.0, 8.0, true, Vector3i())   # error_driven = true
+        cam, 16.0, DEPTH, 8.0, true, Vector3i())   # error_driven = true
     var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
     var idx:   PackedInt32Array   = arrays[Mesh.ARRAY_INDEX]
 

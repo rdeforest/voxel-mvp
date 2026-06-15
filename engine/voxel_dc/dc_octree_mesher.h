@@ -16,15 +16,6 @@
 class DCOctreeMesher : public RefCounted {
 	GDCLASS(DCOctreeMesher, RefCounted)
 
-	// Persistent across calls (reuse the SAME instance): the world-space nodes that
-	// collapsed last frame, keyed Vector4i(world_origin.xyz, size). Hysteresis reads
-	// this to keep an already-collapsed node collapsed until its error clearly exceeds
-	// the threshold — so cells don't oscillate collapsed<->subdivided as the camera
-	// moves (the LOD popping). Keyed by WORLD origin so the keys survive the clipmap's
-	// periodic recenter snap. Only touched inside mesh_clipmap; one job at a time.
-	HashSet<Vector4i> _prev_collapse;
-	HashSet<Vector4i> _curr_collapse;
-
 	// Per-triangle owner cell origin (WORLD lattice) of the last mesh_clipmap/mesh_subregion
 	// call — lets the incremental path know which cached triangles a re-meshed sub-box
 	// replaces. One Vector3 (integer-valued) per emitted triangle.
@@ -48,10 +39,9 @@ public:
 	// QEF fit error (residual_tol, in base-cell world units) is small enough that one
 	// vertex represents the fine surface, so flat regions mesh coarse and detail stays
 	// fine REGARDLESS of camera distance. The data resolution (clipmap level) is still
-	// the floor — error-refine only coarsens, never exceeds available data. (camera/proj
-	// are VESTIGIAL since the necessity switch — collapse no longer reads them; pending
-	// the signature cleanup.) lattice_world_origin: world coords of lattice (0,0,0);
-	// keys the collapse-set world-stable across the clipmap's recenter snap.
+	// the floor — error-refine only coarsens, never exceeds available data.
+	// lattice_world_origin: world coords of lattice (0,0,0); converts a cell's local
+	// origin to its world position for the emit/build boxes.
 	// level_indices: optional per-level CHANNEL_INDICES bytes (same layout/order as
 	// level_data); palette: material id -> albedo Color (index 0 = natural). When
 	// both are supplied, each output vertex gets an ARRAY_COLOR: rgb = palette[id]
@@ -68,8 +58,6 @@ public:
 			Vector3 center,
 			double half0,
 			int depth,
-			Vector3 camera = Vector3(),
-			double proj = 0.0,
 			double residual_tol = 0.0,
 			bool error_driven = false,
 			Vector3i lattice_world_origin = Vector3i(),
@@ -79,8 +67,6 @@ public:
 			double prune_safety = 0.0,
 			Vector3i emit_min = Vector3i(),
 			Vector3i emit_max = Vector3i(),
-			bool incremental = false,
-			int max_leaf = 0,
 			Vector3i build_min = Vector3i(),
 			Vector3i build_max = Vector3i());
 

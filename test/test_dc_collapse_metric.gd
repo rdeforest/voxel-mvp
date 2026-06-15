@@ -56,7 +56,7 @@ func _mesh(eps: float, sphere := false) -> Array:
     return DCOctreeMesher.new().mesh_clipmap(
         [data], DIM, PackedVector3Array([Vector3.ZERO]), PackedFloat32Array([1.0]),
         Vector3(16, 16, 16), 1e9, DEPTH,
-        Vector3(16, 60, 16), 771.0, eps, true, Vector3i())
+        eps, true, Vector3i())
 
 
 func test_diagnostic_sweep() -> void:
@@ -89,6 +89,6 @@ func test_spire_kept_while_terrain_coarsens() -> void:
     var dense := DCOctreeMesher.new().mesh_clipmap(
         [_level(Vector3.ZERO, 1.0, true)], DIM, PackedVector3Array([Vector3.ZERO]),
         PackedFloat32Array([1.0]), Vector3(16, 16, 16), 1e9, DEPTH,
-        Vector3(16, 60, 16), 771.0, 0.0, false, Vector3i())   # err=false: no-collapse baseline
+        0.0, false, Vector3i())   # err=false: no-collapse baseline
     var dense_idx: PackedInt32Array = dense[Mesh.ARRAY_INDEX]
     assert_lt(coarse.size(), dense_idx.size() / 2, "curved terrain still coarsens (LOD works)")

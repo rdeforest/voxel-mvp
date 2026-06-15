@@ -1,17 +1,16 @@
 extends GutTest
 
-# Gate test for B1 — Multi-LOD splice. Validates that the PRODUCTION sub-octree splice path
-# reproduces the full build across a LOD transition: a SMALL octree at sub_origin (sub_depth, not
-# the full DEPTH) with level-origins / center / camera shifted into its local frame, incremental on
-# the shared collapse set, output restricted to the edit core box. If any of that math — or the
-# sub-box ALIGNMENT — is wrong, the patch will not reproduce the full build's triangles in the box
-# and the seam cracks. The full build is the oracle (the cache the live splice patches against).
+# Gate test for the multi-LOD splice. Validates that the build-box splice reproduces the full build
+# across a LOD transition: a splice builds on the FULL build's frame (root_origin / DEPTH) restricted
+# by a build-box to the edit region + apron, emitting only the core. Its cells therefore share the
+# full build's lattice and neighbours, so the core triangles are reproduced EXACTLY and the seam
+# can't crack. The full build is the oracle (the cache the live splice patches against).
 #
 # Field: an analytic 2-level sphere clipmap. Analytic is correct HERE because the oracle is the full
-# build on the SAME field — this test isolates the coordinate transform + boundary stitching, not
+# build on the SAME field — this test isolates the build-box restriction + boundary stitching, not
 # the field's fidelity (the real-terrain watertight guards live in test_dc_real_terrain.gd /
 # test_dc_incremental_splice.gd). A finite HALF0 forces the sphere surface through the level-0/1
-# boundary so coarse (collapsed) cells appear outside the fine core — the cells B1 must patch.
+# boundary so coarse (collapsed) cells appear outside the fine core — the cells the splice must patch.
 
 const SIZE   := 64
 const DIM    := SIZE + 1                 # 65 samples per level per axis
@@ -19,9 +18,7 @@ const DEPTH  := 6                        # octree root [0,64]^3
 const HALF0  := 12.0                     # level-0 half-extent; level-1 used at Chebyshev > 12
 const CENTER := Vector3(32, 32, 32)
 const RADIUS := 24.0                     # sphere surface crosses the LOD band
-const PROJ   := 500.0
 const TOL    := 2.0                      # world-residual collapse tolerance (necessity LOD)
-const CAMERA := Vector3(32, 300, 32)     # high above; the far side of the sphere collapses
 
 
 # Sphere SDF over a DIM^3 grid sampled at world p = origin + (x,y,z)*cell (so level k uses cell 2^k).
@@ -88,7 +85,7 @@ func test_owner_sizes_parallel_to_owners() -> void:
     var clip := _clip()
     var mesher := DCOctreeMesher.new()
     var arrays := mesher.mesh_clipmap(clip.data, DIM, clip.origins, clip.cells,
-        CENTER, HALF0, DEPTH, CAMERA, PROJ, TOL, true, Vector3i.ZERO)
+        CENTER, HALF0, DEPTH, TOL, true, Vector3i.ZERO)
     assert_false(arrays.is_empty(), "produced a surface")
     var owners := mesher.get_last_triangle_owners()
     var sizes  := mesher.get_last_triangle_owner_sizes()
@@ -113,7 +110,7 @@ func test_buildbox_splice_reproduces_full_build_across_lod() -> void:
     # A. Full build (the oracle).
     var mesher := DCOctreeMesher.new()
     var full := mesher.mesh_clipmap(clip.data, DIM, clip.origins, clip.cells,
-        CENTER, HALF0, DEPTH, CAMERA, PROJ, TOL, true, world_origin)
+        CENTER, HALF0, DEPTH, TOL, true, world_origin)
     assert_false(full.is_empty(), "full build produced a surface")
     var full_owners := mesher.get_last_triangle_owners()
     var full_sizes  := mesher.get_last_triangle_owner_sizes()
@@ -135,12 +132,10 @@ func test_buildbox_splice_reproduces_full_build_across_lod() -> void:
     var apron := Vector3i.ONE * 8        # ≥ the point-location stitch radius, so core cells' neighbours are full-res
 
     # C. The build-box splice: SAME frame as the full build, build only core+apron, emit only core.
-    # incremental=false, max_leaf=0 (no cap) — none of the offset-splice crutches are needed.
     var patch := mesher.mesh_clipmap(clip.data, DIM, clip.origins, clip.cells,
-        CENTER, HALF0, DEPTH, CAMERA, PROJ, TOL, true, world_origin,
+        CENTER, HALF0, DEPTH, TOL, true, world_origin,
         [], PackedColorArray(), false, 0.0,
         core_min, core_max,                          # emit box: only the core triangles
-        false, 0,
         core_min - apron, core_max + apron)          # build box: descend only here
     var patch_owners := mesher.get_last_triangle_owners()
 

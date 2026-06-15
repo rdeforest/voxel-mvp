@@ -107,16 +107,14 @@ var _splice_owners:      PackedVector3Array = PackedVector3Array()  # per-triang
 var _splice_owner_sizes: PackedFloat32Array = PackedFloat32Array()  # per-triangle owner sizes
 var _edits_during_build: Array = []  # edits seen while a full build ran → re-queued on finish
 
-# The clipmap geometry of the last full build — what a splice re-uses so its sub-octree meshes the
-# same levels with the same camera/eps and lands on the same cells.
+# The clipmap geometry of the last full build — what a splice re-uses so it meshes the same levels
+# at the same tolerance on the same frame and lands on the same cells.
 class ClipmapView:
     var level_world_cells: PackedVector3Array = PackedVector3Array()
     var level_origins:     PackedVector3Array = PackedVector3Array()
     var level_cells:       PackedFloat32Array = PackedFloat32Array()
     var center_lattice:    Vector3
-    var camera_lattice:    Vector3
     var half0:             float
-    var proj:              float
     var residual_tol:      float
     var error_driven:      bool
     func ready() -> bool:
@@ -355,11 +353,10 @@ func _splice_job(store: EditStore, core_min: Vector3i, core_max: Vector3i,
     _splice_patch = _mesher.mesh_clipmap(
         level_data, LEVEL_DIM, _clipmap.level_origins, _clipmap.level_cells,
         _clipmap.center_lattice, _clipmap.half0, _ROOT_DEPTH,
-        _clipmap.camera_lattice, _clipmap.proj, _clipmap.residual_tol, _clipmap.error_driven,
+        _clipmap.residual_tol, _clipmap.error_driven,
         _cache.origin, level_idxs, palette,
         true, 0.0,                       # uniform_core=true (match the full build), prune_safety=0
         core_min, core_max,              # emit box: only output triangles in the edit core
-        false, 0,                        # incremental=false, max_leaf cap=0 — the full frame needs neither
         build_min, build_max)            # build box: descend only the edit box + apron
     _splice_owners      = _mesher.get_last_triangle_owners()
     _splice_owner_sizes = _mesher.get_last_triangle_owner_sizes()
@@ -542,33 +539,22 @@ func _dispatch(center: Vector3) -> void:
     # region as the representative "this got redone" box (green) — so movement lights it up.
     var fine_w := half0 * base_cell
     region_invalidated.emit(center - Vector3.ONE * fine_w, center + Vector3.ONE * fine_w, 1)
-    # Capture the camera (main thread) for error-driven LOD: viewpoint in lattice
-    # space + the perspective projection factor (px per world unit at unit distance).
-    var camera_lattice := center_lattice
-    var proj := 0.0
-    var cam := get_viewport().get_camera_3d()
-    if cam != null:
-        camera_lattice = cam.global_position / base_cell - Vector3(root_origin)   # world -> base-cell lattice
-        var vp_h := float(get_viewport().get_visible_rect().size.y)
-        proj = vp_h / (2.0 * tan(deg_to_rad(cam.fov) * 0.5))
-    # Capture so splices can run mesh_clipmap with identical geometry + camera + eps.
+    # Capture so splices can run mesh_clipmap with identical geometry + tolerance on the same frame.
     _clipmap.level_world_cells = level_world_cells
     _clipmap.level_origins     = level_origins
     _clipmap.level_cells       = level_cells
     _clipmap.center_lattice    = center_lattice
-    _clipmap.camera_lattice    = camera_lattice
     _clipmap.half0             = half0
-    _clipmap.proj              = proj
     _clipmap.residual_tol      = residual_tol
     _clipmap.error_driven      = error_driven
     if dump_next:
-        _arm_dump(center_lattice, camera_lattice, half0, proj, root_origin)
+        _arm_dump(center_lattice, half0, root_origin)
     # An immutable snapshot of the sparse store for the worker (cheap — copies only edited
     # nodes; unedited world stays the on-demand generator).
     var job_store: EditStore = _edit_store.duplicate()
     _task_id = WorkerThreadPool.add_task(
         _mesh_job.bind(job_store, level_world_cells, level_origins, level_cells, center_lattice, half0,
-            camera_lattice, proj, residual_tol, error_driven, root_origin,
+            residual_tol, error_driven, root_origin,
             MaterialPalette.colors()), false, "DC terrain mesh")
 
 
@@ -577,7 +563,7 @@ func _dispatch(center: Vector3) -> void:
 # snapshot + immutable PackedArrays — safe off the main thread (no Node / engine access).
 func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
         level_origins: PackedVector3Array, level_cells: PackedFloat32Array,
-        center: Vector3, half0: float, camera: Vector3, proj: float, tol: float, err: bool,
+        center: Vector3, half0: float, tol: float, err: bool,
         world_origin: Vector3i, palette: PackedColorArray) -> void:
     var base_cell := VoxelConstants.RENDER_BASE_CELL
     var level_data: Array = []
@@ -594,7 +580,7 @@ func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
         _dump_dict["cells"]      = level_cells
     _job.arrays = _mesher.mesh_clipmap(
         level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH,
-        camera, proj, tol, err, world_origin, level_indices, palette,
+        tol, err, world_origin, level_indices, palette,
         true,   # uniform_core: KEEP the fine core in B1 — edits near the player land in uniform
                 # fine LOD and splice with a small box. (Dropping it is B2's job, once a budget-
                 # driven LOD replaces it; dropping it here made flat near-terrain coarse, so edits
@@ -609,14 +595,14 @@ func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
 # Diagnostic (dcdump): write this dispatch's mesher INPUT (clipmap SDF + params) paired
 # with the OUTPUT mesh it produced, so the exact case can be replayed and audited
 # headlessly — and the displayed mesh inspected directly (Mesh.ARRAY_* arrays).
-func _arm_dump(center: Vector3, camera: Vector3, half0: float, proj: float, root_origin: Vector3i) -> void:
+func _arm_dump(center: Vector3, half0: float, root_origin: Vector3i) -> void:
     dump_next = false
     _dump_armed = true
     # level_data / origins / cells are filled in by _mesh_job once the worker reads the store.
     _dump_dict = {
         "dim": LEVEL_DIM,
-        "center": center, "camera": camera, "half0": half0, "depth": _ROOT_DEPTH,
-        "proj": proj, "tol": residual_tol, "err": error_driven, "root_origin": root_origin,
+        "center": center, "half0": half0, "depth": _ROOT_DEPTH,
+        "tol": residual_tol, "err": error_driven, "root_origin": root_origin,
     }
 
 
