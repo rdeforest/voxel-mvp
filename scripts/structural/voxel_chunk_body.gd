@@ -87,7 +87,7 @@ static func _chunk_mesh(voxels: Array[Vector3i], voxel_set: Dictionary, store: E
     var mesher := DCOctreeMesher.new()
     var arrays := mesher.mesh_clipmap(
         [data], dim, PackedVector3Array([Vector3.ZERO]), PackedFloat32Array([1.0]),
-        Vector3.ZERO, 1e9, depth, 0.0, false, Vector3i.ZERO,
+        Vector3.ZERO, 1e9, depth, Vector3.ZERO, 0.0, 0.0, false, Vector3i.ZERO,
         [idx], MaterialPalette.colors())
     if arrays.is_empty() or (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).is_empty():
         return null

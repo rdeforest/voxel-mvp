@@ -51,12 +51,18 @@ func _spire_verts(verts: PackedVector3Array) -> int:
     return n
 
 
+# Camera far along +z with proj == distance, so proj/dist ~= 1 and the screen error
+# we*proj/dist ~= we (the world QEF residual). This isolates the residual METRIC under test
+# from the distance falloff, so eps reads ~ as a world-residual tolerance (base-cells).
+const FAR := 1000.0
+
 func _mesh(eps: float, sphere := false) -> Array:
     var data := _level(Vector3.ZERO, 1.0, sphere)
+    var center := Vector3(16, 16, 16)
     return DCOctreeMesher.new().mesh_clipmap(
         [data], DIM, PackedVector3Array([Vector3.ZERO]), PackedFloat32Array([1.0]),
-        Vector3(16, 16, 16), 1e9, DEPTH,
-        eps, true, Vector3i())
+        center, 1e9, DEPTH,
+        center + Vector3(0, 0, FAR), FAR, eps, true, Vector3i())
 
 
 func test_diagnostic_sweep() -> void:
@@ -76,8 +82,8 @@ func test_spire_kept_while_terrain_coarsens() -> void:
     # The thin spire's UNDIVIDED residual is high, so at a fine tolerance it stays fully
     # meshed with no flapping slivers while the flat floor (residual 0) collapses hard.
     # (The old count-averaged metric drowned the spire's residual in the floor's zeros:
-    # spire lost, aspect ~44.) Under necessity LOD the tolerance is a world residual, so
-    # tol ~= 1 base-cell keeps the spire — the old eps=16 px was ~0.9 after /dist.
+    # spire lost, aspect ~44.) With proj/dist ~= 1 here the screen error ~= the world
+    # residual, so eps ~= 1 base-cell keeps the spire while the zero-residual floor collapses.
     var s := _mesh(1.0)
     var sv: PackedVector3Array = s[Mesh.ARRAY_VERTEX]
     var si: PackedInt32Array   = s[Mesh.ARRAY_INDEX]
@@ -89,6 +95,6 @@ func test_spire_kept_while_terrain_coarsens() -> void:
     var dense := DCOctreeMesher.new().mesh_clipmap(
         [_level(Vector3.ZERO, 1.0, true)], DIM, PackedVector3Array([Vector3.ZERO]),
         PackedFloat32Array([1.0]), Vector3(16, 16, 16), 1e9, DEPTH,
-        0.0, false, Vector3i())   # err=false: no-collapse baseline
+        Vector3.ZERO, 0.0, 0.0, false, Vector3i())   # err=false: no-collapse baseline
     var dense_idx: PackedInt32Array = dense[Mesh.ARRAY_INDEX]
     assert_lt(coarse.size(), dense_idx.size() / 2, "curved terrain still coarsens (LOD works)")

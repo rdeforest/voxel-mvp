@@ -92,17 +92,19 @@ func test_lod_transition_is_watertight():
 # --- Error-driven LOD (bottom-up collapse) ---
 #
 # The redesign: build to the data floor, then collapse a node into one leaf wherever
-# its ACCUMULATED QEF (the real fine Hermite data) is fit by one vertex within the
-# world-residual tolerance, floored so a flat field stays >=2 cells/axis. Two invariants:
+# its ACCUMULATED QEF (the real fine Hermite data) is fit by one vertex within eps_px
+# on screen (we*proj/dist), floored so a flat field stays >=2 cells/axis. Two invariants:
 #   - error-mode stays watertight on the sphere (collapse + point-location stitching
 #     introduce size jumps but no cracks),
-#   - it coarsens a flat field far below distance-mode without holing it (the failure
+#   - it coarsens a flat field far below no-collapse mode without holing it (the failure
 #     of the old top-down metric, which collapsed a flat region to one empty cell).
 
+const PROJ := 500.0   # stand-in viewport_height/(2 tan(fov/2))
+
 func _mesh_err(level_data: Array, origins: PackedVector3Array, cells: PackedFloat32Array, half0: float,
-        tol: float) -> Array:
+        camera: Vector3, eps_px: float) -> Array:
     return DCOctreeMesher.new().mesh_clipmap(
-        level_data, DIM, origins, cells, CENTER, half0, DEPTH, tol, true)
+        level_data, DIM, origins, cells, CENTER, half0, DEPTH, camera, PROJ, eps_px, true)
 
 # A flat field: SDF = world.z - PLANE_Z (negative below, positive above). An OPEN
 # surface — boundary edges at the octree perimeter are expected; what matters is it
@@ -127,8 +129,9 @@ func test_error_mode_sphere_watertight():
     var data := _level(Vector3.ZERO, 1.0)
     var origins := PackedVector3Array([Vector3.ZERO])
     var cells := PackedFloat32Array([1.0])
+    var camera := CENTER + Vector3(0, 0, 220)                            # far: curvature falls under eps
     var fine := _mesh([data], origins, cells, 1e9)                       # no-collapse baseline
-    var coarse := _mesh_err([data], origins, cells, 1e9, 1.0)
+    var coarse := _mesh_err([data], origins, cells, 1e9, camera, 1.0)
     assert_false(coarse.is_empty(), "error mode produced a surface")
     _assert_watertight(coarse, 3.5, 40)                                # looser hug + lower floor — aggressive collapse, still closed
     var fine_tris: int   = (fine[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
@@ -144,7 +147,7 @@ func test_error_mode_coarsens_flat_without_holing():
     var origins := PackedVector3Array([Vector3.ZERO])
     var cells := PackedFloat32Array([1.0])
     var fine := _mesh([data], origins, cells, 1e9)
-    var coarse := _mesh_err([data], origins, cells, 1e9, 1.0)
+    var coarse := _mesh_err([data], origins, cells, 1e9, CENTER + Vector3(0, 0, 60), 1.0)
     assert_false(coarse.is_empty(), "flat field still meshed (not holed to nothing)")
     var fine_tris: int   = (fine[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
     var coarse_tris: int = (coarse[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
@@ -157,9 +160,28 @@ func test_error_mode_coarsens_flat_without_holing():
     assert_lt(max_dev, 0.5, "coarse vertices still lie on the plane")
 
 
-# Necessity-driven LOD is collapse = f(field): the mesher takes no camera/proj at all, so
-# camera-independence is now structural (there is nothing to vary). The runtime test that proved
-# the screen-error metric was dropped retired with those parameters.
+# Screen-error LOD is collapse = f(field, camera): the same world residual projects to more
+# pixels up close and through a narrow FOV, so the LOD responds to BOTH. This is the property
+# Stage 1 restored (and the necessity code lacked — these asserts would fail on it).
+
+func _err_tris(mesher: DCOctreeMesher, data: PackedFloat32Array, camera: Vector3, proj: float, eps: float) -> int:
+    var arrays := mesher.mesh_clipmap(
+        [data], DIM, PackedVector3Array([Vector3.ZERO]), PackedFloat32Array([1.0]),
+        CENTER, 1e9, DEPTH, camera, proj, eps, true, Vector3i.ZERO)
+    if arrays.is_empty():
+        return 0
+    return (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
+
+func test_screen_error_responds_to_distance_and_fov():
+    var data := _level(Vector3.ZERO, 1.0)              # the sphere
+    var far  := CENTER + Vector3(0, 0, 220)
+    var near := CENTER + Vector3(0, 0, 80)
+    var m := DCOctreeMesher.new()
+    var tris_far  := _err_tris(m, data, far,  PROJ,       1.0)
+    var tris_near := _err_tris(m, data, near, PROJ,       1.0)
+    var tris_zoom := _err_tris(m, data, far,  PROJ * 4.0, 1.0)   # telescope from the far spot
+    assert_gt(tris_near, tris_far, "closer camera keeps more detail (larger on-screen error)")
+    assert_gt(tris_zoom, tris_far, "narrow FOV (telescope) refines distant terrain")
 
 
 # --- Material bleed (index_prefer_explicit) ---
@@ -194,7 +216,7 @@ func _wood_box(half: float, interior_inset: float) -> Dictionary:
 func _mesh_colored(s: Dictionary) -> Array:
     return DCOctreeMesher.new().mesh_clipmap(
         [s.data], DIM, PackedVector3Array([Vector3.ZERO]), PackedFloat32Array([1.0]),
-        CENTER, 1e9, DEPTH, 0.0, false, Vector3i.ZERO,
+        CENTER, 1e9, DEPTH, Vector3.ZERO, 0.0, 0.0, false, Vector3i.ZERO,
         [s.indices], MaterialPalette.colors())
 
 

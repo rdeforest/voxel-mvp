@@ -184,7 +184,9 @@ struct Octree {
 	Clipmap clip;
 	int root_size = 0;
 	int max_depth = 0;
-	double residual_tol = 0.0; // world-residual collapse tolerance (base-cell units) — necessity LOD
+	Vector3 camera;          // viewpoint in root-local lattice space (screen-error LOD)
+	double proj = 0.0;       // viewport_height / (2*tan(fov/2)) — px per world unit at unit distance
+	double eps_px = 0.0;     // screen-space error threshold (px): collapse when we*proj/dist <= eps_px
 	bool error_driven = false;
 	int max_leaf_size = 0;   // min-grid floor: never collapse above this (a flat world keeps >=2 cells/axis, so it meshes instead of collapsing to one empty cell)
 	Vector3i world_origin;   // world coords of lattice (0,0,0): converts a cell's local origin to its world position for the emit/build boxes
@@ -310,14 +312,17 @@ struct Octree {
 		// regions, spiking where one vertex can't represent a feature -> the feature
 		// vetoes its own collapse.
 		//
-		// Necessity-driven LOD: collapse when that residual is within a fixed WORLD-space
-		// tolerance (base-cell units) — NOT scaled by camera distance. The mesh is then
-		// f(field), not f(field, camera): moving or turning the camera changes the LOD
-		// nowhere, so a distant (telescoped) view is already as detailed as the surface
-		// demands. Detail is bought only where the field needs it.
+		// Screen-space-error LOD: project that world residual to pixels (we * proj / dist)
+		// and keep the node refined while it exceeds eps_px (~2px), collapse otherwise. So a
+		// feature coarsens as it recedes (its on-screen error shrinks) and a narrow FOV
+		// (telescope/zoom) raises proj, magnifying distant terrain back over eps_px → it
+		// refines. No hysteresis here — the persistent node cache (Stage 2) is the proper
+		// fix for collapse popping; this eager pass rebuilds each recenter.
 		double we = Math::sqrt(sum.residual(v));
-		if (we > residual_tol) {
-			return; // surface here needs more than one vertex
+		Vector3 ctr = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
+		double dist = MAX((ctr - camera).length(), 1e-3);
+		if (we * proj / dist > eps_px) {
+			return; // on-screen error too large — surface here needs more than one vertex
 		}
 		cells[idx].leaf = true; // collapse: this node is the leaf; its subtree is orphaned
 		orphan_subtree(idx);
@@ -585,7 +590,9 @@ Array DCOctreeMesher::mesh_clipmap(
 		Vector3 center,
 		double half0,
 		int depth,
-		double residual_tol,
+		Vector3 camera,
+		double proj,
+		double eps_px,
 		bool error_driven,
 		Vector3i lattice_world_origin,
 		const TypedArray<PackedByteArray> &level_indices,
@@ -618,7 +625,9 @@ Array DCOctreeMesher::mesh_clipmap(
 	oct.prune_safety = prune_safety;   // >0: surface-sparse build (skip provably-empty regions)
 	oct.root_size = 1 << depth;
 	oct.max_depth = depth;
-	oct.residual_tol = residual_tol;
+	oct.camera = camera;
+	oct.proj = proj;
+	oct.eps_px = eps_px;
 	oct.error_driven = error_driven;
 	oct.world_origin = lattice_world_origin;
 	// Emit-box filter: when emit_min != emit_max (caller set them), restrict output to
@@ -744,10 +753,10 @@ Array DCOctreeMesher::mesh_subregion(
 void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("mesh_clipmap", "level_data", "dim", "level_origins", "level_cells", "center", "half0", "depth",
-					"residual_tol", "error_driven", "lattice_world_origin", "level_indices", "palette",
+					"camera", "proj", "eps_px", "error_driven", "lattice_world_origin", "level_indices", "palette",
 					"uniform_core", "prune_safety", "emit_min", "emit_max", "build_min", "build_max"),
 			&DCOctreeMesher::mesh_clipmap,
-			DEFVAL(0.0), DEFVAL(false), DEFVAL(Vector3i()),
+			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(Vector3i()),
 			DEFVAL(TypedArray<PackedByteArray>()), DEFVAL(PackedColorArray()), DEFVAL(false), DEFVAL(0.0),
 			DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(Vector3i()));
 	ClassDB::bind_method(

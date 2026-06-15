@@ -53,10 +53,10 @@ func _table() -> Array:
         [loadstyle,       "loadstyle", "Load a saved shader-settings preset. Usage: loadstyle <name>"],
         [liststyles,      "liststyles","List saved shader-settings presets."],
         [dcmanager,       "dcmanager", "Toggle the DC terrain manager (threaded re-mesh of a bubble around you). Usage: dcmanager [on|off]"],
-        [dcerror,         "dcerror",   "Toggle necessity-driven terrain LOD (collapse by world-residual, camera-independent). Usage: dcerror [on|off]"],
+        [dcerror,         "dcerror",   "Toggle screen-error terrain LOD (collapse by projected QEF residual in px). Usage: dcerror [on|off]"],
         [dcinval,         "dcinval",   "Toggle the invalidation overlay: blue=voxels an edit changed, green=region re-meshed, fading. Shows what each edit/move redoes."],
-        [dcbudget,        "dcbudget",  "Toggle the B2 detail budget: auto-tune the LOD tolerance toward a frame-time target (refine on slack, coarsen over budget). Usage: dcbudget [on|off]"],
-        [dctol,           "dctol",     "Set the necessity-LOD collapse tolerance (world-residual, base-cells; lower = more detail). Usage: dctol <tol>"],
+        [dcbudget,        "dcbudget",  "Toggle the B2 detail budget: auto-tune the LOD threshold toward a frame-time target (refine on slack, coarsen over budget). Usage: dcbudget [on|off]"],
+        [dceps,           "dceps",     "Set the screen-error LOD threshold (px; lower = more detail). Usage: dceps <px>"],
         [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight + magenta backfaces (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
@@ -205,19 +205,19 @@ func dcinval(_state := "") -> void:
 func dcbudget(state := "") -> void:
     var on := _parse_toggle(state, dc_manager.budget_enabled)
     dc_manager.budget_enabled = on
-    LimboConsole.info("dcbudget: %s (target %.0f ms/frame, tol now %.2f)" % [
-        ("on" if on else "off"), DCTerrainManager.BUDGET_TARGET_MS, dc_manager.residual_tol])
+    LimboConsole.info("dcbudget: %s (target %.0f ms/frame, eps now %.2fpx)" % [
+        ("on" if on else "off"), DCTerrainManager.BUDGET_TARGET_MS, dc_manager.eps_px])
 
 func dcerror(state := "") -> void:
     var on := _parse_toggle(state, dc_manager.error_driven)
     dc_manager.error_driven = on
     dc_manager.remesh()
-    LimboConsole.info("dcerror: %s (tol %.2f)" % [("on" if on else "off"), dc_manager.residual_tol])
+    LimboConsole.info("dcerror: %s (eps %.2fpx)" % [("on" if on else "off"), dc_manager.eps_px])
 
-func dctol(tol: float) -> void:
-    dc_manager.residual_tol = maxf(0.01, tol)
+func dceps(px: float) -> void:
+    dc_manager.eps_px = maxf(0.1, px)
     dc_manager.remesh()
-    LimboConsole.info("dctol: %.2f" % dc_manager.residual_tol)
+    LimboConsole.info("dceps: %.2fpx" % dc_manager.eps_px)
 
 # Freeze the render so a defect holds still, fly through it (noclip), and colour backfaces magenta
 # so a backwards triangle (gap fills magenta) reads differently from a missing one (gap stays open).

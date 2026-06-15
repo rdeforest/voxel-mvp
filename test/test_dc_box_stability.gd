@@ -58,9 +58,9 @@ func _divergence(a: PackedVector3Array, b: PackedVector3Array) -> float:
     return worst
 
 
-# Necessity-driven LOD made collapse = f(field): the mesher no longer takes a camera, so the
-# "same box meshes identically from near vs far camera" check retired with the parameter — there
-# is nothing left to vary. The geomorph view-independence above is the surviving guard.
+# This test runs with collapse OFF (error_driven defaults false) to isolate the geomorph
+# view-dependence — the box's shape must not change as the clipmap re-centres. Screen-error LOD
+# adds its own (intended) camera dependence; that's exercised in test_dc_octree_mesher.gd, not here.
 
 
 func test_box_mesh_is_view_dependent() -> void:

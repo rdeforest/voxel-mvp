@@ -35,11 +35,12 @@ public:
 	// origin = level_origins[k]; cell size = level_cells[k]. Clipmap centre
 	// `center`; level-0 half-extent `half0` (level k half-extent = half0 * 2^k).
 	// The octree root is the cube [0, 2^depth]^3.
-	// error_driven: coarsen by NECESSITY — a node stops subdividing once its accumulated
-	// QEF fit error (residual_tol, in base-cell world units) is small enough that one
-	// vertex represents the fine surface, so flat regions mesh coarse and detail stays
-	// fine REGARDLESS of camera distance. The data resolution (clipmap level) is still
-	// the floor — error-refine only coarsens, never exceeds available data.
+	// error_driven: coarsen by SCREEN-SPACE ERROR — a node stops subdividing once its
+	// accumulated QEF fit error, projected to pixels (we * proj / dist), drops to eps_px,
+	// so a feature coarsens as it recedes and a narrow FOV (telescope) refines distant
+	// terrain. camera is the viewpoint in root-local lattice space; proj = viewport_height
+	// / (2*tan(fov/2)). The data resolution (clipmap level) is still the floor — error-LOD
+	// only coarsens, never exceeds available data.
 	// lattice_world_origin: world coords of lattice (0,0,0); converts a cell's local
 	// origin to its world position for the emit/build boxes.
 	// level_indices: optional per-level CHANNEL_INDICES bytes (same layout/order as
@@ -58,7 +59,9 @@ public:
 			Vector3 center,
 			double half0,
 			int depth,
-			double residual_tol = 0.0,
+			Vector3 camera = Vector3(),
+			double proj = 0.0,
+			double eps_px = 0.0,
 			bool error_driven = false,
 			Vector3i lattice_world_origin = Vector3i(),
 			const TypedArray<PackedByteArray> &level_indices = TypedArray<PackedByteArray>(),

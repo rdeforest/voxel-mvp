@@ -66,6 +66,7 @@ var _mesher := DCOctreeMesher.new()   # reused: holds the persistent collapse-hy
 # (only dispatched when _task_id == -1) so there is no data race.
 var _task_id := -1
 var _last_center := Vector3.INF
+var _last_proj := 0.0   # proj of the last build; a live FOV/zoom change re-meshes (telescope refines)
 
 # A meshed DC surface tagged for splicing: the Mesh.ARRAY_* surface, the per-triangle owner-cell
 # origin + size, and the world-lattice root its vertices are local to. `_cache` is what's on screen
@@ -115,7 +116,9 @@ class ClipmapView:
     var level_cells:       PackedFloat32Array = PackedFloat32Array()
     var center_lattice:    Vector3
     var half0:             float
-    var residual_tol:      float
+    var camera_lattice:    Vector3
+    var proj:              float
+    var eps_px:            float
     var error_driven:      bool
     func ready() -> bool:
         return not level_cells.is_empty()
@@ -136,33 +139,32 @@ const _MAX_QUEUE := 64               # cap; overflow → one full re-mesh covers
 # the manager is enabled, which is opt-in, so it's quiet in normal play.
 var log_timings := true
 
-# Necessity-driven LOD: coarsen by the surface's own complexity, NOT by camera distance.
-# The mesher builds to the data floor then collapses bottom-up wherever one vertex fits
-# the real fine surface within residual_tol (a fixed WORLD-space tolerance, base-cell
-# units — DCOctreeMesher::accumulate) — flat regions go coarse, curved stay fine, crack-
-# free, and a coarse cell derives its vertex from accumulated FINE QEF so it sits on the
-# fine surface (seams dissolve). The camera is not an input, so moving/turning re-meshes
-# nothing (telescopes are free). Default ON. `dcerror`/`dctol` toggle and tune it.
+# Screen-space-error LOD: the mesher builds to the data floor then collapses bottom-up
+# wherever one vertex's projected error (we * proj / dist) is within eps_px on screen
+# (DCOctreeMesher::accumulate) — flat/distant regions go coarse, near/curved stay fine,
+# crack-free, and a coarse cell derives its vertex from accumulated FINE QEF so it sits on
+# the fine surface (seams dissolve). The camera IS an input now (Stage 1): moving recoarsens
+# receding terrain and a narrow FOV (telescope) refines distant terrain. Default ON.
+# `dcerror`/`dceps` toggle and tune it.
 var error_driven := true
 var dump_next := false   # diagnostic: capture the next dispatch's input + output (dcdump cmd)
 var _dump_armed := false
 var _dump_dict := {}
-# Collapse tolerance: the max UNDIVIDED QEF residual (base-cell world units) at which one
-# vertex may stand in for a cell's fine surface. Smaller = more detail kept. ~0.3 base-
-# cells matches the old near-terrain detail; far detail is now kept too (necessity), so
-# the resident extent (Stage 2 eviction) bounds cost, and B2 tunes this to the budget.
-var residual_tol := 0.3
+# Screen-error threshold (px): the max projected QEF residual at which one vertex may stand
+# in for a cell's fine surface. Smaller = more detail kept. ~2px is the doc target; B2 tunes
+# it to the frame budget.
+var eps_px := 2.0
 
 # B2 budget controller. Detail self-tunes toward a frame-time target — refine when there's slack,
-# coarsen when over budget — by nudging residual_tol (the world-residual collapse tolerance; smaller
+# coarsen when over budget — by nudging eps_px (the screen-error collapse threshold; smaller
 # = more detail). Slow and damped: each change re-meshes the clipmap, so it acts once per
 # BUDGET_INTERVAL and only when the frame time is clearly outside the target band. Opt-in (`dcbudget`)
-# because tol only helps a TRIANGLE-bound frame; on a shader/CPU-bound one it would shed detail for
-# no gain. Now camera-independent (necessity LOD), this is the single global detail knob.
+# because eps only helps a TRIANGLE-bound frame; on a shader/CPU-bound one it would shed detail for
+# no gain. This is the single global detail knob.
 const BUDGET_TARGET_MS := 16.0   # the frame budget detail is allowed to spend up to (~60 fps)
 const BUDGET_INTERVAL  := 1.0    # seconds between adjustments (re-mesh isn't free)
-const TOL_MIN := 0.05
-const TOL_MAX := 2.0
+const EPS_MIN := 0.5
+const EPS_MAX := 16.0
 var budget_enabled := false
 var _budget_clock := 0.0
 
@@ -213,21 +215,21 @@ func _tune_quality(dt: float) -> void:
         return
     _budget_clock = 0.0
     var frame_ms := 1000.0 / maxf(Engine.get_frames_per_second(), 1.0)
-    var tuned := _tol_for(frame_ms)
+    var tuned := _eps_for(frame_ms)
     if Perf.is_shown():
-        Perf.status("budget", "%.1f ms/frame → tol %.2f" % [frame_ms, tuned])   # show state each tick
-    if is_equal_approx(tuned, residual_tol):
+        Perf.status("budget", "%.1f ms/frame → eps %.2fpx" % [frame_ms, tuned])   # show state each tick
+    if is_equal_approx(tuned, eps_px):
         return
-    residual_tol = tuned
+    eps_px = tuned
     remesh()
 
 # More detail when there's slack, less when over budget, unchanged within the target band.
-func _tol_for(frame_ms: float) -> float:
+func _eps_for(frame_ms: float) -> float:
     if frame_ms > BUDGET_TARGET_MS * 1.1:
-        return minf(TOL_MAX, residual_tol * 1.15)
+        return minf(EPS_MAX, eps_px * 1.15)
     if frame_ms < BUDGET_TARGET_MS * 0.8:
-        return maxf(TOL_MIN, residual_tol * 0.92)
-    return residual_tol
+        return maxf(EPS_MIN, eps_px * 0.92)
+    return eps_px
 
 
 # Make DC the terrain render: start meshing now.
@@ -353,7 +355,7 @@ func _splice_job(store: EditStore, core_min: Vector3i, core_max: Vector3i,
     _splice_patch = _mesher.mesh_clipmap(
         level_data, LEVEL_DIM, _clipmap.level_origins, _clipmap.level_cells,
         _clipmap.center_lattice, _clipmap.half0, _ROOT_DEPTH,
-        _clipmap.residual_tol, _clipmap.error_driven,
+        _clipmap.camera_lattice, _clipmap.proj, _clipmap.eps_px, _clipmap.error_driven,
         _cache.origin, level_idxs, palette,
         true, 0.0,                       # uniform_core=true (match the full build), prune_safety=0
         core_min, core_max,              # emit box: only output triangles in the edit core
@@ -432,9 +434,11 @@ func _process(dt: float) -> void:
     else:
         var center := _follow.global_position
         var drift := center.distance_to(_last_center)
-        if drift > RECENTER_DISTANCE and not frozen:
+        var fov_changed := not is_equal_approx(_view_proj(), _last_proj)
+        if (drift > RECENTER_DISTANCE or fov_changed) and not frozen:
             if Perf.is_shown() and is_finite(drift):
-                print("recenter: walked %.1fm → full rebuild (this is the movement re-mesh, B3)" % drift)
+                var why := ("walked %.1fm" % drift) if drift > RECENTER_DISTANCE else "FOV change"
+                print("recenter: %s → full rebuild (movement/FOV re-mesh, B3)" % why)
             _dispatch(center)
     # Async edit splices run on their own worker, concurrent with a full build.
     if _splice_task_id != -1:
@@ -497,6 +501,16 @@ func _cache_tris_in(region_min: Vector3i, region_max: Vector3i) -> PackedVector3
                 out.append((origin + verts[idx[t * 3 + j]]) * base_cell)
     return out
 
+# The perspective projection factor (px per world unit at unit distance) of the live camera, or
+# 0 with no camera. Position-independent — only FOV + viewport height — so it's the FOV-change probe.
+func _view_proj() -> float:
+    var cam := get_viewport().get_camera_3d()
+    if cam == null:
+        return 0.0
+    var vp_h := float(get_viewport().get_visible_rect().size.y)
+    return vp_h / (2.0 * tan(deg_to_rad(cam.fov) * 0.5))
+
+
 func _dispatch(center: Vector3) -> void:
     # All octree geometry below is in BASE-CELL units (one unit = RENDER_BASE_CELL metres). The
     # mesher meshes a pure integer lattice in these units; the store is read at the matching world
@@ -539,22 +553,33 @@ func _dispatch(center: Vector3) -> void:
     # region as the representative "this got redone" box (green) — so movement lights it up.
     var fine_w := half0 * base_cell
     region_invalidated.emit(center - Vector3.ONE * fine_w, center + Vector3.ONE * fine_w, 1)
-    # Capture so splices can run mesh_clipmap with identical geometry + tolerance on the same frame.
+    # Screen-error LOD inputs (main thread): the viewpoint in root-local lattice space and the
+    # perspective projection factor (px per world unit at unit distance). camera shares the cell
+    # frame the mesher collapses in (root-local base-cells), so we·proj/dist projects correctly.
+    var camera_lattice := center_lattice
+    var cam := get_viewport().get_camera_3d()
+    if cam:
+        camera_lattice = cam.global_position / base_cell - Vector3(root_origin)
+    var proj := _view_proj()
+    _last_proj = proj   # FOV-change trigger compares the live proj against this
+    # Capture so splices can run mesh_clipmap with identical geometry + camera + eps on the same frame.
     _clipmap.level_world_cells = level_world_cells
     _clipmap.level_origins     = level_origins
     _clipmap.level_cells       = level_cells
     _clipmap.center_lattice    = center_lattice
     _clipmap.half0             = half0
-    _clipmap.residual_tol      = residual_tol
+    _clipmap.camera_lattice    = camera_lattice
+    _clipmap.proj              = proj
+    _clipmap.eps_px            = eps_px
     _clipmap.error_driven      = error_driven
     if dump_next:
-        _arm_dump(center_lattice, half0, root_origin)
+        _arm_dump(center_lattice, camera_lattice, half0, proj, root_origin)
     # An immutable snapshot of the sparse store for the worker (cheap — copies only edited
     # nodes; unedited world stays the on-demand generator).
     var job_store: EditStore = _edit_store.duplicate()
     _task_id = WorkerThreadPool.add_task(
         _mesh_job.bind(job_store, level_world_cells, level_origins, level_cells, center_lattice, half0,
-            residual_tol, error_driven, root_origin,
+            camera_lattice, proj, eps_px, error_driven, root_origin,
             MaterialPalette.colors()), false, "DC terrain mesh")
 
 
@@ -563,7 +588,7 @@ func _dispatch(center: Vector3) -> void:
 # snapshot + immutable PackedArrays — safe off the main thread (no Node / engine access).
 func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
         level_origins: PackedVector3Array, level_cells: PackedFloat32Array,
-        center: Vector3, half0: float, tol: float, err: bool,
+        center: Vector3, half0: float, camera: Vector3, proj: float, eps: float, err: bool,
         world_origin: Vector3i, palette: PackedColorArray) -> void:
     var base_cell := VoxelConstants.RENDER_BASE_CELL
     var level_data: Array = []
@@ -580,7 +605,7 @@ func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
         _dump_dict["cells"]      = level_cells
     _job.arrays = _mesher.mesh_clipmap(
         level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH,
-        tol, err, world_origin, level_indices, palette,
+        camera, proj, eps, err, world_origin, level_indices, palette,
         true,   # uniform_core: KEEP the fine core in B1 — edits near the player land in uniform
                 # fine LOD and splice with a small box. (Dropping it is B2's job, once a budget-
                 # driven LOD replaces it; dropping it here made flat near-terrain coarse, so edits
@@ -595,14 +620,14 @@ func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
 # Diagnostic (dcdump): write this dispatch's mesher INPUT (clipmap SDF + params) paired
 # with the OUTPUT mesh it produced, so the exact case can be replayed and audited
 # headlessly — and the displayed mesh inspected directly (Mesh.ARRAY_* arrays).
-func _arm_dump(center: Vector3, half0: float, root_origin: Vector3i) -> void:
+func _arm_dump(center: Vector3, camera: Vector3, half0: float, proj: float, root_origin: Vector3i) -> void:
     dump_next = false
     _dump_armed = true
     # level_data / origins / cells are filled in by _mesh_job once the worker reads the store.
     _dump_dict = {
         "dim": LEVEL_DIM,
         "center": center, "half0": half0, "depth": _ROOT_DEPTH,
-        "tol": residual_tol, "err": error_driven, "root_origin": root_origin,
+        "camera": camera, "proj": proj, "eps_px": eps_px, "err": error_driven, "root_origin": root_origin,
     }
 
 

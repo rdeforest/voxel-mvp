@@ -18,7 +18,13 @@ const DEPTH  := 6                        # octree root [0,64]^3
 const HALF0  := 12.0                     # level-0 half-extent; level-1 used at Chebyshev > 12
 const CENTER := Vector3(32, 32, 32)
 const RADIUS := 24.0                     # sphere surface crosses the LOD band
-const TOL    := 2.0                      # world-residual collapse tolerance (necessity LOD)
+const TOL    := 2.0                      # screen-error threshold (px) the gate reasons about
+# Camera far along +z with proj == distance, so proj/dist ~= 1 and the screen error we*proj/dist
+# ~= the world residual we — the collapse is then driven by the field (a stable LOD transition the
+# splice must reproduce), not by per-cell distance falloff. Full build and patch share these, so the
+# crack-free gate stays an exact-reproduction check regardless of the absolute values.
+const CAM    := Vector3(32, 32, 2032)
+const PROJ   := 2000.0
 
 
 # Sphere SDF over a DIM^3 grid sampled at world p = origin + (x,y,z)*cell (so level k uses cell 2^k).
@@ -85,7 +91,7 @@ func test_owner_sizes_parallel_to_owners() -> void:
     var clip := _clip()
     var mesher := DCOctreeMesher.new()
     var arrays := mesher.mesh_clipmap(clip.data, DIM, clip.origins, clip.cells,
-        CENTER, HALF0, DEPTH, TOL, true, Vector3i.ZERO)
+        CENTER, HALF0, DEPTH, CAM, PROJ, TOL, true, Vector3i.ZERO)
     assert_false(arrays.is_empty(), "produced a surface")
     var owners := mesher.get_last_triangle_owners()
     var sizes  := mesher.get_last_triangle_owner_sizes()
@@ -110,7 +116,7 @@ func test_buildbox_splice_reproduces_full_build_across_lod() -> void:
     # A. Full build (the oracle).
     var mesher := DCOctreeMesher.new()
     var full := mesher.mesh_clipmap(clip.data, DIM, clip.origins, clip.cells,
-        CENTER, HALF0, DEPTH, TOL, true, world_origin)
+        CENTER, HALF0, DEPTH, CAM, PROJ, TOL, true, world_origin)
     assert_false(full.is_empty(), "full build produced a surface")
     var full_owners := mesher.get_last_triangle_owners()
     var full_sizes  := mesher.get_last_triangle_owner_sizes()
@@ -133,7 +139,7 @@ func test_buildbox_splice_reproduces_full_build_across_lod() -> void:
 
     # C. The build-box splice: SAME frame as the full build, build only core+apron, emit only core.
     var patch := mesher.mesh_clipmap(clip.data, DIM, clip.origins, clip.cells,
-        CENTER, HALF0, DEPTH, TOL, true, world_origin,
+        CENTER, HALF0, DEPTH, CAM, PROJ, TOL, true, world_origin,
         [], PackedColorArray(), false, 0.0,
         core_min, core_max,                          # emit box: only the core triangles
         core_min - apron, core_max + apron)          # build box: descend only here

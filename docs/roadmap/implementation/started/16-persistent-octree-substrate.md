@@ -16,7 +16,10 @@ subdivide verdict), invalidate per cause — **move**, **edit**, **FOV**, **wind
 
 **Canonical stages (this supersedes every other stage list in this file):**
 1. **Screen-error criterion** — restore `camera`/`proj`, collapse on `we·proj/dist > ~2px`, re-mesh on
-   FOV change as well as drift. Eager; validates the 2px + telescopes in-game. *(in progress)*
+   FOV change as well as drift. Eager; validates the 2px + telescopes in-game.
+   *(code landed — `camera`/`proj`/`eps_px` back in `mesh_clipmap`, screen-error collapse, B2 tunes
+   `eps_px`, FOV-change re-mesh; full GUT suite green incl. a camera/FOV-dependence test. PENDING:
+   in-game 2px tune + telescope check — needs GPU eyes.)*
 2. **Persistent node cache + invalidation** — octree survives frames; a move re-tests screen-error per
    node, re-meshes only crossers; edits dirty touched nodes; FOV/resize re-test all. *(the payoff)*
 3. **Top-down lazy build** — refine on demand instead of meshing every cell to the floor. *(speed, last)*
