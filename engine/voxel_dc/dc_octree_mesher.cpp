@@ -540,8 +540,21 @@ struct Octree {
 		if (rc < 3) {
 			return;
 		}
+		// Winding reference = the surface normal (gradient), which is the most accurate direction and
+		// is needed where the surface grazes the edge (then the axial facing alone is ambiguous). BUT
+		// the gradient is a finite difference stepped by the cell size, so where two surfaces sit
+		// closer than a cell — a part resting on sloped ground, leaving a thin air wedge — it samples
+		// ACROSS the gap into the far solid and, on our non-true-distance SDF, flips, back-facing the
+		// wedge. The edge's own endpoints give the facing along `axis` unambiguously (solid→air =
+		// sign(fb - fa); fa, fb are opposite-signed, checked above). So trust the gradient, but if its
+		// axial component CONTRADICTS that sign it jumped a thin feature — veto it to the axial facing.
 		double t = fa / (fa - fb);
 		Vector3 outward = clip.gradient(to_v3(lo).lerp(to_v3(hi), t));
+		double axis_face = (fb > fa) ? 1.0 : -1.0;
+		if (outward[axis] * axis_face < 0.0) {
+			outward = Vector3();
+			outward[axis] = axis_face;
+		}
 		emit_poly(ring, rc, outward, to_v3(cell_world_origin(leaf_idx)), float(cells[leaf_idx].size));
 	}
 
