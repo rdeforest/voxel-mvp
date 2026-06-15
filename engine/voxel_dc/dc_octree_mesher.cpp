@@ -277,24 +277,58 @@ struct Octree {
 	// accumulated QEF's residual already refuses to collapse over real detail, so no
 	// "all children are leaves" gate is needed — collapsing just orphans the subtree;
 	// point-location meshing stitches the resulting size jumps crack-free.
-	void accumulate(int idx) {
-		if (cells[idx].leaf) {
+	// FIELD-derived pass (expensive, run ONCE per build): give every node its accumulated QEF — a
+	// structural leaf's own crossings (leaf_qef samples the field), an internal node = the sum of its
+	// children's, so the node carries ALL the fine Hermite data within it (no coarse-corner
+	// undersampling). NO collapse here; that is camera-derived and re-runnable (collapse_pass). Uses
+	// the STRUCTURAL leaf (no children), not the leaf flag, so it is correct even after a prior
+	// collapse_pass dirtied the flags (Stage 2: the retained octree re-collapses without re-sampling).
+	void accumulate_qef(int idx) {
+		if (cells[idx].children[0] < 0) {
 			cells[idx].qef = leaf_qef(idx);
 			return;
 		}
 		Qef sum;
 		for (int i = 0; i < 8; ++i) {
 			int ch = cells[idx].children[i];
-			accumulate(ch);
+			accumulate_qef(ch);
 			sum.add(cells[ch].qef);
 		}
 		cells[idx].qef = sum;
-		if (!error_driven || sum.count == 0 || cells[idx].size > max_leaf_size) {
+	}
+
+	// Reset every node's leaf flag to its STRUCTURAL state (leaf iff it has no children) and clear the
+	// placed vertex, so collapse_pass + meshing can re-run from scratch on a camera re-walk.
+	void reset_leaves() {
+		for (uint32_t i = 0; i < cells.size(); ++i) {
+			cells[i].leaf = cells[i].children[0] < 0;
+			cells[i].vertex = -1;
+		}
+	}
+
+	// CAMERA-derived pass (cheap, re-runnable, NO field sampling): collapse a node into one leaf when a
+	// single vertex represents its accumulated QEF within eps_px on screen. Bottom-up; a parent collapse
+	// orphans its subtree, so the coarsest collapsing ancestor wins.
+	//
+	// Collapse error = the L2 residual of the accumulated QEF at the merged vertex, NOT divided by plane
+	// count: the undivided residual is ~0 on flat/cliff/gently-curved regions (flat planes contribute
+	// exactly 0) and spikes where one vertex can't represent a feature, so a thin feature vetoes its own
+	// collapse. Screen-space-error LOD projects that world residual to pixels (we * proj / dist): keep
+	// refined while it exceeds eps_px (~2px), collapse otherwise — a feature coarsens as it recedes and a
+	// narrow FOV (telescope) raises proj to refine distant terrain.
+	void collapse_pass(int idx) {
+		if (cells[idx].children[0] < 0) {
+			return; // structural leaf — nothing to collapse
+		}
+		for (int i = 0; i < 8; ++i) {
+			collapse_pass(cells[idx].children[i]);
+		}
+		if (!error_driven || cells[idx].qef.count == 0 || cells[idx].size > max_leaf_size) {
 			return;
 		}
 		Vector3 cmin = to_v3(cells[idx].origin);
 		Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
-		// Never collapse the finest level: a uniform 1m fine core gives edit patches clean
+		// Never collapse the finest level when uniform_core: a 1m fine core gives edit patches clean
 		// cell boundaries to splice against (incremental meshing). Outer levels still coarsen.
 		if (uniform_core) {
 			Vector3 c = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
@@ -302,23 +336,8 @@ struct Octree {
 				return;
 			}
 		}
-		Vector3 v = sum.solve(cmin, cmax);
-		// Collapse error = the L2 residual of the accumulated QEF at the merged vertex,
-		// NOT divided by plane count. The old /count averaged a thin feature's few
-		// high-residual planes into the many ZERO-residual planes of the flat surface
-		// around it, so a big cell collapsed over a spire and the surface flapped /
-		// vanished. Undivided, flat planes contribute exactly 0 (they don't dilute), so
-		// the residual reflects the feature's own error: ~0 on flat/cliff/gently-curved
-		// regions, spiking where one vertex can't represent a feature -> the feature
-		// vetoes its own collapse.
-		//
-		// Screen-space-error LOD: project that world residual to pixels (we * proj / dist)
-		// and keep the node refined while it exceeds eps_px (~2px), collapse otherwise. So a
-		// feature coarsens as it recedes (its on-screen error shrinks) and a narrow FOV
-		// (telescope/zoom) raises proj, magnifying distant terrain back over eps_px → it
-		// refines. No hysteresis here — the persistent node cache (Stage 2) is the proper
-		// fix for collapse popping; this eager pass rebuilds each recenter.
-		double we = Math::sqrt(sum.residual(v));
+		Vector3 v = cells[idx].qef.solve(cmin, cmax);
+		double we = Math::sqrt(cells[idx].qef.residual(v));
 		Vector3 ctr = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
 		double dist = MAX((ctr - camera).length(), 1e-3);
 		if (we * proj / dist > eps_px) {
@@ -564,7 +583,22 @@ struct Octree {
 		// is one empty cell — no quad). half the root => the 8 root children may collapse,
 		// nothing coarser.
 		max_leaf_size = MAX(1, root_size >> 1);
-		accumulate(0); // QEF up the tree + error-driven collapse
+		accumulate_qef(0);       // QEF up the tree (field-derived, once)
+		recollapse_and_mesh();   // collapse + mesh (camera-derived, re-runnable)
+	}
+
+	// Re-decide collapse against the current camera/proj/eps over the already-built tree + QEFs, then
+	// re-mesh. No build, no field sampling — this is the Stage 2 movement re-walk (and the tail of a
+	// fresh build). Clears prior output so it is idempotent.
+	void recollapse_and_mesh() {
+		verts.clear();
+		normals.clear();
+		colors.clear();
+		indices.clear();
+		tri_owners.clear();
+		tri_owner_sizes.clear();
+		reset_leaves();
+		collapse_pass(0);
 		// Pass 1: a vertex per surviving surface leaf. Pass 2: stitch edges.
 		int n = int(cells.size());
 		for (int i = 0; i < n; ++i) {
