@@ -59,7 +59,7 @@ func _table() -> Array:
         [dceps,           "dceps",     "Set the screen-error LOD threshold (px; lower = more detail). Usage: dceps <px>"],
         [fov,             "fov",       "Set the camera field-of-view in degrees (low = telescope/zoom → distant terrain refines under screen-error LOD). Usage: fov <degrees>"],
         [dccore,          "dccore",    "Toggle the uniform 1m fine core: ON pins fine cells around you (clean edit splices); OFF lets the core collapse by screen-error too (uniform huge tris at high dceps, but edits may crack). Usage: dccore [on|off]"],
-        [dcprune,         "dcprune",   "Set the surface-sparse build safety factor (skips empty cells → fast rebuild). 0 = dense (slow, all cells); ~2 = conservative. Lower = more pruning but risks holes. Usage: dcprune <factor>"],
+        [dcprune,         "dcprune",   "Toggle the surface-sparse build (exact min/max prune — skips provably-empty cells, fast rebuild). 1 = on (default), 0 = dense build (slow, for comparison). Usage: dcprune <0|1>"],
         [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight + magenta backfaces (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],

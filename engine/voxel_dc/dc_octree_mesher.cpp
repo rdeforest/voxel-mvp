@@ -47,6 +47,104 @@ struct Level {
 	double at(const Vector3 &world) const {
 		return voxel_dc::sample_trilinear(data, dim, origin, cell, world);
 	}
+
+	// --- Surface-sparse prune: exact min/max pyramid over `data` ---
+	// Unlike a gradient ESTIMATE, this checks the ACTUAL samples, so it can never miss a sub-cell ridge
+	// (never over-prunes). build_mip() makes a min/max pyramid; surface_free(box) is O(1) (≤8 blocks).
+	LocalVector<LocalVector<float>> mip_min;
+	LocalVector<LocalVector<float>> mip_max;
+	LocalVector<int> mip_dim;
+
+	void build_mip() {
+		mip_min.clear();
+		mip_max.clear();
+		mip_dim.clear();
+		int64_t n = int64_t(dim) * dim * dim;
+		LocalVector<float> mn, mx;
+		mn.resize(n);
+		mx.resize(n);
+		for (int64_t i = 0; i < n; ++i) {
+			mn[i] = data[i];
+			mx[i] = data[i];
+		}
+		mip_min.push_back(mn);
+		mip_max.push_back(mx);
+		mip_dim.push_back(dim);
+		int d = dim;
+		while (d > 1) {
+			int nd = (d + 1) / 2;
+			const LocalVector<float> &pmn = mip_min[mip_min.size() - 1];
+			const LocalVector<float> &pmx = mip_max[mip_max.size() - 1];
+			LocalVector<float> cmn, cmx;
+			cmn.resize(int64_t(nd) * nd * nd);
+			cmx.resize(int64_t(nd) * nd * nd);
+			for (int z = 0; z < nd; ++z) {
+				for (int y = 0; y < nd; ++y) {
+					for (int x = 0; x < nd; ++x) {
+						float lo = 1e30f, hi = -1e30f;
+						for (int oz = 0; oz < 2; ++oz) {
+							for (int oy = 0; oy < 2; ++oy) {
+								for (int ox = 0; ox < 2; ++ox) {
+									int sx = x * 2 + ox, sy = y * 2 + oy, sz = z * 2 + oz;
+									if (sx >= d || sy >= d || sz >= d) {
+										continue;
+									}
+									int si = sx + d * (sy + d * sz);
+									lo = MIN(lo, pmn[si]);
+									hi = MAX(hi, pmx[si]);
+								}
+							}
+						}
+						int di = x + nd * (y + nd * z);
+						cmn[di] = lo;
+						cmx[di] = hi;
+					}
+				}
+			}
+			mip_min.push_back(cmn);
+			mip_max.push_back(cmx);
+			mip_dim.push_back(nd);
+			d = nd;
+		}
+	}
+
+	// True if NO zero-crossing in the lattice box [cmin, cmax] in this level's grid (1-cell margin to
+	// catch a crossing on the box face). If the box doesn't overlap this level's grid, returns true
+	// (this level has no data here — it abstains; the caller checks every level).
+	bool surface_free(const Vector3 &cmin, const Vector3 &cmax) const {
+		if (mip_dim.is_empty()) {
+			return false;
+		}
+		int g0x = MAX(int(Math::floor((cmin.x - origin.x) / cell)) - 1, 0);
+		int g0y = MAX(int(Math::floor((cmin.y - origin.y) / cell)) - 1, 0);
+		int g0z = MAX(int(Math::floor((cmin.z - origin.z) / cell)) - 1, 0);
+		int g1x = MIN(int(Math::ceil((cmax.x - origin.x) / cell)) + 1, dim);
+		int g1y = MIN(int(Math::ceil((cmax.y - origin.y) / cell)) + 1, dim);
+		int g1z = MIN(int(Math::ceil((cmax.z - origin.z) / cell)) + 1, dim);
+		if (g0x >= g1x || g0y >= g1y || g0z >= g1z) {
+			return true; // no overlap with this level's grid
+		}
+		int span = MAX(g1x - g0x, MAX(g1y - g0y, g1z - g0z));
+		int m = 0;
+		while ((1 << (m + 1)) <= span && m + 1 < int(mip_dim.size())) {
+			++m;
+		}
+		int bs = 1 << m;
+		int md = mip_dim[m];
+		const LocalVector<float> &pmn = mip_min[m];
+		const LocalVector<float> &pmx = mip_max[m];
+		float lo = 1e30f, hi = -1e30f;
+		for (int z = g0z / bs; z <= (g1z - 1) / bs; ++z) {
+			for (int y = g0y / bs; y <= (g1y - 1) / bs; ++y) {
+				for (int x = g0x / bs; x <= (g1x - 1) / bs; ++x) {
+					int i = x + md * (y + md * z);
+					lo = MIN(lo, pmn[i]);
+					hi = MAX(hi, pmx[i]);
+				}
+			}
+		}
+		return !(lo <= 0.0f && hi >= 0.0f); // free iff all strictly one side of the isosurface
+	}
 };
 
 // The clipmap: pick the finest level whose box contains the point (single-valued
@@ -109,6 +207,24 @@ struct Clipmap {
 
 	double target_cell_size(const Vector3 &p) const {
 		return double(1 << level_index(p));
+	}
+
+	void build_mips() {
+		for (uint32_t k = 0; k < levels.size(); ++k) {
+			levels[k].build_mip();
+		}
+	}
+
+	// A node is surface-free only if EVERY level's grid agrees (no level sees a crossing in the box).
+	// The finest level covering the box catches sub-cell features a coarser mip smoothed away, so this
+	// never over-prunes regardless of the blend.
+	bool surface_free(const Vector3 &cmin, const Vector3 &cmax) const {
+		for (uint32_t k = 0; k < levels.size(); ++k) {
+			if (!levels[k].surface_free(cmin, cmax)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	int index_at(const Vector3 &p) const {
@@ -364,24 +480,14 @@ struct Octree {
 			return idx; // outside the splice's edit box+apron — leaf, don't descend (no data sampled)
 		}
 		Vector3 center = to_v3(origin) + Vector3(1, 1, 1) * (size * 0.5);
-		// Surface-sparse prune: if the cell is provably surface-free, stop here instead of
-		// subdividing its whole subtree down to the floor (the dense build's 10M-cell cost).
-		// |field(center)| greater than the field's worst-case change to any corner means no
-		// zero-crossing inside. The change is bounded by half the cell-scale gradient summed
-		// over axes (L1, conservative vs the diagonal), padded by prune_safety for the field's
-		// nonlinearity. Self-calibrating: steep regions have a big gradient and prune less, so
-		// no global slope constant to mis-tune. A pruned cell carries no surface, so no
-		// crossing edge touches it and the stitch loses nothing.
-		if (prune_safety > 0.0 && size > 1) {
-			double fc = clip.value(center);
-			double h = size * 0.5;
-			double gx = Math::abs(clip.value(center + Vector3(h, 0, 0)) - clip.value(center - Vector3(h, 0, 0)));
-			double gy = Math::abs(clip.value(center + Vector3(0, h, 0)) - clip.value(center - Vector3(0, h, 0)));
-			double gz = Math::abs(clip.value(center + Vector3(0, 0, h)) - clip.value(center - Vector3(0, 0, h)));
-			double spread = 0.5 * (gx + gy + gz) * prune_safety;
-			if (Math::abs(fc) > spread) {
-				return idx; // confidently surface-free — uniform leaf, don't subdivide
-			}
+		// Surface-sparse prune: stop here if the cell is provably surface-free, instead of subdividing
+		// its whole subtree to the floor (the dense build's ~2M-cell, multi-second cost). EXACT — checks
+		// the actual grid samples via a min/max mip, so it CAN'T miss a sub-cell ridge (a gradient
+		// estimate did → over-pruned → degenerate geometry). A surface-free cell has no crossing edge,
+		// so the stitch loses nothing.
+		if (prune_safety > 0.0 && size > 1 &&
+				clip.surface_free(to_v3(origin), to_v3(origin) + Vector3(1, 1, 1) * double(size))) {
+			return idx;
 		}
 		if (double(size) <= clip.target_cell_size(center)) {
 			return idx; // at the data resolution floor — can't refine further
@@ -768,6 +874,9 @@ Array DCOctreeMesher::mesh_clipmap(
 		oct.clip.levels[k] = lv;
 	}
 
+	if (prune_safety > 0.0) {
+		oct.clip.build_mips(); // min/max pyramids for the exact surface-sparse prune
+	}
 	oct.run();
 
 	_last_tri_owners      = oct.tri_owners;

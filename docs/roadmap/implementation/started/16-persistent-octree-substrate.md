@@ -24,16 +24,14 @@ fine region to the data floor (~2M cells at ±16m / 0.25m) and samples all of th
 is a thin sheet and ~95% are empty. Scroll-fill / remesh / retention all missed this — they optimized
 sampling + stationary re-collapse, not the dense build. 300fps misled me (it's the main thread; the 8.7s
 is the worker, so the terrain just lagged seconds behind movement).
-- [~] **surface-sparse build (the perf fix — first attempt FAILED, reverted to off):** the build's
-  existing prune uses a GRADIENT ESTIMATE (finite diff over the cell). It cut 8.7s → 1.9s in-game, but
-  the finite diff is blind to sub-cell sharp features (ridges, part edges) → it over-prunes real surface
-  → degenerate verts (`dcprune 1/2`) and wrong geometry (`dcprune 3`). No safe factor exists — confirmed
-  in GUI. My watertight tests missed it because they ran with COLLAPSE OFF (the bug surfaces under the
-  bottom-up collapse over an over-pruned cell). Reverted to dense default; kept `dcprune` as an
-  experiment knob. **THE RELIABLE FIX (next):** prune on the EXACT data, not a gradient guess — build a
-  min/max mip of each level's grid (already filled), and skip a node only if its grid region is entirely
-  one sign (no zero-crossing). Cannot over-prune (checks the real samples). O(1)/node via the mip.
-  Test gap to close: watertight WITH `error_driven=true` (collapse).
+- [x] **surface-sparse build — EXACT min/max prune (THE perf fix, done right):** the build skips a cell
+  only when its actual grid samples are all one sign (no zero-crossing), via a **min/max mip** of each
+  level's grid — O(1)/node, and it physically cannot miss a sub-cell ridge, so it never over-prunes. This
+  replaced the gradient-estimate prune that shipped degenerate geometry (1st attempt). Default ON
+  (`dcprune 0` = dense, to compare). Guarded by a watertight test WITH collapse (`error_driven=true`) on
+  the real heightfield terrain — pruned+collapse surface == dense+collapse surface, all verts finite (the
+  test gap that let the gradient version slip through). Should cut the 8.7s dense build by ~20-40×.
+  **GUI-verify the rebuild ms + geometry.**
 - [x] **2b/3 — scroll-fill the move rebuild** *(secondary win)*: a recenter re-samples only the shell that scrolled in, reusing the previous build's grids via `EditStore.fill_region`. (Cuts the *sampling*; the prune cuts the *build* — together they attack the move rebuild from both sides.)
 - [x] **2b/3 — scroll-fill the move rebuild** *(the move-latency win)*: a recenter now re-samples only the shell that scrolled in, reusing the previous build's per-level grids via `EditStore.fill_region` (the proven mechanism the collision manager uses) — the dominant generator cost is cut. Edits clear the buffers (next build re-samples, no stale reuse). Test: a scrolled rebuild == a full-sample rebuild byte-for-byte. *(This is the pragmatic win; the full world-anchored-octree-that-keeps-interior-triangles is deferred — not needed at current scale, and the scroll-fill captures the latency.)*
 - [x] **2e** — correctness tests landed (remesh==fresh-build; set_eps in-place; scroll==full-sample). Visual `dcinval` thin-band check is a GUI step.

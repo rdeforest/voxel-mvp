@@ -157,12 +157,12 @@ const _MAX_QUEUE := 64               # cap; overflow → one full re-mesh covers
 # the manager is enabled, which is opt-in, so it's quiet in normal play.
 var log_timings := true
 
-# Surface-sparse build: stop descending a cell once it's provably surface-free. DEFAULT OFF (0 = dense
-# build). The gradient-ESTIMATE prune here is unreliable — a finite difference over the cell misses
-# sharp sub-cell features (ridges, part edges), so it over-prunes real surface → degenerate/missing
-# geometry at any safety factor. Kept as a knob (`dcprune`) for experiment only; the reliable fix is the
-# exact min/max-over-grid prune (checks the actual data, never over-prunes) — see doc 16.
-var prune_safety := 0.0
+# Surface-sparse build: skip cells provably surface-free, so the build doesn't descend ~2M mostly-empty
+# fine cells (the multi-second dense rebuild). EXACT — the mesher checks each cell's actual grid samples
+# via a min/max mip (never misses a sub-cell ridge, so it can't over-prune), validated watertight WITH
+# collapse on real terrain. >0 = on (the value is just an enable now — the old gradient factor is gone).
+# `dcprune 0` reverts to the dense build to compare.
+var prune_safety := 1.0
 
 # Screen-space-error LOD: the mesher builds to the data floor then collapses bottom-up
 # wherever one vertex's projected error (we * proj / dist) is within eps_px on screen

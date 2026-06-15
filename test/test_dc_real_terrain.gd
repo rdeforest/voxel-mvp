@@ -100,6 +100,29 @@ func test_surface_sparse_prune_stays_watertight():
         "pruned surface == dense surface (only surface-free cells skipped)")
 
 
+# THE guard the gradient prune lacked: surface-sparse build WITH bottom-up COLLAPSE (error_driven). The
+# over-prune bug surfaced only here — an over-pruned cell's missing vertex broke the collapse → degenerate
+# (inf) verts and wrong geometry. The EXACT mip prune checks real samples, so a pruned cell truly has no
+# surface and the collapse is unaffected: pruned+collapse must equal dense+collapse, all verts finite.
+func test_surface_sparse_prune_with_collapse():
+    var data := _bake_data()
+    var origins := PackedVector3Array([Vector3.ZERO])
+    var cells := PackedFloat32Array([1.0])
+    var center := Vector3(16, 16, 16)
+    var cam := Vector3(16, 16, 200)   # off the region so collapse actually fires
+    var dense := DCOctreeMesher.new().mesh_clipmap([data], DIM, origins, cells, center, 1e9, DEPTH,
+        cam, 500.0, 2.0, true, Vector3i.ZERO)
+    var pruned := DCOctreeMesher.new().mesh_clipmap([data], DIM, origins, cells, center, 1e9, DEPTH,
+        cam, 500.0, 2.0, true, Vector3i.ZERO, [], PackedColorArray(), false, 1.0)
+    var dv: PackedVector3Array = dense[Mesh.ARRAY_VERTEX]
+    var pv: PackedVector3Array = pruned[Mesh.ARRAY_VERTEX]
+    assert_gt(pv.size(), 100, "pruned+collapse produced a surface")
+    for v in pv:
+        assert_true(is_finite(v.x) and is_finite(v.y) and is_finite(v.z), "no degenerate (inf/nan) vertex from the prune")
+    assert_almost_eq(float(pv.size()), float(dv.size()), float(dv.size()) * 0.02,
+        "pruned+collapse surface == dense+collapse surface (the exact prune skips only empty cells)")
+
+
 # The geomorph blend (across the LOD band) was the other half of why the prune was disabled — the
 # finite-diff gradient is sampled across blended levels there. A 2-level clipmap: the pruned build must
 # keep the same surface as the dense one (over-pruning in the band would drop verts).
