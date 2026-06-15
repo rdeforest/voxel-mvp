@@ -123,11 +123,16 @@ screen-error core into SVO). SVO may remain as a Phase-B *storage* oracle.
   leaked), so vertex *order* differs, but positions are bit-identical and the surface matches exactly.
   Tests: `test/test_dc_world_octree.gd` (`test_grow_world_equals_fresh_build`, `..._round_trip_is_lossless`).
 
-**NEXT:** **B1b** — reclaim evicted cells via a free-list (B1 leaks them; bound the resident set across a
-traverse). Then the exact surface-sparse prune over direct sampling + graded data floor for horizon
-coverage (the O(volume) wall), then a `dcworld` manager (modeled on `DcSubstratePreview`) wires `mesh_world`
-+ `grow_world` as the live render — the first GPU eyes on this path (`dcinval` thin-band gate) — and retires
-the clipmap + geomorph + the SVO `dcgen` path.
+- **B1b — bounded resident set (free-list).** `kill_subtree` now returns evicted slots to a `free_list`
+  the next grow's `alloc_cell` reuses, so the cell array plateaus across a traverse instead of leaking.
+  Gate (`test_grow_world_bounds_resident_set`): a 22-move window sweep across the root grows storage only
+  12073→14793 (+22%) — vs ~278k if it leaked — and the final surface still matches a fresh build.
+
+**NEXT:** the exact surface-sparse prune over direct sampling + graded data floor for horizon coverage (the
+O(volume) wall — `EditStoreSource::surface_free` currently abstains → dense build to floor; the hard part is
+there is no pre-baked grid to mip against, unlike the clipmap), then a `dcworld` manager (modeled on
+`DcSubstratePreview`) wires `mesh_world` + `grow_world` as the live render — the first GPU eyes on this path
+(`dcinval` thin-band gate) — and retires the clipmap + geomorph + the SVO `dcgen` path.
 
 ## THE GOAL — world-fixed incremental octree (no compromise)
 

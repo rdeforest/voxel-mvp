@@ -139,6 +139,9 @@ public:
 	// Field-sampled leaf count of the last build/grow — after grow_world, just the leading-edge band.
 	int get_last_build_sample_count() const { return _last_build_samples; }
 
+	// Total slots in the retained octree's cell array (live + free-list). Bounded across a traverse (B1b).
+	int get_octree_cell_count() const;
+
 	// Per-triangle owner cell origins (WORLD lattice) from the last mesh call — same order/count
 	// as the returned ARRAY_INDEX divided by 3.
 	PackedVector3Array get_last_triangle_owners()      const { return _last_tri_owners; }

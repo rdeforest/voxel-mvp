@@ -264,6 +264,34 @@ func test_grow_world_round_trip_is_lossless():
     assert_eq(_tri_sigs(back_a), _tri_sigs(built_a), "A→B→A returns to the A surface (evict+regrow is lossless)")
 
 
+# Stage B1b — bounded resident set: sweeping the window across the whole root must not leak. Each move
+# evicts a trailing band and grafts a leading one; the free-list reuses the evicted slots, so the cell
+# array plateaus near a single window's size instead of growing with the number of moves. After a long
+# sweep the storage must stay within ~2× a from-scratch build of the final window, and the surface must
+# still match that fresh build (the sweep doesn't corrupt anything).
+func test_grow_world_bounds_resident_set():
+    var s := _store()
+    var origin := _region_origin(s)
+    var cam := Vector3(16, 16, 120)
+    var w := 10 # window width in x; swept across the 32-wide root
+    var m := DCOctreeMesher.new()
+    m.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(),
+            origin, origin + Vector3i(w, SIZE, SIZE))
+    var grown_final: Array = []
+    for step in range(1, SIZE - w + 1): # ends at window x ∈ [SIZE-w, SIZE)
+        grown_final = m.grow_world(cam, 500.0, 2.0,
+                origin + Vector3i(step, 0, 0), origin + Vector3i(step + w, SIZE, SIZE))
+    var swept_count: int = m.get_octree_cell_count()
+
+    var fresh := DCOctreeMesher.new()
+    var fresh_final: Array = fresh.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true,
+            PackedColorArray(), origin + Vector3i(SIZE - w, 0, 0), origin + WIN_FULL)
+    var fresh_count: int = fresh.get_octree_cell_count()
+
+    assert_lt(swept_count, fresh_count * 2, "swept cell array stays bounded ≈ a fresh build of the final window (free-list reuse, no leak)")
+    assert_eq(_tri_sigs(grown_final), _tri_sigs(fresh_final), "after a 22-move sweep the surface still matches a fresh build (no corruption)")
+
+
 # Direct field sampling == sampling a baked grid of the same field: the crossing topology is decided by
 # the field's SIGN at integer cell corners — identical whether read direct (mesh_world) or via a
 # fill_region grid (mesh_clipmap) — so the two meshes share a vertex count (positions differ only by the

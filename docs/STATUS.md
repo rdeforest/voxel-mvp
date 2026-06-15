@@ -42,15 +42,18 @@ untouched):**
   `reaccumulate` rolls ancestor QEFs up from cached children (no resample); `recollapse_and_mesh`.
   **Gate met: `grow A→B` == fresh `mesh_world` of B (same surface+winding, order-independent) while
   sampling only the leading edge** (`get_last_build_sample_count`); round-trip A→B→A lossless.
-  Tests in `test/test_dc_world_octree.gd`. **GUT now 231 / 230 pass / 1 pre-existing pending / 0 fail.**
+- **B1b — bounded resident set.** `kill_subtree` returns evicted slots to a `free_list`; the next grow's
+  `alloc_cell` reuses them. Gate: a 22-move sweep grows storage only 12073→14793 (+22%, vs ~278k leaked) and
+  the swept surface still matches a fresh build. `get_octree_cell_count` exposes the bound.
+  Tests in `test/test_dc_world_octree.gd`. **GUT now 232 / 231 pass / 1 pre-existing pending / 0 fail.**
   Still **headless-only — nothing GUI-verified** (no `dcworld` yet).
 
-**NEXT — B1b + visibility:** (1) **B1b** reclaim evicted cells via a free-list (B1 leaks the orphaned
-subtree — fine for correctness, unbounded memory across a long traverse); gate: resident cell count bounded.
-(2) the exact surface-sparse prune over direct sampling + graded data floor for horizon coverage (the
-O(volume) wall blocks a full-view-distance render). (3) a `dcworld` manager modeled on `DcSubstratePreview`
-wires `mesh_world`+`grow_world` as the live render — **first GPU eyes** (`dcinval` thin-band gate) — and
-retires the clipmap + geomorph + the `dcgen`/SVO render. Gate each step: watertight-WITH-collapse + GUT green.
+**NEXT — visibility:** (1) the exact surface-sparse prune over direct sampling + graded data floor for
+horizon coverage — the O(volume) wall blocks a full-view-distance render (`EditStoreSource::surface_free`
+abstains → dense build to floor; the hard part: no pre-baked grid to mip against, unlike the clipmap).
+(2) a `dcworld` manager modeled on `DcSubstratePreview` wires `mesh_world`+`grow_world` as the live render —
+**first GPU eyes** (`dcinval` thin-band gate) — and retires the clipmap + geomorph + the `dcgen`/SVO render.
+Gate each step: watertight-WITH-collapse + GUT green.
 
 ### Active thread (2026-06-11): MPM continuum-physics substrate — spike done, VERDICT = GO
 

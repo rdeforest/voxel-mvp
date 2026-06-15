@@ -423,6 +423,8 @@ struct Octree {
 	                               // the field-derived build cost. A grow re-samples only the new band, so
 	                               // this proves the retained interior was NOT resampled (the B1 win).
 	LocalVector<Cell> cells;
+	LocalVector<int> free_list;    // (B1b) indices of cells killed by eviction, reused by the next grow so
+	                               // `cells` stays bounded across a long traverse instead of leaking.
 	PackedVector3Array verts;
 	PackedVector3Array normals;
 	PackedColorArray colors;       // per-vertex material colour (rgb); a=0 material, a=1 natural
@@ -579,16 +581,33 @@ struct Octree {
 		return d;
 	}
 
-	int build(const Vector3i &origin, int size, int depth) {
-		int idx = int(cells.size());
-		Cell c;
-		c.origin = origin;
-		c.size = size;
-		c.leaf = true;
-		for (int i = 0; i < 8; ++i) {
-			c.children[i] = -1;
+	// Allocate a cell slot — reusing one freed by eviction (B1b) before growing `cells`, so a long
+	// traverse churns slots in place instead of leaking. The returned slot is reset by build().
+	int alloc_cell() {
+		if (!free_list.is_empty()) {
+			int i = free_list[free_list.size() - 1];
+			free_list.resize(free_list.size() - 1);
+			return i;
 		}
-		cells.push_back(c);
+		int i = int(cells.size());
+		cells.push_back(Cell());
+		return i;
+	}
+
+	int build(const Vector3i &origin, int size, int depth) {
+		int idx = alloc_cell();
+		{
+			Cell &c = cells[idx]; // reset fully — a reused slot may carry stale state
+			c.origin = origin;
+			c.size = size;
+			c.leaf = true;
+			c.absent = false;
+			c.vertex = -1;
+			c.qef = Qef();
+			for (int i = 0; i < 8; ++i) {
+				c.children[i] = -1;
+			}
+		}
 		if (depth >= max_depth || size <= 1) {
 			return idx;
 		}
@@ -857,18 +876,22 @@ struct Octree {
 		}
 	}
 
-	// Clear an orphaned subtree so its stale cells emit nothing. The cells stay in `cells` (B1 leaks them;
-	// B1b reclaims via a free-list), but with an empty QEF a leaf places no vertex and an internal node
-	// stays non-leaf — so the flat-array mesh loops skip the whole detached subtree.
+	// Clear an orphaned subtree and return every slot to the free-list (B1b) for the next grow to reuse.
+	// A freed slot is left inert — empty QEF (count 0) + detached + leaf — so even before reuse the
+	// flat-array mesh loops skip it (a vertex is placed only for a leaf with qef.count > 0).
 	void kill_subtree(int idx) {
 		for (int i = 0; i < 8; ++i) {
 			int ch = cells[idx].children[i];
 			if (ch >= 0) {
 				kill_subtree(ch);
 			}
+			cells[idx].children[i] = -1;
 		}
 		cells[idx].qef = Qef();
 		cells[idx].vertex = -1;
+		cells[idx].leaf = true;
+		cells[idx].absent = true;
+		free_list.push_back(idx);
 	}
 
 	// Reconcile the tree to the current window box (build_min/build_max): graft cells that newly overlap
@@ -1257,6 +1280,12 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	return pack_output(oct);
 }
 
+// Total slots in the retained octree's cell array (live + free). With B1b's free-list this plateaus
+// across a long traverse (evicted slots reused), instead of growing every move — the bound the test gates.
+int DCOctreeMesher::get_octree_cell_count() const {
+	return _persist != nullptr ? int(_persist->oct.cells.size()) : 0;
+}
+
 void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("mesh_clipmap", "level_data", "dim", "level_origins", "level_cells", "center", "half0", "depth",
@@ -1282,6 +1311,7 @@ void DCOctreeMesher::_bind_methods() {
 			&DCOctreeMesher::grow_world);
 	ClassDB::bind_method(D_METHOD("remesh", "camera", "proj", "eps_px"), &DCOctreeMesher::remesh);
 	ClassDB::bind_method(D_METHOD("get_last_build_sample_count"), &DCOctreeMesher::get_last_build_sample_count);
+	ClassDB::bind_method(D_METHOD("get_octree_cell_count"),      &DCOctreeMesher::get_octree_cell_count);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);
 }
