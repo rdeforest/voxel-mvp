@@ -58,6 +58,7 @@ func _table() -> Array:
         [dcbudget,        "dcbudget",  "Toggle the B2 detail budget: auto-tune the LOD threshold toward a frame-time target (refine on slack, coarsen over budget). Usage: dcbudget [on|off]"],
         [dceps,           "dceps",     "Set the screen-error LOD threshold (px; lower = more detail). Usage: dceps <px>"],
         [fov,             "fov",       "Set the camera field-of-view in degrees (low = telescope/zoom → distant terrain refines under screen-error LOD). Usage: fov <degrees>"],
+        [dccore,          "dccore",    "Toggle the uniform 1m fine core: ON pins fine cells around you (clean edit splices); OFF lets the core collapse by screen-error too (uniform huge tris at high dceps, but edits may crack). Usage: dccore [on|off]"],
         [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight + magenta backfaces (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
@@ -227,6 +228,12 @@ func fov(degrees: float) -> void:
         return
     cam.fov = clampf(degrees, 1.0, 179.0)   # the DC manager polls FOV each frame → auto re-mesh
     LimboConsole.info("fov: %.1f°" % cam.fov)
+
+func dccore(state := "") -> void:
+    var on := _parse_toggle(state, dc_manager.uniform_core)
+    dc_manager.uniform_core = on
+    dc_manager.remesh()
+    LimboConsole.info("dccore: %s (fine 1m core %s)" % [("on" if on else "off"), ("pinned" if on else "collapsible")])
 
 # Freeze the render so a defect holds still, fly through it (noclip), and colour backfaces magenta
 # so a backwards triangle (gap fills magenta) reads differently from a missing one (gap stays open).

@@ -120,6 +120,7 @@ class ClipmapView:
     var proj:              float
     var eps_px:            float
     var error_driven:      bool
+    var uniform_core:      bool
     func ready() -> bool:
         return not level_cells.is_empty()
 
@@ -154,6 +155,12 @@ var _dump_dict := {}
 # in for a cell's fine surface. Smaller = more detail kept. ~2px is the doc target; B2 tunes
 # it to the frame budget.
 var eps_px := 2.0
+
+# Pin the finest clipmap level (level 0) — the 1m core bubble around the camera — so it never
+# collapses by screen error. ON keeps edits near the player landing in uniform 1m cells with clean
+# boundaries the splice can patch crack-free; OFF lets the core coarsen too (uniform huge triangles
+# at high eps, but edits there may crack / force a full rebuild). `dccore` toggles it. Default ON.
+var uniform_core := true
 
 # B2 budget controller. Detail self-tunes toward a frame-time target — refine when there's slack,
 # coarsen when over budget — by nudging eps_px (the screen-error collapse threshold; smaller
@@ -358,7 +365,7 @@ func _splice_job(store: EditStore, core_min: Vector3i, core_max: Vector3i,
         _clipmap.center_lattice, _clipmap.half0, _ROOT_DEPTH,
         _clipmap.camera_lattice, _clipmap.proj, _clipmap.eps_px, _clipmap.error_driven,
         _cache.origin, level_idxs, palette,
-        true, 0.0,                       # uniform_core=true (match the full build), prune_safety=0
+        _clipmap.uniform_core, 0.0,      # uniform_core: match the full build this patches; prune_safety=0
         core_min, core_max,              # emit box: only output triangles in the edit core
         build_min, build_max)            # build box: descend only the edit box + apron
     _splice_owners      = _mesher.get_last_triangle_owners()
@@ -573,6 +580,7 @@ func _dispatch(center: Vector3) -> void:
     _clipmap.proj              = proj
     _clipmap.eps_px            = eps_px
     _clipmap.error_driven      = error_driven
+    _clipmap.uniform_core      = uniform_core
     if dump_next:
         _arm_dump(center_lattice, camera_lattice, half0, proj, root_origin)
     # An immutable snapshot of the sparse store for the worker (cheap — copies only edited
@@ -580,7 +588,7 @@ func _dispatch(center: Vector3) -> void:
     var job_store: EditStore = _edit_store.duplicate()
     _task_id = WorkerThreadPool.add_task(
         _mesh_job.bind(job_store, level_world_cells, level_origins, level_cells, center_lattice, half0,
-            camera_lattice, proj, eps_px, error_driven, root_origin,
+            camera_lattice, proj, eps_px, error_driven, uniform_core, root_origin,
             MaterialPalette.colors()), false, "DC terrain mesh")
 
 
@@ -590,7 +598,7 @@ func _dispatch(center: Vector3) -> void:
 func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
         level_origins: PackedVector3Array, level_cells: PackedFloat32Array,
         center: Vector3, half0: float, camera: Vector3, proj: float, eps: float, err: bool,
-        world_origin: Vector3i, palette: PackedColorArray) -> void:
+        uniform: bool, world_origin: Vector3i, palette: PackedColorArray) -> void:
     var base_cell := VoxelConstants.RENDER_BASE_CELL
     var level_data: Array = []
     var level_indices: Array = []
@@ -607,10 +615,9 @@ func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
     _job.arrays = _mesher.mesh_clipmap(
         level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH,
         camera, proj, eps, err, world_origin, level_indices, palette,
-        true,   # uniform_core: KEEP the fine core in B1 — edits near the player land in uniform
-                # fine LOD and splice with a small box. (Dropping it is B2's job, once a budget-
-                # driven LOD replaces it; dropping it here made flat near-terrain coarse, so edits
-                # there had to align to coarse cells and the splice box blew up → full-rebuild.)
+        uniform,  # uniform_core: KEEP the fine core (level 0) at 1m so edits near the player splice
+                  # with a small box. `dccore off` drops it (the core coarsens too — uniform huge
+                  # triangles at high eps, but edits there may crack / force a full rebuild).
         0.0)    # surface-sparse prune DISABLED: the local-gradient bound is unreliable on
                 # godot_voxel's lossy-encoded + geomorph-blended multi-level SDF (it over-prunes
                 # real surface -> big slivers). Safe at lod 0 only; needs a mip-robust bound.
