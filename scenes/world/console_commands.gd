@@ -17,6 +17,7 @@ var host:              Node
 var dc_manager:        DCTerrainManager
 var inval_overlay:     Node3D
 var substrate_preview: DcSubstratePreview
+var world_preview:     DcWorldPreview
 var pbd_structure:     PbdStructure
 var integrity:         StructuralIntegrity
 var player:            CharacterBody3D
@@ -64,6 +65,7 @@ func _table() -> Array:
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
         [dcgen,           "dcgen",     "Phase B preview: render the octree-over-generator substrate (cyan) at your position. Usage: dcgen [on|off]"],
+        [dcworld,         "dcworld",   "doc 16: render the WORLD-FIXED incremental octree (amber bubble; mesh_world + grow_world on move). Dense build → small bubble until the prune lands. Tip: dcmanager off to see it alone. Usage: dcworld [on|off]"],
         [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
         [pbddemo,         "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [mpmdemo,         "mpmdemo",   "PB-MPM demo: spawn a live block of continuum material that falls and rests ON the terrain. Usage: mpmdemo [size]"],
@@ -266,6 +268,15 @@ func dcgen(state := "") -> void:
     var on := _parse_toggle(state, substrate_preview.is_enabled())
     substrate_preview.set_enabled(on)
     LimboConsole.info("dcgen: %s (live octree-over-generator render, cyan)" % ("on" if on else "off"))
+
+# `dcworld on` renders the doc-16 world-fixed incremental octree (mesh_world + grow_world on move),
+# amber, overlaid. Dense build → a small bubble until the surface-sparse prune lands.
+func dcworld(state := "") -> void:
+    var on := _parse_toggle(state, world_preview.is_enabled())
+    world_preview.set_enabled(on)
+    LimboConsole.info("dcworld: %s (world-fixed incremental octree, amber bubble)%s" % [
+        "on" if on else "off",
+        " — tip: `dcmanager off` to see it alone" if on else ""])
 
 # Spawn a live PBD structural-physics demo in front of the player (stress-coloured
 # lines; watch it sag and snap). Re-run to reset.

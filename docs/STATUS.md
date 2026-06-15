@@ -48,12 +48,21 @@ untouched):**
   Tests in `test/test_dc_world_octree.gd`. **GUT now 232 / 231 pass / 1 pre-existing pending / 0 fail.**
   Still **headless-only — nothing GUI-verified** (no `dcworld` yet).
 
-**NEXT — visibility:** (1) the exact surface-sparse prune over direct sampling + graded data floor for
-horizon coverage — the O(volume) wall blocks a full-view-distance render (`EditStoreSource::surface_free`
-abstains → dense build to floor; the hard part: no pre-baked grid to mip against, unlike the clipmap).
-(2) a `dcworld` manager modeled on `DcSubstratePreview` wires `mesh_world`+`grow_world` as the live render —
-**first GPU eyes** (`dcinval` thin-band gate) — and retires the clipmap + geomorph + the `dcgen`/SVO render.
-Gate each step: watertight-WITH-collapse + GUT green.
+- **`dcworld` — wired, AWAITING GPU EYES (2026-06-15).** `DcWorldPreview` (`scripts/dc/dc_world_preview.gd`,
+  modeled on `DcSubstratePreview`): a persistent `DCOctreeMesher`; re-root = `mesh_world`, move = `grow_world`,
+  edit = full rebuild; threaded on `WorkerThreadPool`; amber overlay. `dcworld [on|off]` console cmd. Boots
+  clean (`--editor --quit` parse + 12s headless run, no script errors). **Not yet eyeballed** — that's the
+  next session's first task on the laptop.
+  - **Expected (NOT bugs — the missing prune/floor):** coverage is a small BUBBLE (±24 m) with a hard rim
+    where terrain stops (the window edge); dense build to floor; no distance LOD detail because everything
+    in the bubble is near-camera. **Real bugs to watch for:** cracks/see-through *inside* the bubble, wrong
+    surface shape, terrain lagging behind movement, flicker on move, terrain not following at all.
+
+**NEXT — visibility:** GUI-verify `dcworld` (triage per above). Then (1) the exact surface-sparse prune over
+direct sampling + graded data floor for horizon coverage — the O(volume) wall blocks a full-view-distance
+render (`EditStoreSource::surface_free` abstains → dense build to floor; the hard part: no pre-baked grid to
+mip against, unlike the clipmap). Then `dcworld` becomes the live render and retires the clipmap + geomorph +
+the `dcgen`/SVO render. Gate each step: watertight-WITH-collapse + GUT green.
 
 ### Active thread (2026-06-11): MPM continuum-physics substrate — spike done, VERDICT = GO
 
