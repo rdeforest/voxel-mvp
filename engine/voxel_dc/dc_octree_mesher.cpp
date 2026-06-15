@@ -311,12 +311,15 @@ struct EditStoreSource : public SdfSource {
 	Vector3 world_origin; // lattice coords of octree (0,0,0)
 	double base_cell;     // world metres per lattice unit
 
-	// (P1, doc 17) transient min/max acceleration grid over the resident window, in OCTREE-LOCAL lattice
-	// (one sample per lattice unit), so surface_free can skip building the ~99.8% of empty cells. Baking is
-	// ~30x cheaper than the dense tree build (measured), and the exact min/max test can't miss a crossing.
-	Level accel;
-	LocalVector<float> accel_data; // backs accel.data
+	// (P1+P2, doc 17) transient GRADED min/max acceleration structure for the prune: concentric levels in
+	// OCTREE-LOCAL lattice, res 2^k doubling outward (fine near, coarse far — same per-level sample count, so
+	// the bake is bounded even over the horizon). `Clipmap::surface_free` ANDs the levels: the finest level
+	// covering a box decides, so it can't miss a crossing at the build floor's resolution. Skips building the
+	// ~99.8% empty cells at EVERY distance — grading the floor alone doesn't (far empties still build coarse).
+	Clipmap accel;
+	LocalVector<PackedFloat32Array> accel_held; // backs the levels' data ptrs
 	bool has_accel = false;
+	static const int ACCEL_DIM = 129;           // samples per level axis (matches the render clipmap)
 
 	// (P2, doc 17) graded data floor: the build descends only as fine as a cell would RENDER. A cell of
 	// size s at distance d projects to ~s*proj/d px, so the floor where that ≈ eps_px is s = eps_px*d/proj
@@ -336,23 +339,63 @@ struct EditStoreSource : public SdfSource {
 		return store->sample(to_world(p));
 	}
 
-	// Bake the accel grid over the OCTREE-LOCAL lattice box [lo, hi] (a cube of side = max span + 1, so it
-	// covers the window even when clamped non-cubic at a root face). One field sample per lattice unit.
-	void bake_accel(const Vector3i &lo, const Vector3i &hi) {
-		int dim = MAX(hi.x - lo.x, MAX(hi.y - lo.y, hi.z - lo.z)) + 1;
-		accel.origin = Vector3(lo);
-		accel.cell = 1.0;
-		accel.dim = dim;
-		accel_data.resize(int64_t(dim) * dim * dim);
+	// Sample one accel level into accel_held[slot] and register it: a dim³ grid at `res` lattice spacing,
+	// octree-local origin `lo`. (accel_held is pre-sized so its ptrs stay valid as levels are added.)
+	void bake_accel_level(int slot, const Vector3i &lo, int res, int dim) {
+		PackedFloat32Array &data = accel_held[slot];
+		data.resize(int64_t(dim) * dim * dim);
+		float *d = data.ptrw();
 		for (int z = 0; z < dim; ++z) {
 			for (int y = 0; y < dim; ++y) {
 				for (int x = 0; x < dim; ++x) {
-					accel_data[x + dim * (y + dim * z)] = float(value(Vector3(lo.x + x, lo.y + y, lo.z + z)));
+					d[x + dim * (y + dim * z)] =
+							float(value(Vector3(lo.x + x * res, lo.y + y * res, lo.z + z * res)));
 				}
 			}
 		}
-		accel.data = accel_data.ptr();
-		accel.build_mip();
+		Level lv;
+		lv.data = data.ptr();
+		lv.origin = Vector3(lo);
+		lv.cell = res;
+		lv.dim = dim;
+		accel.levels[slot] = lv;
+	}
+
+	// Bake the GRADED accel over the OCTREE-LOCAL window [win_lo, win_hi]. floor_k == 0 → one res-1 level
+	// sized to cover the whole window (uniform). Else concentric ACCEL_DIM³ levels centred on `cam_local`,
+	// res doubling, until the coarsest covers the whole window — so every in-window box is decided by a level
+	// at ~its build-floor resolution (fine near, coarse far), bounding both the bake and the build.
+	void bake_accel(const Vector3i &win_lo, const Vector3i &win_hi, const Vector3 &cam_local, double fk) {
+		accel.levels.clear();
+		LocalVector<Vector3i> origins; // decide specs first so accel_held can be pre-sized (stable ptrs)
+		LocalVector<int> reslist;
+		LocalVector<int> dimlist;
+		if (fk <= 0.0) {
+			int span = MAX(win_hi.x - win_lo.x, MAX(win_hi.y - win_lo.y, win_hi.z - win_lo.z)) + 1;
+			origins.push_back(win_lo);
+			reslist.push_back(1);
+			dimlist.push_back(span);
+		} else {
+			Vector3i c(int(Math::round(cam_local.x)), int(Math::round(cam_local.y)), int(Math::round(cam_local.z)));
+			int reach = MAX(MAX(c.x - win_lo.x, win_hi.x - c.x), MAX(MAX(c.y - win_lo.y, win_hi.y - c.y), MAX(c.z - win_lo.z, win_hi.z - c.z)));
+			int res = 1;
+			for (int k = 0; k < 16; ++k) {
+				int half = (ACCEL_DIM / 2) * res;
+				origins.push_back(c - Vector3i(half, half, half));
+				reslist.push_back(res);
+				dimlist.push_back(ACCEL_DIM);
+				if (half >= reach) {
+					break; // this level covers the whole window
+				}
+				res *= 2;
+			}
+		}
+		accel_held.resize(origins.size());
+		accel.levels.resize(origins.size());
+		for (uint32_t k = 0; k < origins.size(); ++k) {
+			bake_accel_level(int(k), origins[k], reslist[k], dimlist[k]);
+		}
+		accel.build_mips();
 		has_accel = true;
 	}
 
@@ -373,22 +416,13 @@ struct EditStoreSource : public SdfSource {
 		return CLAMP(floor_k * (p - cam).length(), 1.0, floor_cap);
 	}
 
-	// Exact surface-sparse prune (P1): a cell is surface-free iff the accel grid's min/max over it (plus a
-	// 1-cell margin) is strictly one side of the isosurface. Only prune cells the accel grid FULLY covers —
-	// outside it, return false (build the cell). The accel covers the fine bubble where empty cells are many
-	// and worth skipping; far cells build at the graded (coarse) floor without it, so they're few and cheap.
-	// (Returning Level's out-of-grid abstain — TRUE = prune — would wrongly vanish far cells.)
+	// Surface-sparse prune (P1+P2): `Clipmap::surface_free` ANDs the concentric levels — the finest level
+	// covering the box decides, coarser ones abstain where they don't reach — so a box is pruned only if a
+	// level at ~its build-floor resolution proves no crossing. The coarsest level covers the whole window,
+	// so every in-window cell is decided (out-of-window cells aren't built). Can't miss a crossing at the
+	// floor it would be built to, and matches the floor grading so it never over-prunes a visible cell.
 	bool surface_free(const Vector3 &cmin, const Vector3 &cmax) const override {
-		if (!has_accel) {
-			return false;
-		}
-		Vector3 lo = accel.origin;
-		Vector3 hi = accel.origin + Vector3(accel.dim - 1, accel.dim - 1, accel.dim - 1);
-		if (cmin.x - 1.0 < lo.x || cmin.y - 1.0 < lo.y || cmin.z - 1.0 < lo.z ||
-				cmax.x + 1.0 > hi.x || cmax.y + 1.0 > hi.y || cmax.z + 1.0 > hi.z) {
-			return false; // not fully inside the accel grid → build it (don't prune blindly)
-		}
-		return accel.surface_free(cmin, cmax);
+		return has_accel && accel.surface_free(cmin, cmax);
 	}
 	bool is_finest_level(const Vector3 &p) const override { return false; } // no clipmap core to pin
 
@@ -1307,20 +1341,10 @@ Array DCOctreeMesher::mesh_world(
 		oct.window_mode = true;
 		oct.build_min = win_min;
 		oct.build_max = win_max;
-		// Bake the surface-sparse accel grid (P1) and turn the prune on. The accel covers where the floor
-		// is fine and empty cells are many: the whole window when uniform, else just the fine bubble around
-		// the camera (radius ~1/floor_k, where the floor reaches 1) — far cells build coarse without it.
-		Vector3i wlo = win_min - world_origin;
-		Vector3i whi = win_max - world_origin;
-		Vector3i alo = wlo;
-		Vector3i ahi = whi;
-		if (floor_k > 0.0) {
-			int ar = int(Math::ceil(1.0 / floor_k));
-			Vector3i c(int(Math::round(camera.x)), int(Math::round(camera.y)), int(Math::round(camera.z)));
-			alo = Vector3i(MAX(c.x - ar, wlo.x), MAX(c.y - ar, wlo.y), MAX(c.z - ar, wlo.z));
-			ahi = Vector3i(MIN(c.x + ar, whi.x), MIN(c.y + ar, whi.y), MIN(c.z + ar, whi.z));
-		}
-		_persist->world_src.bake_accel(alo, ahi);
+		// Bake the surface-sparse accel (P1+P2) over the window and turn the prune on. Uniform (floor_k==0)
+		// → one res-1 level covering the window; graded → concentric levels (fine near camera, coarse far),
+		// so a large window stays affordable.
+		_persist->world_src.bake_accel(win_min - world_origin, win_max - world_origin, camera, floor_k);
 		oct.prune_safety = 1.0;
 	}
 	oct.run();
@@ -1346,11 +1370,14 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	oct.window_mode = true;
 	oct.build_min = win_min;
 	oct.build_max = win_max;
-	// P1: re-bake the accel grid over the NEW window so the leading-edge band is covered (an uncovered box
-	// abstains TRUE = prune, which would vanish the band). The retained interior isn't rebuilt, so its
-	// prune decisions (from the original window's accel) stand — geometrically identical (empty either way).
+	// P1/P2: re-bake the accel over the NEW window so the leading-edge band is covered (an uncovered box
+	// would prune the band away). Keep the build's floor_k; recentre the accel on the new camera. The
+	// retained interior isn't rebuilt — its prune decisions stand (geometrically identical, empty either
+	// way). NOTE: grow does not re-grade interior cells whose floor changed with the camera — that's the
+	// incremental band-diff (a later increment); a graded dcworld full-rebuilds on larger moves meanwhile.
 	if (_persist->world_src.has_accel) {
-		_persist->world_src.bake_accel(win_min - oct.world_origin, win_max - oct.world_origin);
+		_persist->world_src.cam = camera;
+		_persist->world_src.bake_accel(win_min - oct.world_origin, win_max - oct.world_origin, camera, _persist->world_src.floor_k);
 		oct.prune_safety = 1.0;
 	}
 	oct.build_samples = 0;
