@@ -8,15 +8,29 @@
 
 ## Resumption Brief
 
-### Active thread (2026-06-15): DC render — screen-space-error LOD (lazy persistent octree)
+### Active thread (2026-06-15): DC render — finish 16 via the WORLD-FIXED INCREMENTAL OCTREE
 
-The render's LOD criterion + persistence. **Plan + stages: `docs/roadmap/implementation/started/16-persistent-octree-substrate.md`** — read its "CURRENT PLAN" anchor first. LOD = **screen-space error**: a cell refines while its triangles project to **> ~2px**, merges when not (FOV folds in → a telescope/zoom refines distant terrain). Built as a **lazy, cached, persistent node-keyed octree** — coarse by default, refine on demand, cache each node (triangles + verdict), invalidate on **move / edit / FOV / resolution**.
+**Read `docs/MANIFESTO.md`, then the `## START HERE` brief at the top of
+`docs/roadmap/implementation/started/16-persistent-octree-substrate.md`.** That brief is the
+authoritative handoff — it has the hump, the plan, the foundations to reuse, and the manifesto traps to
+avoid. Summary:
 
-**Done this session (commits `2539bb0`→`956f455`):** the crack-free **build-box splice** (a splice builds on the full build's frame, restricted to the edit box + apron — no offset sub-octree; proven crack-free on real terrain); the **thin-gap winding fix** (take winding from the edge's solid→air sign when the gradient jumps a sub-cell gap — fixed reversed triangles where a part rests on a slope); **examine mode** (`Ctrl+E` / `examine` — freeze re-meshing + noclip fly + magenta backfaces, to tell a reversed triangle from a hole); and **cleanup** retiring the dead camera-independent-"necessity" machinery.
+**The hump:** movement triggers a FULL rebuild of a **camera-centered** clipmap octree (~4.8s; terrain
+lags seconds behind you — a *correctness* failure, not a perf nicety). Stage 1 (screen-error LOD) shipped
+and is merged to master. This session built the right *foundations* on branch
+`feat/dc-persistent-octree-cache` (persistent octree + `remesh()`, exact surface-sparse prune, scroll-fill,
+async in-place remesh, move→remesh) — but they're improvements to the *camera-centered* clipmap, which is
+the wrong structure. The fix is THE GOAL in doc 16: a **world-fixed incremental octree** (data resolution
+world-fixed/detail-driven, render LOD screen-error; a move re-collapses + builds only the leading band,
+interior reused). Per the manifesto this is enabling STRUCTURE — mandatory, do it, no deferring.
 
-**Stage 1 — code landed (headless-green; GUI-verify next).** `camera`/`proj`/`eps_px` are back in `DCOctreeMesher::mesh_clipmap`; collapse is now `we·proj/dist > eps_px` (~2px, no hysteresis); the manager computes camera-lattice + proj from the live `Camera3D`, B2 auto-tunes `eps_px`, and an FOV change re-meshes (telescope refines distant terrain). `dctol`→`dceps`. Full GUT suite green (215 tests) incl. a new camera/FOV-dependence test. **PENDING: in-game** — tune the 2px in play and confirm the telescope/zoom refine; needs GPU eyes (`dceps`, narrow FOV). Then **Stage 2** (persistent node cache + incremental invalidation — the movement payoff), **Stage 3** (top-down lazy build). GPU (resident SDF + compute DC) is the eventual end-state, deferred until CPU meshing saturates (we're at <1ms/frame).
+**Process note (own it):** last session repeatedly hit the Enterprise traps the manifesto forbids
+(defer-the-hard-part, chase worker wall-clock at 300fps, a surface-prune that broke watertightness = the
+literal #8 cautionary tale). Re-read the manifesto at the START of the rewrite, not after being told.
 
-**Watch:** the camera-independent "necessity" LOD was a confused requirement, since corrected to screen-error. `examine` found 1 missing + 2 reversed triangles still out there — likely resolved by the persistence/screen-error work; re-check with `Ctrl+E` after Stage 2.
+**NEXT:** the rewrite per doc 16's START HERE — decide first whether to retire the clipmap data model
+(Stage C, manifesto-preferred) before world-anchoring (A) + incremental growth (B). Gate every step on
+watertight-WITH-collapse + interior-byte-identical-on-move + GUT green + `dcinval` thin band.
 
 ### Active thread (2026-06-11): MPM continuum-physics substrate — spike done, VERDICT = GO
 

@@ -1,5 +1,62 @@
 # Persistent Octree Substrate — staged plan (B3 / doc-10 completion)
 
+## START HERE — next session (finish 16 = build the world-fixed incremental octree)
+
+**Read `docs/MANIFESTO.md` in full first, then "THE GOAL" below.** The previous session fell into the
+exact Enterprise traps the manifesto forbids and you must not repeat:
+- proposed *defer-the-hard-part / ship-current-state / rewrite-later* (the habit, not the thesis);
+- chased **worker-thread wall-clock** (the move rebuild) while framerate was 300fps — manifesto #8 says
+  leave wall-clock on a worker alone and **never** trade correctness for it;
+- shipped a **gradient surface-prune that broke watertightness** — the *literal* cautionary tale in #8.
+The world-fixed octree is **enabling STRUCTURE** (mandatory, never deferrable), not an optimization. The
+move rebuild's staleness (terrain lags seconds behind you) is a **correctness** failure. Correctness first.
+
+**The hump, precisely:** movement triggers a FULL rebuild of a **camera-centered** clipmap octree (~4.8s).
+Root cause: the clipmap re-centers its data on the camera every build (`Clipmap::level_index`/`value` are
+distance-from-`center`; `_dispatch` re-snaps the octree root to the player). A move = "all data moved" =
+rebuild. The fix is to make **data world-fixed** and the **build incremental** (build only the leading
+band, reuse the interior). That's THE GOAL below.
+
+**Do this — decisively, in small tested steps toward the FULL end (never a smaller end):**
+1. **First decision (don't skip):** the clipmap is intrinsically camera-centered, so world-anchoring
+   bolted onto it is awkward. Choose, and document the choice + why (cite the manifesto):
+   - **(i, manifesto-preferred)** retire the clipmap data model FIRST (Stage C): one **world-fixed
+     adaptive data source** feeding the octree — data resolution driven by DETAIL/edits, not camera
+     distance — then world-anchor (A) + incremental growth (B) fall out cleanly. Don't optimize the wrong
+     structure.
+   - **(ii)** world-anchor within the clipmap (A → B → C) only if it proves materially simpler after you
+     read the data model.
+2. **Build incrementally.** Each step gated by ALL of: watertight on real heightfield terrain **WITH
+   collapse** (`error_driven=true` — the test gap that bit last time; see `test/test_dc_real_terrain.gd`);
+   **interior byte-identical** before/after a small move (the incremental-correctness gate — an
+   incremental build must equal a from-scratch build); full GUT suite green; and in-game `dcinval` shows
+   a **thin band** re-meshed on a move, not the whole-vicinity box.
+
+**Foundations already built — REUSE, don't rebuild (all on `feat/dc-persistent-octree-cache`):**
+- **Persistent octree** — `DCOctreePersist` pimpl in `engine/voxel_dc/dc_octree_mesher.cpp`;
+  `remesh(camera, proj, eps)` re-walks it (re-collapse, no field sample), tested byte-identical to a
+  fresh build. `accumulate_qef()` (field, once) is split from `collapse_pass()` (camera, re-runnable).
+- **EXACT surface-sparse prune** — `Level::build_mip`/`surface_free` + `Clipmap::surface_free`; on when
+  `prune_safety>0`; watertight WITH collapse. (The gradient prune was the watertightness wound — deleted.)
+- **Scroll-fill** — `EditStore::fill_region(prev, prev_origin, dirty_origin, dirty_size)` reuses the
+  overlap, samples only the scrolled-in shell + edited box. Manager: `_scroll_buffers`/`_scroll_wcs`/`_dirty_*`.
+- **Async in-place remesh** + build/remesh/splice **serialized** on the shared `_mesher`
+  (`_dispatch_remesh`/`_remesh_job`/`_finish_remesh`).
+- **move→remesh** — `_build_center`, `REMESH_DISTANCE`(2m)/`REBUILD_DISTANCE`(12m): moves re-collapse the
+  retained octree; a full rebuild fires only past 12m. **That 12m rebuild is the remaining cost Stage B
+  eliminates.**
+
+**Read to orient:** `Level`/`Clipmap` structs (`dc_octree_mesher.cpp` ~L26–160) = the camera-centered
+data model to replace; `_dispatch`/`_mesh_job` (`dc_terrain_manager.gd`) = where the clipmap levels are
+built + the root re-snapped; `docs/roadmap/design/10-adaptive-octree-substrate.md` = the substrate vision.
+
+**Loose ends (NOT priorities — the rewrite subsumes them):** prune only got 8.7→4.8s (≈1.8×, not ~20× —
+likely the per-rebuild mip allocation over 7×129³, or steep terrain having more surface cells); the
+`No vertices… immediate_mesh.cpp:150` warning (empty-surface draw, probably a debug overlay); distant-edit
+detail loss (coarse clipmap undersampling — gone once data resolution is world-fixed).
+
+---
+
 ## THE GOAL — world-fixed incremental octree (no compromise)
 
 The correct end state, per the manifesto (one field / one representation / persists everywhere / the
