@@ -67,6 +67,11 @@ var _mesher := DCOctreeMesher.new()   # reused: holds the persistent collapse-hy
 var _task_id := -1
 var _last_center := Vector3.INF
 var _last_proj := 0.0   # proj of the last build; a live FOV/zoom change re-meshes (telescope refines)
+# Async in-place re-mesh: a FOV/eps change re-collapses the RETAINED octree on a worker (no rebuild, no
+# field re-sample) instead of a full rebuild. Mutually exclusive with the build + splice (shared _mesher).
+# `_remesh` is the worker→finish handoff, same shape as `_job`.
+var _remesh_task_id := -1
+var _remesh := DcMesh.new()
 
 # A meshed DC surface tagged for splicing: the Mesh.ARRAY_* surface, the per-triangle owner-cell
 # origin + size, and the world-lattice root its vertices are local to. `_cache` is what's on screen
@@ -226,14 +231,53 @@ func remesh() -> void:
     _last_center = Vector3.INF
 
 
-# Set the screen-error threshold and re-mesh. ASYNC (worker rebuild), NOT a synchronous in-place
-# re-collapse: a sync main-thread mesh hitches, and when the budget controller drives it every interval
-# that hitch inflates the measured frame time → the budget over-corrects → oscillation. The async path
-# stays off the main thread, and scroll-fill makes a stationary rebuild cheap (shift 0 → no re-sample).
-# Used by the budget controller and the `dceps` command.
+# Set the screen-error threshold and re-collapse the retained octree ON A WORKER (no rebuild, no field
+# re-sample) — so the budget controller can drive it every interval without a main-thread hitch (a sync
+# mesh would inflate the measured frame time and make the budget oscillate). Used by the budget
+# controller and the `dceps` command. Falls back to a full rebuild if no build is retained / mesher busy.
 func set_eps(px: float) -> void:
     eps_px = px
-    remesh()
+    _dispatch_remesh(_clipmap.proj, eps_px)
+
+
+# Re-collapse the RETAINED octree against the current camera + proj/eps on a worker — the in-place
+# re-walk (no rebuild, no field sampling). Falls back to a full rebuild when nothing is retained or the
+# shared mesher is busy (the move/FOV/eps/splice jobs are serialized in _process).
+func _dispatch_remesh(proj: float, eps: float) -> void:
+    if _cache.empty() or _task_id != -1 or _remesh_task_id != -1 or _splice_task_id != -1:
+        remesh()
+        return
+    var base_cell := VoxelConstants.RENDER_BASE_CELL
+    var camera_lattice := _clipmap.camera_lattice
+    var cam := get_viewport().get_camera_3d()
+    if cam:
+        camera_lattice = cam.global_position / base_cell - Vector3(_cache.origin)
+    _last_proj = proj
+    _clipmap.camera_lattice = camera_lattice
+    _clipmap.proj   = proj
+    _clipmap.eps_px = eps
+    _remesh_task_id = WorkerThreadPool.add_task(_remesh_job.bind(camera_lattice, proj, eps), false, "DC remesh")
+
+
+# Worker: re-walk the retained octree (DCOctreeMesher.remesh) — re-decide collapse vs the new camera and
+# re-emit, reusing the cached tree + QEFs. No store reads, no Node access.
+func _remesh_job(camera: Vector3, proj: float, eps: float) -> void:
+    _remesh.arrays = _mesher.remesh(camera, proj, eps)
+    _remesh.owners = _mesher.get_last_triangle_owners()
+    _remesh.sizes  = _mesher.get_last_triangle_owner_sizes()
+
+
+func _finish_remesh() -> void:
+    WorkerThreadPool.wait_for_task_completion(_remesh_task_id)
+    _remesh_task_id = -1
+    if _remesh.arrays.is_empty():
+        return
+    var mesh := ArrayMesh.new()
+    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _remesh.arrays)
+    _mesh_instance.mesh = mesh   # origin + instance position unchanged (same retained root frame)
+    _cache.arrays = _remesh.arrays
+    _cache.owners = _remesh.owners
+    _cache.sizes  = _remesh.sizes
 
 
 # B2: once per interval, push the tolerance toward the frame budget and re-mesh if it moved. Skips
@@ -485,25 +529,31 @@ func _process(dt: float) -> void:
         return
     _tune_quality(dt)
     var t0 := Time.get_ticks_usec()
+    # All three jobs share _mesher, so at most one runs at a time: finish whichever is in flight, else
+    # pick the next — a move (full rebuild, re-source) over a FOV/eps change (in-place re-collapse) over
+    # a queued edit splice.
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()
             Perf.mark_event()   # mark the frame the new mesh is applied (correlate spikes)
-    else:
+    elif _remesh_task_id != -1:
+        if WorkerThreadPool.is_task_completed(_remesh_task_id):
+            _finish_remesh()
+    elif _splice_task_id != -1:
+        if WorkerThreadPool.is_task_completed(_splice_task_id):
+            _finish_splice()
+    elif not frozen:
         var center := _follow.global_position
         var drift := center.distance_to(_last_center)
         var fov_changed := not is_equal_approx(_view_proj(), _last_proj)
-        if (drift > RECENTER_DISTANCE or fov_changed) and not frozen:
+        if drift > RECENTER_DISTANCE:
             if Perf.is_shown() and is_finite(drift):
-                var why := ("walked %.1fm" % drift) if drift > RECENTER_DISTANCE else "FOV change"
-                print("recenter: %s → rebuild (async; scroll-fill reuses the overlap)" % why)
-            _dispatch(center)   # async rebuild; a stationary FOV change re-samples nothing (shift 0)
-    # Async edit splices run on their own worker, concurrent with a full build.
-    if _splice_task_id != -1:
-        if WorkerThreadPool.is_task_completed(_splice_task_id):
-            _finish_splice()
-    elif not frozen and not _splice_queue.is_empty() and not _cache.arrays.is_empty() and _task_id == -1:
-        _dispatch_splice()
+                print("recenter: walked %.1fm → full rebuild (re-source data)" % drift)
+            _dispatch(center)
+        elif fov_changed:
+            _dispatch_remesh(_view_proj(), eps_px)   # in-place re-collapse on a worker (no rebuild)
+        elif not _splice_queue.is_empty() and not _cache.arrays.is_empty():
+            _dispatch_splice()
     Perf.report("DC mesh (main)", (Time.get_ticks_usec() - t0) / 1000.0)
     if Perf.is_shown():
         var blocked := ""
@@ -777,3 +827,6 @@ func _exit_tree() -> void:
     if _task_id != -1:
         WorkerThreadPool.wait_for_task_completion(_task_id)
         _task_id = -1
+    if _remesh_task_id != -1:
+        WorkerThreadPool.wait_for_task_completion(_remesh_task_id)
+        _remesh_task_id = -1
