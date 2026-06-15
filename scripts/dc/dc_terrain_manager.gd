@@ -226,39 +226,14 @@ func remesh() -> void:
     _last_center = Vector3.INF
 
 
-# Stage 2: re-collapse the RETAINED octree against the current camera + proj/eps and swap the new
-# surface in — no field re-sample, no worker. Valid only for POSITION-STABLE changes (FOV/zoom, eps):
-# the retained level data is centered on the last build, so a camera TRANSLATION past the fine band
-# still needs a full rebuild (Stage 3 re-sources the data ahead). Cheap (mesh only); main thread.
-func _remesh_in_place(proj: float, eps: float) -> void:
-    if _cache.empty() or _task_id != -1:
-        remesh()   # nothing retained, or a build is in flight → schedule a full rebuild instead
-        return
-    var base_cell := VoxelConstants.RENDER_BASE_CELL
-    var camera_lattice := _clipmap.camera_lattice
-    var cam := get_viewport().get_camera_3d()
-    if cam:
-        camera_lattice = cam.global_position / base_cell - Vector3(_cache.origin)
-    var arrays: Array = _mesher.remesh(camera_lattice, proj, eps)
-    _last_proj = proj
-    if arrays.is_empty():
-        return
-    var mesh := ArrayMesh.new()
-    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-    _mesh_instance.mesh = mesh   # origin + mesh_instance position unchanged (same retained root frame)
-    _cache.arrays = arrays
-    _cache.owners = _mesher.get_last_triangle_owners()
-    _cache.sizes  = _mesher.get_last_triangle_owner_sizes()
-    _clipmap.camera_lattice = camera_lattice
-    _clipmap.proj   = proj
-    _clipmap.eps_px = eps
-
-
-# Set the screen-error threshold and apply it cheaply (in-place re-collapse) when a build is retained,
-# else schedule a full rebuild. Used by the budget controller and the `dceps` command.
+# Set the screen-error threshold and re-mesh. ASYNC (worker rebuild), NOT a synchronous in-place
+# re-collapse: a sync main-thread mesh hitches, and when the budget controller drives it every interval
+# that hitch inflates the measured frame time → the budget over-corrects → oscillation. The async path
+# stays off the main thread, and scroll-fill makes a stationary rebuild cheap (shift 0 → no re-sample).
+# Used by the budget controller and the `dceps` command.
 func set_eps(px: float) -> void:
     eps_px = px
-    _remesh_in_place(_clipmap.proj, eps_px)
+    remesh()
 
 
 # B2: once per interval, push the tolerance toward the frame budget and re-mesh if it moved. Skips
@@ -518,12 +493,11 @@ func _process(dt: float) -> void:
         var center := _follow.global_position
         var drift := center.distance_to(_last_center)
         var fov_changed := not is_equal_approx(_view_proj(), _last_proj)
-        if drift > RECENTER_DISTANCE and not frozen:
+        if (drift > RECENTER_DISTANCE or fov_changed) and not frozen:
             if Perf.is_shown() and is_finite(drift):
-                print("recenter: walked %.1fm → full rebuild (movement re-mesh, B3)" % drift)
-            _dispatch(center)   # translation past the fine band → re-source data (full rebuild)
-        elif fov_changed and not frozen:
-            _remesh_in_place(_view_proj(), eps_px)   # FOV/zoom only: same camera position → cheap re-collapse
+                var why := ("walked %.1fm" % drift) if drift > RECENTER_DISTANCE else "FOV change"
+                print("recenter: %s → rebuild (async; scroll-fill reuses the overlap)" % why)
+            _dispatch(center)   # async rebuild; a stationary FOV change re-samples nothing (shift 0)
     # Async edit splices run on their own worker, concurrent with a full build.
     if _splice_task_id != -1:
         if WorkerThreadPool.is_task_completed(_splice_task_id):

@@ -15,7 +15,7 @@ Approach B (persistent C++ octree — "octree survives frames"). The field-deriv
 once; the camera-derived collapse verdict is re-decided cheaply per move. Approach A (GDScript displayed-
 leaf cache) was rejected: it can't predict collapse-on-recede without retaining internal nodes.
 - [x] **2a** — split `accumulate()` → `accumulate_qef()` + `collapse_pass()`; retain the octree on `DCOctreeMesher` (pimpl); `remesh(camera,proj,eps)` re-walk entry; test proves a re-walk == a fresh build at that camera (byte-identical)
-- [x] **2c** — manager wires `remesh()` for POSITION-STABLE changes (FOV/zoom, eps/budget, window-resize): instant re-collapse of the retained octree, no field re-sample. Test proves it takes the cheap path, not a full rebuild.
+- [~] **2c — REVERTED to async.** The synchronous in-place `remesh()` (FOV/eps) re-collapsed the retained octree on the MAIN thread — which hitches, and under the budget controller the hitch inflated the measured frame time → eps oscillation + a lag spike every interval (caught in GUI testing). FOV/eps now route through the **async** rebuild; scroll-fill makes a stationary change cheap (shift 0 → no re-sample) without a main-thread mesh. **Consequence: the C++ retained octree + `remesh()` (2a) is now UNUSED by the game** (scroll-fill, not the retained-octree re-walk, is what delivered the win). → remove the retention in the cleanup pass; keep the `accumulate_qef`/`collapse_pass` split (run() uses it).
 - [x] **2d** (edit half) — edits already re-mesh only the touched region via the build-box splice (no change needed); FOV/resize covered by 2c's `remesh`.
 
 **PERF FINDING (corrected):** "no perf pressure" was wrong — 300fps is the main thread; the meshing

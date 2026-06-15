@@ -57,10 +57,10 @@ func test_full_build_renders_terrain_in_world_space() -> void:
     assert_gt(float(hugged) / float(maxi(near, 1)), 0.8, "those verts hug the terrain surface (correct world scale)")
 
 
-func test_set_eps_remeshes_in_place_from_retained_octree() -> void:
-    # Stage 2c: set_eps re-collapses the RETAINED octree (no worker rebuild) and swaps a valid mesh in.
-    # error_driven=false (headless has no camera), so the surface is identical — the path under test is
-    # _mesher.remesh() + cache swap, NOT a scheduled full rebuild.
+func test_set_eps_schedules_async_rebuild() -> void:
+    # set_eps sets the threshold and schedules an ASYNC rebuild (not a synchronous main-thread remesh —
+    # that hitches, and under the budget controller it oscillates). The rebuild is cheap because a
+    # stationary change scroll-reuses everything (shift 0). Here we assert the value + the schedule.
     var focus := Vector3(0, _surface(0, 0), 0)
     var mgr := DCTerrainManager.new()
     add_child_autofree(mgr)
@@ -74,10 +74,10 @@ func test_set_eps_remeshes_in_place_from_retained_octree() -> void:
     mgr._finish()
     assert_gt((mgr._cache.arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), 500, "primed a base mesh")
 
-    mgr._last_center = focus      # settled — any later INF would mean a full rebuild was scheduled
+    mgr._last_center = focus
     mgr.set_eps(4.0)
-    assert_ne(mgr._last_center, Vector3.INF, "set_eps used the in-place remesh, did NOT schedule a full rebuild")
-    assert_gt((mgr._cache.arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), 500, "in-place remesh left a valid cached mesh")
+    assert_eq(mgr.eps_px, 4.0, "set_eps set the threshold")
+    assert_eq(mgr._last_center, Vector3.INF, "set_eps scheduled an async rebuild (next tick), no sync hitch")
 
 
 func test_scroll_rebuild_matches_full_sample() -> void:
