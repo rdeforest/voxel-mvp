@@ -10,8 +10,15 @@
 - [x] Full GUT suite green (215 tests) incl. a camera/FOV-dependence test
 - [x] **In-game validation** — screen-error confirmed: flat coarsens, detail/near stays fine, telescope refines distant
 
-**Stage 2 — Persistent node cache + invalidation** *(the movement payoff)*
-- [ ] not started
+**Stage 2 — Persistent node cache + invalidation** *(the movement payoff)* — branch `feat/dc-persistent-octree-cache`
+Approach A (GDScript-owned cache, reuse the build-box mesh op). Key insight: cache each displayed
+leaf's residual `we`; a move recomputes `we·proj/dist` per cached leaf (cheap, no field sampling) to
+find verdict flips, so only those regions re-mesh.
+- [ ] **2a** — mesher exposes per-displayed-leaf `{world origin, size, we}`; manager caches it beside the mesh (plumbing, no behavior change)
+- [ ] **2b** — world-fixed root: anchor the lattice to a global grid; re-snap only when the camera nears the root boundary, not every recenter
+- [ ] **2c** — incremental recenter: recompute `we·proj/dist` per cached leaf vs the new camera, build-box re-mesh only verdict-flipped regions + leading edge, evict trailing; interior triangles unchanged
+- [ ] **2d** — FOV/resize invalidation via the same verdict diff (proj change re-tests all)
+- [ ] **2e** — test: walking re-meshes a thin band (`dcinval`), interior byte-identical before/after a small move; full GUT suite green
 
 **Stage 3 — Top-down lazy build** *(speed)*
 - [ ] not started
