@@ -1,5 +1,9 @@
 extends CharacterBody3D
 
+# Ctrl+E toggles examine mode (freeze render + noclip + magenta backfaces). The player only owns
+# its own noclip; World wires this to the console `examine` command, which orchestrates all of it.
+signal examine_toggle_requested
+
 var _movement:         PlayerMovement
 var _camera_rig:       CameraRig
 var build_state:       BuildState
@@ -190,6 +194,9 @@ func _on_key_pressed(event: InputEventKey) -> void:
     # agnostic), with Shift+/ as a fallback if unicode isn't populated.
     if event.unicode == 0x3F or (event.keycode == KEY_SLASH and event.shift_pressed):
         _help_overlay.toggle()
+        return
+    if event.ctrl_pressed and event.keycode == KEY_E:
+        examine_toggle_requested.emit()   # debug examine toggle — works even with the mouse free
         return
     if not _focused:
         return   # mouse is free (console / Esc): tool + overlay keys are off until you click back in

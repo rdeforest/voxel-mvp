@@ -57,7 +57,7 @@ func _table() -> Array:
         [dcinval,         "dcinval",   "Toggle the invalidation overlay: blue=voxels an edit changed, green=region re-meshed, fading. Shows what each edit/move redoes."],
         [dcbudget,        "dcbudget",  "Toggle the B2 detail budget: auto-tune the LOD tolerance toward a frame-time target (refine on slack, coarsen over budget). Usage: dcbudget [on|off]"],
         [dctol,           "dctol",     "Set the necessity-LOD collapse tolerance (world-residual, base-cells; lower = more detail). Usage: dctol <tol>"],
-        [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight + magenta backfaces (tell a backwards triangle from a hole). Usage: examine [on|off]"],
+        [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight + magenta backfaces (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
         [dcgen,           "dcgen",     "Phase B preview: render the octree-over-generator substrate (cyan) at your position. Usage: dcgen [on|off]"],

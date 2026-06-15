@@ -104,6 +104,7 @@ func _wire_console() -> void:
     _console.edit_store        = _edit_store
     _console.part_index        = _part_index
     _console.register_all()
+    _player.examine_toggle_requested.connect(_console.examine.bind(""))   # Ctrl+E = `examine`
 
 func _grab_os_focus() -> void:
     DisplayServer.window_move_to_foreground()

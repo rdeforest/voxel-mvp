@@ -42,6 +42,7 @@ const ROWS := [
     ["V",                 "Toggle PBD stress lines"],
     ["G",                 "Toggle voxel grid overlay"],
     ["F",                 "Toggle scene wireframe"],
+    ["Ctrl+E",            "Toggle examine mode (freeze + noclip + magenta backfaces)"],
     ["`",                 "Console (commands: settle, physics_active, perf, reset, …)"],
     ["?",                 "This help"],
 
