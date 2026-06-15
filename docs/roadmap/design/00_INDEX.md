@@ -41,3 +41,8 @@ or condensed.
   and size detail to a runtime budget instead of a constant fine core. B1 (multi-
   LOD splice) + B2 (budget-driven eps_px); B3 (incremental LOD on camera move)
   deferred but recorded.
+- [`14-consensus-reality.md`](14-consensus-reality.md) — "excuse-driven magic":
+  unrealistic abilities (double-jump, glide) default **on** until the player proves
+  they know better, then re-enable via in-world "excuse" artifacts. A diegetic
+  dream-tell; the belief-domain state machine that gates them. Disillusionment
+  trigger deferred to the damage model.
