@@ -8,6 +8,16 @@
 
 ## Resumption Brief
 
+### Active thread (2026-06-15): DC render — screen-space-error LOD (lazy persistent octree)
+
+The render's LOD criterion + persistence. **Plan + stages: `docs/roadmap/implementation/16-persistent-octree-substrate.md`** — read its "CURRENT PLAN" anchor first. LOD = **screen-space error**: a cell refines while its triangles project to **> ~2px**, merges when not (FOV folds in → a telescope/zoom refines distant terrain). Built as a **lazy, cached, persistent node-keyed octree** — coarse by default, refine on demand, cache each node (triangles + verdict), invalidate on **move / edit / FOV / resolution**.
+
+**Done this session (commits `2539bb0`→`956f455`):** the crack-free **build-box splice** (a splice builds on the full build's frame, restricted to the edit box + apron — no offset sub-octree; proven crack-free on real terrain); the **thin-gap winding fix** (take winding from the edge's solid→air sign when the gradient jumps a sub-cell gap — fixed reversed triangles where a part rests on a slope); **examine mode** (`Ctrl+E` / `examine` — freeze re-meshing + noclip fly + magenta backfaces, to tell a reversed triangle from a hole); and **cleanup** retiring the dead camera-independent-"necessity" machinery.
+
+**NEXT — Stage 1:** restore `camera`/`proj`, switch the collapse threshold to `we·proj/dist > ~2px`, add an FOV-change re-mesh trigger. Eager (still rebuilds on recenter) but makes LOD camera-responsive — validates the 2px + telescopes in-game. Then **Stage 2** (persistent node cache + incremental invalidation — the movement payoff), **Stage 3** (top-down lazy build). GPU (resident SDF + compute DC) is the eventual end-state, deferred until CPU meshing saturates (we're at <1ms/frame).
+
+**Watch:** the camera-independent "necessity" LOD was a confused requirement, since corrected to screen-error. `examine` found 1 missing + 2 reversed triangles still out there — likely resolved by the persistence/screen-error work; re-check with `Ctrl+E` after Stage 2.
+
 ### Active thread (2026-06-11): MPM continuum-physics substrate — spike done, VERDICT = GO
 
 **The pivot.** GUI-testing parts-as-voxels surfaced PBD's structural limits — a beam on a peak

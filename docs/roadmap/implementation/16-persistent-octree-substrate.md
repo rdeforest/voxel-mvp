@@ -6,6 +6,30 @@ it **incrementally** instead of triggering a full rebuild. This is "B3" from
 [doc 13](../design/13-incremental-lod-splice.md). Each stage ships independently, stays tested, and
 leaves the game working — the current clipmap keeps rendering until a stage is trusted.*
 
+## CURRENT PLAN — read this first (2026-06-15)
+
+**LOD = screen-space error.** A cell stays refined while its triangles project to **> ~2px**, merges
+when they don't (so far terrain coarsens; a telescope/zoom narrows FOV → distant terrain grows back
+over 2px → refines). Built as a **lazy, cached, persistent octree**: coarse by default, refine on
+demand where the field has detail AND it's visible, cache each **node**'s result (triangles +
+subdivide verdict), invalidate per cause — **move**, **edit**, **FOV**, **window resolution**.
+
+**Canonical stages (this supersedes every other stage list in this file):**
+1. **Screen-error criterion** — restore `camera`/`proj`, collapse on `we·proj/dist > ~2px`, re-mesh on
+   FOV change as well as drift. Eager; validates the 2px + telescopes in-game. *(in progress)*
+2. **Persistent node cache + invalidation** — octree survives frames; a move re-tests screen-error per
+   node, re-meshes only crossers; edits dirty touched nodes; FOV/resize re-test all. *(the payoff)*
+3. **Top-down lazy build** — refine on demand instead of meshing every cell to the floor. *(speed, last)*
+4. **Eviction** — bound the resident set (the "### Stage 2 — Eviction" section below).
+5. **Retire the full-rebuild + godot_voxel render fallback** (the "### Stage 3" section below).
+
+**Already done this session (commits `2539bb0`→`956f455`):** the crack-free **build-box splice**, the
+**thin-gap winding fix**, **examine mode** (+Ctrl+E), and the **dead-machinery cleanup**.
+
+**SUPERSEDED — read as history, not plan:** everything below framed as *necessity / camera-independent
+/ distance-irrelevant / world-fixed grid*. The build-box *finding* is real and done; the LOD *criterion*
+reversed from camera-independent "necessity" back to screen-error (a confused requirement, corrected).
+
 ## Where we already are (the head start)
 
 Doc 10's hard parts are **done**, which is why this plan is small:
@@ -77,12 +101,30 @@ their world positions **and their triangles**. This is the architectural heart �
   geomorph `value()` is already a pure function of world position — confirmed — so no camera-orbit
   dependence); the resolution gradient stays (necessary at planet scale) but the frame is world-fixed.
 
-### (former Stage 2 — Camera-driven incremental LOD — REMOVED by the LOD decision below.)
-There is no camera-driven LOD to update: a cell's LOD is decided by **necessity** (a fixed world-space
-residual tolerance), not by distance, so moving or turning the camera changes the displayed mesh by
-**nothing**. The mesh updates only on (a) **edits** (B1, done) and (b) **window scroll** (Stage 1,
-loading newly-resident cells). Telescopes fall out for free for the same reason: distant complex
-terrain is already meshed fine because the detail is *necessary*, regardless of where you stand.
+## DIRECTION CORRECTION (supersedes the "necessity, not distance" section below)
+The camera-INDEPENDENT "necessity" LOD was a detour (a confused requirement, since corrected). The
+real model is **screen-space error**: a cell stays refined while its triangles project to **more than
+~2px**, and merges when they don't — so far terrain coarsens, and a **telescope/zoom (narrow FOV)**
+magnifies distant terrain back over 2px and refines it. Implemented as a **lazy, cached, persistent
+octree**: coarse by default, refine on demand where the field has detail AND it's visible, cache each
+NODE's result (its triangles + subdivide verdict), invalidate per cause — **move** (distances change),
+**edit** (field changes), **FOV** (zoom/telescope), **window resolution**. This brings `proj`/FOV back
+into the collapse threshold (`we · proj/dist` vs ~2px); the QEF residual, build-box, and winding work
+all carry. The "RESOLVED: necessity, not distance" section further down is OBSOLETE — ignore it.
+
+**Staged build:**
+1. **Screen-error criterion** — restore the projected threshold (keep refined while `we·proj/dist >
+   ~2px`), re-add `camera`/`proj`, trigger a re-mesh on FOV change as well as drift. Eager (still
+   rebuilds on recenter) but makes the LOD camera-responsive; tune the 2px in-game. Small.
+2. **Persistent node cache + invalidation** — the octree survives across frames; each node caches its
+   mesh + verdict; a move re-tests the cheap screen-error per node and re-meshes only the crossers; an
+   edit dirties touched nodes; FOV/resize re-tests all. The incremental-movement payoff + world-anchor.
+3. **Top-down lazy build** — refine downward on demand instead of meshing every cell to the floor.
+   Pure speed; last, since we're at <1ms/frame.
+
+Longer term this is a candidate to move onto the GPU (resident sparse SDF + compute DC, screen-error
+selection), which the hardware (32G VRAM) suits — deferred until CPU meshing actually saturates (it
+isn't close), and the same algorithm ports over.
 
 ### Stage 2 — Eviction (the functional policy)
 Bound the resident set: keep cells contributing to the displayed surface; evict out-of-view cells and
@@ -102,21 +144,3 @@ data store until its own retirement (doc 10 Phase B / doc 11).
 - Validate on the real godot_voxel-encoded / store field, not analytic ([[dc-sdf-not-unit-distance]],
   [[validate-on-faithful-field]]).
 
-## RESOLVED (the LOD decision): necessity, not distance
-**A cell's LOD is decided entirely by necessity — distance from the camera is irrelevant.** A cell
-collapses iff one vertex represents its surface within a **fixed world-space residual tolerance**
-(the max-residual metric, *unscaled* — drop the `* proj / dist` screen term). Flat terrain collapses
-everywhere; complex terrain stays fine everywhere; the camera is not an input.
-
-Consequences (all simplifying):
-- **The mesh is `f(field)`, not `f(field, camera)`** → camera motion triggers **zero** re-mesh.
-  That deletes the whole camera-driven-LOD machinery (former Stage 2) and the re-snap-on-move problem.
-- **No concentric LOD rings.** There are no levels keyed to camera distance; each cell is fine or
-  coarse on its own surface complexity.
-- **Telescopes are free** — distant detail is already resolved because it's necessary.
-- **Cost moves to the budget.** Without distance coarsening, far complex terrain keeps its triangles,
-  so **B2 tunes the world-residual tolerance** (coarser tolerance when over budget) — the one knob,
-  now camera-independent. The resident-set radius (Stage 2 eviction) bounds the extent.
-
-The C++ change is small: `accumulate()` already computes the residual `we`; collapse on
-`we <= tolerance` instead of `we * proj / dist <= eps_px`. Camera params drop out of the mesher.
