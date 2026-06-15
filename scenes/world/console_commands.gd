@@ -217,8 +217,7 @@ func dcerror(state := "") -> void:
     LimboConsole.info("dcerror: %s (eps %.2fpx)" % [("on" if on else "off"), dc_manager.eps_px])
 
 func dceps(px: float) -> void:
-    dc_manager.eps_px = maxf(0.1, px)
-    dc_manager.remesh()
+    dc_manager.set_eps(maxf(0.1, px))   # cheap in-place re-collapse (retained octree), no field re-sample
     LimboConsole.info("dceps: %.2fpx" % dc_manager.eps_px)
 
 func fov(degrees: float) -> void:

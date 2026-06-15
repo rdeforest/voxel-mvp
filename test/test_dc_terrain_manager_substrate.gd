@@ -57,6 +57,29 @@ func test_full_build_renders_terrain_in_world_space() -> void:
     assert_gt(float(hugged) / float(maxi(near, 1)), 0.8, "those verts hug the terrain surface (correct world scale)")
 
 
+func test_set_eps_remeshes_in_place_from_retained_octree() -> void:
+    # Stage 2c: set_eps re-collapses the RETAINED octree (no worker rebuild) and swaps a valid mesh in.
+    # error_driven=false (headless has no camera), so the surface is identical — the path under test is
+    # _mesher.remesh() + cache swap, NOT a scheduled full rebuild.
+    var focus := Vector3(0, _surface(0, 0), 0)
+    var mgr := DCTerrainManager.new()
+    add_child_autofree(mgr)
+    var follow := Node3D.new()
+    add_child_autofree(follow)
+    follow.global_position = focus
+    mgr.setup(follow, _store())
+    mgr._enabled = true
+    mgr.error_driven = false
+    mgr._dispatch(focus)
+    mgr._finish()
+    assert_gt((mgr._cache.arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), 500, "primed a base mesh")
+
+    mgr._last_center = focus      # settled — any later INF would mean a full rebuild was scheduled
+    mgr.set_eps(4.0)
+    assert_ne(mgr._last_center, Vector3.INF, "set_eps used the in-place remesh, did NOT schedule a full rebuild")
+    assert_gt((mgr._cache.arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), 500, "in-place remesh left a valid cached mesh")
+
+
 func test_async_splice_applies_an_edit() -> void:
     # Prime a full build, dig into the store, then drive the async splice (dispatch -> worker ->
     # apply) and confirm the cached mesh changed — the edit shows without a full re-mesh.

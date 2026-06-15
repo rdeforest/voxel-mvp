@@ -15,13 +15,14 @@ Approach B (persistent C++ octree — "octree survives frames"). The field-deriv
 once; the camera-derived collapse verdict is re-decided cheaply per move. Approach A (GDScript displayed-
 leaf cache) was rejected: it can't predict collapse-on-recede without retaining internal nodes.
 - [x] **2a** — split `accumulate()` → `accumulate_qef()` + `collapse_pass()`; retain the octree on `DCOctreeMesher` (pimpl); `remesh(camera,proj,eps)` re-walk entry; test proves a re-walk == a fresh build at that camera (byte-identical)
-- [ ] **2b** — world-fixed root: anchor the lattice to a global grid; re-snap only when the camera nears the root boundary, not every recenter
-- [ ] **2c** — incremental re-walk on move: manager calls `remesh()` (re-decide collapse vs new camera, re-mesh only flipped subtrees) instead of a full rebuild
-- [ ] **2d** — edit dirties touched nodes (re-sample field + re-accumulate QEF there only); FOV/resize re-walk all
-- [ ] **2e** — test: walking re-meshes a thin band (`dcinval`), interior byte-identical before/after a small move; full GUT suite green
+- [x] **2c** — manager wires `remesh()` for POSITION-STABLE changes (FOV/zoom, eps/budget, window-resize): instant re-collapse of the retained octree, no field re-sample. Test proves it takes the cheap path, not a full rebuild.
+- [x] **2d** (edit half) — edits already re-mesh only the touched region via the build-box splice (no change needed); FOV/resize covered by 2c's `remesh`.
 
-**Stage 3 — Top-down lazy build** *(speed)*
-- [ ] not started
+**ARCHITECTURAL FINDING (reshapes 2b + Stage 3):** the clipmap LOD levels are **camera-centered** — each level's SDF is sampled around the build center — so `remesh()` is exact only when the camera doesn't TRANSLATE. A move past the fine band still needs fresh data *ahead* of the camera, which is the world-fixed scrolling window. So the original 2b ("world-fixed root") and Stage 3 ("lazy build") **merge** into one piece:
+- [ ] **2b/3 — world-fixed scrolling window** *(the translation payoff — the doc's "architectural heart", and the big remaining piece)*: rework the camera-centered clipmap to a world-anchored octree; a move re-samples + re-meshes only the leading-edge band and reuses the interior (which keeps its world position + triangles). Subsumes the old Stage-3 lazy build.
+- [ ] **2e** — test: walking re-meshes a thin band (`dcinval`), interior byte-identical before/after a small move
+
+**Stage 3 — Top-down lazy build** *(speed)* — **merged into 2b/3** (world-fixed scrolling window) above; the lazy/world-anchored build is the same rework.
 
 **Stage 4 — Eviction** *(bound the resident set)*
 - [ ] not started
