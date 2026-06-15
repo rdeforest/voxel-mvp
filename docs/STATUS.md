@@ -10,7 +10,7 @@
 
 ### Active thread (2026-06-15): DC render — screen-space-error LOD (lazy persistent octree)
 
-The render's LOD criterion + persistence. **Plan + stages: `docs/roadmap/implementation/16-persistent-octree-substrate.md`** — read its "CURRENT PLAN" anchor first. LOD = **screen-space error**: a cell refines while its triangles project to **> ~2px**, merges when not (FOV folds in → a telescope/zoom refines distant terrain). Built as a **lazy, cached, persistent node-keyed octree** — coarse by default, refine on demand, cache each node (triangles + verdict), invalidate on **move / edit / FOV / resolution**.
+The render's LOD criterion + persistence. **Plan + stages: `docs/roadmap/implementation/started/16-persistent-octree-substrate.md`** — read its "CURRENT PLAN" anchor first. LOD = **screen-space error**: a cell refines while its triangles project to **> ~2px**, merges when not (FOV folds in → a telescope/zoom refines distant terrain). Built as a **lazy, cached, persistent node-keyed octree** — coarse by default, refine on demand, cache each node (triangles + verdict), invalidate on **move / edit / FOV / resolution**.
 
 **Done this session (commits `2539bb0`→`956f455`):** the crack-free **build-box splice** (a splice builds on the full build's frame, restricted to the edit box + apron — no offset sub-octree; proven crack-free on real terrain); the **thin-gap winding fix** (take winding from the edge's solid→air sign when the gradient jumps a sub-cell gap — fixed reversed triangles where a part rests on a slope); **examine mode** (`Ctrl+E` / `examine` — freeze re-meshing + noclip fly + magenta backfaces, to tell a reversed triangle from a hole); and **cleanup** retiring the dead camera-independent-"necessity" machinery.
 
@@ -200,8 +200,7 @@ pop-in tuning); `vdebug [flag]` (godot_voxel debug overlays); `set`/`get` (shade
 uniforms incl. `debug_lod` / `debug_normal` visualizers).
 
 **Uncommitted on purpose:** `scenes/world/world.tscn` (Robert's `lod_distance=96`
-tuning + editor debug-shader defaults), `docs/F2-lod-seam-options.md` (scratch
-decision doc — keep as reference). Deferred items have memories: LOD-boundary
+tuning + editor debug-shader defaults). Deferred items have memories: LOD-boundary
 cracks (this work), [[edit-remesh-padding-gap]], [[distant-shadow-shimmer]].
 
 ---
@@ -277,7 +276,7 @@ gates on quiescence and trusts saved support values.
 | 0 — Foundation | Complete | godot + godot_voxel build chain, walking-around prototype |
 | 2 — Terrain Modification | Complete | dig, fill, flatten with refuse-don't-deform |
 | 5 — Building System | Functionally complete for v0.0 | Parts, structural integrity, cave integrity, pillar reinforcement all working; SDF seam matching deferred to v0.1+ |
-| Cleanup pass | Complete | Plan in `docs/code-cleanup-plan.md`; step #4 deferred |
+| Cleanup pass | Complete | Plan fully landed or made moot by the Phase 6 / PBD deletions (collapse_detector, part_support, integrity_debug); plan doc retired |
 | Persistence (snapshot + stream) | Complete (`a4b95da`) | F5 save, F9 load, terrain SDF auto-persists. Action-journal/replay deferred. |
 
 ### v0.1 — Phase status

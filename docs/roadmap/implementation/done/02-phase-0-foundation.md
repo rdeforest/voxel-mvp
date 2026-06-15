@@ -2,7 +2,7 @@
 
 **Goal:** Walking around a procedural voxel world with basic physics.
 **Version target:** 0.0
-**Status:** Complete. See `../../completed/implementation-02-phase-0-foundation.md`.
+**Status:** Complete. See `implementation-02-phase-0-foundation.md`.
 
 ## Tasks
 

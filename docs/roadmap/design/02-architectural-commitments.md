@@ -4,7 +4,7 @@ These are decisions that have been made, work as expected, and would
 cost more than they save to revisit. Listed here so they're easy to
 point at when a refactor proposal forgets one of them.
 
-Mechanism rationale for shipped code lives in `../../architecture.md`.
+Mechanism rationale for shipped code lives in `architecture.md`.
 Current-state tracking lives in `../../STATUS.md`. This chapter is the
 *forward-looking* commitments — what stays true going forward.
 
@@ -115,7 +115,7 @@ if necessary.
 future-proofing.
 
 **The DC-QEF transition (see
-[`../implementation/14-dc-qef-transition.md`](../implementation/14-dc-qef-transition.md))
+[`../implementation/started/14-dc-qef-transition.md`](../implementation/started/14-dc-qef-transition.md))
 replaces godot_voxel's meshing layer but keeps its storage, streaming,
 and LOD.** This is *not* a Hytale-style rewrite — it's surgical
 replacement of one layer (~15–20% of what godot_voxel does for us) to

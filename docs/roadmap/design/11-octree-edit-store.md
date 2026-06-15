@@ -194,6 +194,6 @@ each flip is guarded).
 
 ## When this lands
 
-The rationale graduates into [`../../architecture.md`](../../architecture.md); the resolved
+The rationale graduates into [`architecture.md`](architecture.md); the resolved
 decisions into [`02-architectural-commitments.md`](02-architectural-commitments.md). Doc 10
 stays as the substrate spec; this chapter is deleted once S5 ships.

@@ -160,7 +160,7 @@ Typed records (all `RefCounted`, in `scripts/structural/`):
 - `VoxelRecord` — `{support, material, dirty}` for tracked voxels.
 - `PartRecord` — `{id, cells, material, dimensions, transform, ancestry}` for the `PartIndex` identity sidecar.
 
-Detailed mechanism rationale (lazy-expansion bounds, pause-correct delta accumulation, etc.) lives in `docs/architecture.md`. The doc complements `roadmap.md → Architectural Commitments` (design-level decisions) and this file (where the code lives).
+Detailed mechanism rationale (lazy-expansion bounds, pause-correct delta accumulation, etc.) lives in `docs/roadmap/design/architecture.md`. The doc complements `roadmap.md → Architectural Commitments` (design-level decisions) and this file (where the code lives).
 
 ### Player composition (`scenes/player/`)
 

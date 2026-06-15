@@ -3,7 +3,7 @@
 Two things happen over and over in this game: the player **changes the world** (digs, builds)
 and the player **moves through it**. This doc traces both, start to finish, in plain language —
 what actually happens between "player does a thing" and "the screen shows it." It's the mental
-model the [incremental-LOD-splice work](roadmap/design/13-incremental-lod-splice.md) builds on.
+model the [incremental-LOD-splice work](../design/13-incremental-lod-splice.md) builds on.
 
 ## The cast (in plain terms)
 
@@ -99,7 +99,7 @@ spotlight (and keep a little patch of collision cooked under your feet).
 
 Today, **moving** rebuilds the whole spotlight (expensive, but rare — only when you've traveled),
 and **editing** *tries* to patch just the changed box but often gives up and does that same whole
-rebuild. The plan ([doc 13](roadmap/design/13-incremental-lod-splice.md)) is to make **both**
+rebuild. The plan ([doc 13](../design/13-incremental-lod-splice.md)) is to make **both**
 work the same cheap way: only ever re-mesh the small region that actually changed — whether it
 changed because you *edited* it or because you *moved* and its detail level shifted. Same
 machinery, no full rebuilds. This doc is the "before" picture; that's the "after."

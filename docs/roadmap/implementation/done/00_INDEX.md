@@ -1,11 +1,25 @@
-# docs/completed — Index
+# docs/roadmap/implementation/done — Index
 
-Per-chapter records of work already shipped. Each entry below notes *why
-the doc exists*, not what it contains. The `implementation-*` files mirror
-the roadmap's implementation chapters as completed; the `extras-*` files
-record work that landed outside the numbered phases.
+Shipped work. Each entry below notes *why the doc exists*, not what it
+contains. Three kinds of doc live here:
 
-## Files
+- the **phase scope docs** (numbered, matching the roadmap's chapters)
+  whose work fully landed, moved out of the active implementation list;
+- the **`implementation-*`** records that mirror those chapters as
+  completed (plan vs. record — both kept);
+- the **`extras-*`** records for work that landed outside the numbered
+  phases.
+
+## Phase scope docs (shipped)
+
+- [`02-phase-0-foundation.md`](02-phase-0-foundation.md) — scoped the v0.0
+  foundation: walking around a procedural voxel world.
+- [`03-phase-2-terrain-modification.md`](03-phase-2-terrain-modification.md)
+  — scoped dig/fill/flatten, to verify the core loop feels right.
+- [`04-phase-5-building-system.md`](04-phase-5-building-system.md) — scoped
+  the parts + structural-integrity thesis defense (v0.0).
+
+## Shipped-work records
 
 - [`extras-01-persistence.md`](extras-01-persistence.md) — records the
   save/load infrastructure that makes the v0.0 demo survive across sessions.

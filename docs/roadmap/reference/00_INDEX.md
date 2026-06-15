@@ -15,3 +15,6 @@ exists*, not what it contains.
   providers matching the project's licensing stance.
 - [`05-elevator-pitch-long.md`](05-elevator-pitch-long.md) — the full
   Valheim-comparison pitch for when the short one needs backing.
+- [`06-edit-and-movement-lifecycles.md`](06-edit-and-movement-lifecycles.md)
+  — plain-language mental model of the edit and movement pipelines; the
+  basis the incremental-LOD-splice design (doc 13) builds on.

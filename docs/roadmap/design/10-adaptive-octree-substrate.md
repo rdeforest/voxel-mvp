@@ -4,7 +4,7 @@
 becomes the world's data + render substrate. The conceptual ground (field + DC-QEF,
 why an octree, parts-as-voxels) is [`03-dc-qef-geometry.md`](03-dc-qef-geometry.md);
 the **mesher** migration (DC over godot_voxel data, the path-b render layer) was
-[`../implementation/14-dc-qef-transition.md`](../implementation/14-dc-qef-transition.md)
+[`../implementation/started/14-dc-qef-transition.md`](../implementation/started/14-dc-qef-transition.md)
 and has largely shipped. This doc is the next architectural step: making the octree
 itself the substrate.*
 
@@ -304,7 +304,7 @@ persistence move.
 
 ## When this lands
 
-- A's mechanism rationale graduates into `../../architecture.md`; decisions into
+- A's mechanism rationale graduates into `architecture.md`; decisions into
   [`02-architectural-commitments.md`](02-architectural-commitments.md).
 - This chapter stays as the substrate spec (B continues against it). Doc 14 remains
   the historical record of the mesher transition that preceded it.

@@ -1,6 +1,6 @@
 # Completed: Phase 5 — Building System
 
-Maps to [`../roadmap/implementation/04-phase-5-building-system.md`](../roadmap/implementation/04-phase-5-building-system.md).
+Maps to [`04-phase-5-building-system.md`](04-phase-5-building-system.md).
 
 ## What shipped
 
@@ -64,7 +64,7 @@ a gameplay mechanic.
 - **The "what if a voxel is two types of cell?" question is a category
   error.** Resolved by the role-vs-matter distinction: voxels store
   *what the matter is*; roles live in sidecar indexes. Captured in
-  [design principle #6](../roadmap/design/01-principles.md).
+  [design principle #6](../../design/01-principles.md).
 - **Materializing the same physical rules over different data
   structures (voxels and parts) was the v0.0 architectural commitment
   that made the unified visualisation possible.** The components had
@@ -75,7 +75,7 @@ a gameplay mechanic.
   semantics* but compute differently (terrain: worklist-fixpoint flood
   fill; parts: per-frame recompute bottom-up). The unified answer comes
   with DC-QEF — one field, one mesher, one propagation algorithm.
-  Captured in [the DC-QEF transition chapter](../roadmap/implementation/14-dc-qef-transition.md).
+  Captured in [the DC-QEF transition chapter](../started/14-dc-qef-transition.md).
 
 ## Deferred to v0.1+ (with reasons)
 

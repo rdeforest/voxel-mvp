@@ -8,7 +8,7 @@ each `.drawio` file is the editable source, and its companion `.md` page
 holds the prose explanation. For an inline image, export an SVG from the
 editor and embed it.
 
-Companion to: `CLAUDE.md` (where code lives), [`../architecture.md`](../architecture.md)
+Companion to: `CLAUDE.md` (where code lives), [`../roadmap/design/architecture.md`](../roadmap/design/architecture.md)
 (mechanism rationale), [`../roadmap/`](../roadmap/00_INDEX.md) (version strategy).
 
 ## Files

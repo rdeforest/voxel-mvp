@@ -161,7 +161,7 @@ static func _add_box_visual(body: RigidBody3D, size: Vector3i, local_center: Vec
 
 
 # Greedy-merge the solid cells into axis-aligned boxes (the collision compound).
-# See docs/architecture.md → "Greedy box merge".
+# See docs/roadmap/design/architecture.md → "Greedy box merge".
 static func _greedy_merge(voxel_set: Dictionary) -> Array:
     var consumed: Dictionary = {}
     var boxes:    Array      = []

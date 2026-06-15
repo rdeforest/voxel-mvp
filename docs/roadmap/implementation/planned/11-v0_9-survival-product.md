@@ -5,7 +5,7 @@ Locomotives.
 **Status:** Pending; after v0.2.
 
 This is the version where the network architecture work
-([`../design/05-network-architecture.md`](../design/05-network-architecture.md))
+([`../../design/05-network-architecture.md`](../../design/05-network-architecture.md))
 finally has to land. Multiplayer is gated on the decentralized op-log
 replication design being ready to build.
 
@@ -24,7 +24,7 @@ replication design being ready to build.
 
 - **FEAT066**: Enemy AI + combat — raycast steering for outdoor
   enemies; 3D nav grid or HPA* for dungeon enemies (see
-  [pathfinding in known hard problems](../design/07-known-hard-problems.md)).
+  [pathfinding in known hard problems](../../design/07-known-hard-problems.md)).
 - **FEAT067**: Boss encounters as progression gates.
 - **FEAT068**: Procedural dungeons — generated cave complexes; no
   loading screens.

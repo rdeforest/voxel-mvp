@@ -30,7 +30,7 @@ here. If a chapter and the manifesto disagree, the manifesto wins.
 A single concern often spans sections: when something has both a permanent
 shape and a one-shot migration, the permanent shape lives in `design/` and
 the migration lives in `implementation/`. When a design chapter ships, its
-mechanism rationale moves into [`../architecture.md`](../architecture.md)
+mechanism rationale moves into [`design/architecture.md`](design/architecture.md)
 and its decisions are added to
 [`design/02-architectural-commitments.md`](design/02-architectural-commitments.md);
 the chapter itself is then deleted or condensed.

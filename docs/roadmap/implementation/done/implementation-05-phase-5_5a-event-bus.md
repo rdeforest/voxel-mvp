@@ -1,6 +1,6 @@
 # Completed: Phase 5.5a — Voxel Event Bus
 
-Maps to [`../roadmap/implementation/05-phase-5_5-architectural-maturation.md`](../roadmap/implementation/05-phase-5_5-architectural-maturation.md)
+Maps to [`../started/05-phase-5_5-architectural-maturation.md`](../started/05-phase-5_5-architectural-maturation.md)
 section 5.5a.
 
 **Commit:** `ee80b63`

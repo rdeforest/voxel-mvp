@@ -1,7 +1,7 @@
 # DC-QEF Transition
 
 *The one-shot migration plan. The permanent spec is at
-[`../design/03-dc-qef-geometry.md`](../design/03-dc-qef-geometry.md).
+[`../../design/03-dc-qef-geometry.md`](../../design/03-dc-qef-geometry.md).
 When this work lands, this chapter becomes history — kept around as
 record of how the transition was done, not as ongoing reference.*
 
@@ -10,8 +10,8 @@ record of how the transition was done, not as ongoing reference.*
 The current shipped code uses godot_voxel's TransVoxel mesher. That
 mesher takes the SDF channel and produces smoothed terrain — fine for
 the v0.0 thesis, but it embeds the cube model that the
-[principles](../design/01-principles.md) and the
-[manifesto](../../MANIFESTO.md) reject.
+[principles](../../design/01-principles.md) and the
+[manifesto](../../../MANIFESTO.md) reject.
 
 The deferred items that should have shipped in v0.0 — sub-cell parts,
 true voxel-wall-blending-into-rock geometry, fracture along arbitrary
@@ -87,7 +87,7 @@ only + finite-diff gradients gives *smooth* DC but loses guaranteed-
 crisp creases. Crisp features → extend storage (Bite E below), which
 is also the seam where "borrow godot_voxel" ends and "own the stack"
 begins — and where the decentralized op-log storage plans (see
-[network architecture](../design/05-network-architecture.md)) will
+[network architecture](../../design/05-network-architecture.md)) will
 eventually replace `VoxelStream` anyway.
 
 Whether existing code is untouched: if it talks to the **edit API** +
@@ -136,9 +136,9 @@ Each can be picked up cold without holding the rest in your head.
 > span multiple cube faces, which godot_voxel's per-side transition model can't
 > carve up. We pivoted to building **our own meshing/render layer** over
 > godot_voxel's data (path b). Current direction + progress live in
-> `docs/STATUS.md` ("Active thread") and `docs/F2-lod-seam-options.md`. The
-> material below is kept as the record of how we got there (the `dc_seam` loop
-> extraction + zipper it produced are still reusable).
+> `docs/STATUS.md` ("Active thread"). The material below is kept as the record
+> of how we got there (the `dc_seam` loop extraction + zipper it produced are
+> still reusable).
 
 **Status (2026-06-03):** F1 (real C++ DC) shipped. Same-LOD seams are
 crack-free (boundary padding makes adjacent same-LOD blocks compute identical
@@ -201,9 +201,9 @@ cracks.
 
 ## When this lands
 
-- Mechanism rationale graduates into `../../architecture.md`.
+- Mechanism rationale graduates into `../../design/architecture.md`.
 - Decisions added to
-  [`../design/02-architectural-commitments.md`](../design/02-architectural-commitments.md).
+  [`../../design/02-architectural-commitments.md`](../../design/02-architectural-commitments.md).
 - This chapter becomes a historical record (not deleted — the
   reasoning about WHY the transition was done remains valuable for
   future-you and future-Claude).

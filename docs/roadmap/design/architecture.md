@@ -6,11 +6,11 @@ live as paragraph comments inline in the code.
 
 What lives where:
 
-| Doc                                              | Scope                                       |
-|--------------------------------------------------|---------------------------------------------|
-| `CLAUDE.md`                                      | Where code lives, how to use it             |
-| `roadmap.md` → Architectural Commitments         | Design-level decisions worth not relitigating |
-| `docs/architecture.md` (this file)               | Mechanism rationale: how the gears mesh     |
+| Doc                                                | Scope                                       |
+|----------------------------------------------------|---------------------------------------------|
+| `CLAUDE.md`                                        | Where code lives, how to use it             |
+| `roadmap.md` → Architectural Commitments           | Design-level decisions worth not relitigating |
+| `docs/roadmap/design/architecture.md` (this file)  | Mechanism rationale: how the gears mesh     |
 
 If a piece of reasoning fits in one of the first two, it should live there.
 This doc is for everything else — invariants, asymmetries, sequence

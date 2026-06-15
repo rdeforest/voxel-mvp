@@ -3,7 +3,7 @@
 **Goal:** Place structures that integrate with voxel terrain.
 **Version target:** 0.0
 **Status:** Complete for v0.0 thesis defense. See
-`../../completed/implementation-04-phase-5-building-system.md`. Deferred
+`implementation-04-phase-5-building-system.md`. Deferred
 items moved to Phase 5.5 (next chapter).
 
 ## This was the thesis defense

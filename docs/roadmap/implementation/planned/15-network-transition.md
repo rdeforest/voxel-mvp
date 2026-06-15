@@ -1,7 +1,7 @@
 # Network Transition
 
 *The one-shot migration plan. The permanent spec is at
-[`../design/05-network-architecture.md`](../design/05-network-architecture.md).
+[`../../design/05-network-architecture.md`](../../design/05-network-architecture.md).
 When this work lands, this chapter becomes history.*
 
 ## When this happens
@@ -34,9 +34,7 @@ Each can be picked up cold without holding the rest in your head.
 - [ ] **Local op-log + replay.** Single-peer: append ops, replay
   deterministically into the field. No networking yet. Success =
   replay reproduces the world. (This is also the v0.0.1 replay
-  harness that
-  [`code-cleanup-plan.md`](../../code-cleanup-plan.md) step #4 was
-  waiting on.)
+  harness — a deterministic regression net for structural code.)
 - [ ] **Version-vector bookkeeping.** Track per-peer counters; given
   two vectors, compute the missing-op delta. Unit-testable offline
   with fake peers.
@@ -51,7 +49,7 @@ Each can be picked up cold without holding the rest in your head.
 
 ## When this lands
 
-- Mechanism rationale graduates into `../../architecture.md`.
+- Mechanism rationale graduates into `../../design/architecture.md`.
 - Decisions added to
-  [`../design/02-architectural-commitments.md`](../design/02-architectural-commitments.md).
+  [`../../design/02-architectural-commitments.md`](../../design/02-architectural-commitments.md).
 - This chapter becomes a historical record.

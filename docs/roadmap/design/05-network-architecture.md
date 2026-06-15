@@ -1,7 +1,7 @@
 # Network Architecture: Decentralized, Op-Log Replicated World
 
 *The spec. For the one-shot transition / build sequence, see
-[`../implementation/15-network-transition.md`](../implementation/15-network-transition.md).*
+[`../implementation/planned/15-network-transition.md`](../implementation/planned/15-network-transition.md).*
 
 > Far-horizon work (v0.9+ territory). Does NOT block single-player
 > development. Captured now so the reasoning isn't lost. The v0.1

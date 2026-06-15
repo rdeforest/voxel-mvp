@@ -1,6 +1,6 @@
 # Completed: Phase 0 — Foundation
 
-Maps to [`../roadmap/implementation/02-phase-0-foundation.md`](../roadmap/implementation/02-phase-0-foundation.md).
+Maps to [`02-phase-0-foundation.md`](02-phase-0-foundation.md).
 
 ## What shipped
 
@@ -17,12 +17,12 @@ Procedural terrain, FPS controller, gravity, day/night cycle.
 ## Key decisions taken
 
 - Track Godot 4.6 stable, not master. (Reasoning preserved at
-  [`../roadmap/reference/01-answered-questions.md`](../roadmap/reference/01-answered-questions.md).)
+  [`../../reference/01-answered-questions.md`](../../reference/01-answered-questions.md).)
 - Use the double-precision godot_voxel build from day one.
   Non-retrofittable.
 - TransVoxel mesher for smooth terrain (will be replaced by DC-QEF in
   v0.2; see
-  [`../roadmap/implementation/14-dc-qef-transition.md`](../roadmap/implementation/14-dc-qef-transition.md)).
+  [`../started/14-dc-qef-transition.md`](../started/14-dc-qef-transition.md)).
 
 ## Validation
 

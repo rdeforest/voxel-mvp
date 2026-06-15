@@ -2,7 +2,7 @@
 
 A running log of named bugs that have been closed. Bugs that surfaced
 during a phase and were closed by that phase's work live in the
-phase's completed/ entry; this file is for the cross-cutting ones.
+phase's `implementation-*` record; this file is for the cross-cutting ones.
 
 ## Bug 1 — Fallen chunks not waking
 

@@ -5,7 +5,7 @@
 **Status:** Pending.
 
 Spec for the continuous-work-action UX at
-[`../design/08-continuous-work-actions.md`](../design/08-continuous-work-actions.md).
+[`../../design/08-continuous-work-actions.md`](../../design/08-continuous-work-actions.md).
 
 ## Tasks
 

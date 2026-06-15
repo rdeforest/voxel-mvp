@@ -4,7 +4,7 @@ Larger boundaries to be carved out when we get closer.
 
 - **FEAT083**: Planet-scale world — cube-sphere projection, tectonic
   generation, real oceans. See
-  [planet-scale notes in known hard problems](../design/07-known-hard-problems.md).
+  [planet-scale notes in known hard problems](../../design/07-known-hard-problems.md).
 - **FEAT084**: Sailing as a gameplay loop — across-ocean journeys,
   vessel-vs-vessel combat, navigation.
 

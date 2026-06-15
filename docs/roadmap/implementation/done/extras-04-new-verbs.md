@@ -5,7 +5,7 @@
 ## What shipped
 
 Four new terrain modification verbs that extend the
-[`Action`](../roadmap/design/02-architectural-commitments.md) infrastructure:
+[`Action`](../../design/02-architectural-commitments.md) infrastructure:
 
 - **Raise / Lower** — bell-shaped brushes that smoothly elevate /
   depress a region. The brush falls off radially; centre cells move

@@ -19,7 +19,7 @@ v0.9 can be.
 ## 5.5a — Voxel change event bus + indexer refactor
 
 **Status: DONE (commit ee80b63).** Full spec at
-[`../design/04-event-bus.md`](../design/04-event-bus.md).
+[`../../design/04-event-bus.md`](../../design/04-event-bus.md).
 
 Decouple voxel editing from the systems that care about voxel changes.
 Actions emit events; structural components subscribe. The bus is multi-
@@ -80,7 +80,7 @@ upgrade-as-gameplay, not upgrade-as-polish.
 - **FEAT026**: Localised FEM-style stress tensor — for determining
   fracture direction (in the affected region only, not globally). See
   the FEM note in
-  [`../design/07-known-hard-problems.md`](../design/07-known-hard-problems.md).
+  [`../../design/07-known-hard-problems.md`](../../design/07-known-hard-problems.md).
   This is what enables material-specific break locations (5.5f).
 
 ## 5.5d — Multi-grid foundation
@@ -129,7 +129,7 @@ worth recording now is just that the event bus and any per-voxel data
 structures should be designed to *allow* multiple channels at different
 resolutions — not that they have to be implemented yet.
 
-Full spec at [`../design/06-channel-architecture.md`](../design/06-channel-architecture.md).
+Full spec at [`../../design/06-channel-architecture.md`](../../design/06-channel-architecture.md).
 
 ## 5.5f — Honest destruction
 
@@ -188,7 +188,7 @@ than one part at a time.
 - **FEAT037**: First-person hands — visible at edit time; per-tool
   animation. (Avatar art; pairs with the HUD-icon pass.)
 - **FEAT038**: HUD icons — replace text labels for tools/activities/
-  parts/materials. (Art-dependent; see `../../art-wishlist.md`.)
+  parts/materials. (Art-dependent; see `../../vision/art-wishlist.md`.)
 - **FEAT039**: Crosshair — mode-aware reticle. (Art.)
 - **FEAT040**: Imperial units display option — user preference.
 - **FEAT041**: Stress-overlay on SDF surface — color the Transvoxel

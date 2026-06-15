@@ -1,6 +1,6 @@
 # Completed: Phase 2 — Terrain Modification
 
-Maps to [`../roadmap/implementation/03-phase-2-terrain-modification.md`](../roadmap/implementation/03-phase-2-terrain-modification.md).
+Maps to [`03-phase-2-terrain-modification.md`](03-phase-2-terrain-modification.md).
 
 ## What shipped
 

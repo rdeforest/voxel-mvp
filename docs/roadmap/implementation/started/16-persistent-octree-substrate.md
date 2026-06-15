@@ -1,9 +1,9 @@
 # Persistent Octree Substrate — staged plan (B3 / doc-10 completion)
 
-*The B1-style stage plan for the one piece of [doc 10](../design/10-adaptive-octree-substrate.md)
+*The B1-style stage plan for the one piece of [doc 10](../../design/10-adaptive-octree-substrate.md)
 that's still missing: making the render octree **persistent and world-fixed** so movement refines
 it **incrementally** instead of triggering a full rebuild. This is "B3" from
-[doc 13](../design/13-incremental-lod-splice.md). Each stage ships independently, stays tested, and
+[doc 13](../../design/13-incremental-lod-splice.md). Each stage ships independently, stays tested, and
 leaves the game working — the current clipmap keeps rendering until a stage is trusted.*
 
 ## CURRENT PLAN — read this first (2026-06-15)

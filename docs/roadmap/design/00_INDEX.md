@@ -3,11 +3,14 @@
 The non-implementation specs: *what the answer is*, independent of when it
 ships. Each entry below notes *why the doc exists*, not what it contains.
 Once a chapter ships, its rationale graduates into
-[`../../architecture.md`](../../architecture.md) and the chapter is deleted
+[`architecture.md`](architecture.md) and the chapter is deleted
 or condensed.
 
 ## Files
 
+- [`architecture.md`](architecture.md) — the graduation target: mechanism
+  rationale for shipped code (how the gears mesh), so the *why* outlives
+  memory. Distinct from the numbered specs — it records what already ships.
 - [`01-principles.md`](01-principles.md) — states the load-bearing design
   principles the rest of the corpus rests on.
 - [`02-architectural-commitments.md`](02-architectural-commitments.md) —

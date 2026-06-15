@@ -1,6 +1,6 @@
 # Completed: Phase 5.5b — Construction Mode + Honest-Failure Terrain Ops
 
-Maps to [`../roadmap/implementation/05-phase-5_5-architectural-maturation.md`](../roadmap/implementation/05-phase-5_5-architectural-maturation.md)
+Maps to [`../started/05-phase-5_5-architectural-maturation.md`](../started/05-phase-5_5-architectural-maturation.md)
 section 5.5b.
 
 **Commits:** `15308bd` (5.5b1 + 5.5b2), `d2b7bbd` (5.5b3)
@@ -8,7 +8,7 @@ section 5.5b.
 ## What shipped
 
 The placeholder fill/dig/flatten verbs were replaced with construction-
-mode equivalents that respect [design principle #7](../roadmap/design/01-principles.md):
+mode equivalents that respect [design principle #7](../../design/01-principles.md):
 terrain ops should fail honest, not fake a surface.
 
 ### 5.5b1 — `AdditiveAction` base class (`15308bd`)

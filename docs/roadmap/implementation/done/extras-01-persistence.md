@@ -44,7 +44,7 @@ demoable — you can quit and come back.
 - **Action-journal/replay would be a better long-term answer, but
   snapshot-on-quiescence is fine for v0.0.** The action journal is
   deferred — it's the same primitive the network layer will need (see
-  [network architecture](../roadmap/design/05-network-architecture.md)).
+  [network architecture](../../design/05-network-architecture.md)).
   Building it now would be speculative; building it then is necessary.
 
 ## Deferred

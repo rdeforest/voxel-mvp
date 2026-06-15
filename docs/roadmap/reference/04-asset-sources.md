@@ -12,4 +12,4 @@ strictest). Game code is open-source-eventually; assets should match.
 | Ambientcg.com       | PBR textures for terrain        | CC0     |
 
 For artists who want to contribute, see
-[`../../art-wishlist.md`](../../art-wishlist.md).
+[`../vision/art-wishlist.md`](../vision/art-wishlist.md).

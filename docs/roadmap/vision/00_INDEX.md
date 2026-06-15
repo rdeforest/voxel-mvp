@@ -6,6 +6,8 @@ contains.
 
 ## Files
 
+- [`art-wishlist.md`](art-wishlist.md) — the standing list of asset asks
+  and conventions for contributing artists.
 - [`01-elevator-pitch.md`](01-elevator-pitch.md) — the thirty-second
   positioning statement that anchors every other pitch.
 - [`02-competitive-landscape.md`](02-competitive-landscape.md) — maps

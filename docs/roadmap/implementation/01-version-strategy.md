@@ -21,8 +21,8 @@ The thesis defense. Walking around a procedural voxel world, real
 terrain modification, building that integrates seamlessly with terrain,
 unified structural integrity, cave reinforcement. No biomes, no
 resources, no inventory, no enemies. **Answered: yes, this is as good
-an idea as I thought.** See `../../completed/` for the chronological
-record.
+an idea as I thought.** See [`done/`](done/00_INDEX.md) for the
+chronological record.
 
 ## v0.1 — Status: in progress
 
@@ -72,7 +72,7 @@ this whole thing actually works" frontier.
 The DC-QEF migration is *not* a version. It's a transition that
 happens *during* a version (most likely v0.2) and changes what's
 possible in subsequent versions. See
-[`14-dc-qef-transition.md`](14-dc-qef-transition.md) for the work plan.
+[`14-dc-qef-transition.md`](started/14-dc-qef-transition.md) for the work plan.
 
 The transition replaces godot_voxel's meshing layer — keeping its
 storage, streaming, and LOD. It is *not* the kind of rewrite that

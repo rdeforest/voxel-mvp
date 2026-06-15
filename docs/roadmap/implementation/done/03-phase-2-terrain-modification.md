@@ -2,7 +2,7 @@
 
 **Goal:** Dig, flatten, raise terrain with tools.
 **Version target:** 0.0
-**Status:** Complete. See `../../completed/implementation-03-phase-2-terrain-modification.md`.
+**Status:** Complete. See `implementation-03-phase-2-terrain-modification.md`.
 
 ## Why this came before biomes
 
