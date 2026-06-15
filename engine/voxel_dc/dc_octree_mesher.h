@@ -44,14 +44,14 @@ public:
 	// origin = level_origins[k]; cell size = level_cells[k]. Clipmap centre
 	// `center`; level-0 half-extent `half0` (level k half-extent = half0 * 2^k).
 	// The octree root is the cube [0, 2^depth]^3.
-	// error_driven: refine by screen-space error instead of distance bands. A node
-	// stops subdividing (coarsens) once its QEF fit error, projected to screen, is
-	// below eps_px — so flat regions mesh coarse, detail stays fine. camera is the
-	// viewpoint in lattice space; proj = viewport_height / (2*tan(fov/2)) (so screen
-	// error = world_error * proj / distance). The data resolution (clipmap level) is
-	// still the floor — error-refine only coarsens, never exceeds available data.
-	// lattice_world_origin: world coords of lattice (0,0,0); makes the hysteresis keys
-	// world-stable across the clipmap's recenter snap. Only used when error_driven.
+	// error_driven: coarsen by NECESSITY — a node stops subdividing once its accumulated
+	// QEF fit error (residual_tol, in base-cell world units) is small enough that one
+	// vertex represents the fine surface, so flat regions mesh coarse and detail stays
+	// fine REGARDLESS of camera distance. The data resolution (clipmap level) is still
+	// the floor — error-refine only coarsens, never exceeds available data. (camera/proj
+	// are VESTIGIAL since the necessity switch — collapse no longer reads them; pending
+	// the signature cleanup.) lattice_world_origin: world coords of lattice (0,0,0);
+	// keys the collapse-set world-stable across the clipmap's recenter snap.
 	// level_indices: optional per-level CHANNEL_INDICES bytes (same layout/order as
 	// level_data); palette: material id -> albedo Color (index 0 = natural). When
 	// both are supplied, each output vertex gets an ARRAY_COLOR: rgb = palette[id]
@@ -70,7 +70,7 @@ public:
 			int depth,
 			Vector3 camera = Vector3(),
 			double proj = 0.0,
-			double eps_px = 0.0,
+			double residual_tol = 0.0,
 			bool error_driven = false,
 			Vector3i lattice_world_origin = Vector3i(),
 			const TypedArray<PackedByteArray> &level_indices = TypedArray<PackedByteArray>(),
@@ -80,7 +80,9 @@ public:
 			Vector3i emit_min = Vector3i(),
 			Vector3i emit_max = Vector3i(),
 			bool incremental = false,
-			int max_leaf = 0);
+			int max_leaf = 0,
+			Vector3i build_min = Vector3i(),
+			Vector3i build_max = Vector3i());
 
 	// Incremental edit patch: mesh a small UNIFORM (1 m) cube [sub_origin, sub_origin+sub_size]
 	// from a fresh SDF grid, emitting ONLY the triangles owned by cells whose origin lies in

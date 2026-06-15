@@ -58,24 +58,27 @@ func _divergence(a: PackedVector3Array, b: PackedVector3Array) -> float:
     return worst
 
 
-# Same box, but with error-driven collapse ON (the in-game default), camera orbiting.
-# Collapse keys on camera distance + frame history, so it can make the mesh near a
-# structure view-dependent even though the field doesn't change.
-func _mesh_collapse(center: Vector3) -> PackedVector3Array:
+# Same box with error-driven collapse ON (the in-game default), but vary the CAMERA while
+# the clipmap centre (the data) is held fixed. Under necessity-driven LOD the collapse keys
+# on a fixed world-residual, not the camera, so the mesh must not move with the viewpoint.
+func _mesh_collapse(camera: Vector3, tol: float) -> PackedVector3Array:
     var arrays := DCOctreeMesher.new().mesh_clipmap(
         [_level(1.0), _level(2.0)], DIM,
         PackedVector3Array([Vector3.ZERO, Vector3.ZERO]),
         PackedFloat32Array([1.0, 2.0]),
-        center, 16.0, DEPTH,
-        center, 771.0, 8.0, true, Vector3i())     # camera=center, proj, eps, error_driven=true
+        BOX_C, 16.0, DEPTH,                       # clipmap centre fixed on the box
+        camera, 771.0, tol, true, Vector3i())     # only the camera (+ proj, vestigial) varies
     return arrays[Mesh.ARRAY_VERTEX]
 
-func test_collapse_view_dependence() -> void:
-    var east := _mesh_collapse(BOX_C + Vector3(10, 0, 0))
-    var north := _mesh_collapse(BOX_C + Vector3(0, 0, 10))
-    gut.p("COLLAPSE max_dev east=%.3f north=%.3f  divergence=%.3f" % [
-        _max_dev(east), _max_dev(north), _divergence(east, north)])
-    assert_true(true)   # diagnostic — read the numbers
+func test_collapse_is_camera_independent() -> void:
+    # Near vs far camera over the SAME field: necessity LOD must mesh them identically.
+    # (The old proj/dist metric coarsened the far view, so this caught the regression.)
+    var near := _mesh_collapse(BOX_C + Vector3(12, 0, 0), 0.5)
+    var far  := _mesh_collapse(BOX_C + Vector3(600, 0, 0), 0.5)
+    gut.p("camera-indep: near_verts=%d far_verts=%d divergence=%.4f" % [
+        near.size(), far.size(), _divergence(near, far)])
+    assert_eq(near.size(), far.size(), "vertex count is camera-independent (necessity LOD)")
+    assert_lt(_divergence(near, far), 1e-4, "mesh is identical from near and far cameras")
 
 
 func test_box_mesh_is_view_dependent() -> void:

@@ -20,7 +20,7 @@ const HALF0  := 12.0                     # level-0 half-extent; level-1 used at 
 const CENTER := Vector3(32, 32, 32)
 const RADIUS := 24.0                     # sphere surface crosses the LOD band
 const PROJ   := 500.0
-const EPS_PX := 2.0                      # error-driven collapse → coarse cells far from camera
+const TOL    := 2.0                      # world-residual collapse tolerance (necessity LOD)
 const CAMERA := Vector3(32, 300, 32)     # high above; the far side of the sphere collapses
 
 
@@ -46,15 +46,6 @@ func _clip() -> Dictionary:
         "origins": PackedVector3Array([Vector3.ZERO, Vector3.ZERO]),
         "cells":   PackedFloat32Array([1.0, 2.0]),
     }
-
-
-static func _snap_dn(v: int, c: int) -> int:
-    @warning_ignore("integer_division")
-    return (v / c) * c if v >= 0 else ((v - c + 1) / c) * c
-
-static func _snap_up(v: int, c: int) -> int:
-    @warning_ignore("integer_division")
-    return ((v + c - 1) / c) * c if v >= 0 else (v / c) * c
 
 
 func _edge_audit_welded(verts: PackedVector3Array, idx: PackedInt32Array) -> Dictionary:
@@ -97,7 +88,7 @@ func test_owner_sizes_parallel_to_owners() -> void:
     var clip := _clip()
     var mesher := DCOctreeMesher.new()
     var arrays := mesher.mesh_clipmap(clip.data, DIM, clip.origins, clip.cells,
-        CENTER, HALF0, DEPTH, CAMERA, PROJ, EPS_PX, true, Vector3i.ZERO)
+        CENTER, HALF0, DEPTH, CAMERA, PROJ, TOL, true, Vector3i.ZERO)
     assert_false(arrays.is_empty(), "produced a surface")
     var owners := mesher.get_last_triangle_owners()
     var sizes  := mesher.get_last_triangle_owner_sizes()
@@ -107,98 +98,60 @@ func test_owner_sizes_parallel_to_owners() -> void:
         assert_true(s > 0 and (s & (s - 1)) == 0, "size is power-of-two (tri %d = %d)" % [i, s])
 
 
-# THE GATE TEST: the production sub-octree splice reproduces the full build across a LOD transition.
-func test_suboctree_splice_reproduces_full_build_across_lod() -> void:
+# THE GATE TEST: a build-box splice reproduces the full build across a LOD transition.
+# Necessity LOD made the old OFFSET sub-octree splice crack (its sub_origin frame stitched its
+# artificial boundary differently than the full build — build/collapse/align were proven frame-pure,
+# the divergence was purely emit-stage at the offset boundary). The fix is structural: a splice now
+# builds on the FULL build's frame (root_origin / DEPTH), restricted by a build-box to the edit box +
+# apron, emitting only the core. Its cells therefore share the full build's lattice AND neighbours, so
+# the core triangles are reproduced EXACTLY and the seam can't crack — no sub_origin shift, no
+# align_cell, no max_leaf cap, no shared collapse-set. This test drives that path.
+func test_buildbox_splice_reproduces_full_build_across_lod() -> void:
     var clip := _clip()
-    var cache_origin := Vector3i.ZERO
+    var world_origin := Vector3i.ZERO
 
-    # A. Full build (the oracle); also populates the collapse hysteresis on this mesher.
+    # A. Full build (the oracle).
     var mesher := DCOctreeMesher.new()
     var full := mesher.mesh_clipmap(clip.data, DIM, clip.origins, clip.cells,
-        CENTER, HALF0, DEPTH, CAMERA, PROJ, EPS_PX, true, cache_origin)
+        CENTER, HALF0, DEPTH, CAMERA, PROJ, TOL, true, world_origin)
     assert_false(full.is_empty(), "full build produced a surface")
     var full_owners := mesher.get_last_triangle_owners()
     var full_sizes  := mesher.get_last_triangle_owner_sizes()
 
-    # B+C. Pick a coarse cell (size>1, Chebyshev > HALF0) whose iteratively-aligned splice sub-box
-    # stays inside the root [0,SIZE] (the synthetic field is finite; a real clipmap extends past any
-    # edit). Geometry mirrors _dispatch_splice EXACTLY, including the iterative alignment trap.
-    var align_cell := 0
-    var core_min:   Vector3i
-    var core_max:   Vector3i
-    var sub_origin: Vector3i
-    var sub_size  := 0
-    var sub_depth := 0
-    for t0 in full_owners.size():
-        if int(full_sizes[t0]) <= 1:
-            continue
-        var ci := Vector3i(full_owners[t0])
-        var cheb := maxi(absi(ci.x - int(CENTER.x)), maxi(absi(ci.y - int(CENTER.y)), absi(ci.z - int(CENTER.z))))
-        if cheb <= int(HALF0):
-            continue
-        var mn := ci
-        var mx := ci + Vector3i.ONE * int(full_sizes[t0])
-        var al := 1
-        var cmin: Vector3i
-        var cmax: Vector3i
-        var so:   Vector3i
-        var shi:  Vector3i
-        for _it in 8:
-            cmin = Vector3i(_snap_dn(mn.x, al), _snap_dn(mn.y, al), _snap_dn(mn.z, al)) - Vector3i.ONE * al
-            cmax = Vector3i(_snap_up(mx.x, al), _snap_up(mx.y, al), _snap_up(mx.z, al)) + Vector3i.ONE * al
-            var ap := 2 * maxi(4, al)   # 2 align-cells of ring context (mirrors _dispatch_splice)
-            so  = cmin - Vector3i.ONE * ap
-            shi = cmax + Vector3i.ONE * ap
-            var grown := 1
-            for t in full_owners.size():
-                var o: Vector3 = full_owners[t]
-                var sz := int(full_sizes[t])
-                if o.x + sz > so.x and o.x < shi.x and o.y + sz > so.y and o.y < shi.y and o.z + sz > so.z and o.z < shi.z:
-                    grown = maxi(grown, sz)
-            if grown <= al:
-                break
-            al = grown
-        var span := maxi(shi.x - so.x, maxi(shi.y - so.y, shi.z - so.z))
-        var ss := 1
-        while ss < span:
-            ss <<= 1
-        if so.x < 0 or so.y < 0 or so.z < 0:
-            continue
-        if so.x + ss > SIZE or so.y + ss > SIZE or so.z + ss > SIZE:
-            continue
-        align_cell = al; core_min = cmin; core_max = cmax; sub_origin = so; sub_size = ss
-        var tmp := ss
-        while tmp > 1:
-            tmp >>= 1
-            sub_depth += 1
-        break
-    assert_gt(align_cell, 0, "found an interior LOD-transition cell whose aligned sub-box fits the root")
+    # B. Pick a core box around the coarsest interior owner (a LOD transition the splice must stitch).
+    var seed_i := -1
+    var seed_sz := 0
+    for t in full_owners.size():
+        var sz := int(full_sizes[t])
+        var o: Vector3 = full_owners[t]
+        var cheb := maxi(absi(int(o.x) - int(CENTER.x)), maxi(absi(int(o.y) - int(CENTER.y)), absi(int(o.z) - int(CENTER.z))))
+        if sz > seed_sz and cheb > int(HALF0) and cheb < int(HALF0) * 2:
+            seed_sz = sz
+            seed_i = t
+    assert_gt(seed_i, -1, "found an interior LOD-transition owner")
+    var sc := Vector3i(full_owners[seed_i])
+    var core_min := sc - Vector3i.ONE * (seed_sz * 2)
+    var core_max := sc + Vector3i.ONE * (seed_sz * 3)
+    var apron := Vector3i.ONE * 8        # ≥ the point-location stitch radius, so core cells' neighbours are full-res
 
-    # The coordinate transform under test (mirrors _splice_job): shift into the sub-octree frame.
-    var root_offset := sub_origin - cache_origin
-    var sub_level_origins := PackedVector3Array()
-    for k in clip.origins.size():
-        sub_level_origins.append(clip.origins[k] - Vector3(root_offset))
-    var sub_center := (Vector3(cache_origin) + CENTER) - Vector3(sub_origin)
-    var sub_camera := (Vector3(cache_origin) + CAMERA) - Vector3(sub_origin)
-    gut.p("align=%d core %s..%s sub_origin=%s sub_size=%d sub_depth=%d" % [
-        align_cell, core_min, core_max, sub_origin, sub_size, sub_depth])
-
-    # D. The splice: small octree (sub_depth) at sub_origin, incremental (inherits the full build's
-    # hysteresis), output restricted to the core box. Reuses the full grids (the sub-box is interior).
-    var patch := mesher.mesh_clipmap(clip.data, DIM, sub_level_origins, clip.cells,
-        sub_center, HALF0, sub_depth, sub_camera, PROJ, EPS_PX, true, sub_origin,
-        [], PackedColorArray(), false, 0.0, core_min, core_max, true, align_cell)
+    # C. The build-box splice: SAME frame as the full build, build only core+apron, emit only core.
+    # incremental=false, max_leaf=0 (no cap) — none of the offset-splice crutches are needed.
+    var patch := mesher.mesh_clipmap(clip.data, DIM, clip.origins, clip.cells,
+        CENTER, HALF0, DEPTH, CAMERA, PROJ, TOL, true, world_origin,
+        [], PackedColorArray(), false, 0.0,
+        core_min, core_max,                          # emit box: only the core triangles
+        false, 0,
+        core_min - apron, core_max + apron)          # build box: descend only here
     var patch_owners := mesher.get_last_triangle_owners()
 
-    # E. Patch verts are in the sub-octree's local frame; shift by sub_origin to compare in world.
-    var shift := Vector3(sub_origin)
+    # D. Same frame → no shift. The patch's core triangles must equal the full build's, vertex-for-vertex.
     var full_core  := _tris_in_box(full,  full_owners,  core_min, core_max)
     var patch_core := _tris_in_box(patch, patch_owners, core_min, core_max)
-    gut.p("full_core=%d patch_core=%d" % [full_core.size(), patch_core.size()])
+    gut.p("full_core=%d patch_core=%d (core %s..%s, seed size %d)" % [
+        full_core.size(), patch_core.size(), core_min, core_max, seed_sz])
     assert_gt(full_core.size(), 0, "full build has triangles in the core box")
     assert_eq(patch_core.size(), full_core.size(),
-        "sub-octree patch reproduces the full build's triangle COUNT in the box")
+        "build-box splice reproduces the full build's triangle COUNT in the box")
 
     var key := func(v: Vector3) -> Vector3i:
         return Vector3i(roundi(v.x * 16.0), roundi(v.y * 16.0), roundi(v.z * 16.0))
@@ -209,7 +162,7 @@ func test_suboctree_splice_reproduces_full_build_across_lod() -> void:
     var patch_vset := {}
     for tri in patch_core:
         for v in tri:
-            patch_vset[key.call(v + shift)] = true
+            patch_vset[key.call(v)] = true
     var missing := 0
     for k in full_vset:
         if not patch_vset.has(k):
@@ -219,11 +172,11 @@ func test_suboctree_splice_reproduces_full_build_across_lod() -> void:
         if not full_vset.has(k):
             extra += 1
     gut.p("verts full∖patch=%d patch∖full=%d" % [missing, extra])
-    assert_eq(missing, 0, "every full-build vertex in the box is reproduced by the sub-octree patch")
-    assert_eq(extra,   0, "the sub-octree patch introduces no vertex absent from the full build")
+    assert_eq(missing, 0, "every full-build vertex in the box is reproduced by the build-box patch")
+    assert_eq(extra,   0, "the build-box patch introduces no vertex absent from the full build")
 
-    # F. Watertight: assemble (full − core) + (patch shifted to world); weld; no NEW boundary edges
-    # vs the full build (no cracks at the seam), and manifold. Both audits are position-welded.
+    # E. Watertight: assemble (full − core) + patch core; weld; no NEW boundary edges vs the full
+    # build (no cracks at the seam), and manifold. Both audits are position-welded.
     var all_verts := PackedVector3Array()
     var all_idx   := PackedInt32Array()
     var full_idx: PackedInt32Array     = full[Mesh.ARRAY_INDEX]
@@ -240,7 +193,7 @@ func test_suboctree_splice_reproduces_full_build_across_lod() -> void:
         var patch_idx:   PackedInt32Array   = patch[Mesh.ARRAY_INDEX]
         var base := all_verts.size()
         for v in patch_verts:
-            all_verts.append(v + shift)
+            all_verts.append(v)
         for i in patch_idx.size():
             all_idx.append(patch_idx[i] + base)
     var spliced := _edge_audit_welded(all_verts, all_idx)

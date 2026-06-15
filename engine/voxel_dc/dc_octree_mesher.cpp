@@ -184,9 +184,9 @@ struct Octree {
 	Clipmap clip;
 	int root_size = 0;
 	int max_depth = 0;
-	Vector3 camera;          // viewpoint in lattice space (error-driven refine)
-	double proj = 0.0;       // viewport_height / (2*tan(fov/2))
-	double eps_px = 0.0;     // screen-space error threshold (px)
+	Vector3 camera;          // VESTIGIAL since necessity-driven LOD (collapse no longer reads it); drop with the signature cleanup
+	double proj = 0.0;       // VESTIGIAL (was screen-error scale); ditto
+	double residual_tol = 0.0; // world-residual collapse tolerance (base-cell units) — necessity LOD
 	bool error_driven = false;
 	int max_leaf_size = 0;   // min-grid floor: never collapse above this (a flat world keeps >=2 cells/axis, so it meshes instead of collapsing to one empty cell)
 	int max_leaf_cap = 0;    // >0: caller's hard cap on the leaf size (the incremental splice sets it
@@ -210,6 +210,9 @@ struct Octree {
 	bool emit_filter = false;      // emit only triangles owned by cells inside [emit_min, emit_max)
 	Vector3i emit_min;             // (WORLD lattice) — the incremental patch's core box
 	Vector3i emit_max;
+	bool build_box = false;        // restrict the build to cells overlapping [build_min, build_max)
+	Vector3i build_min;            // (WORLD lattice) — a splice builds only the edit box + apron, on the
+	Vector3i build_max;            // FULL build's frame, so its cells share that lattice → crack-free
 	LocalVector<Cell> cells;
 	PackedVector3Array verts;
 	PackedVector3Array normals;
@@ -226,6 +229,13 @@ struct Octree {
 	bool owner_in_emit_box(int idx) const {
 		Vector3i o = cell_world_origin(idx);
 		return o.x >= emit_min.x && o.x < emit_max.x && o.y >= emit_min.y && o.y < emit_max.y && o.z >= emit_min.z && o.z < emit_max.z;
+	}
+
+	// Does a cell (lattice origin + size) overlap the build box (WORLD lattice)? A splice descends
+	// only overlapping cells, so the tree is a thin spine to the edit box plus the box at full res.
+	bool cell_overlaps_build_box(const Vector3i &origin, int size) const {
+		Vector3i o = origin + world_origin;
+		return o.x + size > build_min.x && o.x < build_max.x && o.y + size > build_min.y && o.y < build_max.y && o.z + size > build_min.z && o.z < build_max.z;
 	}
 
 	// A leaf's QEF, built from the 12 cube edges that cross the isosurface (the cell's
@@ -308,20 +318,23 @@ struct Octree {
 		// vanished. Undivided, flat planes contribute exactly 0 (they don't dilute), so
 		// the residual reflects the feature's own error: ~0 on flat/cliff/gently-curved
 		// regions, spiking where one vertex can't represent a feature -> the feature
-		// vetoes its own collapse. Distance LOD is still handled by proj/dist below.
+		// vetoes its own collapse.
+		//
+		// Necessity-driven LOD: collapse when that residual is within a fixed WORLD-space
+		// tolerance (base-cell units) — NOT scaled by camera distance. The mesh is then
+		// f(field), not f(field, camera): moving or turning the camera changes the LOD
+		// nowhere, so a distant (telescoped) view is already as detailed as the surface
+		// demands. Detail is bought only where the field needs it.
 		double we = Math::sqrt(sum.residual(v));
-		Vector3 center = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
-		double dist = MAX((center - camera).length(), 1e-3);
-		double screen_err = we * proj / dist;
-		Vector4i key(cells[idx].origin.x + world_origin.x, cells[idx].origin.y + world_origin.y,
-				cells[idx].origin.z + world_origin.z, cells[idx].size);
-		bool was_collapsed = prev_collapse != nullptr && prev_collapse->has(key);
-		double threshold = was_collapsed ? eps_px * HYST : eps_px;
-		if (screen_err > threshold) {
-			return; // too complex here for one vertex (with hysteresis slack if it was collapsed)
+		if (we > residual_tol) {
+			return; // surface here needs more than one vertex
 		}
 		cells[idx].leaf = true; // collapse: this node is the leaf; its subtree is orphaned
 		orphan_subtree(idx);
+		// Still recorded for the incremental splice path. With the camera out of the LOD
+		// decision the hysteresis read is gone; retiring the set machinery is a follow-up.
+		Vector4i key(cells[idx].origin.x + world_origin.x, cells[idx].origin.y + world_origin.y,
+				cells[idx].origin.z + world_origin.z, cells[idx].size);
 		if (curr_collapse != nullptr) {
 			curr_collapse->insert(key);
 		}
@@ -339,6 +352,9 @@ struct Octree {
 		cells.push_back(c);
 		if (depth >= max_depth || size <= 1) {
 			return idx;
+		}
+		if (build_box && !cell_overlaps_build_box(origin, size)) {
+			return idx; // outside the splice's edit box+apron — leaf, don't descend (no data sampled)
 		}
 		Vector3 center = to_v3(origin) + Vector3(1, 1, 1) * (size * 0.5);
 		// Surface-sparse prune: if the cell is provably surface-free, stop here instead of
@@ -575,7 +591,7 @@ Array DCOctreeMesher::mesh_clipmap(
 		int depth,
 		Vector3 camera,
 		double proj,
-		double eps_px,
+		double residual_tol,
 		bool error_driven,
 		Vector3i lattice_world_origin,
 		const TypedArray<PackedByteArray> &level_indices,
@@ -585,7 +601,9 @@ Array DCOctreeMesher::mesh_clipmap(
 		Vector3i emit_min,
 		Vector3i emit_max,
 		bool incremental,
-		int max_leaf) {
+		int max_leaf,
+		Vector3i build_min,
+		Vector3i build_max) {
 	Array out;
 	const int n = level_data.size();
 	if (n == 0 || dim < 2 || level_origins.size() != n || level_cells.size() != n || depth < 1) {
@@ -635,7 +653,7 @@ Array DCOctreeMesher::mesh_clipmap(
 	oct.max_depth = depth;
 	oct.camera = camera;
 	oct.proj = proj;
-	oct.eps_px = eps_px;
+	oct.residual_tol = residual_tol;
 	oct.error_driven = error_driven;
 	oct.world_origin = lattice_world_origin;
 	oct.prev_collapse = &_prev_collapse;
@@ -649,6 +667,14 @@ Array DCOctreeMesher::mesh_clipmap(
 		oct.emit_filter = true;
 		oct.emit_min = emit_min;
 		oct.emit_max = emit_max;
+	}
+	// Build-box restriction: a splice builds on the FULL frame (root_origin/_ROOT_DEPTH) but descends
+	// only cells overlapping [build_min, build_max) (the edit box + apron), so its cells land on the
+	// full build's lattice and neighbours — no offset sub-octree, no seam divergence.
+	if (build_min != build_max) {
+		oct.build_box = true;
+		oct.build_min = build_min;
+		oct.build_max = build_max;
 	}
 	oct.clip.center = center;
 	oct.clip.half0 = half0;
@@ -767,12 +793,14 @@ Array DCOctreeMesher::mesh_subregion(
 void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("mesh_clipmap", "level_data", "dim", "level_origins", "level_cells", "center", "half0", "depth",
-					"camera", "proj", "eps_px", "error_driven", "lattice_world_origin", "level_indices", "palette",
-					"uniform_core", "prune_safety", "emit_min", "emit_max", "incremental", "max_leaf"),
+					"camera", "proj", "residual_tol", "error_driven", "lattice_world_origin", "level_indices", "palette",
+					"uniform_core", "prune_safety", "emit_min", "emit_max", "incremental", "max_leaf",
+					"build_min", "build_max"),
 			&DCOctreeMesher::mesh_clipmap,
 			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(Vector3i()),
 			DEFVAL(TypedArray<PackedByteArray>()), DEFVAL(PackedColorArray()), DEFVAL(false), DEFVAL(0.0),
-			DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(false), DEFVAL(0));
+			DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(false), DEFVAL(0),
+			DEFVAL(Vector3i()), DEFVAL(Vector3i()));
 	ClassDB::bind_method(
 			D_METHOD("mesh_subregion", "data", "dim", "data_origin", "cell", "sub_origin", "sub_size",
 					"core_min", "core_max", "indices", "palette"),

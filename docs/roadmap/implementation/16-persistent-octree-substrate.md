@@ -31,6 +31,25 @@ rebuild. Fixing that is this plan.
 
 ## The stages
 
+### Why the fold is mandatory (the splice-offset finding, instrumented)
+Switching collapse to necessity (`we ≤ residual_tol`, camera dropped) is correct and proven
+camera-independent — but it turns the **splice gate test red**, and the instrumented root cause is
+the architectural lever for everything below:
+
+- The splice meshes a **separate, smaller octree** rooted at `sub_origin` (offset from the full
+  build's `root_origin`), then transplants its triangles. That offset frame is the whole problem.
+- Instrumentation proved build floor (`level_index`/`target_cell_size`), collapse (`we`, byte-for-byte),
+  and alignment (`align_cell`) are **all frame-identical** between the full build and the sub-octree.
+  The divergence is purely in the **emit / point-location stitch at the sub-octree's artificial
+  boundary** (30 vs 12 tris in the core box, 18 extra verts, 20 new boundary edges = cracks).
+- The old screen-error metric's **slack** (hysteresis ×2.5 + the `/dist` scale) was silently absorbing
+  this boundary divergence; the tight necessity threshold exposes it.
+
+**The fix is structural, not a patch:** stop meshing a separate offset octree. Re-mesh the edited region
+**within the same world-fixed octree as the full build**, so a splice's cells share the full build's
+lattice *and its real neighbours* — no artificial boundary, no offset, crack-free by construction. That
+is exactly the world-fixed substrate, which is why necessity-LOD and B3 are one fold, not two stages.
+
 ### Stage 1 — World-fixed grid + scrolling resident window
 Replace "re-snap the root, rebuild everything" with "the cell grid is anchored to world coordinates;
 a resident **window** of cells around the camera **scrolls**." When the player moves, build the cells
@@ -42,10 +61,21 @@ their world positions **and their triangles**. This is the architectural heart �
   mesher likely gains a "mesh these specific world cells" entry beside `mesh_clipmap`.
 - **Test:** walking re-meshes only a leading-edge band (verify with `dcinval` — green is a thin band,
   not the whole vicinity); the interior mesh is byte-identical before/after a small move.
-- **Risk:** this is where the design depth is. Open question to resolve first: how the concentric LOD
-  *levels* map onto a world-fixed grid (today they're camera-centred rings). Likely: keep rings but
-  defined by camera distance over world-fixed cells, so a ring boundary is "cells at Chebyshev
-  distance d", recomputed cheaply per move.
+- **First increment (the splice fix, derived from the finding):** make a splice **build on the full
+  build's frame** (`root_origin` / `_ROOT_DEPTH`) instead of a separate `sub_origin` octree, with the
+  build **pruned to the edit box + apron** (cells not overlapping it leaf-terminate before sampling, so
+  cost stays proportional to the edit, not the whole root). Read only the box+apron sub-grid as today,
+  but place it at full-frame coordinates so the meshed cells land on the *same lattice and neighbours*
+  as the full build → the emit/stitch boundary is identical → crack-free, no `align_cell`, no
+  `max_leaf` cap, no shared collapse-set. Mesher gains a `build_min`/`build_max` box; `_splice_job`
+  passes the full frame + box. Rewrite the gate test to drive this (it currently mirrors the doomed
+  offset path). This *is* the persistent octree's meshing op, minus persistence — Stage 1 proper then
+  makes that octree survive across frames and scroll.
+- **Then retire** the now-dead hysteresis (`prev/curr_collapse`, `HYST`, the `incremental` clearing/swap)
+  and the vestigial `camera`/`proj` — all only existed to serve the old camera-driven collapse.
+- **Risk:** this is where the design depth is. The LOD *levels* are world-anchored shells now (the
+  geomorph `value()` is already a pure function of world position — confirmed — so no camera-orbit
+  dependence); the resolution gradient stays (necessary at planet scale) but the frame is world-fixed.
 
 ### (former Stage 2 — Camera-driven incremental LOD — REMOVED by the LOD decision below.)
 There is no camera-driven LOD to update: a cell's LOD is decided by **necessity** (a fixed world-space

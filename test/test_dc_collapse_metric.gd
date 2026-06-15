@@ -73,19 +73,22 @@ func test_diagnostic_sweep() -> void:
 
 
 func test_spire_kept_while_terrain_coarsens() -> void:
-    # eps=16 aggressively coarsens the sphere; the spire must stay fully meshed with no
-    # flapping slivers. (Count-averaged metric: spire lost, aspect ~44.)
-    var s := _mesh(16.0)
+    # The thin spire's UNDIVIDED residual is high, so at a fine tolerance it stays fully
+    # meshed with no flapping slivers while the flat floor (residual 0) collapses hard.
+    # (The old count-averaged metric drowned the spire's residual in the floor's zeros:
+    # spire lost, aspect ~44.) Under necessity LOD the tolerance is a world residual, so
+    # tol ~= 1 base-cell keeps the spire — the old eps=16 px was ~0.9 after /dist.
+    var s := _mesh(1.0)
     var sv: PackedVector3Array = s[Mesh.ARRAY_VERTEX]
     var si: PackedInt32Array   = s[Mesh.ARRAY_INDEX]
-    assert_gt(_spire_verts(sv), 150, "thin spire stays fully refined under aggressive collapse")
+    assert_gt(_spire_verts(sv), 150, "thin spire stays fully refined while the floor coarsens")
     assert_lt(_max_aspect(sv, si), 20.0, "no flapping slivers over the spire")
 
-    var sphere_full := (_mesh(16.0, true) as Array)   # err=true already; compare to no-collapse
-    var coarse: PackedInt32Array = sphere_full[Mesh.ARRAY_INDEX]
-    var full := DCOctreeMesher.new().mesh_clipmap(
+    # Curved terrain still coarsens hard at a looser tolerance (LOD by surface complexity).
+    var coarse: PackedInt32Array = (_mesh(4.0, true) as Array)[Mesh.ARRAY_INDEX]
+    var dense := DCOctreeMesher.new().mesh_clipmap(
         [_level(Vector3.ZERO, 1.0, true)], DIM, PackedVector3Array([Vector3.ZERO]),
         PackedFloat32Array([1.0]), Vector3(16, 16, 16), 1e9, DEPTH,
-        Vector3(16, 60, 16), 771.0, 16.0, false, Vector3i())
-    var full_idx: PackedInt32Array = full[Mesh.ARRAY_INDEX]
-    assert_lt(coarse.size(), full_idx.size() / 2, "curved terrain still coarsens (LOD works)")
+        Vector3(16, 60, 16), 771.0, 0.0, false, Vector3i())   # err=false: no-collapse baseline
+    var dense_idx: PackedInt32Array = dense[Mesh.ARRAY_INDEX]
+    assert_lt(coarse.size(), dense_idx.size() / 2, "curved terrain still coarsens (LOD works)")

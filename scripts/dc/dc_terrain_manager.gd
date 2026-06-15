@@ -99,7 +99,6 @@ var _splice_queue: Array = []        # [[box_origin, box_size], ...] world boxes
 var _splice_task_id := -1
 var _splice_core_min: Vector3i       # apply geometry captured at splice dispatch (base-cell units)
 var _splice_core_max: Vector3i
-var _splice_sub_origin: Vector3i
 var _splice_patch:        Array              = []              # worker output: the meshed patch
 var _splice_owners:      PackedVector3Array = PackedVector3Array()  # per-triangle owner cells
 var _splice_owner_sizes: PackedFloat32Array = PackedFloat32Array()  # per-triangle owner sizes
@@ -115,7 +114,7 @@ class ClipmapView:
     var camera_lattice:    Vector3
     var half0:             float
     var proj:              float
-    var eps_px:            float
+    var residual_tol:      float
     var error_driven:      bool
     func ready() -> bool:
         return not level_cells.is_empty()
@@ -136,32 +135,33 @@ const _MAX_QUEUE := 64               # cap; overflow → one full re-mesh covers
 # the manager is enabled, which is opt-in, so it's quiet in normal play.
 var log_timings := true
 
-# Error-driven LOD: coarsen by screen-space error (~eps_px) instead of distance bands.
+# Necessity-driven LOD: coarsen by the surface's own complexity, NOT by camera distance.
 # The mesher builds to the data floor then collapses bottom-up wherever one vertex fits
-# the real fine surface within eps_px on screen (DCOctreeMesher::accumulate) — flat
-# regions go coarse, curved stay fine, crack-free, and a coarse cell derives its vertex
-# from accumulated FINE QEF so it sits on the fine surface (seams dissolve). Default ON
-# since the collapse metric was fixed (undivided residual — thin features veto their own
-# collapse, no more flapping; substrate Phase A). `dcerror`/`dceps` toggle and tune it.
+# the real fine surface within residual_tol (a fixed WORLD-space tolerance, base-cell
+# units — DCOctreeMesher::accumulate) — flat regions go coarse, curved stay fine, crack-
+# free, and a coarse cell derives its vertex from accumulated FINE QEF so it sits on the
+# fine surface (seams dissolve). The camera is not an input, so moving/turning re-meshes
+# nothing (telescopes are free). Default ON. `dcerror`/`dctol` toggle and tune it.
 var error_driven := true
 var dump_next := false   # diagnostic: capture the next dispatch's input + output (dcdump cmd)
 var _dump_armed := false
 var _dump_dict := {}
-# Screen-error collapse threshold. Since the collapse metric is the UNDIVIDED QEF
-# residual (not per-plane RMS — see DCOctreeMesher::accumulate), this is a larger
-# scale than a literal pixel count; ~8 coarsens curved terrain well while thin
-# features veto their own collapse. Tune live with `dceps`.
-var eps_px := 8.0
+# Collapse tolerance: the max UNDIVIDED QEF residual (base-cell world units) at which one
+# vertex may stand in for a cell's fine surface. Smaller = more detail kept. ~0.3 base-
+# cells matches the old near-terrain detail; far detail is now kept too (necessity), so
+# the resident extent (Stage 2 eviction) bounds cost, and B2 tunes this to the budget.
+var residual_tol := 0.3
 
 # B2 budget controller. Detail self-tunes toward a frame-time target — refine when there's slack,
-# coarsen when over budget — by nudging eps_px (the screen-error collapse threshold; smaller = more
-# detail). Slow and damped: each change re-meshes the clipmap, so it acts once per BUDGET_INTERVAL
-# and only when the frame time is clearly outside the target band. Opt-in (`dcbudget`) because eps
-# only helps a TRIANGLE-bound frame; on a shader/CPU-bound one it would shed detail for no gain.
+# coarsen when over budget — by nudging residual_tol (the world-residual collapse tolerance; smaller
+# = more detail). Slow and damped: each change re-meshes the clipmap, so it acts once per
+# BUDGET_INTERVAL and only when the frame time is clearly outside the target band. Opt-in (`dcbudget`)
+# because tol only helps a TRIANGLE-bound frame; on a shader/CPU-bound one it would shed detail for
+# no gain. Now camera-independent (necessity LOD), this is the single global detail knob.
 const BUDGET_TARGET_MS := 16.0   # the frame budget detail is allowed to spend up to (~60 fps)
 const BUDGET_INTERVAL  := 1.0    # seconds between adjustments (re-mesh isn't free)
-const EPS_MIN := 2.0
-const EPS_MAX := 24.0
+const TOL_MIN := 0.05
+const TOL_MAX := 2.0
 var budget_enabled := false
 var _budget_clock := 0.0
 
@@ -197,8 +197,8 @@ func remesh() -> void:
     _last_center = Vector3.INF
 
 
-# B2: once per interval, push eps toward the frame budget and re-mesh if it moved. Skips while a
-# build/splice is in flight (don't retune mid-work) so it never fights the very cost it's measuring.
+# B2: once per interval, push the tolerance toward the frame budget and re-mesh if it moved. Skips
+# while a build/splice is in flight (don't retune mid-work) so it never fights the cost it's measuring.
 func _tune_quality(dt: float) -> void:
     if not budget_enabled or _task_id != -1 or _splice_task_id != -1:
         return
@@ -207,21 +207,21 @@ func _tune_quality(dt: float) -> void:
         return
     _budget_clock = 0.0
     var frame_ms := 1000.0 / maxf(Engine.get_frames_per_second(), 1.0)
-    var tuned := _eps_for(frame_ms)
+    var tuned := _tol_for(frame_ms)
     if Perf.is_shown():
-        Perf.status("budget", "%.1f ms/frame → eps %.1f" % [frame_ms, tuned])   # show state each tick
-    if is_equal_approx(tuned, eps_px):
+        Perf.status("budget", "%.1f ms/frame → tol %.2f" % [frame_ms, tuned])   # show state each tick
+    if is_equal_approx(tuned, residual_tol):
         return
-    eps_px = tuned
+    residual_tol = tuned
     remesh()
 
 # More detail when there's slack, less when over budget, unchanged within the target band.
-func _eps_for(frame_ms: float) -> float:
+func _tol_for(frame_ms: float) -> float:
     if frame_ms > BUDGET_TARGET_MS * 1.1:
-        return minf(EPS_MAX, eps_px * 1.15)
+        return minf(TOL_MAX, residual_tol * 1.15)
     if frame_ms < BUDGET_TARGET_MS * 0.8:
-        return maxf(EPS_MIN, eps_px * 0.92)
-    return eps_px
+        return maxf(TOL_MIN, residual_tol * 0.92)
+    return residual_tol
 
 
 # Make DC the terrain render: start meshing now.
@@ -249,10 +249,12 @@ func _enqueue_splice(box_origin: Vector3, box_size: Vector3) -> void:
     _splice_queue.append([box_origin, box_size, Time.get_ticks_usec()])
 
 
-# Lazy re-mesh: replace just the triangles an edit changed, not the whole clipmap. Optimistic —
-# an edit usually sits in one LOD, so mesh a small box at the edit's own resolution and only widen
-# (once) if that box happens to meet a coarser neighbour. No growing feedback loop. Serialized
-# behind any in-flight full build so the shared collapse-set isn't raced.
+# Lazy re-mesh: replace just the triangles an edit changed, not the whole clipmap. The splice builds
+# on the FULL build's frame (root_origin / _ROOT_DEPTH) with a BUILD-BOX restricting the descent to the
+# edit box + apron and an EMIT-BOX restricting output to the core — so its cells land on the full
+# build's exact lattice and neighbours and the patch reproduces it crack-free (no offset sub-octree,
+# no alignment, no LOD rejection — see test_dc_lod_splice). Serialized behind any in-flight full build
+# so the cache it patches isn't swapped mid-splice.
 func _dispatch_splice() -> void:
     if _full_build_running():
         return                          # edits wait in _edits_during_build; they splice after it
@@ -260,12 +262,13 @@ func _dispatch_splice() -> void:
         _request_full_rebuild()
         return
     var edit := _next_edit()
-    var region := _splice_region(edit)
-    _show_invalidation(edit, region)
-    if _can_splice(region):
-        _start_splice(edit, region)
-    else:
-        _give_up_to_full_rebuild(edit, region)
+    var core := _edit_core_cells(edit)
+    var span := _extent(core.min, core.max)
+    if span > _MAX_SPLICE_SPAN:
+        _give_up_to_full_rebuild(edit, span)   # a huge edit isn't worth a giant build-box
+        return
+    _show_invalidation(edit, core)
+    _start_splice(edit, core)
 
 
 func _full_build_running() -> bool:
@@ -278,19 +281,8 @@ func _next_edit() -> Dictionary:
     var e: Array = _splice_queue.pop_front()
     return {"origin": e[0], "size": e[1], "queued_us": e[2] if e.size() > 2 else Time.get_ticks_usec()}
 
-
-# Where a splice would re-mesh. Take the LOD the edit actually sits in (one fixed look at the edit's
-# own cells — NOT a growing scan), align to it, and only if the resulting box reaches a coarser cell,
-# re-align ONCE to that. Anything coarser still is left for _can_splice to reject (it falls back).
-func _splice_region(edit: Dictionary) -> Dictionary:
-    var core := _edit_core_cells(edit)
-    var region := _region_at(core, _coarsest_owner_in(core.min, core.max))
-    if _reaches_coarser_lod(region):
-        region = _region_at(core, _coarsest_owner_in(region.sub_min, _sub_end(region)))
-    return region
-
-# The edit's world box in cells, padded by the DC stencil (a changed corner only moves the surface
-# a few cells out). The box itself scales with the edit; this halo is the small fixed part.
+# The edit's world box in base-cells, padded by the DC stencil (a changed corner only moves the
+# surface a few cells out). The box scales with the edit; this halo is the small fixed part.
 func _edit_core_cells(edit: Dictionary) -> Dictionary:
     var base_cell := VoxelConstants.RENDER_BASE_CELL
     var lo: Vector3 = edit.origin / base_cell
@@ -298,111 +290,69 @@ func _edit_core_cells(edit: Dictionary) -> Dictionary:
     var halo := Vector3i.ONE * _EDIT_STENCIL_CELLS
     return {"min": Vector3i(lo.floor()) - halo, "max": Vector3i(hi.ceil()) + halo}
 
-# Snap the core to whole `cell`-sized cells and add the stitch apron; size the octree root (a power
-# of two) to contain it. core = triangles replaced; [sub_min, sub_end) = what the worker meshes.
-func _region_at(core: Dictionary, cell: int) -> Dictionary:
-    var core_min := _snap_down(core.min, cell) - Vector3i.ONE * cell
-    var core_max := _snap_up(core.max, cell)   + Vector3i.ONE * cell
-    var apron := 2 * maxi(_EDIT_APRON, cell)
-    var sub_min := core_min - Vector3i.ONE * apron
-    var sub_hi  := core_max + Vector3i.ONE * apron
-    return {"core_min": core_min, "core_max": core_max, "cell": cell,
-            "sub_min": sub_min, "sub_size": _pow2_at_least(_extent(sub_min, sub_hi))}
+# Stitch apron (base-cells) around the core: any displayed cell ADJACENT to the core must build to
+# its data floor and collapse identically to the full build, so the apron must contain it whole. The
+# coarsest cell near the edit bounds that, so the apron tracks the local LOD — small near the player
+# (fine cells), larger out in the coarse bands — keeping the build-box proportional to the edit.
+func _splice_apron(core: Dictionary) -> int:
+    var probe := Vector3i.ONE * _EDIT_APRON
+    var local_cell := _coarsest_owner_in(core.min - probe, core.max + probe)
+    return 2 * local_cell + _EDIT_APRON
 
-func _can_splice(region: Dictionary) -> bool:
-    return region.sub_size <= _MAX_SPLICE_SPAN and not _reaches_coarser_lod(region)
-
-func _reaches_coarser_lod(region: Dictionary) -> bool:
-    return _coarsest_owner_in(region.sub_min, _sub_end(region)) > region.cell
-
-func _sub_end(region: Dictionary) -> Vector3i:
-    return region.sub_min + Vector3i.ONE * region.sub_size
-
-func _show_invalidation(edit: Dictionary, region: Dictionary) -> void:
+func _show_invalidation(edit: Dictionary, core: Dictionary) -> void:
     region_invalidated.emit(edit.origin, edit.origin + edit.size, 0)
     if debug_invalidation:
-        triangles_invalidated.emit(_cache_tris_in(region.sub_min, _sub_end(region)))
+        triangles_invalidated.emit(_cache_tris_in(core.min, core.max))
 
-func _start_splice(edit: Dictionary, region: Dictionary) -> void:
-    _splice_core_min   = region.core_min
-    _splice_core_max   = region.core_max
-    _splice_sub_origin = region.sub_min
+func _start_splice(edit: Dictionary, core: Dictionary) -> void:
+    _splice_core_min   = core.min
+    _splice_core_max   = core.max
     _trace_edit_us     = edit.queued_us
     _trace_dispatch_us = Time.get_ticks_usec()
+    var apron := Vector3i.ONE * _splice_apron(core)
     _splice_task_id = WorkerThreadPool.add_task(
-        _splice_job.bind(_edit_store.duplicate(), region.sub_min, region.sub_size,
-            region.core_min, region.core_max, region.cell, MaterialPalette.colors()),
+        _splice_job.bind(_edit_store.duplicate(), core.min, core.max,
+            core.min - apron, core.max + apron, MaterialPalette.colors()),
         false, "DC splice")
 
 func _request_full_rebuild() -> void:
     _last_center = Vector3.INF
 
-func _give_up_to_full_rebuild(edit: Dictionary, region: Dictionary) -> void:
+func _give_up_to_full_rebuild(edit: Dictionary, span: int) -> void:
     _request_full_rebuild()
-    _trace_fallback(edit.queued_us, "edit meets a coarser LOD or is too big (sub %d cells)" % region.sub_size)
+    _trace_fallback(edit.queued_us, "edit too big to splice (%d cells)" % span)
 
 func _extent(lo: Vector3i, hi: Vector3i) -> int:
     var d := hi - lo
     return maxi(d.x, maxi(d.y, d.z))
 
-func _pow2_at_least(n: int) -> int:
-    var p := 1
-    while p < n:
-        p <<= 1
-    return p
 
-
-# Worker: read each clipmap level over the splice sub-box from the snapshot, then run
-# mesh_clipmap in incremental mode on _mesher (shared collapse-set with the full build).
-# The octree spans [sub_origin, sub_origin+sub_size) in world-lattice space — a small cube,
-# NOT the full root — so cost is proportional to the edit box, not the whole scene. emit_filter
-# restricts output to [core_min, core_max). No Node/main-thread access.
-func _splice_job(store: EditStore, sub_origin: Vector3i, sub_size: int,
-        core_min: Vector3i, core_max: Vector3i, max_leaf: int, palette: PackedColorArray) -> void:
+# Worker: read each clipmap level from the snapshot, then mesh on the FULL build's frame
+# (root_origin / _ROOT_DEPTH, the same level geometry + camera + tol as the cache) with a BUILD-BOX
+# restricting the descent to [build_min, build_max) and an EMIT-BOX to [core_min, core_max). The
+# built cells therefore share the full build's exact lattice + neighbours, so the patch reproduces it
+# over the core and stitches crack-free; the build-box leaf-terminates everything else, so cost stays
+# proportional to the edit. Patch verts land in the cache's frame (no shift). No Node/main access.
+func _splice_job(store: EditStore, core_min: Vector3i, core_max: Vector3i,
+        build_min: Vector3i, build_max: Vector3i, palette: PackedColorArray) -> void:
     _trace_work_start_us = Time.get_ticks_usec()
-    var base_cell  := VoxelConstants.RENDER_BASE_CELL
-    # Compute the sub-octree depth from sub_size (must be a power of two).
-    var sub_depth := 0
-    var tmp := sub_size
-    while tmp > 1:
-        tmp >>= 1
-        sub_depth += 1
-    # Read the SDF + indices for each clipmap level over the sub-box. We use the same level
-    # world origins and cell sizes as the last full build — the fill_region reads the sub-box
-    # portion of each level's grid. We still read LEVEL_DIM samples so the Clipmap SDF queries
-    # from the sub-octree cells have enough surrounding data for gradient and value lookups.
-    var level_data:  Array = []
-    var level_idxs:  Array = []
+    var base_cell := VoxelConstants.RENDER_BASE_CELL
+    var level_data: Array = []
+    var level_idxs: Array = []
     for k in LEVELS:
-        var cell: float = _clipmap.level_cells[k]
-        var world_cell  := base_cell * cell
+        var world_cell := base_cell * _clipmap.level_cells[k]
         var wc := Vector3i(_clipmap.level_world_cells[k])
         level_data.append(store.fill_region(wc, LEVEL_DIM, world_cell, PackedFloat32Array(), Vector3i.ZERO, Vector3i.ZERO, Vector3i.ZERO))
         level_idxs.append(store.fill_indices_region(wc, LEVEL_DIM, world_cell))
-    # Level origins for the sub-octree are RELATIVE to sub_origin (its lattice zero). The full
-    # build's level_origins are relative to _cache.origin. Sub-octree lattice = world - sub_origin,
-    # so level_origin[k] = _clipmap.level_origins[k] - (sub_origin - _cache.origin).
-    var root_offset := sub_origin - _cache.origin
-    var sub_level_origins := PackedVector3Array()
-    for k in LEVELS:
-        sub_level_origins.append(_clipmap.level_origins[k] - Vector3(root_offset))
-    # Center in sub-lattice space = full-build center in world - sub_origin (since sub-lattice
-    # is world offset by sub_origin and same scale).
-    var world_center := Vector3(_cache.origin) + _clipmap.center_lattice
-    var sub_center   := world_center - Vector3(sub_origin)
-    var sub_camera   := Vector3(_cache.origin) + _clipmap.camera_lattice - Vector3(sub_origin)
-    # world_origin for the sub-octree = sub_origin (already in world base-cell lattice units).
-    # hysteresis key = sub_cell.origin_relative_to_sub_root + sub_world_origin = world position.
-    var sub_world_origin := sub_origin
     _splice_patch = _mesher.mesh_clipmap(
-        level_data, LEVEL_DIM, sub_level_origins, _clipmap.level_cells,
-        sub_center, _clipmap.half0, sub_depth,
-        sub_camera, _clipmap.proj, _clipmap.eps_px, _clipmap.error_driven,
-        sub_world_origin, level_idxs, palette,
-        true, 0.0,           # uniform_core=true (match the full build), prune_safety=0
-        core_min, core_max,  # emit box: only output triangles in the edit core
-        true,                # incremental: update collapse-set in-place, no swap
-        max_leaf)            # cap collapse at the local displayed cell size (no coarser → no crack)
+        level_data, LEVEL_DIM, _clipmap.level_origins, _clipmap.level_cells,
+        _clipmap.center_lattice, _clipmap.half0, _ROOT_DEPTH,
+        _clipmap.camera_lattice, _clipmap.proj, _clipmap.residual_tol, _clipmap.error_driven,
+        _cache.origin, level_idxs, palette,
+        true, 0.0,                       # uniform_core=true (match the full build), prune_safety=0
+        core_min, core_max,              # emit box: only output triangles in the edit core
+        false, 0,                        # incremental=false, max_leaf cap=0 — the full frame needs neither
+        build_min, build_max)            # build box: descend only the edit box + apron
     _splice_owners      = _mesher.get_last_triangle_owners()
     _splice_owner_sizes = _mesher.get_last_triangle_owner_sizes()
     _trace_work_end_us = Time.get_ticks_usec()
@@ -415,7 +365,7 @@ func _finish_splice() -> void:
     _splice_task_id = -1
     if _splice_patch.is_empty() or _cache.arrays.is_empty():
         return
-    _apply_splice(_splice_core_min, _splice_core_max, _splice_sub_origin,
+    _apply_splice(_splice_core_min, _splice_core_max,
         _splice_patch, _splice_owners, _splice_owner_sizes)
     if Perf.is_shown():
         _trace_emit(finish_us, Time.get_ticks_usec())
@@ -445,11 +395,12 @@ func _trace_fallback(edit_us: int, reason: String) -> void:
 
 # Swap the cached mesh's core-box triangles for the patch's (DCEditSplicer does the array surgery),
 # then display the result — it becomes the base for the next edit. Main thread, O(triangles) (~ms).
-func _apply_splice(core_min: Vector3i, core_max: Vector3i, sub_origin: Vector3i,
+# The patch was meshed on the cache's own frame (full-frame build-box), so its verts need no shift.
+func _apply_splice(core_min: Vector3i, core_max: Vector3i,
         patch: Array, patch_owners: PackedVector3Array,
         patch_owner_sizes: PackedFloat32Array) -> void:
     var patch_mesh := {"arrays": patch, "owners": patch_owners, "sizes": patch_owner_sizes}
-    var spliced := DCEditSplicer.splice(_cache.bundle(), patch_mesh, core_min, core_max, Vector3(sub_origin - _cache.origin))
+    var spliced := DCEditSplicer.splice(_cache.bundle(), patch_mesh, core_min, core_max, Vector3.ZERO)
     _show_mesh(spliced.arrays)
     _cache.arrays = spliced.arrays
     _cache.owners = spliced.owners
@@ -509,24 +460,8 @@ static func _half(n: int) -> int:
     @warning_ignore("integer_division")
     return n / 2
 
-# Snap v DOWN to a multiple of cell_size (floor).
-static func _snap_down(v: Vector3i, cell_size: int) -> Vector3i:
-    @warning_ignore("integer_division")
-    return Vector3i(
-        (v.x / cell_size) * cell_size if v.x >= 0 else ((v.x - cell_size + 1) / cell_size) * cell_size,
-        (v.y / cell_size) * cell_size if v.y >= 0 else ((v.y - cell_size + 1) / cell_size) * cell_size,
-        (v.z / cell_size) * cell_size if v.z >= 0 else ((v.z - cell_size + 1) / cell_size) * cell_size)
-
-# Snap v UP to a multiple of cell_size (ceiling).
-static func _snap_up(v: Vector3i, cell_size: int) -> Vector3i:
-    @warning_ignore("integer_division")
-    return Vector3i(
-        ((v.x + cell_size - 1) / cell_size) * cell_size if v.x >= 0 else (v.x / cell_size) * cell_size,
-        ((v.y + cell_size - 1) / cell_size) * cell_size if v.y >= 0 else (v.y / cell_size) * cell_size,
-        ((v.z + cell_size - 1) / cell_size) * cell_size if v.z >= 0 else (v.z / cell_size) * cell_size)
-
-# The coarsest displayed cell whose cell overlaps a base-cell box — the local LOD a splice must
-# align to so no displayed cell straddles its boundary. (1 where the cache is finest.)
+# The coarsest displayed cell whose extent overlaps a base-cell box (1 where the cache is finest).
+# Used to size a splice's stitch apron to the local LOD.
 func _coarsest_owner_in(box_min: Vector3i, box_max: Vector3i) -> int:
     var coarsest := 1
     for tri in _cache.owners.size():
@@ -616,7 +551,7 @@ func _dispatch(center: Vector3) -> void:
     _clipmap.camera_lattice    = camera_lattice
     _clipmap.half0             = half0
     _clipmap.proj              = proj
-    _clipmap.eps_px            = eps_px
+    _clipmap.residual_tol      = residual_tol
     _clipmap.error_driven      = error_driven
     if dump_next:
         _arm_dump(center_lattice, camera_lattice, half0, proj, root_origin)
@@ -625,7 +560,7 @@ func _dispatch(center: Vector3) -> void:
     var job_store: EditStore = _edit_store.duplicate()
     _task_id = WorkerThreadPool.add_task(
         _mesh_job.bind(job_store, level_world_cells, level_origins, level_cells, center_lattice, half0,
-            camera_lattice, proj, eps_px, error_driven, root_origin,
+            camera_lattice, proj, residual_tol, error_driven, root_origin,
             MaterialPalette.colors()), false, "DC terrain mesh")
 
 
@@ -634,7 +569,7 @@ func _dispatch(center: Vector3) -> void:
 # snapshot + immutable PackedArrays — safe off the main thread (no Node / engine access).
 func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
         level_origins: PackedVector3Array, level_cells: PackedFloat32Array,
-        center: Vector3, half0: float, camera: Vector3, proj: float, eps: float, err: bool,
+        center: Vector3, half0: float, camera: Vector3, proj: float, tol: float, err: bool,
         world_origin: Vector3i, palette: PackedColorArray) -> void:
     var base_cell := VoxelConstants.RENDER_BASE_CELL
     var level_data: Array = []
@@ -651,7 +586,7 @@ func _mesh_job(store: EditStore, level_world_cells: PackedVector3Array,
         _dump_dict["cells"]      = level_cells
     _job.arrays = _mesher.mesh_clipmap(
         level_data, LEVEL_DIM, level_origins, level_cells, center, half0, _ROOT_DEPTH,
-        camera, proj, eps, err, world_origin, level_indices, palette,
+        camera, proj, tol, err, world_origin, level_indices, palette,
         true,   # uniform_core: KEEP the fine core in B1 — edits near the player land in uniform
                 # fine LOD and splice with a small box. (Dropping it is B2's job, once a budget-
                 # driven LOD replaces it; dropping it here made flat near-terrain coarse, so edits
@@ -673,7 +608,7 @@ func _arm_dump(center: Vector3, camera: Vector3, half0: float, proj: float, root
     _dump_dict = {
         "dim": LEVEL_DIM,
         "center": center, "camera": camera, "half0": half0, "depth": _ROOT_DEPTH,
-        "proj": proj, "eps": eps_px, "err": error_driven, "root_origin": root_origin,
+        "proj": proj, "tol": residual_tol, "err": error_driven, "root_origin": root_origin,
     }
 
 

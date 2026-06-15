@@ -92,8 +92,8 @@ func test_lod_transition_is_watertight():
 # --- Error-driven LOD (bottom-up collapse) ---
 #
 # The redesign: build to the data floor, then collapse a node into one leaf wherever
-# its ACCUMULATED QEF (the real fine Hermite data) is fit by one vertex within eps_px
-# on screen, floored so a flat field stays >=2 cells/axis. Its spec is two invariants:
+# its ACCUMULATED QEF (the real fine Hermite data) is fit by one vertex within the
+# world-residual tolerance, floored so a flat field stays >=2 cells/axis. Two invariants:
 #   - error-mode stays watertight on the sphere (collapse + point-location stitching
 #     introduce size jumps but no cracks),
 #   - it coarsens a flat field far below distance-mode without holing it (the failure
@@ -102,9 +102,9 @@ func test_lod_transition_is_watertight():
 const PROJ := 500.0   # stand-in viewport_height/(2 tan(fov/2))
 
 func _mesh_err(level_data: Array, origins: PackedVector3Array, cells: PackedFloat32Array, half0: float,
-        camera: Vector3, eps_px: float) -> Array:
+        camera: Vector3, tol: float) -> Array:
     return DCOctreeMesher.new().mesh_clipmap(
-        level_data, DIM, origins, cells, CENTER, half0, DEPTH, camera, PROJ, eps_px, true)
+        level_data, DIM, origins, cells, CENTER, half0, DEPTH, camera, PROJ, tol, true)
 
 # A flat field: SDF = world.z - PLANE_Z (negative below, positive above). An OPEN
 # surface — boundary edges at the octree perimeter are expected; what matters is it
@@ -160,38 +160,32 @@ func test_error_mode_coarsens_flat_without_holing():
     assert_lt(max_dev, 0.5, "coarse vertices still lie on the plane")
 
 
-# --- Collapse hysteresis (persistent state, the anti-popping property) ---
+# --- Necessity-driven LOD: collapse is f(field), NOT f(camera) ---
 
-func _err_tris(mesher: DCOctreeMesher, data: PackedFloat32Array, camera: Vector3, eps: float) -> int:
+func _err_tris(mesher: DCOctreeMesher, data: PackedFloat32Array, camera: Vector3, tol: float) -> int:
     var arrays := mesher.mesh_clipmap(
         [data], DIM, PackedVector3Array([Vector3.ZERO]), PackedFloat32Array([1.0]),
-        CENTER, 1e9, DEPTH, camera, PROJ, eps, true, Vector3i.ZERO)
+        CENTER, 1e9, DEPTH, camera, PROJ, tol, true, Vector3i.ZERO)
     if arrays.is_empty():
         return 0
     return (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
 
-func test_collapse_hysteresis_is_sticky():
-    # The popping is a node oscillating collapsed<->subdivided as the camera moves. A
-    # reused mesher remembers last frame's collapse and keeps a collapsed node collapsed
-    # until its error clearly exceeds eps (×HYST=2.5). So: warm the persistent mesher far
-    # away (collapsed), then mesh from half the distance (error ~2x, still inside the
-    # 2.5x band) — it should STAY coarse, where a cold mesh at that distance refines.
+func test_collapse_is_camera_independent():
+    # The necessity switch: collapse keys on a fixed WORLD-residual tolerance, not on the
+    # camera. So the SAME field meshed from a near camera and a far one must produce the
+    # identical triangle count — where the old screen-error metric coarsened the distant
+    # view (it divided by distance), necessity keeps detail wherever the surface needs it.
+    # This is what makes a telescoped distant view as sharp as a near one, and why moving
+    # the camera re-meshes nothing. (Fails against the old proj/dist collapse: far < near.)
     var data := _level(Vector3.ZERO, 1.0)
-    var far := CENTER + Vector3(0, 0, 220)
-    var near := CENTER + Vector3(0, 0, 110)            # factor 2 < HYST(2.5): inside the band
+    var near := CENTER + Vector3(0, 0, 40)
+    var far  := CENTER + Vector3(0, 0, 800)            # 20x farther — old code would over-collapse
 
-    var cold := DCOctreeMesher.new()
-    var tris_far  := _err_tris(cold, data, far, 1.0)   # fresh, far
-    var cold2 := DCOctreeMesher.new()
-    var tris_near := _err_tris(cold2, data, near, 1.0) # fresh, near (no history)
+    var tris_near := _err_tris(DCOctreeMesher.new(), data, near, 0.5)
+    var tris_far  := _err_tris(DCOctreeMesher.new(), data, far, 0.5)
 
-    var warm := DCOctreeMesher.new()
-    _err_tris(warm, data, far, 1.0)                    # warm the history at `far` (collapses)
-    var tris_sticky := _err_tris(warm, data, near, 1.0)  # then move to `near` — should stick coarse
-
-    assert_gt(tris_near, tris_far, "near genuinely refines more than far (the LOD differs)")
-    assert_lt(tris_sticky, tris_near, "hysteresis kept it coarser than a cold mesh at the same spot")
-    assert_lte(tris_sticky, tris_far + tris_far / 20, "stayed ~as coarse as the warmed (far) state")
+    assert_gt(tris_near, 0, "the field meshed (guards against a vacuous 0 == 0)")
+    assert_eq(tris_near, tris_far, "necessity LOD: collapse ignores camera distance (near == far)")
 
 
 # --- Material bleed (index_prefer_explicit) ---

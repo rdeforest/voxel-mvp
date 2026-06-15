@@ -53,10 +53,10 @@ func _table() -> Array:
         [loadstyle,       "loadstyle", "Load a saved shader-settings preset. Usage: loadstyle <name>"],
         [liststyles,      "liststyles","List saved shader-settings presets."],
         [dcmanager,       "dcmanager", "Toggle the DC terrain manager (threaded re-mesh of a bubble around you). Usage: dcmanager [on|off]"],
-        [dcerror,         "dcerror",   "Toggle error-driven terrain LOD (screen-space error vs distance bands). Usage: dcerror [on|off]"],
+        [dcerror,         "dcerror",   "Toggle necessity-driven terrain LOD (collapse by world-residual, camera-independent). Usage: dcerror [on|off]"],
         [dcinval,         "dcinval",   "Toggle the invalidation overlay: blue=voxels an edit changed, green=region re-meshed, fading. Shows what each edit/move redoes."],
-        [dcbudget,        "dcbudget",  "Toggle the B2 detail budget: auto-tune eps toward a frame-time target (refine on slack, coarsen over budget). Usage: dcbudget [on|off]"],
-        [dceps,           "dceps",     "Set the error-driven LOD threshold in px (lower = more detail). Usage: dceps <px>"],
+        [dcbudget,        "dcbudget",  "Toggle the B2 detail budget: auto-tune the LOD tolerance toward a frame-time target (refine on slack, coarsen over budget). Usage: dcbudget [on|off]"],
+        [dctol,           "dctol",     "Set the necessity-LOD collapse tolerance (world-residual, base-cells; lower = more detail). Usage: dctol <tol>"],
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
         [dcgen,           "dcgen",     "Phase B preview: render the octree-over-generator substrate (cyan) at your position. Usage: dcgen [on|off]"],
@@ -204,19 +204,19 @@ func dcinval(_state := "") -> void:
 func dcbudget(state := "") -> void:
     var on := _parse_toggle(state, dc_manager.budget_enabled)
     dc_manager.budget_enabled = on
-    LimboConsole.info("dcbudget: %s (target %.0f ms/frame, eps now %.1f)" % [
-        ("on" if on else "off"), DCTerrainManager.BUDGET_TARGET_MS, dc_manager.eps_px])
+    LimboConsole.info("dcbudget: %s (target %.0f ms/frame, tol now %.2f)" % [
+        ("on" if on else "off"), DCTerrainManager.BUDGET_TARGET_MS, dc_manager.residual_tol])
 
 func dcerror(state := "") -> void:
     var on := _parse_toggle(state, dc_manager.error_driven)
     dc_manager.error_driven = on
     dc_manager.remesh()
-    LimboConsole.info("dcerror: %s (eps %.2f px)" % [("on" if on else "off"), dc_manager.eps_px])
+    LimboConsole.info("dcerror: %s (tol %.2f)" % [("on" if on else "off"), dc_manager.residual_tol])
 
-func dceps(px: float) -> void:
-    dc_manager.eps_px = maxf(0.01, px)
+func dctol(tol: float) -> void:
+    dc_manager.residual_tol = maxf(0.01, tol)
     dc_manager.remesh()
-    LimboConsole.info("dceps: %.2f px" % dc_manager.eps_px)
+    LimboConsole.info("dctol: %.2f" % dc_manager.residual_tol)
 
 func dcdump() -> void:
     dc_manager.dump_next = true
