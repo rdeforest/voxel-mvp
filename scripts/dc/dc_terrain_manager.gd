@@ -158,14 +158,15 @@ var eps_px := 2.0
 # B2 budget controller. Detail self-tunes toward a frame-time target — refine when there's slack,
 # coarsen when over budget — by nudging eps_px (the screen-error collapse threshold; smaller
 # = more detail). Slow and damped: each change re-meshes the clipmap, so it acts once per
-# BUDGET_INTERVAL and only when the frame time is clearly outside the target band. Opt-in (`dcbudget`)
-# because eps only helps a TRIANGLE-bound frame; on a shader/CPU-bound one it would shed detail for
-# no gain. This is the single global detail knob.
+# BUDGET_INTERVAL and only when the frame time is clearly outside the target band. Default-on
+# (`dcbudget` toggles it); it only helps a TRIANGLE-bound frame, on a shader/CPU-bound one it sheds
+# detail for no gain — toggle off to hand-tune `dceps` (the budget loop overrides eps when on). This
+# is the single global detail knob.
 const BUDGET_TARGET_MS := 16.0   # the frame budget detail is allowed to spend up to (~60 fps)
 const BUDGET_INTERVAL  := 1.0    # seconds between adjustments (re-mesh isn't free)
 const EPS_MIN := 0.5
 const EPS_MAX := 16.0
-var budget_enabled := false
+var budget_enabled := true
 var _budget_clock := 0.0
 
 
