@@ -79,6 +79,14 @@ Naming the slots buys two things:
   *sentences* built from the player's words ("fill bucket from stream")
   instead of anonymous glyphs.
 
+**Where the symbols come from.** A slot for a concrete, on-screen thing (the
+bucket, the stream) uses a symbol *derived from how that thing looks in the
+world* — a rendered icon of the actual object, so the glyph already resembles
+what the player pointed at, with no artist in the loop. Abstract slots (the
+hand for "agent," the arrow for "action") draw from Creative Commons symbol
+libraries — a small fixed vocabulary of reusable glyphs. So every sentence is
+half auto-generated from the world and half drawn from that shared glyph set.
+
 The game ships **no nouns**; the player writes the language. This is exactly
 why a naming system is compatible with minimal text and near-zero localization
 (pillar 6) — the only words on screen are ones the player chose to put there.
@@ -100,6 +108,27 @@ schematics, authored by the player rather than by us.
 
 This reinforces pillar 2 (progression is epistemic): a bigger concept library
 is *literally* the player knowing more, with no capability stat anywhere.
+
+## Sharing lexicons and libraries
+
+A player's **lexicon** (their named symbols) and **concept library** (their
+named builds and action-sentences) are **shareable artifacts.** "I made this
+construction of blocks and called it a castle — try it out": a player exports a
+library entry, another imports it, names and all.
+
+This is **community interaction without multiplayer.** It is asynchronous
+artifact exchange — a file you hand someone, like a blueprint or a recipe card
+— not a shared world, live peers, or any netcode. It therefore stays entirely
+inside this project's single-player scope (see
+[`../implementation/01-version-strategy.md`](../implementation/01-version-strategy.md))
+and does *not* reach for the successor game's network layer: the only thing
+crossing between players is data one of them authored, opened by hand by the
+other.
+
+- *Buys you:* a creative community — shared vocabularies, traded builds,
+  remixable libraries — with none of the networking cost, and none of the
+  always-online dependency pillar 5 would object to. It's the social upside of
+  multiplayer that single-player can actually have.
 
 ## The hint system: consider weird combinations
 
@@ -162,3 +191,7 @@ accessibility chapter for the no-reflexes commitment this serves.
   feeling like a dead end?
 - **How consider reads on a controller** vs. keyboard/mouse — it must be one
   obvious input on each (pillar 9).
+- **Importing a shared library that disagrees with yours.** When an imported
+  lexicon names a thing differently than you do (their "keep" vs. your
+  "bucket"), whose word wins on merge? And how does an imported build degrade
+  gracefully when it references parts or materials the importer doesn't have?

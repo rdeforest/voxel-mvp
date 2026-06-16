@@ -59,7 +59,8 @@ or condensed.
   exclusion.
 - [`17-consider-and-hypothetical-mode.md`](17-consider-and-hypothetical-mode.md)
   — the third universal verb (examine / interact / **consider**): hypothetical
-  mode, the player-named concept library that makes builds repeatable, and the
+  mode, consider→interact outcome prediction, the player-named concept library
+  (with shareable lexicons/libraries — community without multiplayer), and the
   consider-things-together hint system. Resolves pillar 9's input→action
   visual-language problem (ghosts + naming).
 - [`18-accessibility.md`](18-accessibility.md) — the mechanism half of pillar
