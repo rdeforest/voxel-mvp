@@ -15,7 +15,7 @@ const CZ := 100.0
 
 
 func _surface() -> int:
-    return int(SparseVoxelOctree.terrain_surface(CX, CZ, BASE, AMP, PERIOD, OCTAVES, SEED))
+    return int(EditStore.terrain_surface(CX, CZ, BASE, AMP, PERIOD, OCTAVES, SEED))
 
 # A live store + MpmStructure + StructuralIntegrity + scout, all wired and world-ready.
 func _rig() -> Dictionary:

@@ -15,7 +15,7 @@ const WOOD  := 4   # MaterialPalette index
 func _stub_chunk(dims: Vector3i) -> Array:
     var manager := EditStoreManager.new()
     manager.setup()
-    var surface := SparseVoxelOctree.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
+    var surface := EditStore.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
         EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
     var base := Vector3i(0, int(surface) + 40, 0)   # air region above the ground
     var center := Vector3(base) + Vector3(dims) * 0.5

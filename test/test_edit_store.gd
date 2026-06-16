@@ -18,13 +18,13 @@ const CZ := 100.0
 
 
 func _store() -> EditStore:
-    var s0 := SparseVoxelOctree.terrain_surface(CX, CZ, BASE, AMP, PERIOD, OCTAVES, SEED)
+    var s0 := EditStore.terrain_surface(CX, CZ, BASE, AMP, PERIOD, OCTAVES, SEED)
     var es := EditStore.new()
     es.setup(Vector3(CX - 128.0, s0 - 128.0, CZ - 128.0), 256.0, BASE, AMP, PERIOD, OCTAVES, SEED)
     return es
 
 func _surface() -> float:
-    return SparseVoxelOctree.terrain_surface(CX, CZ, BASE, AMP, PERIOD, OCTAVES, SEED)
+    return EditStore.terrain_surface(CX, CZ, BASE, AMP, PERIOD, OCTAVES, SEED)
 
 
 func test_unedited_defers_to_generator() -> void:
@@ -116,22 +116,6 @@ func test_fill_indices_region_reads_per_cell_material() -> void:
     var ci := (int(center.x) - origin.x) + dim * ((int(center.y) - origin.y) + dim * (int(center.z) - origin.z))
     assert_eq(idx[ci], 7, "the filled cell carries its painted material")
     assert_eq(idx[0], 0, "a corner outside the edit reads natural (0)")
-
-
-func test_imprint_store_graded_bakes_edits_into_render_octree() -> void:
-    # S3 render path: a SparseVoxelOctree imprinted from the store carries generator + edits.
-    # Use a SURFACE dig (the supported case — the octree is already subdivided at the
-    # surface). A small floating edit in empty air is undersampled by the graded octree's
-    # homogeneity prune; that's a separate limitation, noted on imprint_store_graded.
-    var es := _store()
-    var s0 := _surface()
-    var dig := Vector3(CX, s0, CZ)                 # carve a crater on the surface
-    es.stamp_sphere(dig, 5.0, SUBTRACT, 0, 1.0)
-    var oc := SparseVoxelOctree.new()
-    oc.setup(Vector3(CX - 128.0, s0 - 128.0, CZ - 128.0), 256.0)
-    oc.imprint_store_graded(es, dig, 1.0, 32.0)
-    assert_gt(oc.sample(Vector3(CX, s0 - 2.0, CZ)), 0.0, "the dig (carved crater) shows air in the render octree")
-    assert_lt(oc.sample(Vector3(CX, s0 - 40.0, CZ)), 0.0, "unedited deep ground stays solid (generator)")
 
 
 func test_fill_region_incremental_matches_full() -> void:

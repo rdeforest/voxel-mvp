@@ -14,13 +14,13 @@ const CZ := 100.0
 
 
 func _store() -> EditStore:
-    var s0 := SparseVoxelOctree.terrain_surface(CX, CZ, BASE, AMP, PERIOD, OCTAVES, SEED)
+    var s0 := EditStore.terrain_surface(CX, CZ, BASE, AMP, PERIOD, OCTAVES, SEED)
     var es := EditStore.new()
     es.setup(Vector3(CX - 256.0, s0 - 256.0, CZ - 256.0), 512.0, BASE, AMP, PERIOD, OCTAVES, SEED)
     return es
 
 func _surface() -> int:
-    return int(SparseVoxelOctree.terrain_surface(CX, CZ, BASE, AMP, PERIOD, OCTAVES, SEED))
+    return int(EditStore.terrain_surface(CX, CZ, BASE, AMP, PERIOD, OCTAVES, SEED))
 
 
 func _run(flood: GroundFlood) -> int:

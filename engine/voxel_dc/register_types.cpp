@@ -6,7 +6,6 @@
 #include "edit_store.h"
 #include "mpm_sim.h"
 #include "pbd_sim.h"
-#include "sparse_voxel_octree.h"
 
 // Module name is `voxel_dc`; Godot generates calls to these by that name.
 void initialize_voxel_dc_module(ModuleInitializationLevel p_level) {
@@ -16,7 +15,6 @@ void initialize_voxel_dc_module(ModuleInitializationLevel p_level) {
 	ClassDB::register_class<DCOctreeMesher>();
 	ClassDB::register_class<PbdSim>();
 	ClassDB::register_class<MpmSim>();
-	ClassDB::register_class<SparseVoxelOctree>();
 	ClassDB::register_class<EditStore>();
 }
 

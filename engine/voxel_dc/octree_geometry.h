@@ -1,8 +1,8 @@
 #ifndef OCTREE_GEOMETRY_H
 #define OCTREE_GEOMETRY_H
 
-// Cube/corner geometry shared by the SparseVoxelOctree storage and its mesher (kept in
-// one place so the two .cpp files agree on corner order, trilinear sampling, etc.).
+// Cube/corner geometry shared by the octree storage and mesher (kept in
+// one place so the .cpp files agree on corner order, trilinear sampling, etc.).
 
 #include "core/math/math_funcs.h"
 #include "core/math/vector3.h"

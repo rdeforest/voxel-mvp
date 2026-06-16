@@ -21,7 +21,7 @@ func after_each() -> void:
 
 func test_round_trips_edits_through_disk() -> void:
     var manager := _manager()
-    var surface := SparseVoxelOctree.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
+    var surface := EditStore.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
         EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
     var center := Vector3(0.0, surface - 5.0, 0.0)
     manager.store.stamp_sphere(center, 4.0, SUBTRACT, 0, 1.0)

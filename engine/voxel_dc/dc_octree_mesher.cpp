@@ -10,7 +10,7 @@
 #include "scene/resources/mesh.h"
 
 // CB (cube corners by xyz bits), EDGES (12 corner-pairs), RING (4 cells around an edge),
-// and Qef all come from voxel_dc — shared with the SparseVoxelOctree storage/mesher so
+// and Qef all come from voxel_dc — shared with the octree storage and mesher so
 // the corner order can't drift between them.
 using namespace voxel_dc;
 

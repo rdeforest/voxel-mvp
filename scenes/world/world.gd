@@ -5,7 +5,6 @@ extends Node3D
 
 var _dc_manager: DCTerrainManager
 var _inval_overlay: Node3D
-var _substrate_preview: DcSubstratePreview
 var _world_preview: DcWorldPreview
 var _dc_collision: DCCollisionManager
 var _awake_overlay: AwakeOverlay
@@ -49,9 +48,6 @@ func _ready() -> void:
     add_child(_inval_overlay)
     _dc_manager.region_invalidated.connect(_inval_overlay.highlight)        # `dcinval` toggles it
     _dc_manager.triangles_invalidated.connect(_inval_overlay.highlight_triangles)
-    _substrate_preview = DcSubstratePreview.new()
-    add_child(_substrate_preview)
-    _substrate_preview.setup(_player, _edit_store.store)   # Phase B S3: render imprints generator + edits from the store (dcgen)
     _world_preview = DcWorldPreview.new()
     add_child(_world_preview)
     _world_preview.setup(_player, _edit_store.store)       # doc 16/17: world-fixed incremental octree
@@ -101,9 +97,8 @@ func _wire_structural_sims() -> void:
 func _wire_console() -> void:
     _console = ConsoleCommands.new()
     _console.host              = self
-    _console.dc_manager        = _dc_manager
-    _console.inval_overlay     = _inval_overlay
-    _console.substrate_preview = _substrate_preview
+    _console.dc_manager    = _dc_manager
+    _console.inval_overlay = _inval_overlay
     _console.world_preview = _world_preview
     _console.pbd_structure     = _pbd_structure
     _console.integrity         = _integrity

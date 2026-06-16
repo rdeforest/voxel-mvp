@@ -18,7 +18,7 @@ func _store() -> EditStore:
 
 func test_submetre_log_imprints_at_its_true_thickness() -> void:
     var es := _store()
-    var s0 := SparseVoxelOctree.terrain_surface(0, 0, BASE, AMP, PERIOD, OCTAVES, SEED)
+    var s0 := EditStore.terrain_surface(0, 0, BASE, AMP, PERIOD, OCTAVES, SEED)
     var pos := Vector3(0, s0 + 30.0, 0)         # in open air
     var shape := CsgBoxShape.new(Vector3(0.5, 0.5, 4.0))   # a 0.5m-thick, 4m-long log
     var xform := Transform3D(Basis(), pos)

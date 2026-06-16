@@ -17,7 +17,7 @@ func _store() -> EditStore:
     return es
 
 func _surface(x: float, z: float) -> float:
-    return SparseVoxelOctree.terrain_surface(x, z, BASE, AMP, PERIOD, OCTAVES, SEED)
+    return EditStore.terrain_surface(x, z, BASE, AMP, PERIOD, OCTAVES, SEED)
 
 
 func test_foot_patch_collision_hugs_the_surface_in_world() -> void:

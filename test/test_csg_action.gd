@@ -17,7 +17,7 @@ var _center: Vector3
 
 
 func before_each() -> void:
-    var surface := SparseVoxelOctree.terrain_surface(0.0, 0.0, BASE, AMP, PERIOD, OCTAVES, SEED)
+    var surface := EditStore.terrain_surface(0.0, 0.0, BASE, AMP, PERIOD, OCTAVES, SEED)
     _center = Vector3(0.0, surface + 60.0, 0.0)   # well into the air
     _store = EditStore.new()
     _store.setup(_center - Vector3.ONE * 128.0, 256.0, BASE, AMP, PERIOD, OCTAVES, SEED)

@@ -59,6 +59,8 @@ public:
 	int material_at(Vector3 p) const;
 	int leaf_count() const;          // stored (edited) leaves — the storage measure
 
+	static double terrain_surface(double x, double z, double base, double amp, double period, int octaves, int seed);
+
 	PackedByteArray serialize() const;     // the sparse edited tree + root + generator params
 	void deserialize(const PackedByteArray &bytes);
 

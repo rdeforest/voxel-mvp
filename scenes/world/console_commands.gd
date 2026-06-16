@@ -13,11 +13,10 @@ extends RefCounted
 # PBD demo (this is RefCounted, so it can't add_child itself). The other collaborators
 # are the subsystems World owns; assign them before register_all().
 
-var host:              Node
-var dc_manager:        DCTerrainManager
-var inval_overlay:     Node3D
-var substrate_preview: DcSubstratePreview
-var world_preview:     DcWorldPreview
+var host:          Node
+var dc_manager:    DCTerrainManager
+var inval_overlay: Node3D
+var world_preview: DcWorldPreview
 var pbd_structure:     PbdStructure
 var integrity:         StructuralIntegrity
 var player:            CharacterBody3D
@@ -64,7 +63,6 @@ func _table() -> Array:
         [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight + magenta backfaces (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
-        [dcgen,           "dcgen",     "Phase B preview: render the octree-over-generator substrate (cyan) at your position. Usage: dcgen [on|off]"],
         [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + mesh-lag."],
         [meshlag,         "meshlag",   "Max mesh lag (ms) the budget controller keeps the worker re-mesh under — higher = more terrain detail, slower re-mesh on a move. Usage: meshlag [ms] (default 500)"],
         [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
@@ -265,12 +263,6 @@ func dcdump() -> void:
 func dcaudit() -> void:
     dc_manager.audit_current_mesh()
     LimboConsole.info("dcaudit: scanned the on-screen mesh; suspect triangles printed to stdout (Debug Console)")
-
-# `dcgen on` starts the live substrate render (follows you, threaded re-mesh); `dcgen off` hides it.
-func dcgen(state := "") -> void:
-    var on := _parse_toggle(state, substrate_preview.is_enabled())
-    substrate_preview.set_enabled(on)
-    LimboConsole.info("dcgen: %s (live octree-over-generator render, cyan)" % ("on" if on else "off"))
 
 # `dcworld` is THE terrain render (doc 17 P3): the world-fixed octree, 0.25 m, graded by the screen-error
 # budget controller (eps_px self-tunes against frame time + mesh lag, ~100 ms target / 500 ms ceiling).

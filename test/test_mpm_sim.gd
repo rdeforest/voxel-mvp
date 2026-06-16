@@ -114,7 +114,7 @@ func _pillar_store(top: int) -> EditStoreManager:
     return manager
 
 func test_elastic_block_rests_on_an_sdf_pillar() -> void:
-    var surface := SparseVoxelOctree.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
+    var surface := EditStore.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
         EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
     var top := int(surface) + 50
     var store := _pillar_store(top)
@@ -229,7 +229,7 @@ func test_elastic_block_rests_on_real_generator_terrain() -> void:
     # terrain (the EditStore generator as the SDF collider) must fall and rest on it, finite.
     var store := EditStoreManager.new()
     store.setup()
-    var surface := SparseVoxelOctree.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
+    var surface := EditStore.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
         EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
     var top := int(surface)
 

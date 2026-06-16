@@ -12,7 +12,7 @@ const STONE := 1
 # A store with no edits (pure generator) + a cube of MPM particles placed in the air well above
 # the terrain surface (so the generator is air there and the rasterised result is isolated).
 func _air_top() -> int:
-    var surface := SparseVoxelOctree.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
+    var surface := EditStore.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
         EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
     return int(surface) + 40
 

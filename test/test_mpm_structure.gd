@@ -5,7 +5,7 @@ extends GutTest
 # settles, and freeze it back into the store as terrain. This is the loop `mpmthaw` drives in-game.
 
 func _surface() -> int:
-    var s := SparseVoxelOctree.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
+    var s := EditStore.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
         EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
     return int(s)
 

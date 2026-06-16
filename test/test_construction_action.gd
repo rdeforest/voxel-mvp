@@ -15,7 +15,7 @@ const COLUMN_Z := 100.0
 
 
 func _surface() -> float:
-    return SparseVoxelOctree.terrain_surface(COLUMN_X, COLUMN_Z, BASE, AMP, PERIOD, OCTAVES, SEED)
+    return EditStore.terrain_surface(COLUMN_X, COLUMN_Z, BASE, AMP, PERIOD, OCTAVES, SEED)
 
 func _store() -> EditStore:
     var store := EditStore.new()
