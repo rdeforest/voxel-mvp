@@ -8,29 +8,24 @@
 
 ## Resumption Brief
 
-### Active thread (2026-06-15): DC render → PRODUCTION via doc 17 (world-octree productionization)
+### Active thread (2026-06-15): doc 17 done — dcworld IS the render. Next: finish `started/` → cleanup → bug bash
 
-**Docs 14 + 16 are DONE** (`docs/roadmap/implementation/done/`). 14: DC replaced Transvoxel as the
-production render, crack-free LOD via path-b. 16: the **world-fixed incremental octree substrate**
-(`mesh_world` + `grow_world`) is built, proven headless (`test/test_dc_world_octree.gd`, 9 cases), and
-visible (`dcworld`). The active thread is now **[doc 17](roadmap/implementation/started/17-world-octree-to-production.md)
-— make the world-fixed octree the live render and retire the clipmap.** Read `docs/MANIFESTO.md` + doc 17.
+**Docs 14 + 16 DONE; doc 17's world-octree is now THE production render (GPU-verified visually).** The path:
+P1 surface-sparse prune (concentric world-anchored min/max accel) → P2 graded floor from the ONE knob
+`eps_px`, driven by the budget controller (self-tunes vs frame time + mesh lag, ~100/500 ms; settles ~eps 94)
+→ P2.5 incremental band-diff (a move refines approached / coarsens receded / grafts+evicts the window edge,
+re-meshing only the changed band) → P3 swap (`dcworld` enabled at startup, production shader + palette;
+clipmap kept as the `dcmanager` comparison fallback). Perf overlay shows live `eps_px` + mesh-lag.
+GUT 233 / 232 pass / 1 pending / 0 fail. Branch `feat/dc-persistent-octree-cache`.
 
-**Where the octree stands (branch `feat/dc-persistent-octree-cache`):** `mesh_world` (windowed build,
-absent rim), `grow_world` (graft leading edge / evict trailing / reuse interior — byte-identical to a fresh
-build, free-list-bounded), `remesh` (re-collapse, no resample). `DcWorldPreview`/`dcworld [on|off] [radius]`
-renders it at production density (0.25 m), amber overlay, threaded. GUT 232 / 231 pass / 1 pending / 0 fail.
+**Deferred BY CHOICE (Robert's sequence: finish all `started/` docs → code cleanup pass → bug bash):**
+- The **inside-coverage cracks** ride along on the render — tracked in [`docs/bugs/`](bugs/00_INDEX.md)
+  (proactive accumulate-fine-QEF fix proposed), for the **bug bash**.
+- **Deleting** the old parallel renders (clipmap + geomorph + `dcgen`/SVO) is the **cleanup pass** — kept as
+  fallbacks for now.
 
-**The one wall:** the build is DENSE to the floor, so 0.25 m coverage is a small BUBBLE (O(volume)). Doc 17:
-(1) surface-sparse prune over DIRECT sampling — the hard part is there's no pre-baked grid to mip against
-(the Lipschitz/gradient route is the over-prune trap, [[dc-sdf-not-unit-distance]]); (2) graded data floor
-for horizon coverage; (3) promote `dcworld` to the live render, retire clipmap + geomorph + `dcgen`/SVO.
-Gate each step: watertight-WITH-collapse + GUT green + `dcinval` thin band + GPU eyes.
-
-**GPU eyes pending on `dcworld`** (first eyeball this session found one reversed triangle — see Known limits;
-pre-existing, in the live render too, logged). When judging it: coverage-bubble + hard rim + uniform density
-are EXPECTED (the missing prune); cracks INSIDE the bubble, wrong shape, or terrain lagging/not-following are
-REAL bugs.
+**Remaining `started/` doc:** `05-phase-5_5-architectural-maturation.md`. After the `started/` docs are
+finished comes the code cleanup pass (delete the parallel meshers), then the bug bash (docs/bugs/).
 
 ### Active thread (2026-06-11): MPM continuum-physics substrate — spike done, VERDICT = GO
 

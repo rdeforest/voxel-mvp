@@ -79,14 +79,15 @@ controller re-grading); full rebuild only on first build / edit / re-root. Gate:
 **GPU-verify:** the bloom-on-walk is smooth and the controller settles across the cheap-grow / rare-rebuild
 regimes.
 
-### P3 — Make `dcworld` the live render; retire the clipmap
-With P1+P2, the world-fixed octree covers the view at an affordable cost. Promote it: a `dcworld` manager
-modeled on `DCTerrainManager`/`DcSubstratePreview` becomes the default render, and the camera-centered
-clipmap levels + geomorph blend + the `dcgen`/SVO render are retired (least-duplication — delete a parallel
-mesher, don't copy). Collision stays on `VoxelMesherDC` until its own consolidation.
-- Gate each step: watertight-WITH-collapse + full GUT green + `dcinval` shows a thin re-meshed band on a
-  move (not the whole vicinity) + **GPU eyes** on the live terrain (render correctness can't be trusted
-  headless).
+### P3 — Make `dcworld` the live render — DONE (2026-06-15); clipmap deletion deferred to the cleanup pass
+`dcworld` is now THE terrain render: enabled at world startup, wearing the production terrain shader +
+material palette; the clipmap is no longer `start_default()`ed (still toggleable via `dcmanager` for
+side-by-side comparison). GPU-verified visually acceptable (Robert, 2026-06-15) — the inside-coverage cracks
+ride along (tracked in `docs/bugs/`, deferred to the post-cleanup bug bash; Robert: "they're a feature now").
+- **Deferred by choice:** *deleting* the camera-centered clipmap + geomorph + `dcgen`/SVO render. They stay
+  as comparison fallbacks until the **code cleanup pass** (Robert's sequence: finish all `started/` docs →
+  cleanup pass → bug bash). So P3's render *swap* is done; the parallel-mesher *deletion* is cleanup work.
+- Collision stays on the DC collision manager (its consolidation is separate).
 
 ## Known bugs (deferred → [`docs/bugs/`](../../../bugs/00_INDEX.md))
 
