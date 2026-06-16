@@ -44,9 +44,25 @@ footprint the structural layer subscribes to — wants event-coverage tests); C+
 paused, the gravity dup self-resolves when PBD retires); the LOW structural-perf items (per-frame Action rebuild,
 `perf.gd` O(n) ring) per the flag-don't-chase steer.
 
-**NEXT = Pass 2:** Robert reads every file, edits to taste, asks questions; Claude extracts going-forward
-instructions from each diff. Then the **DC cleanup pass** (delete the clipmap `DCTerrainManager` + geomorph), the
-**bug bash** (`docs/bugs/`), then MPM (doc 12) / v0.1 backlog (5.5g/h).
+**Pass 2 underway (2026-06-16):** Robert reads file-by-file leaving `RdF:` comments; Claude applies fixes + extracts
+guidance (memories: [[group-related-params]], [[comments-why-not-what-design-to-docs]], [[no-pimpl-pattern]]). His
+first lens — too-many-parameters / doing-too-much — drove a re-review (param groups: `EditEntry`, `ActionContext`,
+`TerrainParams`, `ViewParams`) and these further commits (GUT green throughout, count now 193 after deleting clipmap tests):
+- **`3b8c3a5`** `ActionContext` — bundle the store/player/integrity/pbd tail every Action ctor repeated.
+- **`3464f9c`** drop the redundant `box` arg from `VoxelImprint.apply` (held the `Brush` bundle — touches CsgAction core).
+- **`d58e8ce`** the **DC cleanup pass** (brought forward): delete the clipmap render (`DCTerrainManager`), the splice
+  path (`DCEditSplicer` + C++ `mesh_subregion`), `DcMeshAudit`, their tests + console/world wiring (~1700 lines).
+  **Key finding:** `mesh_clipmap`/`remesh` are NOT clipmap-only — collision, falling chunks, and ~10 test oracles use
+  them, so they STAY. Cleaned the mesher header comments (answered the `RdF:` notes); `dc_octree_mesher.h` is ready
+  for a fresh read.
+
+**RdF items status:** `mesh_subregion` DELETED; over-long `mesh_clipmap` comment TRIMMED → docs ref. **DEFERRED (with
+reasons):** un-pimpl (`DCOctreePersist` still holds the `Clipmap` `mesh_clipmap` needs — doesn't collapse cleanly) and
+`mesh_clipmap`'s 20 params (load-bearing + GDScript-binding-constrained across ~17 positional call sites).
+
+**Remaining recommended (queued):** `EditEntry` typed record (the `entry[0..3]` work tuples — behavior-sensitive),
+`Brush` bundle, internal `TerrainParams` (C++), the name+comment sweep on live files, `mesh_world` `ViewParams`. Then
+the **bug bash** (`docs/bugs/`), then MPM (doc 12) / v0.1 backlog (5.5g/h).
 
 ### Prior thread (2026-06-15): doc 17 done — dcworld IS the render
 
