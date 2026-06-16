@@ -51,29 +51,33 @@ phantom "targeting bug"). Protocol:
 
 ## Architecture
 
-This is a Godot 4.6 game built with **double-precision** (`precision=double` — cannot be removed; it's compiled into the engine binary for planet-scale coordinates) and the **godot_voxel** module for voxel storage / streaming / LOD / collision. **Terrain meshing is our own Dual Contouring**, not Transvoxel (godot_voxel ships no DC).
+This is a Godot 4.6 game built with **double-precision** (`precision=double` — cannot be removed; it's compiled into the engine binary for planet-scale coordinates). **The terrain data is the C++ `EditStore`** (a sparse octree of edits over a C++ procedural generator — see Persistence), and **all meshing is our own Dual Contouring** (`engine/voxel_dc/`), not Transvoxel. **godot_voxel is still built** (`tools/build`; the `voxel_dc` module shares its ABI — see [[voxel-dc-abi-defines]]) but is **out of the running game** (Phase B): no `VoxelLodTerrain` node, no godot_voxel storage/streaming/LOD/collision at runtime.
 
-### Terrain meshing / rendering (Dual Contouring)
+### Terrain rendering + collision (Dual Contouring, world-fixed octree)
 
-Two DC meshers, both ours (`engine/voxel_dc/`):
-- **`VoxelMesherDC`** — per-block DC, set as the terrain's `mesher` in `world.tscn`. godot_voxel builds terrain **collision** from these blocks. Has LOD-boundary seam cracks (the "F2" problem).
-- **`DCOctreeMesher`** + **`DCTerrainManager`** (`scripts/dc/dc_terrain_manager.gd`) — the "path-b" render layer: meshes the camera vicinity as ONE octree clipmap (crack-free LOD) on a worker thread and **renders that**, hiding godot_voxel's per-block render via `render_layers_mask = 0`. Default-on at startup (`start_default()`); `dcmanager`/`dcsolo` console commands toggle/override. Re-meshes on movement and on `terrain_sdf_changed` edits.
+Everything sources SDF + material from the `EditStore`; nothing reads godot_voxel. The subsystems are created in `world.gd:_ready`, not in `world.tscn`:
 
-So: **render = `DCOctreeMesher`, collision = `VoxelMesherDC`** (both DC, both ours, both C++ in `engine/voxel_dc/`). Shared QEF solver in `engine/voxel_dc/dc_qef.h`. `DCOctreeMesher` is covered by `test/test_dc_octree_mesher.gd` (watertight + crack-free LOD transition) and `test/test_dc_real_terrain.gd` (real terrain); `DCRegionReader` by `test/test_dc_region_reader.gd`. The GDScript prototype *render* meshers were retired once this C++ path became production. `scripts/dc/` now holds: `dc_terrain_manager.gd` + `dc_collision_manager.gd` (live render/collision managers), `dc_edit_splicer.gd` (incremental edit-patch array surgery), and `voxel_octree.gd` + `octree_mesher.gd` — **the Phase B substrate prototypes** (the GDScript oracle `SparseVoxelOctree` was ported from; actively maintained for the adaptive-octree-substrate work, NOT dead — see `docs/roadmap/design/10-adaptive-octree-substrate.md`). The single-mesher consolidation (collision from our octree mesh, drop per-block visual meshing) is a deferred cleanup.
+- **Render — `DcWorldPreview` (`scripts/dc/dc_world_preview.gd`), the `dcworld` render (doc 17).** A single **world-fixed incremental octree** (`DCOctreeMesher.mesh_world` / `grow_world`): screen-error LOD whose one knob `eps_px` is driven by a frame-time + mesh-lag **budget controller**; a move re-meshes only the changed band (incremental refine/coarsen). Default-on at world startup. Wears the production terrain shader + material palette.
+- **Render fallback — `DCTerrainManager` (`scripts/dc/dc_terrain_manager.gd`), the camera-centered clipmap.** The previous render; kept toggleable via `dcmanager` for side-by-side comparison. Retiring it (+ `DcSubstratePreview`/`dcgen`, + the GDScript SVO substrate prototypes) is a pending **cleanup pass**.
+- **Collision — `DCCollisionManager` (`scripts/dc/dc_collision_manager.gd`).** Body-driven JIT collision DC-meshed from the `EditStore` around the player (no godot_voxel). Separate from the render.
+
+Shared QEF solver in `engine/voxel_dc/dc_qef.h`. `DCOctreeMesher` (`mesh_world`/`grow_world`) is covered by `test/test_dc_world_octree.gd`; the clipmap path by `test/test_dc_octree_mesher.gd` + `test/test_dc_real_terrain.gd`. `scripts/dc/` also keeps `dc_edit_splicer.gd` (incremental edit-patch array surgery) and `voxel_octree.gd` + `octree_mesher.gd` (the GDScript SVO substrate prototypes the oracle was ported from). Known render bugs live in `docs/bugs/` (inside-coverage cracks, reversed ridge triangles).
 
 ### Scene graph
 
+`world.tscn` holds only `StructuralIntegrity` + `Player`; the terrain subsystems (`EditStoreManager`, `DcWorldPreview`, `DCTerrainManager`, `DCCollisionManager`, …) are instantiated in `world.gd:_ready`.
+
 ```
 world.tscn
-├── VoxelLodTerrain      ← procedural SDF terrain
 ├── StructuralIntegrity  ← Node; facade composing the structural subsystem
 └── Player (CharacterBody3D)
     ├── Head / Camera3D
     ├── RayCast3D
     └── EditPreview (MeshInstance3D)
+   (terrain render/collision/data nodes added at runtime by world.gd)
 ```
 
-`player.gd` acquires `StructuralIntegrity` and `VoxelLodTerrain` via `get_parent().get_node()` in `_ready`.
+`player.gd` acquires `StructuralIntegrity` via `get_parent().get_node()` in `_ready`; it edits the terrain through the `EditStore` (sphere-traced aim via `TerrainRaymarch`), not a terrain node.
 
 ### Action pattern (`scripts/actions/`)
 
@@ -194,7 +198,7 @@ Player controls in **Construction → Build** activity: `[`/`]` cycle parts, `R/
 - `G` toggles the voxel grid overlay (wireframes the targeted cell and its Chebyshev neighborhood, helpful for understanding voxel boundaries during flatten/dig/fill).
 - `F` toggles full-scene wireframe.
 
-**Action preview rendering:** Every `Action` subclass implements `preview() -> ActionPreview`, returning the cells it would change classified by intent (`air`, `solid`, `part`) plus a `refused` flag. The world-space `VoxelPreviewRenderer` (`scenes/player/voxel_preview_renderer.gd`) builds an Action each frame from the current raycast hit, calls `preview()`, and draws the cells via two ImmediateMesh passes (visible / obscured). Outlines inset 0.05 to avoid z-fighting with the Transvoxel surface. Refusal lerps intent colors toward grey. The legacy idealised sphere/plane previews are gone for Dig/Fill/Flatten; Build keeps its part-mesh ghost.
+**Action preview rendering:** Every `Action` subclass implements `preview() -> ActionPreview`, returning the cells it would change classified by intent (`air`, `solid`, `part`) plus a `refused` flag. The world-space `VoxelPreviewRenderer` (`scenes/player/voxel_preview_renderer.gd`) builds an Action each frame from the current raycast hit, calls `preview()`, and draws the cells via two ImmediateMesh passes (visible / obscured). Outlines inset 0.05 to avoid z-fighting with the DC terrain surface. Refusal lerps intent colors toward grey. The legacy idealised sphere/plane previews are gone for Dig/Fill/Flatten; Build keeps its part-mesh ghost.
 
 ### Materials
 
@@ -203,7 +207,7 @@ Player controls in **Construction → Build** activity: `[`/`]` cycle parts, `R/
 ### SDF conventions
 
 - Negative SDF = inside solid; positive = air. Surface at zero-crossing.
-- Use `SDF_AIR = 5.0` (not 1.0) to clear voxels — Transvoxel interpolation pulls the surface back toward solid neighbours unless the value is large enough.
+- Use `SDF_AIR = 5.0` (not 1.0) to clear voxels — isosurface interpolation (DC) pulls the surface back toward solid neighbours unless the value is large enough.
 - Use `SDF_SOLID_THRESHOLD = 0.0` to test solidity in queries.
 - All SDF and structural constants live in `VoxelConstants` (`scripts/voxel_constants.gd`).
 
