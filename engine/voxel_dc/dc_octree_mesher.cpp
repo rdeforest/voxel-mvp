@@ -319,7 +319,9 @@ struct EditStoreSource : public SdfSource {
 	Clipmap accel;
 	LocalVector<PackedFloat32Array> accel_held; // backs the levels' data ptrs
 	bool has_accel = false;
-	static const int ACCEL_DIM = 129;           // samples per level axis (matches the render clipmap)
+	static const int ACCEL_DIM = 65;            // samples per level axis. Small on purpose: the accel bake is
+	                                            // a fixed mesh-lag cost (independent of eps), so keeping it
+	                                            // cheap frees the lag budget for the controller to refine eps.
 
 	// (P2, doc 17) graded data floor: the build descends only as fine as a cell would RENDER. A cell of
 	// size s at distance d projects to ~s*proj/d px, so the floor where that ≈ eps_px is s = eps_px*d/proj

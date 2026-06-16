@@ -19,11 +19,22 @@ extends MeshInstance3D
 const DEPTH        := 11      # root = 2^11 = 2048-unit cube; the window roams inside it (size is free —
 const ROOT_SIZE    := 1 << DEPTH  #   cells outside the window are cheap absent leaves)
 const ROOT_SNAP    := 64      # snap the root origin to this LATTICE grid (cells stay world-aligned)
-const RECENTER     := 6.0     # grow the window once the player drifts this far (m)
-const EPS_PX       := 2.0     # screen-error LOD threshold (px)
+const RECENTER     := 6.0     # re-mesh once the player drifts this far (m)
+
+# Budget controller (doc 13 B2): ONE knob, _eps_px, driven against two costs. Start coarse (cheap) and
+# tighten until either binds. Mesh lag = the worker build's WORK ms (terrain latency); frame time = render.
+const EPS_START    := 48.0    # start with a big error allowance (coarse) — the controller tightens it
+const EPS_MIN      := 1.0
+const EPS_MAX      := 256.0
+const MESH_TARGET  := 100.0   # ms — under this (and frame headroom): refine (lower eps)
+const MESH_CEIL    := 500.0   # ms — over this: coarsen (raise eps) — the mesh-lag ceiling
+const FRAME_BUDGET := 16.0    # ms — frame-time ceiling (render cost); generous, not an FPS game
 
 var base_cell    := VoxelConstants.RENDER_BASE_CELL  # metres per lattice unit (matches production density)
-var win_radius_m := 12.0                             # resident window half-extent around the player (m)
+var win_radius_m := 128.0                            # resident window half-extent (m) — graded floor + budget make it affordable
+var _eps_px      := EPS_START                        # the single operating point; floor + collapse both derive from it
+var _frame_ms    := 0.0                              # smoothed frame time (render-cost signal)
+var _eps_dirty   := false                            # the controller changed eps → re-mesh to apply it
 
 var _follow:     Node3D
 var _edit_store: EditStore        # live store; snapshotted per re-root so the worker reads immutably
@@ -38,11 +49,12 @@ var _last_center := Vector3.INF
 var _task_id := -1
 var _job_store: EditStore            # immutable snapshot handed to the worker
 var _job_arrays: Array = []
-var _job_is_grow := false
 var _job_cam := Vector3.ZERO
 var _job_proj := 0.0
+var _job_eps := EPS_START            # eps captured for the in-flight job
 var _job_win_min := Vector3i.ZERO
 var _job_win_max := Vector3i.ZERO
+var _job_work_ms := 0.0              # worker build time of the last job = mesh lag (controller signal)
 
 
 func setup(follow: Node3D, edit_store: EditStore = null) -> void:
@@ -81,18 +93,19 @@ func set_enabled(on: bool) -> void:
         mesh = null
 
 
-func _process(_dt: float) -> void:
+func _process(dt: float) -> void:
     if not _enabled or _follow == null:
         return
+    _frame_ms = lerpf(_frame_ms, dt * 1000.0, 0.1)   # smoothed frame-time signal for the controller
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()
         return
     var p := _follow.global_position
-    if not _built or _dirty or _outside_root(p):
+    # Graded build full-rebuilds on move: grow_world doesn't re-grade interior cells whose floor changed as
+    # the camera moved (that's the P2.5 band-diff). Re-mesh on move, edit, re-root, or an eps change.
+    if not _built or _dirty or _outside_root(p) or p.distance_to(_last_center) > RECENTER or _eps_dirty:
         _dispatch_build(p)
-    elif p.distance_to(_last_center) > RECENTER:
-        _dispatch_grow(p)
 
 
 # Root origin (LATTICE) snapped to the ROOT_SNAP grid, centred on the player — cells never shift
@@ -136,40 +149,29 @@ func _camera_lattice() -> Vector3:
     return cam_world / base_cell - Vector3(_root_origin_i)
 
 
-# Full rebuild at a snapped root with a fresh EditStore snapshot — re-root, edit, or first build.
+# Full graded rebuild at a snapped root with a fresh EditStore snapshot. Captures the camera + window on
+# the MAIN thread (the worker can't touch the viewport), then dispatches the build to a worker.
 func _dispatch_build(p: Vector3) -> void:
     _root_origin_i = _snap_root(p)
     _job_store = _edit_store.duplicate() if _edit_store != null else null
     _built = true
     _dirty = false
+    _eps_dirty = false
     _last_center = p
-    _stage_job(p, false)
-
-
-# Incremental: move the window toward the new position (graft leading edge, evict trailing) on the
-# RETAINED octree — the common case as you walk. No new snapshot: grow reuses the retained store.
-func _dispatch_grow(p: Vector3) -> void:
-    _last_center = p
-    _stage_job(p, true)
-
-
-# Capture the camera + window on the MAIN thread (worker can't touch the viewport), then dispatch.
-func _stage_job(p: Vector3, is_grow: bool) -> void:
     var win := _window(p)
     _job_win_min = win[0]
     _job_win_max = win[1]
     _job_cam = _camera_lattice()
     _job_proj = _view_proj()
-    _job_is_grow = is_grow
-    _task_id = WorkerThreadPool.add_task(_run_job, false, "dcworld grow" if is_grow else "dcworld build")
+    _job_eps = _eps_px                            # capture the operating point for the worker
+    _task_id = WorkerThreadPool.add_task(_run_job, false, "dcworld build")
 
 
 func _run_job() -> void:
-    if _job_is_grow:
-        _job_arrays = _mesher.grow_world(_job_cam, _job_proj, EPS_PX, _job_win_min, _job_win_max)
-    else:
-        _job_arrays = _mesher.mesh_world(_job_store, _root_origin_i, DEPTH, base_cell,
-                _job_cam, _job_proj, EPS_PX, true, PackedColorArray(), _job_win_min, _job_win_max)
+    var t0 := Time.get_ticks_usec()
+    _job_arrays = _mesher.mesh_world(_job_store, _root_origin_i, DEPTH, base_cell,
+            _job_cam, _job_proj, _job_eps, true, PackedColorArray(), _job_win_min, _job_win_max)
+    _job_work_ms = (Time.get_ticks_usec() - t0) / 1000.0   # mesh lag = the controller's primary signal
 
 
 func _finish() -> void:
@@ -185,6 +187,22 @@ func _finish() -> void:
     visible = true
     Perf.report("dcworld swap (main)", (Time.get_ticks_usec() - t0) / 1000.0)
     Perf.mark_event()
+    _control()
+
+
+# The B2 budget controller (doc 13): nudge the one knob, _eps_px, toward the budget. Coarsen (raise eps) if
+# mesh lag or frame time is over budget; refine (lower eps) only when BOTH have headroom. Damped, and it
+# backs off (×1.4) faster than it refines (×0.9). A change marks _eps_dirty → re-mesh applies it; in the
+# comfort band eps stops moving, so tuning rebuilds stop. The floor + collapse both derive from _eps_px.
+func _control() -> void:
+    var prev := _eps_px
+    var over := _job_work_ms > MESH_CEIL or _frame_ms > FRAME_BUDGET
+    var under := _job_work_ms < MESH_TARGET and _frame_ms < FRAME_BUDGET * 0.5
+    if over:
+        _eps_px = minf(_eps_px * 1.4, EPS_MAX)
+    elif under:
+        _eps_px = maxf(_eps_px * 0.9, EPS_MIN)
+    _eps_dirty = absf(_eps_px - prev) > 0.01
 
 
 func _arrays_to_mesh(arrays: Array) -> ArrayMesh:

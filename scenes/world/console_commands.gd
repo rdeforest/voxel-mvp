@@ -269,15 +269,20 @@ func dcgen(state := "") -> void:
     substrate_preview.set_enabled(on)
     LimboConsole.info("dcgen: %s (live octree-over-generator render, cyan)" % ("on" if on else "off"))
 
-# `dcworld on [radius_m]` renders the doc-16 world-fixed incremental octree (mesh_world + grow_world on
-# move), amber, overlaid, at production density (0.25 m). Dense build → a small bubble until the prune
-# lands; raise the radius to grow it (and watch the rebuild hitch grow — that hitch is the prune's point).
+# `dcworld on [radius_m]` renders the doc-17 world-fixed octree (amber, overlaid, 0.25 m), graded by the
+# screen-error budget controller: eps_px starts coarse and self-tunes against frame time + mesh lag
+# (~100 ms target, 500 ms ceiling). Coverage is the window radius (default 128 m). `dcmanager off` to see it
+# alone. `dcworld` (no args) prints the live eps_px + last mesh-lag.
 func dcworld(state := "", radius := 0.0) -> void:
     if radius > 0.0:
         world_preview.set_radius(radius)
+    if state == "" and radius == 0.0 and world_preview.is_enabled():
+        LimboConsole.info("dcworld: on, %.0fm coverage, eps_px=%.1f, last mesh-lag=%.0fms" % [
+            world_preview.win_radius_m, world_preview._eps_px, world_preview._job_work_ms])
+        return
     var on := _parse_toggle(state, world_preview.is_enabled())
     world_preview.set_enabled(on)
-    LimboConsole.info("dcworld: %s (world-fixed octree, %.2gm bubble @ %.2gm cells)%s" % [
+    LimboConsole.info("dcworld: %s (world-fixed octree, %.0fm coverage @ %.2gm, budget-tuned eps)%s" % [
         "on" if on else "off", world_preview.win_radius_m, world_preview.base_cell,
         " — tip: `dcmanager off` to see it alone" if on else ""])
 
