@@ -8,7 +8,47 @@
 
 ## Resumption Brief
 
-### Active thread (2026-06-15): doc 17 done — dcworld IS the render. Next: finish `started/` → cleanup → bug bash
+### Active thread (2026-06-16): full-project code review (two-pass) — review now, edits after
+
+**The plan (Robert's call).** Before the DC cleanup pass + bug bash, do a complete code review in **two passes**:
+1. **Pass 1 — Claude reviews the whole project and acts on it.** Both levels:
+   - *Low-level:* code-style fit, better loop/branch handling, branch→data-structure conversions, split-too-big /
+     merge-too-small, naming, vertical alignment, comment density.
+   - *High-level:* single-responsibility (is an object doing >1 thing?), duplication (are two objects doing the
+     same thing?), needless recompute, data moved that needn't be.
+2. **Pass 2 — Robert reads every file, edits to taste, asks questions where the code isn't self-explanatory.**
+   Claude extracts going-forward instructions from each of Robert's diffs (→ memory/feedback) and Robert builds
+   a deeper mental model (currently ~VoxelFarm-blog level).
+
+**Performance is known-poor and that's accepted for now** — Robert prioritizes forward progress over optimization/
+debugging. So Pass 1 flags perf structurally (needless recompute, data churn) but does **not** chase frame time.
+
+**Status:** Pass 1 done — reviewed (8 parallel subsystem reviews) + applied on `refactor/review-pass-1` (4 commits,
+GUT 207/206 pass/1 pending/0 fail throughout):
+- **`4e57cad`** delete `SparseVoxelOctree` + the GDScript SVO prototypes (`voxel_octree`/`octree_mesher`) + `dcgen`
+  (`DcSubstratePreview`) + their tests; relocate the `terrain_surface` oracle to `EditStore`. −1834 lines. *(This
+  pulled the SVO/dcgen prototype deletions FORWARD from the cleanup pass; the clipmap `DCTerrainManager` deletion
+  still belongs to that pass.)*
+- **`624e204`** consolidate duplicated GDScript: new `TerrainProbe` / `OverlayMaterial` / `PhysicsUtils` /
+  `VoxelUtils.euler_basis` shared homes; single-source `TERRAIN_MATERIAL_PATH` / `SURFACE_NUDGE` / `PLAYER_CLEARANCE`
+  into `VoxelConstants`; `FloodViz` drives a `GroundFlood`; event-bus `_remove_matching` no longer erases mid-iterate.
+- **`23403e4`** dedup the DC mesher's leaf-decision logic (`want_leaf`/`sample_leaf`/`discard_children`) — the
+  grow==fresh-build invariant no longer hand-synced across build/reconcile/make_leaf.
+
+**Two review findings were FALSE POSITIVES (verified, not applied):** the mat3 SVD "double-flip" is correct (the
+both-improper case has det F≥0, the double-negate is intended); the MPM sand-viscosity flag is the already-known
+*pending* repose-tuning test, not a new bug.
+
+**Deferred (recommend separate focused passes):** emit-via-`StoreWrite` consolidation (changes `terrain_sdf_changed`
+footprint the structural layer subscribes to — wants event-coverage tests); C++ constants module (low value, MPM
+paused, the gravity dup self-resolves when PBD retires); the LOW structural-perf items (per-frame Action rebuild,
+`perf.gd` O(n) ring) per the flag-don't-chase steer.
+
+**NEXT = Pass 2:** Robert reads every file, edits to taste, asks questions; Claude extracts going-forward
+instructions from each diff. Then the **DC cleanup pass** (delete the clipmap `DCTerrainManager` + geomorph), the
+**bug bash** (`docs/bugs/`), then MPM (doc 12) / v0.1 backlog (5.5g/h).
+
+### Prior thread (2026-06-15): doc 17 done — dcworld IS the render
 
 **Docs 14 + 16 DONE; doc 17's world-octree is now THE production render (GPU-verified visually).** The path:
 P1 surface-sparse prune (concentric world-anchored min/max accel) → P2 graded floor from the ONE knob
