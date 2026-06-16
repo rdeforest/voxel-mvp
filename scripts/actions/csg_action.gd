@@ -26,15 +26,14 @@ func _init(
     p_xform:    Transform3D,
     p_op:       int,
     p_material: StringName,
-    p_store:    EditStore,
-    p_player:   CharacterBody3D,
+    p_ctx:      ActionContext,
 ) -> void:
     shape         = p_shape
     xform         = p_xform
     op            = p_op
     material_name = p_material
-    store         = p_store
-    player        = p_player
+    store         = p_ctx.store
+    player        = p_ctx.player
 
 
 func validate() -> bool:

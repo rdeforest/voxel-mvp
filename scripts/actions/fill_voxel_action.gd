@@ -7,10 +7,10 @@ var cell:    Vector3i
 var store:   EditStore
 
 
-func _init(p_cell: Vector3i, p_store: EditStore, p_player: CharacterBody3D, p_material: StringName = &"Stone") -> void:
+func _init(p_cell: Vector3i, p_ctx: ActionContext, p_material: StringName = &"Stone") -> void:
     cell          = p_cell
-    store         = p_store
-    player        = p_player
+    store         = p_ctx.store
+    player        = p_ctx.player
     material_name = p_material
 
 

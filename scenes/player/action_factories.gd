@@ -8,8 +8,9 @@ var _integrity:   StructuralIntegrity
 var _camera:      Camera3D
 var _build_state: BuildState
 var _csg_state:   CsgState
-var _pbd:         PbdStructure   # resolved lazily — created by world after the player
-var _store_ref:   EditStore      # the edit store — created by world after the player; resolved lazily
+var _pbd:         PbdStructure    # resolved lazily — created by world after the player
+var _store_ref:   EditStore       # resolved lazily — created by world after the player
+var _ctx_ref:     ActionContext   # built lazily; valid once both _store_ref and _pbd resolve
 
 
 func _init(
@@ -26,61 +27,67 @@ func _init(
     _csg_state   = csg_state
 
 
-# The EditStore is created in world._ready, after the player's _ready, so it can't be
-# captured at construction — resolve it on first use and cache (same pattern as _pbd).
+# The EditStore and PbdStructure are created in world._ready, after the player's
+# _ready, so they can't be captured at construction — resolve on first use and
+# cache. _action_ctx() builds the ActionContext once both are available.
 func _store() -> EditStore:
     if _store_ref == null:
         _store_ref = _player.get_parent().edit_store_ref()
+        _ctx_ref   = null   # invalidate so _action_ctx() rebuilds with the real store
     return _store_ref
+
+func _pbd_structure() -> PbdStructure:
+    if _pbd == null:
+        _pbd     = _player.get_parent().get_node_or_null(^"PbdStructure")
+        _ctx_ref = null   # invalidate so _action_ctx() rebuilds with the real pbd
+    return _pbd
+
+func _action_ctx() -> ActionContext:
+    if _ctx_ref == null:
+        _ctx_ref = ActionContext.new(_store(), _player, _integrity, _pbd_structure())
+    return _ctx_ref
 
 
 # --- Factories (one per EditMode) ---
 
 func make_probe(hit_pos: Vector3, hit_normal: Vector3) -> Action:
-    return ProbeAction.new(hit_pos, hit_normal, _build_state.placement_offset, _store(), _integrity, _pbd_structure())
+    return ProbeAction.new(hit_pos, hit_normal, _build_state.placement_offset, _action_ctx())
 
-# The probe's read-out lines for an arbitrary target, tool-independent — the live probe HUD calls
-# this every frame so scanning the scene works no matter which tool is selected.
+# The probe's read-out lines for an arbitrary target, tool-independent — the live
+# probe HUD calls this every frame so scanning the scene works no matter which tool
+# is selected.
 func probe_report(hit_pos: Vector3, hit_normal: Vector3) -> PackedStringArray:
-    var probe := ProbeAction.new(hit_pos, hit_normal, _build_state.placement_offset, _store(), _integrity, _pbd_structure())
-    return probe.report()
-
-# PbdStructure is added to the world after the player's _ready, so it can't be
-# captured at construction — resolve it on first use and cache.
-func _pbd_structure() -> PbdStructure:
-    if _pbd == null:
-        _pbd = _player.get_parent().get_node_or_null(^"PbdStructure")
-    return _pbd
+    return ProbeAction.new(hit_pos, hit_normal, _build_state.placement_offset, _action_ctx()).report()
 
 func make_dig(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var center := hit_pos - hit_normal * (EDIT_RADIUS * 0.5)
-    return DigAction.new(center, EDIT_RADIUS, _store())
+    return DigAction.new(center, EDIT_RADIUS, _action_ctx())
 
 func make_fill(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var center := hit_pos + hit_normal * (EDIT_RADIUS * 0.5)
-    return FillAction.new(center, EDIT_RADIUS, _store(), _player, _build_state.current_material())
+    return FillAction.new(center, EDIT_RADIUS, _action_ctx(), _build_state.current_material())
 
 func make_flatten(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     var flatten_normal := get_flatten_normal()
     if flatten_normal == Vector3.ZERO:
         flatten_normal = hit_normal
-    return FlattenAction.new(hit_pos, flatten_normal, EDIT_RADIUS, _store(), _player)
+    return FlattenAction.new(hit_pos, flatten_normal, EDIT_RADIUS, _action_ctx())
 
 func make_raise(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
-    return RaiseAction.new(hit_pos, EDIT_RADIUS, _store(), _player)
+    return RaiseAction.new(hit_pos, EDIT_RADIUS, _action_ctx())
 
 func make_lower(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
-    return LowerAction.new(hit_pos, EDIT_RADIUS, _store(), _player)
+    return LowerAction.new(hit_pos, EDIT_RADIUS, _action_ctx())
 
 func make_fill_voxel(hit_pos: Vector3, hit_normal: Vector3) -> Action:
-    var pos := hit_pos + hit_normal * 0.5     # nudge into the air cell
+    var pos  := hit_pos + hit_normal * 0.5
     var cell := Vector3i(floori(pos.x), floori(pos.y), floori(pos.z))
-    return FillVoxelAction.new(cell, _store(), _player, _build_state.current_material())
+    return FillVoxelAction.new(cell, _action_ctx(), _build_state.current_material())
 
 func make_empty_voxel(hit_pos: Vector3, hit_normal: Vector3) -> Action:
-    var pos := hit_pos - hit_normal * VoxelConstants.SURFACE_NUDGE    # nudge into the solid cell
+    var pos  := hit_pos - hit_normal * VoxelConstants.SURFACE_NUDGE
     var cell := Vector3i(floori(pos.x), floori(pos.y), floori(pos.z))
-    return EmptyVoxelAction.new(cell, _store())
+    return EmptyVoxelAction.new(cell, _action_ctx())
 
 # One factory for all three CSG shapes — the active shape lives in CsgState
 # (synced from the selected activity). The primitive is centred at the hit point
@@ -93,8 +100,7 @@ func make_csg(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
         xform,
         _csg_state.op,
         _csg_state.current_material(),
-        _store(),
-        _player,
+        _action_ctx(),
     )
 
 # Shared by make_csg and the ghost preview so the stamp and the ghost agree.
@@ -108,8 +114,7 @@ func make_construction(hit_pos: Vector3, _hit_normal: Vector3) -> Action:
         build_placement_pos(hit_pos),
         _build_state.rotation,
         _build_state.current_material(),
-        _store(),
-        _player,
+        _action_ctx(),
     )
 
 
@@ -128,6 +133,6 @@ func get_flatten_normal() -> Vector3:
         return Vector3.UP
     if Input.is_key_pressed(KEY_CTRL):
         var forward := _camera.global_transform.basis.z
-        forward.y = 0.0
+        forward.y   = 0.0
         return forward.normalized()
     return Vector3.ZERO  # sentinel meaning "use hit normal"

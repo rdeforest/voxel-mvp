@@ -21,15 +21,14 @@ func _init(
     p_pos:      Vector3,
     p_rotation: Vector3,
     p_material: StringName,
-    p_store:    EditStore,
-    p_player:   CharacterBody3D,
+    p_ctx:      ActionContext,
 ) -> void:
     part          = p_part
     placement_pos = p_pos
     rotation      = p_rotation
     material_name = p_material
-    store         = p_store
-    player        = p_player
+    store         = p_ctx.store
+    player        = p_ctx.player
 
 
 func validate() -> bool:

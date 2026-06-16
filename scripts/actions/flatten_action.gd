@@ -15,14 +15,13 @@ func _init(
     p_plane_point: Vector3,
     p_normal:      Vector3,
     p_radius:      float,
-    p_store:       EditStore,
-    p_player:      CharacterBody3D,
+    p_ctx:         ActionContext,
 ) -> void:
     plane_point = p_plane_point
     normal      = p_normal.normalized()
     radius      = p_radius
-    store       = p_store
-    player      = p_player
+    store       = p_ctx.store
+    player      = p_ctx.player
 
 
 func validate() -> bool:

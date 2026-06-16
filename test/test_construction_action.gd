@@ -25,13 +25,16 @@ func _store() -> EditStore:
 func _beam() -> Part:
     return preload("res://assets/parts/beam/beam.tres")   # 6x2x2 Wood
 
+func _ctx(store: EditStore) -> ActionContext:
+    return ActionContext.new(store, null, null, null)
+
 
 func test_part_imprints_solid_voxels_with_material() -> void:
     var store := _store()
     # Place the beam in open air (above the surface); execute regardless of attach so we pin
     # the imprint itself. Sample the beam's CENTRE (bottom at pos.y, 2 m tall -> +1 m).
     var pos := Vector3(COLUMN_X, _surface() + 20.0, COLUMN_Z)
-    ConstructionAction.new(_beam(), pos, Vector3.ZERO, &"Wood", store, null).execute()
+    ConstructionAction.new(_beam(), pos, Vector3.ZERO, &"Wood", _ctx(store)).execute()
     var centre := Vector3(COLUMN_X, _surface() + 21.0, COLUMN_Z)
     assert_lt(store.sample(centre), 0.0, "the beam imprinted solid into the store")
     assert_eq(store.material_at(centre), MaterialPalette.index_of(&"Wood"), "with the part's material")
@@ -40,12 +43,12 @@ func test_part_imprints_solid_voxels_with_material() -> void:
 func test_part_resting_on_ground_validates() -> void:
     var store := _store()
     var pos := Vector3(COLUMN_X, _surface(), COLUMN_Z)   # bottom at the surface
-    assert_true(ConstructionAction.new(_beam(), pos, Vector3.ZERO, &"Wood", store, null).validate(),
+    assert_true(ConstructionAction.new(_beam(), pos, Vector3.ZERO, &"Wood", _ctx(store)).validate(),
         "a beam resting on the ground attaches")
 
 
 func test_floating_part_is_refused() -> void:
     var store := _store()
     var pos := Vector3(COLUMN_X, _surface() + 15.0, COLUMN_Z)   # well up in the air
-    assert_false(ConstructionAction.new(_beam(), pos, Vector3.ZERO, &"Wood", store, null).validate(),
+    assert_false(ConstructionAction.new(_beam(), pos, Vector3.ZERO, &"Wood", _ctx(store)).validate(),
         "a part floating in air is refused")

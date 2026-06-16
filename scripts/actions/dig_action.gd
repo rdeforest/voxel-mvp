@@ -12,15 +12,15 @@ var store:     EditStore
 
 
 func _init(
-    p_position:  Vector3,
-    p_radius:    float,
-    p_store:     EditStore,
-    p_shape:     int = Shape.SPHERE,
+    p_position: Vector3,
+    p_radius:   float,
+    p_ctx:      ActionContext,
+    p_shape:    int = Shape.SPHERE,
 ) -> void:
     position = p_position
     radius   = p_radius
     shape    = p_shape
-    store    = p_store
+    store    = p_ctx.store
 
 func validate() -> bool:
     return true

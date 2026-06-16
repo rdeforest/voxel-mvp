@@ -26,12 +26,15 @@ func _store() -> EditStore:
     store.setup(Vector3(-128.0, -128.0, -128.0), 256.0, BASE, AMP, PERIOD, OCTAVES, SEED)
     return store
 
+func _ctx(store: EditStore, player: CharacterBody3D = null) -> ActionContext:
+    return ActionContext.new(store, player, null, null)
+
 
 func test_dig_carves_solid_to_air() -> void:
     var store := _store()
     var center := Vector3(COLUMN_X, _surface() - 5.0, COLUMN_Z)
     assert_lt(store.sample(center), 0.0, "below the surface is solid before the dig")
-    DigAction.new(center, 3.0, store).execute()
+    DigAction.new(center, 3.0, _ctx(store)).execute()
     assert_gt(store.sample(center), 0.0, "the dig carved the centre to air in the store")
 
 
@@ -39,7 +42,7 @@ func test_fill_adds_solid_and_paints_material() -> void:
     var store := _store()
     var center := Vector3(COLUMN_X, _surface() + 10.0, COLUMN_Z)
     assert_gt(store.sample(center), 0.0, "above the surface is air before the fill")
-    FillAction.new(center, 3.0, store, null, &"Stone").execute()
+    FillAction.new(center, 3.0, _ctx(store), &"Stone").execute()
     assert_lt(store.sample(center), 0.0, "the fill made the centre solid in the store")
     assert_eq(store.material_at(center), MaterialPalette.index_of(&"Stone"), "fill painted its material")
 
@@ -47,7 +50,7 @@ func test_fill_adds_solid_and_paints_material() -> void:
 func test_fill_voxel_sets_one_solid_cell() -> void:
     var store := _store()
     var cell := Vector3i(int(COLUMN_X), int(_surface()) + 8, int(COLUMN_Z))
-    var action := FillVoxelAction.new(cell, store, null, &"Stone")
+    var action := FillVoxelAction.new(cell, _ctx(store), &"Stone")
     assert_true(action.validate(), "an air cell can be filled")
     action.execute()
     assert_lt(store.sample(Vector3(cell)), 0.0, "the cell is solid in the store")
@@ -57,7 +60,7 @@ func test_fill_voxel_sets_one_solid_cell() -> void:
 func test_empty_voxel_clears_one_solid_cell() -> void:
     var store := _store()
     var cell := Vector3i(int(COLUMN_X), int(_surface()) - 6, int(COLUMN_Z))
-    var action := EmptyVoxelAction.new(cell, store)
+    var action := EmptyVoxelAction.new(cell, _ctx(store))
     assert_true(action.validate(), "a solid cell can be emptied")
     action.execute()
     assert_gt(store.sample(Vector3(cell)), 0.0, "the cell is air in the store")
@@ -68,7 +71,7 @@ func test_dig_then_fill_returns_to_solid() -> void:
     # generator (the dual-write bug). Carve to air, fill it back, expect solid again.
     var store := _store()
     var center := Vector3(COLUMN_X, _surface() - 5.0, COLUMN_Z)
-    DigAction.new(center, 4.0, store).execute()
+    DigAction.new(center, 4.0, _ctx(store)).execute()
     assert_gt(store.sample(center), 0.0, "carved to air")
-    FillAction.new(center, 3.0, store, null, &"Stone").execute()
+    FillAction.new(center, 3.0, _ctx(store), &"Stone").execute()
     assert_lt(store.sample(center), 0.0, "filled back to solid")

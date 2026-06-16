@@ -16,13 +16,13 @@ var integrity:  StructuralIntegrity
 var pbd:        PbdStructure
 
 
-func _init(p_hit_pos: Vector3, p_hit_normal: Vector3, p_offset: Vector3, p_store: EditStore, p_integrity: StructuralIntegrity, p_pbd: PbdStructure) -> void:
+func _init(p_hit_pos: Vector3, p_hit_normal: Vector3, p_offset: Vector3, p_ctx: ActionContext) -> void:
     hit_pos    = p_hit_pos
     hit_normal = p_hit_normal
     offset     = p_offset
-    store      = p_store
-    integrity  = p_integrity
-    pbd        = p_pbd
+    store      = p_ctx.store
+    integrity  = p_ctx.integrity
+    pbd        = p_ctx.pbd
 
 
 func validate() -> bool:

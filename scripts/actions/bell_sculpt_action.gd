@@ -18,12 +18,11 @@ var _work: Array         = []   # [[Vector3i cell, float new_sdf, float old_sdf]
 var _work_computed: bool = false
 
 
-func _init(p_position: Vector3, p_radius: float, p_store: EditStore,
-        p_player: CharacterBody3D, p_sign: float) -> void:
+func _init(p_position: Vector3, p_radius: float, p_ctx: ActionContext, p_sign: float) -> void:
     position = p_position
     radius   = p_radius
-    store    = p_store
-    player   = p_player
+    store    = p_ctx.store
+    player   = p_ctx.player
     _sign    = p_sign
 
 

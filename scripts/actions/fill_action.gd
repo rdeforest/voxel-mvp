@@ -10,18 +10,17 @@ var store:     EditStore
 
 
 func _init(
-    p_position:  Vector3,
-    p_radius:    float,
-    p_store:     EditStore,
-    p_player:    CharacterBody3D,
-    p_material:  StringName = &"Stone",
-    p_shape:     int = Shape.SPHERE,
+    p_position: Vector3,
+    p_radius:   float,
+    p_ctx:      ActionContext,
+    p_material: StringName = &"Stone",
+    p_shape:    int = Shape.SPHERE,
 ) -> void:
     position      = p_position
     radius        = p_radius
     shape         = p_shape
-    store         = p_store
-    player        = p_player
+    store         = p_ctx.store
+    player        = p_ctx.player
     material_name = p_material
 
 func validate() -> bool:

@@ -6,9 +6,9 @@ var cell:    Vector3i
 var store:   EditStore
 
 
-func _init(p_cell: Vector3i, p_store: EditStore) -> void:
+func _init(p_cell: Vector3i, p_ctx: ActionContext) -> void:
     cell  = p_cell
-    store = p_store
+    store = p_ctx.store
 
 
 func validate() -> bool:

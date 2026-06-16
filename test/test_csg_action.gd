@@ -23,10 +23,13 @@ func before_each() -> void:
     _store.setup(_center - Vector3.ONE * 128.0, 256.0, BASE, AMP, PERIOD, OCTAVES, SEED)
 
 
+func _ctx(player: CharacterBody3D = null) -> ActionContext:
+    return ActionContext.new(_store, player, null, null)
+
 func _sphere(op: int, radius: float) -> CsgAction:
     return CsgAction.new(
         CsgSphereShape.new(radius),
-        Transform3D(Basis.IDENTITY, _center), op, &"Stone", _store, null)
+        Transform3D(Basis.IDENTITY, _center), op, &"Stone", _ctx())
 
 
 func test_sphere_add_marks_interior_solid() -> void:
@@ -55,7 +58,7 @@ func test_player_clearance_refuses_burying_stamp() -> void:
     player.global_position = _center
     var action := CsgAction.new(
         CsgSphereShape.new(4.0),
-        Transform3D(Basis.IDENTITY, _center), CsgState.Op.ADD, &"Stone", _store, player)
+        Transform3D(Basis.IDENTITY, _center), CsgState.Op.ADD, &"Stone", _ctx(player))
     assert_false(action.validate(), "stamp would bury the player -> refused")
 
 
@@ -65,7 +68,7 @@ func test_world_box_grows_with_rotation() -> void:
     var basis  := Basis(Vector3.UP, deg_to_rad(45.0))
     var action := CsgAction.new(
         CsgBoxShape.new(Vector3(4, 4, 4)),
-        Transform3D(basis, Vector3(10, 0, 0)), CsgState.Op.ADD, &"Stone", _store, null)
+        Transform3D(basis, Vector3(10, 0, 0)), CsgState.Op.ADD, &"Stone", _ctx())
     var box := action._world_box()
     # 4×4×4 box rotated 45° about Y spans ~5.66 in X/Z; +/- MARGIN(2) each side.
     assert_true(box.has_point(Vector3(10, 0, 0)), "encloses the centre")
