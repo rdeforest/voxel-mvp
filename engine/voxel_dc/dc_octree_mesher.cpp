@@ -547,6 +547,37 @@ struct Octree {
 		return o.x + size > build_min.x && o.x < build_max.x && o.y + size > build_min.y && o.y < build_max.y && o.z + size > build_min.z && o.z < build_max.z;
 	}
 
+	// Should this cell stop subdividing and become a leaf? True at the data floor, when
+	// the cell is provably surface-free (prune), or when size is already atomic. This is
+	// the shared predicate build() and reconcile() both check — one definition, no drift.
+	bool want_leaf(int size, const Vector3i &origin) const {
+		Vector3 center = to_v3(origin) + Vector3(1, 1, 1) * (size * 0.5);
+		return size <= 1
+			|| double(size) <= src->target_cell_size(center)
+			|| (prune_safety > 0.0 && src->surface_free(
+					to_v3(origin), to_v3(origin) + Vector3(1, 1, 1) * double(size)));
+	}
+
+	// Assign this leaf's Hermite data from its own edges and charge the build counter.
+	// Call sites that are transitioning an absent leaf to present must set absent=false
+	// themselves (the extra step stays inline so this helper stays narrowly scoped).
+	void sample_leaf(int idx) {
+		cells[idx].qef = leaf_qef(idx);
+		++build_samples;
+	}
+
+	// Free all 8 children of idx (recursively) and reset their slots for reuse.
+	// No-op when idx is already a structural leaf (children[0] < 0).
+	void discard_children(int idx) {
+		if (cells[idx].children[0] < 0) {
+			return;
+		}
+		for (int i = 0; i < 8; ++i) {
+			kill_subtree(cells[idx].children[i]);
+			cells[idx].children[i] = -1;
+		}
+	}
+
 	// A leaf's QEF, built from the 12 cube edges that cross the isosurface (the cell's
 	// own Hermite data at its own size).
 	Qef leaf_qef(int idx) const {
@@ -605,8 +636,7 @@ struct Octree {
 			if (cells[idx].absent) {
 				cells[idx].qef = Qef();
 			} else {
-				cells[idx].qef = leaf_qef(idx);
-				++build_samples;
+				sample_leaf(idx);
 			}
 			return;
 		}
@@ -715,18 +745,10 @@ struct Octree {
 			}
 			return idx; // outside the box — leaf, don't descend (no data sampled)
 		}
-		Vector3 center = to_v3(origin) + Vector3(1, 1, 1) * (size * 0.5);
-		// Surface-sparse prune: stop here if the cell is provably surface-free, instead of subdividing
-		// its whole subtree to the floor (the dense build's ~2M-cell, multi-second cost). EXACT — checks
-		// the actual grid samples via a min/max mip, so it CAN'T miss a sub-cell ridge (a gradient
-		// estimate did → over-pruned → degenerate geometry). A surface-free cell has no crossing edge,
-		// so the stitch loses nothing.
-		if (prune_safety > 0.0 && size > 1 &&
-				src->surface_free(to_v3(origin), to_v3(origin) + Vector3(1, 1, 1) * double(size))) {
+		// Surface-sparse prune + data-floor check — the same predicate reconcile() evaluates
+		// per retained cell; want_leaf() is the single definition for both paths.
+		if (want_leaf(size, origin)) {
 			return idx;
-		}
-		if (double(size) <= src->target_cell_size(center)) {
-			return idx; // at the data resolution floor — can't refine further
 		}
 		// Always build down to the data floor; error-driven coarsening happens bottom-up
 		// in accumulate() (build fine, then collapse where the fine data fits one vertex),
@@ -995,16 +1017,10 @@ struct Octree {
 	// Make this cell into a present leaf at its own size: discard any subtree (coarsen) and sample its own
 	// Hermite data. The from-scratch equivalent of a build() that stops here (floor or pruned).
 	void make_leaf(int idx) {
-		if (cells[idx].children[0] >= 0) {
-			for (int i = 0; i < 8; ++i) {
-				kill_subtree(cells[idx].children[i]);
-				cells[idx].children[i] = -1;
-			}
-		}
+		discard_children(idx);
 		cells[idx].leaf = true;
 		cells[idx].absent = false;
-		cells[idx].qef = leaf_qef(idx);
-		++build_samples;
+		sample_leaf(idx);
 	}
 
 	// Reconcile the retained tree to the CURRENT window + camera floor (build_min/max + target_cell_size),
@@ -1017,27 +1033,18 @@ struct Octree {
 		int sz = cells[idx].size;
 		if (!cell_overlaps_build_box(cells[idx].origin, sz)) {
 			// Left the window → absent leaf (the placeholder a fresh build leaves here).
-			if (cells[idx].children[0] >= 0) {
-				for (int i = 0; i < 8; ++i) {
-					kill_subtree(cells[idx].children[i]);
-					cells[idx].children[i] = -1;
-				}
-			}
+			discard_children(idx);
 			cells[idx].leaf = true;
 			cells[idx].absent = true;
 			return;
 		}
 		// In window. build()'s own leaf test: at the data floor, or provably surface-free (pruned).
-		Vector3 center = to_v3(cells[idx].origin) + Vector3(1, 1, 1) * (sz * 0.5);
-		bool want_leaf = sz <= 1 || double(sz) <= src->target_cell_size(center) ||
-				(prune_safety > 0.0 && src->surface_free(to_v3(cells[idx].origin), to_v3(cells[idx].origin) + Vector3(1, 1, 1) * double(sz)));
-		if (want_leaf) {
+		if (want_leaf(sz, cells[idx].origin)) {
 			if (cells[idx].children[0] >= 0) {
 				make_leaf(idx); // receded: coarsen the subtree back to one leaf here
 			} else if (cells[idx].absent) {
 				cells[idx].absent = false; // entered the window at the floor
-				cells[idx].qef = leaf_qef(idx);
-				++build_samples;
+				sample_leaf(idx);
 			}
 			// else: a present leaf already at the floor — unchanged, reused (not resampled)
 		} else if (cells[idx].children[0] >= 0) {
