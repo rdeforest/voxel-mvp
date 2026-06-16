@@ -50,6 +50,45 @@ Considering puts the player in a non-committing sandbox over the real world:
   combination adds it to the player's concept library** — the personal store
   of understood combinations.
 
+### Composing a prediction: consider, then interact
+
+The player *builds* a hypothetical by composing the verbs. **Consider** one
+thing, then **interact** with another, and the game shows what would *likely*
+happen if that interaction were real — without doing it. Worked example:
+
+1. Examine a bucket you made and **consider** it. Time pauses.
+2. Cast the cursor to a nearby stream and **interact**.
+3. The game plays a **ghost** of the likely outcome — the player walking to
+   the water's edge and filling the bucket. Nothing actually changed: the
+   bucket is still empty, the clock still paused.
+
+The prediction is "what is *likely* to happen," not a promise — see the open
+questions on uncertain and multi-outcome interactions.
+
+### The sentence: symbols the player names
+
+After the ghost, the interaction is shown as a row of symbols — for the bucket
+fill, **🖐 hand · bucket · → · stream** (agent · instrument · action ·
+target). Each symbol is a slot the player can **fill in with their own text.**
+Naming the slots buys two things:
+
+- **Search.** Having typed "bucket" and "stream," the player can later find
+  those things by those words — the concept library becomes queryable in the
+  player's *own* language.
+- **Future sentences.** Once named, later predicted interactions render as
+  *sentences* built from the player's words ("fill bucket from stream")
+  instead of anonymous glyphs.
+
+The game ships **no nouns**; the player writes the language. This is exactly
+why a naming system is compatible with minimal text and near-zero localization
+(pillar 6) — the only words on screen are ones the player chose to put there.
+
+This unifies the two halves of the visual language above: the **ghost** shows
+*what* would happen; the **nameable sentence** is *how the player records and
+recalls it.* A named action-sentence is the action-shaped sibling of a named
+build in the concept library below — both live in the same player-authored
+store.
+
 ## The concept library: naming makes builds repeatable
 
 The concept library is how a player turns a one-off arrangement into a
@@ -107,7 +146,14 @@ accessibility chapter for the no-reflexes commitment this serves.
 
 - **Granularity of naming.** Can the player name a single voxel relationship,
   or only assemblies? Where's the line between an examined *thing* and a named
-  *relationship*?
+  *relationship*? And when the player names a sentence slot ("bucket"), does
+  that name bind to *this* instance, to the item *type*, or to every
+  bucket-shaped thing — i.e. how does one naming generalize?
+- **Predicting uncertain or multi-outcome interactions.** The ghost shows what
+  is *likely*, but some interactions have more than one plausible result or a
+  genuinely probabilistic one. Show only the most likely outcome, a fan of
+  alternatives, or a confidence cue? It must stay surprise-free (pillar 9)
+  without pretending the world is more deterministic than it is.
 - **Concept-library UI without clutter** (pillars 5 + 6). The library is
   player-authored content; presenting it for re-placement without a text list
   is the same unsolved problem as the job-queue visual language.
