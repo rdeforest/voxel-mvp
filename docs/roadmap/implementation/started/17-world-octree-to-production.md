@@ -1,9 +1,10 @@
 # World-Fixed Octree → Production Render (doc 16 Stage C)
 
-**Status:** Active. The successor to [doc 16](../done/16-persistent-octree-substrate.md), which BUILT and
-PROVED the world-fixed incremental octree (`mesh_world` + `grow_world`, headless-gated) and wired it to a
-live PREVIEW (`dcworld`). This doc is the remaining work to make it the **production render** and retire the
-camera-centered clipmap — doc 16's Stage C, split out so 16 could close on its achieved deliverable.
+**Status:** the world-fixed octree **IS the production render** (P1–P3 done, GPU-verified). What remains is
+deferred by choice, not in progress: **deleting** the retired parallel renders (the **code cleanup pass**)
+and the **inside-coverage cracks** ([`docs/bugs/`](../../../bugs/dc-inside-coverage-cracks.md), the **bug
+bash**). Successor to [doc 16](../done/16-persistent-octree-substrate.md) (which built + proved the substrate);
+this was its Stage C — promote the octree to the render and retire the camera-centered clipmap.
 
 **Read first:** doc 16 (the substrate + why), `docs/MANIFESTO.md` (one field / one representation / the grid
 is a world-fixed spatial database / no half-measures), and the `dcworld` triage notes in `docs/STATUS.md`.

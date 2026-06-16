@@ -16,7 +16,7 @@ P1 surface-sparse prune (concentric world-anchored min/max accel) → P2 graded 
 → P2.5 incremental band-diff (a move refines approached / coarsens receded / grafts+evicts the window edge,
 re-meshing only the changed band) → P3 swap (`dcworld` enabled at startup, production shader + palette;
 clipmap kept as the `dcmanager` comparison fallback). Perf overlay shows live `eps_px` + mesh-lag.
-GUT 233 / 232 pass / 1 pending / 0 fail. Branch `feat/dc-persistent-octree-cache`.
+GUT 233 / 232 pass / 1 pending / 0 fail. **Merged to `master` (`ca83017`)** — `feat/dc-persistent-octree-cache` folded in.
 
 **Deferred BY CHOICE (Robert's sequence: finish all `started/` docs → code cleanup pass → bug bash):**
 - The **inside-coverage cracks** ride along on the render — tracked in [`docs/bugs/`](bugs/00_INDEX.md)

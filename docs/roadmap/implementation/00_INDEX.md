@@ -17,12 +17,12 @@ underway), [`planned/`](planned/) (not yet begun), [`done/`](done/00_INDEX.md)
 Work underway — partially landed or actively in progress.
 
 - [`started/05-phase-5_5-architectural-maturation.md`](started/05-phase-5_5-architectural-maturation.md)
-  — the decoupling refactor that readies the architecture for v0.1 (5.5a/b
-  shipped; later sub-phases pending).
+  — the v0.1 backlog (5.5a/b shipped; 5.5c/f superseded by MPM/doc 12; 5.5d/e →
+  v0.2; 5.5g construction polish + 5.5h QoL/perf/bugs are the live v0.1 work).
 - [`started/17-world-octree-to-production.md`](started/17-world-octree-to-production.md)
-  — make the world-fixed incremental octree (built + proven in done/16) the live
-  render: surface-sparse prune over direct sampling, graded data floor, retire the
-  clipmap. (Docs 14 + 16 shipped → `done/`.)
+  — the world-fixed octree IS the production render now (P1–P3 done: prune, graded
+  floor + budget controller, incremental band-diff, dcworld swap). Remaining:
+  delete the retired parallel renders (cleanup pass) + the crack bug (bug bash).
 
 ## Planned
 
