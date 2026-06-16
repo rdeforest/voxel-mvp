@@ -42,12 +42,7 @@ func current_material() -> StringName: return _materials[_material_index]
 # Palette id written to the voxel's CHANNEL_INDICES (0 = natural, never used here).
 func material_index() -> int: return MaterialPalette.index_of(current_material())
 
-func rotation_basis() -> Basis:
-    var b := Basis.IDENTITY
-    b = b.rotated(Vector3.RIGHT,   deg_to_rad(rotation.x))
-    b = b.rotated(Vector3.UP,      deg_to_rad(rotation.y))
-    b = b.rotated(Vector3.FORWARD, deg_to_rad(rotation.z))
-    return b
+func rotation_basis() -> Basis: return VoxelUtils.euler_basis(rotation)
 
 func current_mesh() -> Mesh:       return _active.mesh()
 func bounding_extent() -> float:   return _active.bounding_extent()

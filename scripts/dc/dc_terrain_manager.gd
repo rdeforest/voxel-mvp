@@ -58,8 +58,7 @@ var frozen := false        # examine mode: stop dispatching re-meshes so the cur
 # The grass surface material worn by our mesh when DC is the default render. A standalone
 # resource (not the terrain node's) — Godot caches it by path, so the console `set`/`get` and
 # the snapshot tunables load() the SAME instance and edit it live.
-const TERRAIN_MATERIAL_PATH := "res://assets/materials/terrain_surface.tres"
-var terrain_material: ShaderMaterial = load(TERRAIN_MATERIAL_PATH)
+var terrain_material: ShaderMaterial = load(VoxelConstants.TERRAIN_MATERIAL_PATH)
 # Examine-mode override: double-sided, magenta backfaces (tell a backwards triangle from a hole).
 const BACKFACE_MATERIAL_PATH := "res://assets/materials/dc_backface_debug.tres"
 

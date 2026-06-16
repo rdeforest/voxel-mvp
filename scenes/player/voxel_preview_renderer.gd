@@ -137,15 +137,5 @@ static func _tinted(c: Color, refused: bool) -> Color:
 func _make_pass(obscured: bool) -> MeshInstance3D:
     var mi := MeshInstance3D.new()
     mi.mesh              = ImmediateMesh.new()
-    mi.material_override = _make_material(obscured)
+    mi.material_override = OverlayMaterial.make(obscured)
     return mi
-
-static func _make_material(obscured: bool) -> StandardMaterial3D:
-    var mat := StandardMaterial3D.new()
-    mat.shading_mode               = BaseMaterial3D.SHADING_MODE_UNSHADED
-    mat.vertex_color_use_as_albedo = true
-    mat.transparency               = BaseMaterial3D.TRANSPARENCY_ALPHA
-    mat.cull_mode                  = BaseMaterial3D.CULL_DISABLED
-    mat.no_depth_test              = obscured
-    mat.render_priority            = VoxelConstants.OVERLAY_RENDER_PRIORITY  # draw over the post quad
-    return mat

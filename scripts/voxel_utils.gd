@@ -27,6 +27,14 @@ static func for_each_in_bounding_box(
                 operation.call(pos)
 
 
+static func euler_basis(degrees: Vector3) -> Basis:
+    var b := Basis.IDENTITY
+    b = b.rotated(Vector3.RIGHT,   deg_to_rad(degrees.x))
+    b = b.rotated(Vector3.UP,      deg_to_rad(degrees.y))
+    b = b.rotated(Vector3.FORWARD, deg_to_rad(degrees.z))
+    return b
+
+
 static func is_in_sphere(pos: Vector3, center: Vector3, radius: float) -> bool:
     return pos.distance_to(center) <= radius
 

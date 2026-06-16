@@ -27,7 +27,7 @@ func _init(
 func validate() -> bool:
     if player != null:
         var dist := player.global_position.distance_to(position)
-        if dist <= radius + PLAYER_CLEARANCE:
+        if dist <= radius + VoxelConstants.PLAYER_CLEARANCE:
             return false
     return true
 
@@ -83,14 +83,7 @@ func execute() -> void:
 func _freeze_bodies_in_volume() -> void:
     if player == null:
         return
-    var space  := player.get_world_3d().direct_space_state
     var sphere := SphereShape3D.new()
     sphere.radius = radius
-    var query := PhysicsShapeQueryParameters3D.new()
-    query.shape              = sphere
-    query.transform          = Transform3D(Basis(), position)
-    query.collide_with_areas = false
-    for hit in space.intersect_shape(query, 32):
-        var body := hit.collider as RigidBody3D
-        if body != null and not body.freeze:
-            body.freeze = true
+    PhysicsUtils.freeze_bodies_in(
+        player.get_world_3d().direct_space_state, sphere, Transform3D(Basis(), position))

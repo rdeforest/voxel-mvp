@@ -38,21 +38,11 @@ func _ready() -> void:
     _im = ImmediateMesh.new()
     var mi := MeshInstance3D.new()
     mi.mesh                 = _im
-    mi.material_override     = _make_material()
+    mi.material_override     = OverlayMaterial.make(true)
     mi.cast_shadow           = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
     mi.custom_aabb           = AABB(Vector3(-1e5, -1e5, -1e5), Vector3(2e5, 2e5, 2e5))
     add_child(mi)
 
-
-static func _make_material() -> StandardMaterial3D:
-    var mat := StandardMaterial3D.new()
-    mat.shading_mode               = BaseMaterial3D.SHADING_MODE_UNSHADED
-    mat.vertex_color_use_as_albedo = true
-    mat.transparency               = BaseMaterial3D.TRANSPARENCY_ALPHA
-    mat.cull_mode                  = BaseMaterial3D.CULL_DISABLED
-    mat.no_depth_test              = true   # see the boxes through terrain
-    mat.render_priority            = VoxelConstants.OVERLAY_RENDER_PRIORITY
-    return mat
 
 
 func toggle() -> bool:

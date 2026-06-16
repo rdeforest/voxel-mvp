@@ -6,8 +6,6 @@ extends PlayerSafeAction
 # add takes the player's CURRENT material — nothing about adding terrain is
 # material-specific, so the material tagging belongs here once, not per verb.
 
-const PLAYER_CLEARANCE := 1.0
-
 var material_name: StringName = &"Stone"
 
 

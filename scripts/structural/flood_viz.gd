@@ -11,17 +11,11 @@ extends Node3D
 const MAX_VISIBLE := 60000     # MultiMesh capacity for coloured (visible) cells
 const MAX_VISITED := 400000    # generous reach cap — distinguishes "settled" from "floods forever"
 const CELL_SIZE := 0.92
-const NEIGHBORS := [
-    Vector3i(0, -1, 0), # down first — the bias
-    Vector3i(1, 0, 0), Vector3i(-1, 0, 0),
-    Vector3i(0, 0, 1), Vector3i(0, 0, -1),
-    Vector3i(0, 1, 0),
-]
 
 var _store: EditStore
 var _budget := 200
-var _frontier: Array[Vector3i] = []
-var _visited := {}
+var _flood: GroundFlood
+var _prev_visited := 0   # visited count after last step — new entries are the tail of the dict
 var _mm: MultiMesh
 var _reached := 0
 var _running := false
@@ -44,20 +38,18 @@ func setup(store: EditStore) -> void:
 
 # Seed a fresh flood from `cell`, processing `budget` cells per frame.
 func start(cell: Vector3i, budget: int) -> void:
-    _budget = budget
-    _frontier = [cell]
-    _visited = { cell: true }
-    _reached = 0
+    _budget       = budget
+    _flood        = GroundFlood.new()
+    _flood.start([cell], _store, MAX_VISITED)
+    _prev_visited = 0
+    _reached      = 0
     _mm.visible_instance_count = 0
-    _running = true
+    _running      = true
 
-
-func _is_solid(cell: Vector3i) -> bool:
-    return _store.sample(Vector3(cell) + Vector3(0.5, 0.5, 0.5)) < VoxelConstants.SDF_SOLID_THRESHOLD
 
 func _is_visible(cell: Vector3i) -> bool:
-    for n in NEIGHBORS:
-        if not _is_solid(cell + n):
+    for n in GroundFlood.NEIGHBORS:
+        if not TerrainProbe.is_solid(_store, cell + n):
             return true
     return false
 
@@ -65,27 +57,20 @@ func _is_visible(cell: Vector3i) -> bool:
 func _process(_dt: float) -> void:
     if not _running:
         return
-    var done := 0
-    while not _frontier.is_empty() and done < _budget and _visited.size() < MAX_VISITED:
-        var cell: Vector3i = _frontier.pop_front()
-        done += 1
+    _flood.step(_budget)
+    # GDScript Dictionaries preserve insertion order: entries after index _prev_visited are new.
+    var keys := _flood.visited.keys()
+    for idx in range(_prev_visited, keys.size()):
+        var cell: Vector3i = keys[idx]
         if _reached < MAX_VISIBLE and _is_visible(cell):
-            _mm.set_instance_transform(_reached, Transform3D(Basis(), Vector3(cell) + Vector3(0.5, 0.5, 0.5)))
+            _mm.set_instance_transform(_reached, Transform3D(Basis(), Vector3(cell) + VoxelConstants.VOXEL_CENTER_OFFSET))
             _reached += 1
-        for n in NEIGHBORS:
-            var nb: Vector3i = cell + n
-            if _visited.has(nb) or not _is_solid(nb):
-                continue
-            _visited[nb] = true
-            if n.y < 0:
-                _frontier.push_front(nb) # dive down — process bedrock-ward cells first
-            else:
-                _frontier.push_back(nb)
+    _prev_visited = keys.size()
     _mm.visible_instance_count = _reached
-    if _frontier.is_empty() or _visited.size() >= MAX_VISITED:
+    if _flood.state != GroundFlood.RUNNING:
         _running = false
-        var stopped := "CAP HIT (never settled)" if _visited.size() >= MAX_VISITED else "settled"
-        print("floodviz: %s — reached %d cells, %d coloured" % [stopped, _visited.size(), _reached])
+        var stopped := "CAP HIT (never settled)" if _flood.visited.size() >= MAX_VISITED else "settled"
+        print("floodviz: %s — reached %d cells, %d coloured" % [stopped, _flood.visited.size(), _reached])
 
 
 static func _make_material() -> StandardMaterial3D:

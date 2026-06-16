@@ -96,16 +96,10 @@ func _endangers() -> bool:
 # so physics doesn't squirt it sideways from the overlap on the next tick (same
 # guard FillAction uses; the buried-body classifier reintegrates it afterwards).
 func _freeze_bodies_in_volume() -> void:
+    if player == null:
+        return
     var box   := _world_box()
     var shape3 := BoxShape3D.new()
     shape3.size = box.size
-    var query := PhysicsShapeQueryParameters3D.new()
-    query.shape              = shape3
-    query.transform          = Transform3D(Basis(), box.position + box.size * 0.5)
-    query.collide_with_areas = false
-    if player == null:
-        return
-    for hit in player.get_world_3d().direct_space_state.intersect_shape(query, 32):
-        var body := hit.collider as RigidBody3D
-        if body != null and not body.freeze:
-            body.freeze = true
+    PhysicsUtils.freeze_bodies_in(
+        player.get_world_3d().direct_space_state, shape3, Transform3D(Basis(), box.position + box.size * 0.5))

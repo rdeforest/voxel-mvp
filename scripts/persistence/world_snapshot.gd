@@ -63,7 +63,7 @@ static func _encode_windows(world: Node) -> Dictionary:
     return out
 
 static func _terrain_material() -> ShaderMaterial:
-    return load(DCTerrainManager.TERRAIN_MATERIAL_PATH) as ShaderMaterial   # the shared cached instance
+    return load(VoxelConstants.TERRAIN_MATERIAL_PATH) as ShaderMaterial   # the shared cached instance
 
 static func _encode_tunables() -> Dictionary:
     var mat := _terrain_material()

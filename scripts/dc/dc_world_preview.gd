@@ -65,17 +65,12 @@ var _inval: Node3D                  # the invalidation overlay (dcinval) — fed
 const DIAG_LARGE_MULT := 8.0
 const DIAG_SMALL_MULT := 0.5
 
-# The production terrain shader (same instance the clipmap render + the `set`/`get` console tunables use —
-# Godot caches by path), so dcworld as the live render looks like the terrain always has.
-const TERRAIN_MATERIAL_PATH := "res://assets/materials/terrain_surface.tres"
-
-
 func setup(follow: Node3D, edit_store: EditStore = null) -> void:
     _follow = follow
     _edit_store = edit_store
     if _edit_store != null:
         VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_terrain_edit)
-    material_override = load(TERRAIN_MATERIAL_PATH)   # the production terrain shader (dcworld is the render now)
+    material_override = load(VoxelConstants.TERRAIN_MATERIAL_PATH)   # the production terrain shader (dcworld is the render now)
     _palette = MaterialPalette.colors()              # per-vertex material colours (placed parts read their material)
     visible = false
 

@@ -69,6 +69,11 @@ const SDF_SOLID := -5.0
 # Strictly less-than-zero is solid; anything else is air.
 const SDF_SOLID_THRESHOLD := 0.0
 
+# Distance to step from a surface hit point INTO the solid side, so a raycast hit on a
+# cell boundary picks the solid cell rather than the air cell on the player's side.
+# Shared by probe/edit targeting and the grid overlay so they agree on which cell is hit.
+const SURFACE_NUDGE := 0.01
+
 # EditStore brush ops (match EditStore::stamp_* `op`): UNION adds solid, SUBTRACT carves.
 const STORE_OP_UNION    := 0
 const STORE_OP_SUBTRACT := 1
@@ -90,3 +95,15 @@ const FALL_THRESHOLD := 0.01
 # Minimum support change between propagation passes that re-dirties neighbors.
 # Below this, the change is treated as noise and propagation halts.
 const SUPPORT_EPSILON := 0.01
+
+# Extra radius (m) a fill keeps clear of the player so an additive edit can't fill the
+# space the player occupies. Cross-cutting rule shared by the additive verbs.
+const PLAYER_CLEARANCE := 1.0
+
+
+# ============================================================================
+# Asset paths
+# ============================================================================
+# Shared by DcWorldPreview, DCTerrainManager, and WorldSnapshot — single source
+# so a rename doesn't require three edits.
+const TERRAIN_MATERIAL_PATH := "res://assets/materials/terrain_surface.tres"

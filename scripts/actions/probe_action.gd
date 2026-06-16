@@ -44,7 +44,7 @@ func _corner_solid_count(cell: Vector3i) -> int:
 # Target the solid cell behind the hit surface (same convention as the voxel grid
 # overlay), shifted by the placement offset.
 func _target_cell() -> Vector3i:
-    var p := hit_pos + offset - hit_normal * 0.01
+    var p := hit_pos + offset - hit_normal * VoxelConstants.SURFACE_NUDGE
     return Vector3i(floori(p.x), floori(p.y), floori(p.z))
 
 

@@ -92,7 +92,7 @@ func test_floodviz_reaches_a_connected_block_and_settles() -> void:
     for _i in 50:
         fv._process(0.0)
 
-    assert_eq(fv._visited.size(), 125, "flooded every connected solid cell (5³) then stopped")
+    assert_eq(fv._flood.visited.size(), 125, "flooded every connected solid cell (5³) then stopped")
     assert_gt(fv._reached, 0, "coloured the visible surface cells")
     assert_false(fv._running, "the flood settled (frontier drained), didn't run forever")
 

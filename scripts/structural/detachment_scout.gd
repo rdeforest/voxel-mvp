@@ -94,10 +94,10 @@ func _start_next() -> void:
 
 
 func _is_solid(cell: Vector3i) -> bool:
-    return _store.sample(Vector3(cell) + Vector3(0.5, 0.5, 0.5)) < VoxelConstants.SDF_SOLID_THRESHOLD
+    return TerrainProbe.is_solid(_store, cell)
 
 func _is_bedrock(cell: Vector3i) -> bool:
-    return _store.material_at(Vector3(cell) + Vector3(0.5, 0.5, 0.5)) == MaterialPalette.BEDROCK
+    return TerrainProbe.is_bedrock(_store, cell)
 
 func _has_air_neighbor(cell: Vector3i) -> bool:
     for n in GroundFlood.NEIGHBORS:

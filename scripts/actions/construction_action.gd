@@ -74,11 +74,7 @@ func execute() -> void:
 # --- internals ---
 
 func _basis() -> Basis:
-    var basis := Basis.IDENTITY
-    basis = basis.rotated(Vector3.RIGHT,   deg_to_rad(rotation.x))
-    basis = basis.rotated(Vector3.UP,      deg_to_rad(rotation.y))
-    basis = basis.rotated(Vector3.FORWARD, deg_to_rad(rotation.z))
-    return basis
+    return VoxelUtils.euler_basis(rotation)
 
 func _shape() -> CsgBoxShape:
     return CsgBoxShape.new(part.dimensions)

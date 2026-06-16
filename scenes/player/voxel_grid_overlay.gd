@@ -7,7 +7,6 @@ extends MeshInstance3D
 const SHELL_ALPHAS := [0.9, 0.6, 0.3, 0.1]   # shell 0 = targeted cell
 const GREY         := Color(0.85, 0.85, 0.85)
 
-# 12 edges of a unit cube as (corner_a, corner_b) pairs.
 var raycast: RayCast3D       # assigned by player._ready
 var enabled: bool    = false
 var _im:     ImmediateMesh
@@ -16,7 +15,7 @@ var _im:     ImmediateMesh
 func _ready() -> void:
     _im = ImmediateMesh.new()
     mesh = _im
-    material_override = _make_material()
+    material_override = OverlayMaterial.make(false)
     visible = false
 
 func toggle() -> void:
@@ -35,7 +34,7 @@ func _process(_delta: float) -> void:
     var normal := raycast.get_collision_normal()
     # Step slightly into the hit surface so we pick the solid cell,
     # not the air cell on the player's side.
-    var inside := hit - normal * 0.01
+    var inside := hit - normal * VoxelConstants.SURFACE_NUDGE
     var center := Vector3i(floori(inside.x), floori(inside.y), floori(inside.z))
     _redraw(center)
 
@@ -67,13 +66,3 @@ static func _shell_cells(center: Vector3i, d: int) -> Array[Vector3i]:
                 if max(absi(dx), max(absi(dy), absi(dz))) == d:
                     out.append(center + Vector3i(dx, dy, dz))
     return out
-
-static func _make_material() -> StandardMaterial3D:
-    var mat := StandardMaterial3D.new()
-    mat.shading_mode               = BaseMaterial3D.SHADING_MODE_UNSHADED
-    mat.vertex_color_use_as_albedo = true
-    mat.transparency               = BaseMaterial3D.TRANSPARENCY_ALPHA
-    mat.no_depth_test              = false
-    mat.cull_mode                  = BaseMaterial3D.CULL_DISABLED
-    mat.render_priority            = VoxelConstants.OVERLAY_RENDER_PRIORITY  # draw over the post quad
-    return mat

@@ -33,12 +33,7 @@ func current_material() -> StringName: return _materials[_material_index]
 func current_mesh()     -> BoxMesh:    return _build_meshes[_part_index]
 func part_name()        -> String:     return _parts[_part_index].resource_path.get_file().get_basename()
 
-func rotation_basis() -> Basis:
-    var b := Basis.IDENTITY
-    b = b.rotated(Vector3.RIGHT,   deg_to_rad(rotation.x))
-    b = b.rotated(Vector3.UP,      deg_to_rad(rotation.y))
-    b = b.rotated(Vector3.FORWARD, deg_to_rad(rotation.z))
-    return b
+func rotation_basis() -> Basis: return VoxelUtils.euler_basis(rotation)
 
 
 # --- Mutations ---

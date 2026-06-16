@@ -78,7 +78,7 @@ func make_fill_voxel(hit_pos: Vector3, hit_normal: Vector3) -> Action:
     return FillVoxelAction.new(cell, _store(), _player, _build_state.current_material())
 
 func make_empty_voxel(hit_pos: Vector3, hit_normal: Vector3) -> Action:
-    var pos := hit_pos - hit_normal * 0.01    # nudge into the solid cell
+    var pos := hit_pos - hit_normal * VoxelConstants.SURFACE_NUDGE    # nudge into the solid cell
     var cell := Vector3i(floori(pos.x), floori(pos.y), floori(pos.z))
     return EmptyVoxelAction.new(cell, _store())
 

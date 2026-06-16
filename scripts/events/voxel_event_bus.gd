@@ -130,7 +130,7 @@ func _dispatch_cell(channel: StringName, event: VoxelEvent, seen: Dictionary) ->
             per_cell.erase(entry[0])
 
 func _remove_matching(subs: Array, callback: Callable) -> void:
-    for sub: Subscription in subs:
-        if sub.matches(callback):
-            subs.erase(sub)
+    for idx in subs.size():
+        if (subs[idx] as Subscription).matches(callback):
+            subs.remove_at(idx)
             return
