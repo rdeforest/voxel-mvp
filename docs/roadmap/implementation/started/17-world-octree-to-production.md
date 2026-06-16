@@ -83,20 +83,13 @@ mesher, don't copy). Collision stays on `VoxelMesherDC` until its own consolidat
   move (not the whole vicinity) + **GPU eyes** on the live terrain (render correctness can't be trusted
   headless).
 
-## Known limit to fix along the way
+## Known bugs (deferred → [`docs/bugs/`](../../../bugs/00_INDEX.md))
 
-- **Reversed triangles on ridges (shared meshing/winding code).** A quad straddling a convex ridge is
-  non-planar, but `emit_poly` orients both its triangles to ONE shared `outward` (the edge-crossing
-  gradient), so the triangle whose true facing opposes it comes out back-facing. **Pre-existing — present
-  in the LIVE clipmap render too** (24 reversed vs `mesh_world`'s 18 across 81 sample 64³ regions), so it's
-  not a world-octree bug. Rare (~1 per few thousand triangles). **Fix hypothesis:** give each triangle its
-  OWN outward — the mean of its three vertices' QEF normals (free, already computed) or the field gradient
-  at its centroid (independent). Touches the live render → needs GPU eyes. Logged, deferred (2026-06-15).
-- **Cracks INSIDE the coverage (crack-free-WITH-collapse).** Seen on `dcworld` in-game (2026-06-15) — small
-  see-through gaps not at the window rim. This is the gate the headless suite can't check (collapsed boundary
-  cells defeat the rim audit), so it's a GUI bug. **Must be fixed before P3** (retiring the clipmap needs a
-  watertight render). Deferred for now (Robert: not chasing yet). Likely the point-location stitch across a
-  collapse-induced size jump in the graded octree; the `dcinval`/`dcaudit` tools localize it.
+- **[dc-inside-coverage-cracks](../../../bugs/dc-inside-coverage-cracks.md)** — graded-floor coarse leaves
+  place misaligned vertices → LOD-seam holes inside the coverage. Reproduced headlessly (6 @ eps=94);
+  proactive accumulate-fine-QEF fix proposed. **Blocks P3** (retiring the clipmap needs a watertight render).
+- **[dc-reversed-triangles-ridges](../../../bugs/dc-reversed-triangles-ridges.md)** — rare back-facing
+  triangles on ridges; pre-existing, in the live render too.
 
 ## Future ideas (parked)
 

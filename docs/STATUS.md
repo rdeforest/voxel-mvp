@@ -412,14 +412,11 @@ is the authoritative narrative; this list is the cheat sheet.
 
 ### Known limits (recorded, not fixed)
 
-- **Reversed triangles on convex ridges (shared DC meshing/winding).** A quad straddling a ridge is
-  non-planar but `emit_poly` orients both its triangles to ONE shared `outward` (edge-crossing gradient),
-  back-facing the one whose true facing opposes it. **Pre-existing, in the LIVE clipmap render too** (24
-  reversed vs `mesh_world`'s 18 across 81 sample 64³ regions) — NOT a world-octree bug. Rare (~1 per few
-  thousand triangles). Fix hypothesis (per-triangle outward from vertex normals) + detail in doc 17.
-- **DC crease normals not stored (smooth-only shading on creases).** The C++ mesher uses field-gradient
-  normals; sharp edges on edits/structures may read soft. Conditional-deferred (doc 14 Bite E storage half);
-  port crease normals if the art pass needs crisp edges.
+> **Deferred *bugs* (defects) now live in [`docs/bugs/`](bugs/00_INDEX.md)** — one file per bug with
+> diagnosis + a proposed fix. Includes the DC world-octree inside-coverage cracks (blocks doc 17 P3),
+> reversed ridge triangles, soft crease normals, the edit-remesh padding gap, and distant shadow shimmer.
+> The entries below are design/tuning *limits*, not defects.
+
 - **Flatten preview Z-fights with the surface it's matching.** Cosmetic;
   cleanest fix is a small forward offset on the preview plane normal.
 - **`_resume_unfinished_floods` budget starvation:** components larger
