@@ -52,6 +52,7 @@ var _job_arrays: Array = []
 var _job_cam := Vector3.ZERO
 var _job_proj := 0.0
 var _job_eps := EPS_START            # eps captured for the in-flight job
+var _job_is_grow := false            # in-flight job is an incremental grow (vs a full build)
 var _job_win_min := Vector3i.ZERO
 var _job_win_max := Vector3i.ZERO
 var _job_work_ms := 0.0              # worker build time of the last job = mesh lag (controller signal)
@@ -102,10 +103,13 @@ func _process(dt: float) -> void:
             _finish()
         return
     var p := _follow.global_position
-    # Graded build full-rebuilds on move: grow_world doesn't re-grade interior cells whose floor changed as
-    # the camera moved (that's the P2.5 band-diff). Re-mesh on move, edit, re-root, or an eps change.
-    if not _built or _dirty or _outside_root(p) or p.distance_to(_last_center) > RECENTER or _eps_dirty:
+    # Full rebuild only when the field or frame changes: first build, an edit, or a re-root. A plain move or
+    # an eps change (the controller re-grading) goes through grow_world — it re-meshes just the changed band
+    # (P2.5 incremental band-diff), reusing the retained octree.
+    if not _built or _dirty or _outside_root(p):
         _dispatch_build(p)
+    elif p.distance_to(_last_center) > RECENTER or _eps_dirty:
+        _dispatch_grow(p)
 
 
 # Root origin (LATTICE) snapped to the ROOT_SNAP grid, centred on the player — cells never shift
@@ -164,13 +168,32 @@ func _dispatch_build(p: Vector3) -> void:
     _job_cam = _camera_lattice()
     _job_proj = _view_proj()
     _job_eps = _eps_px                            # capture the operating point for the worker
+    _job_is_grow = false
     _task_id = WorkerThreadPool.add_task(_run_job, false, "dcworld build")
+
+
+# Incremental move: grow_world re-meshes only the band the move/eps change touched, reusing the retained
+# octree (same root, no new store snapshot — grow reads the retained snapshot). The common path while walking.
+func _dispatch_grow(p: Vector3) -> void:
+    _eps_dirty = false
+    _last_center = p
+    var win := _window(p)
+    _job_win_min = win[0]
+    _job_win_max = win[1]
+    _job_cam = _camera_lattice()
+    _job_proj = _view_proj()
+    _job_eps = _eps_px
+    _job_is_grow = true
+    _task_id = WorkerThreadPool.add_task(_run_job, false, "dcworld grow")
 
 
 func _run_job() -> void:
     var t0 := Time.get_ticks_usec()
-    _job_arrays = _mesher.mesh_world(_job_store, _root_origin_i, DEPTH, base_cell,
-            _job_cam, _job_proj, _job_eps, true, PackedColorArray(), _job_win_min, _job_win_max)
+    if _job_is_grow:
+        _job_arrays = _mesher.grow_world(_job_cam, _job_proj, _job_eps, _job_win_min, _job_win_max)
+    else:
+        _job_arrays = _mesher.mesh_world(_job_store, _root_origin_i, DEPTH, base_cell,
+                _job_cam, _job_proj, _job_eps, true, PackedColorArray(), _job_win_min, _job_win_max)
     _job_work_ms = (Time.get_ticks_usec() - t0) / 1000.0   # mesh lag = the controller's primary signal
 
 
