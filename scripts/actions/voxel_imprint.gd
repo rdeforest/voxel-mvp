@@ -45,8 +45,9 @@ static func compute(store: EditStore, shape: CsgShape, xform: Transform3D, op: i
 # then emit the structural events at 1m (from the 1m `work`, so the structural system isn't spammed
 # with 64x sub-metre events) + terrain_sdf_changed over `box` for the render/collision re-mesh.
 # `shape`/`xform`/`op` drive the fine geometry write; `work` (1m) drives the events.
-static func apply(store: EditStore, work: Array, material_name: StringName, box: AABB,
+static func apply(store: EditStore, work: Array, material_name: StringName,
         shape: CsgShape, xform: Transform3D, op: int) -> void:
+    var box := world_box(shape, xform)
     _imprint_fine(store, shape, xform, op, material_name, box)
     var material := Materials.from_name(material_name)
     for entry in work:
