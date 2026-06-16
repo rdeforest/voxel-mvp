@@ -65,7 +65,8 @@ func _table() -> Array:
         [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
         [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
         [dcgen,           "dcgen",     "Phase B preview: render the octree-over-generator substrate (cyan) at your position. Usage: dcgen [on|off]"],
-        [dcworld,         "dcworld",   "doc 16: render the WORLD-FIXED incremental octree (amber bubble; mesh_world + grow_world on move). Dense build → small bubble until the prune lands. Tip: dcmanager off to see it alone. Usage: dcworld [on|off]"],
+        [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + mesh-lag."],
+        [meshlag,         "meshlag",   "Max mesh lag (ms) the budget controller keeps the worker re-mesh under — higher = more terrain detail, slower re-mesh on a move. Usage: meshlag [ms] (default 500)"],
         [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
         [pbddemo,         "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [mpmdemo,         "mpmdemo",   "PB-MPM demo: spawn a live block of continuum material that falls and rests ON the terrain. Usage: mpmdemo [size]"],
@@ -273,18 +274,29 @@ func dcgen(state := "") -> void:
 # budget controller (eps_px self-tunes against frame time + mesh lag, ~100 ms target / 500 ms ceiling).
 # `dcworld off` blanks it (use `dcmanager on` to fall back to the clipmap render for comparison). `dcworld`
 # (no args) prints the live eps_px + last mesh-lag (also in the perf overlay). `dcworld on <radius_m>` resizes.
-func dcworld(state := "", radius := 0.0) -> void:
-    if radius > 0.0:
-        world_preview.set_radius(radius)
-    if state == "" and radius == 0.0 and world_preview.is_enabled():
+func dcworld(arg := "") -> void:
+    if arg.is_valid_float():                       # `dcworld 256` → set coverage radius AND turn on
+        world_preview.set_radius(arg.to_float())
+        world_preview.set_enabled(true)
+        LimboConsole.info("dcworld: on, %.0fm coverage @ %.2fm cells (budget-tuned eps)" % [
+            world_preview.win_radius_m, world_preview.base_cell])
+        return
+    if arg == "" and world_preview.is_enabled():   # `dcworld` (no args) → print live stats
         LimboConsole.info("dcworld: on, %.0fm coverage, eps_px=%.1f, last mesh-lag=%.0fms" % [
             world_preview.win_radius_m, world_preview._eps_px, world_preview._job_work_ms])
         return
-    var on := _parse_toggle(state, world_preview.is_enabled())
+    var on := _parse_toggle(arg, world_preview.is_enabled())   # `dcworld on|off` (empty → toggle)
     world_preview.set_enabled(on)
     LimboConsole.info("dcworld: %s (THE world-fixed render, %.0fm coverage @ %.2fm cells, budget-tuned eps)%s" % [
         "on" if on else "off", world_preview.win_radius_m, world_preview.base_cell,
         " — `dcmanager on` for the clipmap to compare" if on else " — terrain blank; `dcmanager on` for the clipmap"])
+
+# Set the mesh-lag ceiling (ms) the dcworld budget controller keeps the worker re-mesh under.
+func meshlag(ms := 0.0) -> void:
+    if ms > 0.0:
+        world_preview.set_max_lag(ms)
+    LimboConsole.info("meshlag: ceiling %.0f ms (refine target %.0f ms) — higher = more detail, slower re-mesh" % [
+        world_preview.mesh_ceil, world_preview.mesh_target])
 
 # Spawn a live PBD structural-physics demo in front of the player (stress-coloured
 # lines; watch it sag and snap). Re-run to reset.

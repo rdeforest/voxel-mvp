@@ -26,9 +26,10 @@ const RECENTER     := 6.0     # re-mesh once the player drifts this far (m)
 const EPS_START    := 48.0    # start with a big error allowance (coarse) — the controller tightens it
 const EPS_MIN      := 1.0
 const EPS_MAX      := 256.0
-const MESH_TARGET  := 100.0   # ms — under this (and frame headroom): refine (lower eps)
-const MESH_CEIL    := 500.0   # ms — over this: coarsen (raise eps) — the mesh-lag ceiling
 const FRAME_BUDGET := 16.0    # ms — frame-time ceiling (render cost); generous, not an FPS game
+
+var mesh_ceil   := 500.0  # ms — over this mesh lag: coarsen (raise eps). The `meshlag` console knob.
+var mesh_target := 100.0  # ms — under this (and frame headroom): refine (lower eps). Scales with the ceiling.
 
 var base_cell    := VoxelConstants.RENDER_BASE_CELL  # metres per lattice unit (matches production density)
 var win_radius_m := 128.0                            # resident window half-extent (m) — graded floor + budget make it affordable
@@ -82,9 +83,12 @@ func is_enabled() -> bool:
     return _enabled
 
 
-# Tune the bubble live (the `dcworld <radius>` arg). A change forces a re-root next frame.
+# Tune the coverage radius live (the `dcworld <radius>` arg). Capped so the window fits inside the root with
+# a re-root margin (else the camera can never get far enough from a root face to roam — constant re-rooting).
+# A change forces a rebuild next frame.
 func set_radius(radius_m: float) -> void:
-    win_radius_m = maxf(2.0, radius_m)
+    var cap := ROOT_SIZE * base_cell * 0.4   # ~40% of the root half-spans; leaves a comfortable roam margin
+    win_radius_m = clampf(radius_m, 2.0, cap)
     _built = false
 
 
@@ -223,13 +227,20 @@ func _finish() -> void:
 # comfort band eps stops moving, so tuning rebuilds stop. The floor + collapse both derive from _eps_px.
 func _control() -> void:
     var prev := _eps_px
-    var over := _job_work_ms > MESH_CEIL or _frame_ms > FRAME_BUDGET
-    var under := _job_work_ms < MESH_TARGET and _frame_ms < FRAME_BUDGET * 0.5
+    var over := _job_work_ms > mesh_ceil or _frame_ms > FRAME_BUDGET
+    var under := _job_work_ms < mesh_target and _frame_ms < FRAME_BUDGET * 0.5
     if over:
         _eps_px = minf(_eps_px * 1.4, EPS_MAX)
     elif under:
         _eps_px = maxf(_eps_px * 0.9, EPS_MIN)
     _eps_dirty = absf(_eps_px - prev) > 0.01
+
+
+# `meshlag` console knob: set the mesh-lag ceiling (ms) the controller keeps eps under; the refine target
+# scales with it (1/5, so 500→100). Higher = more detail at the cost of slower re-mesh on a move.
+func set_max_lag(ms: float) -> void:
+    mesh_ceil = maxf(50.0, ms)
+    mesh_target = mesh_ceil * 0.2
 
 
 func _arrays_to_mesh(arrays: Array) -> ArrayMesh:
