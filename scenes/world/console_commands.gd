@@ -269,10 +269,10 @@ func dcgen(state := "") -> void:
     substrate_preview.set_enabled(on)
     LimboConsole.info("dcgen: %s (live octree-over-generator render, cyan)" % ("on" if on else "off"))
 
-# `dcworld on [radius_m]` renders the doc-17 world-fixed octree (amber, overlaid, 0.25 m), graded by the
-# screen-error budget controller: eps_px starts coarse and self-tunes against frame time + mesh lag
-# (~100 ms target, 500 ms ceiling). Coverage is the window radius (default 128 m). `dcmanager off` to see it
-# alone. `dcworld` (no args) prints the live eps_px + last mesh-lag.
+# `dcworld` is THE terrain render (doc 17 P3): the world-fixed octree, 0.25 m, graded by the screen-error
+# budget controller (eps_px self-tunes against frame time + mesh lag, ~100 ms target / 500 ms ceiling).
+# `dcworld off` blanks it (use `dcmanager on` to fall back to the clipmap render for comparison). `dcworld`
+# (no args) prints the live eps_px + last mesh-lag (also in the perf overlay). `dcworld on <radius_m>` resizes.
 func dcworld(state := "", radius := 0.0) -> void:
     if radius > 0.0:
         world_preview.set_radius(radius)
@@ -282,9 +282,9 @@ func dcworld(state := "", radius := 0.0) -> void:
         return
     var on := _parse_toggle(state, world_preview.is_enabled())
     world_preview.set_enabled(on)
-    LimboConsole.info("dcworld: %s (world-fixed octree, %.0fm coverage @ %.2fm cells, budget-tuned eps)%s" % [
+    LimboConsole.info("dcworld: %s (THE world-fixed render, %.0fm coverage @ %.2fm cells, budget-tuned eps)%s" % [
         "on" if on else "off", world_preview.win_radius_m, world_preview.base_cell,
-        " — tip: `dcmanager off` to see it alone" if on else ""])
+        " — `dcmanager on` for the clipmap to compare" if on else " — terrain blank; `dcmanager on` for the clipmap"])
 
 # Spawn a live PBD structural-physics demo in front of the player (stress-coloured
 # lines; watch it sag and snap). Re-run to reset.

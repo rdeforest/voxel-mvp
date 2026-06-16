@@ -56,6 +56,11 @@ var _job_is_grow := false            # in-flight job is an incremental grow (vs 
 var _job_win_min := Vector3i.ZERO
 var _job_win_max := Vector3i.ZERO
 var _job_work_ms := 0.0              # worker build time of the last job = mesh lag (controller signal)
+var _palette: PackedColorArray      # material id → albedo (per-vertex colours), like the clipmap render
+
+# The production terrain shader (same instance the clipmap render + the `set`/`get` console tunables use —
+# Godot caches by path), so dcworld as the live render looks like the terrain always has.
+const TERRAIN_MATERIAL_PATH := "res://assets/materials/terrain_surface.tres"
 
 
 func setup(follow: Node3D, edit_store: EditStore = null) -> void:
@@ -63,10 +68,8 @@ func setup(follow: Node3D, edit_store: EditStore = null) -> void:
     _edit_store = edit_store
     if _edit_store != null:
         VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_terrain_edit)
-    var mat := StandardMaterial3D.new()
-    mat.albedo_color = Color(1.0, 0.55, 0.1)
-    mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
-    material_override = mat       # back-face cull ON (default): a crack reads as see-through
+    material_override = load(TERRAIN_MATERIAL_PATH)   # the production terrain shader (dcworld is the render now)
+    _palette = MaterialPalette.colors()              # per-vertex material colours (placed parts read their material)
     visible = false
 
 
@@ -98,6 +101,7 @@ func _process(dt: float) -> void:
     if not _enabled or _follow == null:
         return
     _frame_ms = lerpf(_frame_ms, dt * 1000.0, 0.1)   # smoothed frame-time signal for the controller
+    Perf.status("dcworld", "eps_px %.1f   mesh-lag %.0f ms (%s)" % [_eps_px, _job_work_ms, "grow" if _job_is_grow else "build"])
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()
@@ -193,7 +197,7 @@ func _run_job() -> void:
         _job_arrays = _mesher.grow_world(_job_cam, _job_proj, _job_eps, _job_win_min, _job_win_max)
     else:
         _job_arrays = _mesher.mesh_world(_job_store, _root_origin_i, DEPTH, base_cell,
-                _job_cam, _job_proj, _job_eps, true, PackedColorArray(), _job_win_min, _job_win_max)
+                _job_cam, _job_proj, _job_eps, true, _palette, _job_win_min, _job_win_max)
     _job_work_ms = (Time.get_ticks_usec() - t0) / 1000.0   # mesh lag = the controller's primary signal
 
 

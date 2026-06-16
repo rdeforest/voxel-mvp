@@ -43,7 +43,8 @@ func _ready() -> void:
     _dc_manager = DCTerrainManager.new()
     add_child(_dc_manager)
     _dc_manager.setup(_player, _edit_store.store)   # render sources SDF + material from the store
-    _dc_manager.start_default()   # DC is the terrain render
+    # The clipmap render is no longer the default — the world-fixed octree (dcworld) is (doc 17 P3). The
+    # clipmap stays available via `dcmanager` for side-by-side comparison.
     _inval_overlay = preload("res://scenes/player/invalidation_overlay.gd").new()
     add_child(_inval_overlay)
     _dc_manager.region_invalidated.connect(_inval_overlay.highlight)        # `dcinval` toggles it
@@ -53,7 +54,8 @@ func _ready() -> void:
     _substrate_preview.setup(_player, _edit_store.store)   # Phase B S3: render imprints generator + edits from the store (dcgen)
     _world_preview = DcWorldPreview.new()
     add_child(_world_preview)
-    _world_preview.setup(_player, _edit_store.store)       # doc 16: world-fixed incremental octree (dcworld)
+    _world_preview.setup(_player, _edit_store.store)       # doc 16/17: world-fixed incremental octree
+    _world_preview.set_enabled(true)                       # THE terrain render (doc 17 P3); `dcworld` toggles it
     # Body-driven JIT terrain collision from our DC mesher, sourced from the EditStore
     # (generator + edits) — godot_voxel collision is off (world.tscn generate_collisions
     # = false), so this is the only terrain body.
