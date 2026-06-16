@@ -49,3 +49,10 @@ or condensed.
   they know better, then re-enable via in-world "excuse" artifacts. A diegetic
   dream-tell; the belief-domain state machine that gates them. Disillusionment
   trigger deferred to the damage model.
+- [`15-pets-and-companions.md`](15-pets-and-companions.md) — defines animal
+  companionship as fed-not-tamed behavior (unfed animals raid instead), with
+  the @CanYouPetTheDog bar as a real acceptance test.
+- [`16-character-customization.md`](16-character-customization.md) — specifies
+  avatar authoring: high fidelity plus an affirmative full range of atypical
+  bodies, the unremovable dream-wounds, and the one deliberate (mechanical)
+  exclusion.

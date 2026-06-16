@@ -18,3 +18,8 @@ contains.
 - [`04-volcano-story.md`](04-volcano-story.md) — establishes the narrative
   frame (a dream on one volcano island) that unifies the world's systems
   and aesthetics.
+- [`05-design-pillars.md`](05-design-pillars.md) — the player-facing
+  experience commitments (player owns the world, progression is external/
+  epistemic, no resented manipulation, comprehension over conquest, etc.);
+  the cross-check for any feature, paralleling design/01's architectural
+  principles.
