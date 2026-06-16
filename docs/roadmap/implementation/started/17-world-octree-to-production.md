@@ -48,12 +48,28 @@ grid** — so `EditStoreSource::surface_free` abstains and the build descends ev
   "descend every cell" to "sample a coarse grid + descend only surface cells." Gate: pruned+collapse
   surface == dense+collapse surface, watertight WITH collapse, on real terrain.
 
-### P2 — Graded data floor for horizon coverage
-Even surface-sparse, a 0.25 m floor over a 1 km horizon is too many cells. Coverage to view distance needs
-the data floor to **coarsen with distance** (fine near, coarse far) — the world-fixed analogue of the
-clipmap's LOD levels, but driven by detail/distance in the data source, not a camera-snapped grid.
-`EditStoreSource::target_cell_size(p)` returns the floor; make it grade. Gate: coverage reaches view
-distance at a bounded cell count; near detail unchanged.
+### P2 — Graded data floor for horizon coverage — MECHANISM DONE (2026-06-15)
+The data floor coarsens with distance so a large window stays affordable. **One knob, `eps_px`** — the
+floor DERIVES from it (`floor = eps_px·dist/proj`: build only as fine as a cell renders), and the prune
+runs over a concentric world-anchored min/max accel (`EditStoreSource`, reusing `Clipmap::surface_free`)
+so far empties are skipped at every distance. Validated by an `eps_px` sweep at 128 m / 0.25 m: 242 ms
+(eps=128) → 27 s (eps=2) monotonically — the "fine everywhere" wall exists only at the fine end and is
+**never chosen** because the budget controller settles `eps_px` where cost fits. There is **no separate
+floor to tune** (an earlier divergence added one; corrected in `0b43068`).
+
+**Still to wire — the budget controller (doc 13 B2), driving the one knob against TWO costs:**
+- **Frame time** (the render: triangle count) — the usual screen-error budget.
+- **Mesh lag** (the worker build's WORK ms) — start target **≤ 100 ms**, ceiling **≤ 500 ms**: under 500 ms
+  spend more CPU (lower `eps_px`, more detail); over 500 ms raise `eps_px` (coarser). (Not an FPS game, so
+  this lag budget is generous during dev; tighten later if needed.)
+- So: start `eps_px` high (coarse, cheap), tighten until EITHER frame time OR mesh-lag budget is the binding
+  constraint. `eps_px` is the only operating point; everything else (ACCEL_DIM, depth) is API-shape.
+
+### P2.5 — Incremental band-diff (move latency) — keeps mesh lag down as eps tightens
+A full graded rebuild on each move is the worker cost the lag budget caps; the endgame (doc 13 B3) is to
+rebuild only the cells whose LOD band flipped on a move. `grow_world` already grafts window entry/exit; this
+extends `reconcile` to re-grade cells whose floor changed with the camera. Until then a graded `dcworld`
+full-rebuilds on move (acceptable within the 500 ms ceiling).
 
 ### P3 — Make `dcworld` the live render; retire the clipmap
 With P1+P2, the world-fixed octree covers the view at an affordable cost. Promote it: a `dcworld` manager
