@@ -282,7 +282,7 @@ func dcworld(state := "", radius := 0.0) -> void:
         return
     var on := _parse_toggle(state, world_preview.is_enabled())
     world_preview.set_enabled(on)
-    LimboConsole.info("dcworld: %s (world-fixed octree, %.0fm coverage @ %.2gm, budget-tuned eps)%s" % [
+    LimboConsole.info("dcworld: %s (world-fixed octree, %.0fm coverage @ %.2fm cells, budget-tuned eps)%s" % [
         "on" if on else "off", world_preview.win_radius_m, world_preview.base_cell,
         " — tip: `dcmanager off` to see it alone" if on else ""])
 
