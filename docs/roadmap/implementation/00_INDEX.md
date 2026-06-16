@@ -39,13 +39,17 @@ Scoped but not yet begun.
 - [`planned/10-v0_2-art-pass.md`](planned/10-v0_2-art-pass.md) — scopes the
   visual-identity pass: textures, models, shaders.
 - [`planned/11-v0_9-survival-product.md`](planned/11-v0_9-survival-product.md)
-  — scopes multiplayer, survival, combat, and dungeons.
+  — scopes the single-player "real product": survival, combat, locomotives.
+  (Multiplayer is the successor game, not this project — see the scope
+  boundary in `01-version-strategy.md`.)
 - [`planned/12-v1_0-steam-release.md`](planned/12-v1_0-steam-release.md) —
   scopes the open-source release with Steam extras and content depth.
 - [`planned/13-v1_x-wild-dreams.md`](planned/13-v1_x-wild-dreams.md) — parks
   blue-sky post-release ambitions (planet-scale, sailing).
 - [`planned/15-network-transition.md`](planned/15-network-transition.md) — the
-  one-shot plan for building the decentralized replication layer.
+  one-shot plan for building the decentralized replication layer. Successor-game
+  work; kept here because the groundwork (`grid_id`, action-journal) lives in
+  this project.
 
 ## Done
 

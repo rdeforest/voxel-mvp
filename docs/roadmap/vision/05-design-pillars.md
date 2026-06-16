@@ -210,8 +210,8 @@ able to guess what a key, button, or controller input will do before pressing
 it — and should always be rewarded, never punished, for poking at the world
 to find out what it's made of.
 
-**Examine and interact are universal and always safe.** Every thing in the
-game answers two always-available verbs:
+**Examine, interact, and consider are universal and always safe.** Every
+thing in the game answers three always-available verbs:
 
 - **Examine** — gather more information about a thing without committing to
   any other action or taking any risk. *Not* "poke the bear with a stick to
@@ -221,6 +221,14 @@ game answers two always-available verbs:
   default may *change* as the player's relationship to the object changes (a
   wary animal vs. a tamed one), but whatever the current default is, it is
   never a trap.
+- **Consider / think** — enter *hypothetical mode* about the examined thing:
+  describe changes and relationships, name combinations into a reusable
+  concept library, and request recipe hints by considering things together —
+  all without committing to anything. This is the verb that makes the other
+  two surprise-free: you can always preview an outcome (as a ghost) before it
+  happens. The full mechanic — ghosts-plus-naming as the visual language, the
+  concept library, the hint system — is
+  [`../design/17-consider-and-hypothetical-mode.md`](../design/17-consider-and-hypothetical-mode.md).
 
 - *Forbids:* context-sensitive controls that do something destructive you
   didn't expect; an "interact" that sometimes attacks; an examine with side
@@ -245,6 +253,39 @@ pillar 2 (epistemic progression) turned toward the *discovery* layer: the
 difficulty lives in understanding, the controls stay honest, and the only
 surprises left are the fun ones.
 
+## 10. Accessibility is structural, not a polish pass
+
+Accessibility is a design constraint from the start, not a feature bolted on
+near ship. Two absolutes, each a refusal to make the player's body the
+difficulty:
+
+- **No sense is load-bearing alone.** No game-critical information reaches the
+  player through only one sense. Music and sound effects are wanted, but they
+  can *never* be the only clue: when the score shifts the mood, the **color
+  palette shifts with it**, and a **visible-sounds** toggle (the symbol
+  sequence *ear → → eye*) renders a visual cue for every game-critical
+  sound — a grumbling stomach, twigs snapping under heavy wildlife, nearby
+  running water.
+- **No reflexes are ever required.** Nothing demands fast reaction time. The
+  player can **pause time without pausing interaction** — freeze the clock,
+  plan the fix in hypothetical mode (pillar 9's *consider*), then trigger
+  execution, which lands *instantaneously in game time*. A collapsing
+  structure is lost only by not knowing what to do, never by not moving fast
+  enough.
+
+- *Forbids:* audio-only alerts, mood conveyed by sound alone, twitch-gated
+  saves, any failure that hinges on reaction speed, "accessibility options"
+  deferred to a someday backlog.
+- *Buys you:* the difficulty stays where pillars 2 and 4 put it — in
+  comprehension and engineering — and the game is fair to a strictly wider set
+  of players at no cost to anyone. The mechanisms (visible sounds,
+  mood↔palette coupling, pause-and-plan, the settings menu) live in
+  [`../design/18-accessibility.md`](../design/18-accessibility.md).
+
+This pillar *pushes the same direction as* pillar 6: doubling mood into
+palette and sound into sight is more diegetic information, not more overlay
+text.
+
 ## Open problems these pillars create
 
 Stated here so they aren't rediscovered from scratch:
@@ -254,12 +295,14 @@ Stated here so they aren't rediscovered from scratch:
   on the counter with a progress shimmer; the backlog is literally the
   lineup of unfinished things, no list, no text. Most aligned with pillar 1.
   Load-bearing for the anti-tedium goal; prototype early.
-- **A visual language for the input→action mapping** (pillars 6 + 9). The
-  minimal-text commitment forbids just printing key labels on screen, yet
-  least-surprise demands the player always knows what an input will do — and
-  the cue must span keyboard, mouse, *and* controller, plus the case where an
-  object's default interaction changes with the player's relationship to it.
-  Related to but distinct from the job-queue language above.
+- **A visual language for the input→action mapping** (pillars 6 + 9).
+  *Resolved in principle:* the answer is the tool-preview **ghosts** plus
+  letting the player **name things**, plus the **consider** verb that lets
+  them preview any action's ghost before committing — see
+  [`../design/17-consider-and-hypothetical-mode.md`](../design/17-consider-and-hypothetical-mode.md).
+  Still open: how the cue reads across keyboard, mouse, *and* controller, and
+  how it shows an object's default interaction changing with the player's
+  relationship to it.
 - **"See it → interact with it" vs. distance** (pillar 1). The principle
   means *interaction is never gated by fiat*, not *every visible pixel is in
   reach*. The telescope/binoculars feature deliberately lets players see

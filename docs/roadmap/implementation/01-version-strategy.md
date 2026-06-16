@@ -4,13 +4,20 @@ Each version answers one question. Versions are nominal labels —
 v0.5 falls chronologically between v0.1 and v0.2 because it's
 "halfway to 1.0", not "between 0.2 and 0.9."
 
+**Scope boundary: this game is single-player.** Networking and multiplayer
+are *not* part of this project at any version — they are the **successor
+game** (the one after this one). The decentralized network design is captured
+now only so its groundwork (`grid_id` in payloads, the deferred action-journal
+model) isn't lost; see [`../design/05-network-architecture.md`](../design/05-network-architecture.md).
+Every version below is a single-player milestone.
+
 | Version | Question it answers                          | Maps to phases                                              |
 |---------|----------------------------------------------|-------------------------------------------------------------|
 | 0.0     | Is this as good of an idea as I think it is? | Phases 0, 2, 5 (fast path)                                  |
 | 0.1     | Can I make it fun/performant?                | Phases 1, 3, 4, 5.5, plus honest-destruction + construction |
 | 0.5     | Playtester drop                              | Linux/macOS binaries + brief onboarding                     |
 | 0.2     | Can I make it pretty?                        | Art pass, shader work, audio, vehicles, channels            |
-| 0.9     | Can I make it into a real product?           | Multiplayer, survival, combat, locomotives                  |
+| 0.9     | Can I make it into a real product?           | Survival, combat, locomotives (single-player)               |
 | 1.0     | Will people pay to get it from Steam?        | Open-source + Steam cloud-save extras                       |
 | 1.1     | Can I make it run on Windows?                | Cross-platform builds via cloud CI                          |
 | 1.x     | Wild dreams                                  | Planet-scale, sailing                                       |
@@ -47,9 +54,11 @@ temperature). Both gated behind v0.1's gameplay loop landing.
 
 ## v0.9 — Real product
 
-Survival/MMO-y subsystems. Multiplayer (which forces the network
-architecture work). Combat. AI. Locomotives. The pieces that turn the
-tech demo into a game people would play for forty hours.
+Survival subsystems. Combat. AI. Locomotives. The pieces that turn the
+tech demo into a game people would play for forty hours — **single-player.**
+Multiplayer is explicitly *not* here: it forces the network-architecture work,
+which belongs to the successor game (see the scope boundary above). v0.9 is
+"a real product you play alone," not "an MMO."
 
 ## v1.0 — Steam release
 

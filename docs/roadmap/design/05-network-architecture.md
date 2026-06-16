@@ -3,10 +3,14 @@
 *The spec. For the one-shot transition / build sequence, see
 [`../implementation/planned/15-network-transition.md`](../implementation/planned/15-network-transition.md).*
 
-> Far-horizon work (v0.9+ territory). Does NOT block single-player
-> development. Captured now so the reasoning isn't lost. The v0.1
-> persistence already carries `grid_id` in payloads and deferred an
-> action-journal/replay model — both of which this design builds on.
+> **Successor-game work — not part of this project at any version.** This
+> game is single-player end to end (see
+> [`../implementation/01-version-strategy.md`](../implementation/01-version-strategy.md)'s
+> scope boundary); networking belongs to the *next* game, the multiplayer one.
+> Captured now only so the reasoning isn't lost and so this project doesn't
+> foreclose it: the v0.1 persistence already carries `grid_id` in payloads and
+> deferred an action-journal/replay model — both of which this design builds
+> on. Nothing here blocks or gates single-player development.
 
 ## The goal (in Robert's words)
 

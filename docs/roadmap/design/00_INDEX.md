@@ -20,7 +20,8 @@ or condensed.
 - [`04-event-bus.md`](04-event-bus.md) — preserves the spec for the event
   bus (mostly shipped) so the design intent survives the code.
 - [`05-network-architecture.md`](05-network-architecture.md) — captures the
-  far-horizon decentralized op-log multiplayer vision.
+  decentralized op-log multiplayer vision for the **successor game** (this
+  project is single-player); kept so its groundwork isn't lost.
 - [`06-channel-architecture.md`](06-channel-architecture.md) — defines the
   multi-channel spatial-database view of the voxel grid.
 - [`07-known-hard-problems.md`](07-known-hard-problems.md) — parks open
@@ -56,3 +57,12 @@ or condensed.
   avatar authoring: high fidelity plus an affirmative full range of atypical
   bodies, the unremovable dream-wounds, and the one deliberate (mechanical)
   exclusion.
+- [`17-consider-and-hypothetical-mode.md`](17-consider-and-hypothetical-mode.md)
+  — the third universal verb (examine / interact / **consider**): hypothetical
+  mode, the player-named concept library that makes builds repeatable, and the
+  consider-things-together hint system. Resolves pillar 9's input→action
+  visual-language problem (ghosts + naming).
+- [`18-accessibility.md`](18-accessibility.md) — the mechanism half of pillar
+  10: no sense load-bearing alone (mood↔palette, visible-sounds ear→→eye),
+  no reflexes required (pause-without-freeze, instantaneous plan execution),
+  and the settings menu.

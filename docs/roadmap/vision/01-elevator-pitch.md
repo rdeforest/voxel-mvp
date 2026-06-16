@@ -1,5 +1,15 @@
 # Elevator Pitch
 
+## Working title: *name, First*
+
+The title is the string **"Last name, First name"** with a **vignette** effect
+darkening away the first and last word — what survives is *name, First*. The
+load-bearing character is the **comma**: one letter from *coma*, which is the
+whole game ([`04-volcano-story.md`](04-volcano-story.md) — the player is
+dreaming, or comatose; the game never commits). The title quietly carries the
+core conceit without spelling it out, and the vignette that produces it is the
+same lens the player sees the dream through.
+
 > Valheim chose a heightmap engine in 2018 and has spent 7+ years working
 > around its limitations: loading screens for caves, floating buildings,
 > fake terrain modification, no overhangs. This project proves that a

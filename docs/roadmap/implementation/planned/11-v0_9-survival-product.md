@@ -1,18 +1,16 @@
 # v0.9: Can I Make It Into A Real Product?
 
-**Goal:** Survival/MMO-y subsystems. Multiplayer. Combat.
-Locomotives.
+**Goal:** Survival subsystems. Combat. Locomotives. **Single-player.**
 **Status:** Pending; after v0.2.
 
-This is the version where the network architecture work
-([`../../design/05-network-architecture.md`](../../design/05-network-architecture.md))
-finally has to land. Multiplayer is gated on the decentralized op-log
-replication design being ready to build.
-
-## Multiplayer
-
-- **FEAT064**: Multiplayer — full decentralized op-log replication;
-  see the [network transition chapter](15-network-transition.md).
+This is the version that turns the tech demo into a forty-hour
+single-player game. **Multiplayer is *not* part of this version** — or
+this project at all. Networking is the successor game; see the scope
+boundary in
+[`../01-version-strategy.md`](../01-version-strategy.md) and the
+[network design doc](../../design/05-network-architecture.md). The
+decentralized-replication groundwork stays captured so the successor
+isn't foreclosed, but nothing here depends on it.
 
 ## Survival loop
 

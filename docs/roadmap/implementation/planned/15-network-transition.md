@@ -6,13 +6,15 @@ When this work lands, this chapter becomes history.*
 
 ## When this happens
 
-v0.9, gated by the multiplayer commitment (FEAT064).
-
-There is no urgency on the network architecture; single-player work
-through v0.5/v0.2 doesn't need any of it. But the seeds are already
-planted in v0.1: every event payload carries `grid_id`, and the
-deferred action-journal/replay model from v0.1 is the same primitive
-the network layer needs.
+**In the successor game, not this one.** This project is single-player
+at every version (see
+[`../01-version-strategy.md`](../01-version-strategy.md)'s scope
+boundary); networking is the next game's defining feature, not a late
+version of this one. This chapter is kept because the groundwork lives
+*here*: every v0.1 event payload carries `grid_id`, and the deferred
+action-journal/replay model is the same primitive the network layer
+needs — so the successor inherits a head start instead of a rewrite.
+Nothing in this project's roadmap is gated on it.
 
 ## Why this is a separate chapter from the design doc
 
