@@ -64,6 +64,10 @@ func _ready() -> void:
     _drawer.mouse_filter        = Control.MOUSE_FILTER_IGNORE
     content.add_child(_drawer)
 
+    # Measure the ACTUAL per-frame render cost (CPU + GPU), which is independent of vsync / fps_max — the
+    # display interval (get_frames_per_second) clamps to the cap and can't show work below it.
+    RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+
     visible = false
 
 
@@ -95,9 +99,12 @@ func mark_event() -> void:
 
 
 func _process(_dt: float) -> void:
-    # Record every frame (cheap) so the history is already there when the overlay is shown
-    # and no spike is missed. Use the real frame interval — the spike signal we want.
-    _frames.append(get_process_delta_time() * 1000.0)
+    # Record the ACTUAL frame-generation cost every frame (cheap; even while hidden so history is ready).
+    # This is the work to make a frame — NOT the display interval, which vsync/fps_max clamp.
+    var gpu_ms := _gpu_ms()
+    var cpu_ms := _cpu_ms()
+    var gen_ms := maxf(cpu_ms, gpu_ms)   # the limiter: the frame time you'd get uncapped
+    _frames.append(gen_ms)
     _marks.append(1 if _pending_mark else 0)
     _pending_mark = false
     if _frames.size() > GRAPH_CAP:
@@ -107,13 +114,12 @@ func _process(_dt: float) -> void:
         return
     _drawer.queue_redraw()
     var fps := Engine.get_frames_per_second()
-    var frame_ms := 1000.0 / maxf(fps, 0.001)
     var now := Engine.get_process_frames()
     var ticks := Engine.get_physics_frames() - _last_physics_frame
     _last_physics_frame = Engine.get_physics_frames()
     var lines: Array[String] = [
-        "FPS %.1f   (%.1f ms/frame)" % [fps, frame_ms],
-        "phys %d ticks/frame" % ticks,   # >1 = physics over budget, catching up
+        "frame gen %.2f ms  (CPU %.2f / GPU %.2f)" % [gen_ms, cpu_ms, gpu_ms],
+        "FPS %.1f (display, capped)   phys %d ticks/frame" % [fps, ticks],
     ]
     var labels := _times.keys()
     labels.sort()
@@ -126,7 +132,7 @@ func _process(_dt: float) -> void:
         lines.append("%s  %.2f ms" % [label, e.ms])
     # Accounted CPU vs the whole frame: a large, bouncing "other" with small/steady CPU means the
     # cost is GPU / present / unmeasured — not in any timed subsystem (look at the shaders, not here).
-    lines.append("Σ CPU %.2f ms   |   other %.2f ms" % [cpu_sum, maxf(0.0, frame_ms - cpu_sum)])
+    lines.append("Σ CPU %.2f ms   |   other %.2f ms" % [cpu_sum, maxf(0.0, gen_ms - cpu_sum)])
     var keys := _status.keys()
     keys.sort()
     for key in keys:
@@ -135,6 +141,18 @@ func _process(_dt: float) -> void:
             continue
         lines.append("%s: %s" % [key, s.text])
     _label.text = "\n".join(lines)
+
+
+# GPU time to render the last frame, in ms (cap-independent — measured by the rendering server).
+func _gpu_ms() -> float:
+    return RenderingServer.viewport_get_measured_render_time_gpu(get_viewport().get_viewport_rid())
+
+
+# CPU time to produce the last frame, in ms: the main-thread process step + the render-server CPU time.
+# Both are cap-independent (the engine sleeps the rest of the interval when vsync/fps_max throttle).
+func _cpu_ms() -> float:
+    return Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0 \
+            + RenderingServer.viewport_get_measured_render_time_cpu(get_viewport().get_viewport_rid())
 
 
 func _frame_color(ms: float) -> Color:
