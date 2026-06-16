@@ -295,6 +295,40 @@ func test_grow_world_bounds_resident_set():
     assert_eq(_tri_sigs(back_to_start), _tri_sigs(start_built), "a full sweep returns to the start surface (no corruption)")
 
 
+# Stage P2.5 — incremental band-diff on a CAMERA MOVE (graded floor re-grade). With a graded floor
+# (floor = eps_px·dist/proj), moving the camera changes which cells should be fine: cells it approached must
+# refine, cells it receded from must coarsen. grow_world must do this incrementally and produce the SAME
+# surface as a fresh build at the new camera — touching only the changed band, not the whole window. (Same
+# window both times, so this isolates the floor re-grade from window shift.)
+func test_grow_world_regrades_floor_on_camera_move():
+    var s := _store()
+    # depth-7 root (128 lattice), half = 64 — big enough that the floor grades across the window
+    var surf := _surface_y(s, 0.5, 0.5)
+    var origin := Vector3i(-64, int(round(surf)) - 64, -64)
+    var c := origin + Vector3i(64, 64, 64) # window centre (WORLD lattice)
+    var win := Vector3i(48, 48, 48)
+    var wmin := c - win
+    var wmax := c + win
+    var proj := 64.0
+    var eps := 8.0 # floor_k = eps/proj = 1/8 → floor grades 1→~11 across the window
+    # cameras in the octree LATTICE frame (world − origin; base_cell 1). A small move re-grades a band.
+    var cam_a := Vector3(c - origin) + Vector3(0, 24, 0)
+    var cam_b := Vector3(c - origin) + Vector3(12, 24, 0)
+    var m := DCOctreeMesher.new()
+    m.mesh_world(s, origin, 7, 1.0, cam_a, proj, eps, true, PackedColorArray(), wmin, wmax)
+    var grown: Array = m.grow_world(cam_b, proj, eps, wmin, wmax)
+    var grow_samples: int = m.get_last_build_sample_count()
+
+    var fm := DCOctreeMesher.new()
+    var fresh: Array = fm.mesh_world(s, origin, 7, 1.0, cam_b, proj, eps, true, PackedColorArray(), wmin, wmax)
+    var fresh_samples: int = fm.get_last_build_sample_count()
+
+    assert_gt((fresh[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), 100, "graded build has a real surface")
+    assert_eq(_tri_sigs(grown), _tri_sigs(fresh), "grow with camera move == fresh build at the new camera (floor re-graded)")
+    assert_gt(grow_samples, 0, "the move re-sampled the changed band")
+    assert_lt(grow_samples, fresh_samples, "the move re-sampled only the changed band, not the whole window")
+
+
 # Direct field sampling == sampling a baked grid of the same field: the crossing topology is decided by
 # the field's SIGN at integer cell corners — identical whether read direct (mesh_world) or via a
 # fill_region grid (mesh_clipmap) — so the two meshes share a vertex count (positions differ only by the

@@ -992,46 +992,61 @@ struct Octree {
 		free_list.push_back(idx);
 	}
 
-	// Reconcile the tree to the current window box (build_min/build_max): graft cells that newly overlap
-	// (sampling ONLY them) and evict cells that left (detach their subtree to an absent leaf). The result
-	// is structurally identical to a from-scratch windowed build of this window — same cells, same absent
-	// granularity — because both terminate at the shallowest cell not overlapping the window.
-	void reconcile(int idx) {
-		bool overlaps = cell_overlaps_build_box(cells[idx].origin, cells[idx].size);
-		int sz = cells[idx].size;
-		if (cells[idx].children[0] < 0) {
-			Vector3 center = to_v3(cells[idx].origin) + Vector3(1, 1, 1) * (sz * 0.5);
-			bool at_floor = sz <= 1 || double(sz) <= src->target_cell_size(center);
-			if (at_floor) {
-				// A floor leaf can't be subdivided; flip its presence to match the window.
-				if (overlaps && cells[idx].absent) {
-					cells[idx].absent = false;
-					cells[idx].qef = leaf_qef(idx);
-					++build_samples;
-				} else if (!overlaps) {
-					cells[idx].absent = true; // reaccumulate() clears its QEF
-				}
-				return;
-			}
-			if (overlaps && cells[idx].absent) {
-				grow_subtree(idx);   // leading edge: build the new band
-				accumulate_qef(idx); // sample ONLY the new subtree's leaves
-			}
-			return; // still-absent leaf outside the window: nothing
-		}
-		if (overlaps) {
-			for (int i = 0; i < 8; ++i) {
-				reconcile(cells[idx].children[i]);
-			}
-		} else {
-			// Trailing edge: this whole subtree left the window → kill the children (so their stale cells
-			// emit nothing) and detach to an absent leaf, exactly the placeholder a fresh build leaves here.
+	// Make this cell into a present leaf at its own size: discard any subtree (coarsen) and sample its own
+	// Hermite data. The from-scratch equivalent of a build() that stops here (floor or pruned).
+	void make_leaf(int idx) {
+		if (cells[idx].children[0] >= 0) {
 			for (int i = 0; i < 8; ++i) {
 				kill_subtree(cells[idx].children[i]);
 				cells[idx].children[i] = -1;
 			}
+		}
+		cells[idx].leaf = true;
+		cells[idx].absent = false;
+		cells[idx].qef = leaf_qef(idx);
+		++build_samples;
+	}
+
+	// Reconcile the retained tree to the CURRENT window + camera floor (build_min/max + target_cell_size),
+	// touching only what changed: graft cells that entered the window, evict cells that left, REFINE cells
+	// the camera approached (floor now finer), and COARSEN cells it receded from (floor now coarser). The
+	// result is structurally identical to a from-scratch build at this camera/window — same leaf/internal/
+	// absent decision per cell as build() — so the mesh equals a fresh build, but unchanged cells are reused
+	// (not resampled): a move re-meshes only the changed band, not the whole vicinity (doc 17 P2.5 / 13 B3).
+	void reconcile(int idx) {
+		int sz = cells[idx].size;
+		if (!cell_overlaps_build_box(cells[idx].origin, sz)) {
+			// Left the window → absent leaf (the placeholder a fresh build leaves here).
+			if (cells[idx].children[0] >= 0) {
+				for (int i = 0; i < 8; ++i) {
+					kill_subtree(cells[idx].children[i]);
+					cells[idx].children[i] = -1;
+				}
+			}
 			cells[idx].leaf = true;
 			cells[idx].absent = true;
+			return;
+		}
+		// In window. build()'s own leaf test: at the data floor, or provably surface-free (pruned).
+		Vector3 center = to_v3(cells[idx].origin) + Vector3(1, 1, 1) * (sz * 0.5);
+		bool want_leaf = sz <= 1 || double(sz) <= src->target_cell_size(center) ||
+				(prune_safety > 0.0 && src->surface_free(to_v3(cells[idx].origin), to_v3(cells[idx].origin) + Vector3(1, 1, 1) * double(sz)));
+		if (want_leaf) {
+			if (cells[idx].children[0] >= 0) {
+				make_leaf(idx); // receded: coarsen the subtree back to one leaf here
+			} else if (cells[idx].absent) {
+				cells[idx].absent = false; // entered the window at the floor
+				cells[idx].qef = leaf_qef(idx);
+				++build_samples;
+			}
+			// else: a present leaf already at the floor — unchanged, reused (not resampled)
+		} else if (cells[idx].children[0] >= 0) {
+			for (int i = 0; i < 8; ++i) {
+				reconcile(cells[idx].children[i]); // still internal — recurse
+			}
+		} else {
+			grow_subtree(idx);   // approached/entered: subdivide to the (finer) floor — samples only this band
+			accumulate_qef(idx);
 		}
 	}
 
