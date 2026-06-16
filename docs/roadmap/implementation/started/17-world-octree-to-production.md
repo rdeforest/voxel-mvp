@@ -68,11 +68,16 @@ then holds. `eps_px` is the only operating point (ACCEL_DIM, depth are API-shape
   detail. Lowering it (incremental accel bake / serve `value()` from the baked grid) frees budget to refine.
   Not chased yet (Robert: meshing perf fine for now).
 
-### P2.5 — Incremental band-diff (move latency) — keeps mesh lag down as eps tightens
-A full graded rebuild on each move is the worker cost the lag budget caps; the endgame (doc 13 B3) is to
-rebuild only the cells whose LOD band flipped on a move. `grow_world` already grafts window entry/exit; this
-extends `reconcile` to re-grade cells whose floor changed with the camera. Until then a graded `dcworld`
-full-rebuilds on move (acceptable within the 500 ms ceiling).
+### P2.5 — Incremental band-diff (move latency) — DONE (2026-06-15)
+A move now re-meshes only the band it touched, not the whole window. `reconcile` does the full incremental
+band-diff: graft cells entering the window, evict those leaving, **refine cells the camera approached**
+(graded floor now finer), **coarsen cells it receded from** — matching `build()`'s per-cell leaf/internal/
+absent decision, so a `grow_world` against a new camera/eps yields a surface identical to a fresh build
+there while re-sampling only the changed band. dcworld grows on a plain move or an eps change (the
+controller re-grading); full rebuild only on first build / edit / re-root. Gate:
+`test_grow_world_regrades_floor_on_camera_move` (grow-after-move == fresh build, samples << full).
+**GPU-verify:** the bloom-on-walk is smooth and the controller settles across the cheap-grow / rare-rebuild
+regimes.
 
 ### P3 — Make `dcworld` the live render; retire the clipmap
 With P1+P2, the world-fixed octree covers the view at an affordable cost. Promote it: a `dcworld` manager
