@@ -16,6 +16,25 @@ The temptation to skip them in favor of "real gameplay" is real, and
 is wrong. The architecture decisions made here govern what v0.2 and
 v0.9 can be.
 
+## Status reconcile (2026-06-15)
+
+This is no longer an active "finish me" doc — it's the v0.1 backlog, and the
+destruction half has moved under the MPM pivot. Where each sub-phase stands:
+
+| Sub-phase | State |
+|-----------|-------|
+| 5.5a event bus | **DONE** |
+| 5.5b construction-mode / honest-failure verbs | **DONE** |
+| 5.5c fracture as mesh extraction | **SUPERSEDED by MPM** ([doc 12](../../design/12-mpm-structural-substrate.md)) — fracture is now the continuum solver, not a separate extraction step |
+| 5.5d multi-grid | deferred → v0.2 |
+| 5.5e per-channel data | deferred → v0.2 |
+| 5.5f honest destruction | **SUPERSEDED by MPM** (doc 12) — break-location / impact / slump are MPM material behaviour, not bolt-ons |
+| 5.5g construction usefulness | **LIVE v0.1 backlog** (welding partly MPM-emergent; snap/resize/pick-stamp are UI) |
+| 5.5h QoL / perf / bugs | **LIVE v0.1 backlog** (some items landed or MPM-mooted — see notes inline) |
+
+So the genuine remaining v0.1 work in this doc is **5.5g + 5.5h**; 5.5c/5.5f live
+under doc 12; 5.5d/5.5e are v0.2. The detail below is kept as the backlog record.
+
 ## 5.5a — Voxel change event bus + indexer refactor
 
 **Status: DONE (commit ee80b63).** Full spec at
@@ -62,9 +81,16 @@ type hierarchy.
 
 ## 5.5c — Fracture as mesh extraction
 
-**Status: pending (v0.1).** Moved back into v0.1 from v0.2.
+**Status: SUPERSEDED by MPM ([doc 12](../../design/12-mpm-structural-substrate.md)).**
+Mesh-extraction-along-a-failure-surface was the way to get sub-metre fracture
+without sub-metre voxels on a rigid-body model. MPM makes fracture intrinsic
+(the continuum solver fractures and flows on its own grid; topology change is
+free), so there's no separate extraction step to build. FEAT025/026 below are
+absorbed into the MPM core + its material model. Kept as record of the original
+plan and *why* it was the right instinct (sub-metre destruction without sub-metre
+voxels) — MPM achieves the same end differently.
 
-**Rationale:** testing "is this fun?" requires destruction that *feels*
+**Rationale (historical):** testing "is this fun?" requires destruction that *feels*
 honest, not just structurally accurate. Voxel-aligned cubes flying off
 in a collapse read as a programmer-art prototype; mesh-extraction-
 along-a-computed-failure-surface reads as a real world. This is
@@ -133,13 +159,18 @@ Full spec at [`../../design/06-channel-architecture.md`](../../design/06-channel
 
 ## 5.5f — Honest destruction
 
-**Status: pending (v0.1).**
+**Status: SUPERSEDED by MPM ([doc 12](../../design/12-mpm-structural-substrate.md)).**
+"Where it breaks," impact crumble, and hinge-slump are exactly what a continuum
+solver produces from material parameters — Drucker-Prager sand flow, corotated/
+neo-Hookean elasticity, contact on the grid — rather than threshold rules bolted
+onto a rigid-body model. FEAT027–029 become MPM material tuning, not separate
+features: stress-greatest break (the solver's stress field), dirt slump (sand
+plasticity), wood bend (anisotropic elasticity), and the hinge/no-fly-off
+behaviour (it's continuum, not a freed rigid body — the spinning-beam class can't
+arise). Kept as the acceptance criteria MPM's material model must hit.
 
-Destruction has to *feel* right for the fun question to land. 5.5c
-gives the visual primitive (mesh-extraction fracture); this sub-phase
-makes the *where it breaks* answer material-aware, and adds the impact
-and slumping behaviour that makes a collapse read as a real event
-instead of a numeric threshold being crossed.
+Destruction has to *feel* right for the fun question to land — the criteria below
+are how we judge MPM's material behaviour:
 
 - **FEAT027**: Material-specific break locations:
   - Stone breaks where strain is greatest (uses FEAT026's stress
@@ -165,7 +196,11 @@ than one part at a time.
 
 - **FEAT030**: Welding / joining — intersecting parts (cross beams)
   mutually support. Closes the known "vertical beam on cantilever
-  isn't supported" limit.
+  isn't supported" limit. **Note (MPM):** parts are imprinted voxels and
+  MPM simulates them as continuum, so mutual support across an
+  intersection is largely *emergent* (contact + shared material) rather
+  than a joint model — re-scope this to whatever MPM doesn't give for
+  free (e.g. a deliberate rigid weld vs. loose contact) once MPM lands.
 - **FEAT031**: Snap-modifier hotkeys — opt-in grid alignment on top of
   the free placement we already have.
 - **FEAT032**: Rotation snap — finer-than-90° rotations with a snap
@@ -191,15 +226,19 @@ than one part at a time.
   parts/materials. (Art-dependent; see `../../vision/art-wishlist.md`.)
 - **FEAT039**: Crosshair — mode-aware reticle. (Art.)
 - **FEAT040**: Imperial units display option — user preference.
-- **FEAT041**: Stress-overlay on SDF surface — color the Transvoxel
-  surface via terrain shader instead of floating wireframes. Subsumes
-  the "MultiMesh debug viz" item.
+- **FEAT041**: Stress-overlay on SDF surface — color the terrain surface
+  via the terrain shader instead of floating wireframes. (Stale detail:
+  "Transvoxel" → it's our DC render now; the stress source is MPM/PBD,
+  not the old strain layer.)
 - **FEAT042**: Per-material strain duration / nature-of-change reset
-  scaling — tuning pass.
+  scaling — tuning pass. (MPM material params, post-MPM.)
 - **FEAT043**: Budget-consumption telemetry — gather frame-time-by-
-  system so the perf budget table becomes verifiable.
+  system so the perf budget table becomes verifiable. **Partly landed:**
+  the `Perf` overlay reports per-subsystem ms + true frame-gen time
+  (CPU/GPU, cap-independent); what remains is logging/aggregation.
 - **FEAT044**: Perf baseline instrumentation — `Time.get_ticks_usec`
-  deltas on action.execute. Cheap regression detector.
+  deltas on action.execute. Cheap regression detector. (Perf overlay
+  covers the live view; this is the saved-baseline half.)
 - **FEAT045**: Replay harness + collapse-detector state machine —
   deterministic replay against a saved snapshot; natural home for
   catching collapse-detector edge cases.
@@ -207,10 +246,14 @@ than one part at a time.
 Bugs to close in v0.1:
 
 - **FEAT046**: Vertical-on-horizontal beam support — coordinate-snap
-  edge in `_direct_part_supporter`. Surfaces when welding (FEAT030)
-  lands.
-- **FEAT047**: Spinning-beam physics quirk — investigate the gyroscope
-  behaviour observed during playtest.
+  edge in `_direct_part_supporter`. **MPM-mooted:** `_direct_part_supporter`
+  is the PBD-era part-support spine; MPM gives support emergently, so
+  this bug dies with that code path (verify under MPM, don't fix the old
+  path).
+- **FEAT047**: Spinning-beam physics quirk — the gyroscope behaviour was
+  a freed-rigid-body artifact. **MPM-mooted:** continuum material doesn't
+  fly off as a spinning rigid body, so this class can't arise under MPM
+  (the doc-12 reason for the pivot). Verify, then close.
 
 ## v0.1 checkpoint
 

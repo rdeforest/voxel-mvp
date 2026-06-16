@@ -24,8 +24,12 @@ GUT 233 / 232 pass / 1 pending / 0 fail. Branch `feat/dc-persistent-octree-cache
 - **Deleting** the old parallel renders (clipmap + geomorph + `dcgen`/SVO) is the **cleanup pass** — kept as
   fallbacks for now.
 
-**Remaining `started/` doc:** `05-phase-5_5-architectural-maturation.md`. After the `started/` docs are
-finished comes the code cleanup pass (delete the parallel meshers), then the bug bash (docs/bugs/).
+**`started/` docs reconciled (2026-06-15):** `05-phase-5_5` is the v0.1 backlog, now honest — 5.5a/b done,
+5.5c/5.5f **superseded by MPM** (doc 12), 5.5d/e → v0.2, **5.5g (construction polish) + 5.5h (QoL/perf/bugs)
+are the live v0.1 work** (some 5.5h items landed or MPM-mooted). doc 17 is done (render swap). So per the
+sequence the next step is the **DC code cleanup pass**: delete the retired parallel renders dcworld replaced
+(camera-centered clipmap + geomorph + `dcgen`/SVO + the GDScript SVO substrate prototypes), then the **bug
+bash** (`docs/bugs/`). After that, the open feature threads are MPM (doc 12) and the v0.1 backlog (5.5g/h).
 
 ### Active thread (2026-06-11): MPM continuum-physics substrate — spike done, VERDICT = GO
 
