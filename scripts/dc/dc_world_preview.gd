@@ -16,8 +16,8 @@ extends MeshInstance3D
 # surface-sparse prune over direct sampling (doc 16 NEXT) removes; until then, coverage is a
 # small BUBBLE around you with a hard rim where terrain stops (the window edge — NOT a bug).
 
-const DEPTH        := 11      # root = 2^11 = 2048-unit cube; the window roams inside it (size is free —
-const ROOT_SIZE    := 1 << DEPTH  #   cells outside the window are cheap absent leaves)
+const DEPTH        := 13      # root = 2^13 = 8192-unit cube (2048 m at 0.25); the window roams inside it
+const ROOT_SIZE    := 1 << DEPTH  #   (size is free — cells outside the window are cheap absent leaves)
 const ROOT_SNAP    := 64      # snap the root origin to this LATTICE grid (cells stay world-aligned)
 const RECENTER     := 6.0     # re-mesh once the player drifts this far (m)
 
@@ -137,7 +137,9 @@ func _emit_diagnostic() -> void:
 # a re-root margin (else the camera can never get far enough from a root face to roam — constant re-rooting).
 # A change forces a rebuild next frame.
 func set_radius(radius_m: float) -> void:
-    var cap := ROOT_SIZE * base_cell * 0.4   # ~40% of the root half-spans; leaves a comfortable roam margin
+    # Cap so the window leaves ≥ ~96 m of roam before a re-root (roam = root/2 − radius − margin): a bigger
+    # radius would re-root (full rebuild) almost every step. Bump DEPTH for more reach than this allows.
+    var cap := ROOT_SIZE * base_cell * 0.5 - 128.0
     win_radius_m = clampf(radius_m, 2.0, cap)
     _built = false
 
@@ -293,6 +295,7 @@ func _control() -> void:
 func set_max_lag(ms: float) -> void:
     mesh_ceil = maxf(50.0, ms)
     mesh_target = mesh_ceil * 0.2
+    _eps_dirty = true   # kick the controller to re-tune toward the new budget even while stationary
 
 
 func _arrays_to_mesh(arrays: Array) -> ArrayMesh:
