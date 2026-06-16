@@ -128,8 +128,7 @@ public:
 			bool error_driven = false,
 			const PackedColorArray &palette = PackedColorArray(),
 			Vector3i win_min = Vector3i(), // resident window (WORLD lattice); win_min == win_max ⇒ whole root
-			Vector3i win_max = Vector3i(),
-			double floor_k = 0.0);         // graded data floor: floor = floor_k·dist-from-camera (0 = uniform fine)
+			Vector3i win_max = Vector3i());// graded data floor (eps_px/proj) is derived internally — one knob
 
 	// Incremental window growth (doc 16 Stage B): re-window the RETAINED world octree (from a prior
 	// mesh_world) — graft cells newly in [win_min, win_max), sampling only them; evict cells that left;

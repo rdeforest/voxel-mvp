@@ -370,14 +370,17 @@ struct EditStoreSource : public SdfSource {
 		LocalVector<Vector3i> origins; // decide specs first so accel_held can be pre-sized (stable ptrs)
 		LocalVector<int> reslist;
 		LocalVector<int> dimlist;
-		if (fk <= 0.0) {
+		Vector3i c(int(Math::round(cam_local.x)), int(Math::round(cam_local.y)), int(Math::round(cam_local.z)));
+		int reach = MAX(MAX(c.x - win_lo.x, win_hi.x - c.x), MAX(MAX(c.y - win_lo.y, win_hi.y - c.y), MAX(c.z - win_lo.z, win_hi.z - c.z)));
+		if (fk <= 0.0 || reach <= ACCEL_DIM / 2) {
+			// One res-1 level sized to the window: the whole window is within one fine level (floor ≈ 1
+			// throughout), so concentric levels would buy nothing — and this avoids a 129³ bake for a small
+			// window. Covers the uniform case (fk==0) and every all-fine resident bubble.
 			int span = MAX(win_hi.x - win_lo.x, MAX(win_hi.y - win_lo.y, win_hi.z - win_lo.z)) + 1;
 			origins.push_back(win_lo);
 			reslist.push_back(1);
 			dimlist.push_back(span);
 		} else {
-			Vector3i c(int(Math::round(cam_local.x)), int(Math::round(cam_local.y)), int(Math::round(cam_local.z)));
-			int reach = MAX(MAX(c.x - win_lo.x, win_hi.x - c.x), MAX(MAX(c.y - win_lo.y, win_hi.y - c.y), MAX(c.z - win_lo.z, win_hi.z - c.z)));
 			int res = 1;
 			for (int k = 0; k < 16; ++k) {
 				int half = (ACCEL_DIM / 2) * res;
@@ -1300,8 +1303,7 @@ Array DCOctreeMesher::mesh_world(
 		bool error_driven,
 		const PackedColorArray &palette,
 		Vector3i win_min,
-		Vector3i win_max,
-		double floor_k) {
+		Vector3i win_max) {
 	Array out;
 	if (store.is_null() || depth < 1 || base_cell <= 0.0) {
 		ERR_PRINT("DCOctreeMesher::mesh_world: bad arguments");
@@ -1332,8 +1334,11 @@ Array DCOctreeMesher::mesh_world(
 	// Resident WINDOW (doc 16 Stage B): when win_min != win_max, build only the cells overlapping the
 	// window box (WORLD lattice) and mark the rest absent — the large root can span the roam region while
 	// the build cost stays bounded to the window. Default (win_min == win_max) = build the whole root.
-	// P2 (doc 17): graded data floor — the build descends only as fine as a cell renders (floor_k =
-	// eps_px/proj), so far cells stop coarse and a large window stays affordable. 0 = uniform fine.
+	// P2 (doc 17): graded data floor DERIVED from the single eps_px knob — build only as fine as a cell
+	// renders. A size-s cell at distance d projects to ~s·proj/d px, = eps_px at s = eps_px·d/proj, so
+	// floor_k = eps_px/proj. No separate dial: the budget controller drives eps_px (start coarse, tighten to
+	// the frame/WORK budget) and the floor follows. (proj==0 → no camera → uniform fine.)
+	double floor_k = (proj > 0.0 && eps_px > 0.0) ? eps_px / proj : 0.0;
 	_persist->world_src.cam = camera;
 	_persist->world_src.floor_k = floor_k;
 	if (win_min != win_max) {
@@ -1376,8 +1381,10 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	// way). NOTE: grow does not re-grade interior cells whose floor changed with the camera — that's the
 	// incremental band-diff (a later increment); a graded dcworld full-rebuilds on larger moves meanwhile.
 	if (_persist->world_src.has_accel) {
+		double floor_k = (proj > 0.0 && eps_px > 0.0) ? eps_px / proj : 0.0; // same single-knob derivation
 		_persist->world_src.cam = camera;
-		_persist->world_src.bake_accel(win_min - oct.world_origin, win_max - oct.world_origin, camera, _persist->world_src.floor_k);
+		_persist->world_src.floor_k = floor_k;
+		_persist->world_src.bake_accel(win_min - oct.world_origin, win_max - oct.world_origin, camera, floor_k);
 		oct.prune_safety = 1.0;
 	}
 	oct.build_samples = 0;
@@ -1415,10 +1422,10 @@ void DCOctreeMesher::_bind_methods() {
 			DEFVAL(PackedByteArray()), DEFVAL(PackedColorArray()));
 	ClassDB::bind_method(
 			D_METHOD("mesh_world", "store", "world_origin", "depth", "base_cell",
-					"camera", "proj", "eps_px", "error_driven", "palette", "win_min", "win_max", "floor_k"),
+					"camera", "proj", "eps_px", "error_driven", "palette", "win_min", "win_max"),
 			&DCOctreeMesher::mesh_world,
 			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(PackedColorArray()),
-			DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(0.0));
+			DEFVAL(Vector3i()), DEFVAL(Vector3i()));
 	ClassDB::bind_method(
 			D_METHOD("grow_world", "camera", "proj", "eps_px", "win_min", "win_max"),
 			&DCOctreeMesher::grow_world);
