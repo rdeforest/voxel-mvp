@@ -14,7 +14,6 @@ extends RefCounted
 # are the subsystems World owns; assign them before register_all().
 
 var host:          Node
-var dc_manager:    DCTerrainManager
 var inval_overlay: Node3D
 var world_preview: DcWorldPreview
 var pbd_structure:     PbdStructure
@@ -52,17 +51,9 @@ func _table() -> Array:
         [savestyle,       "savestyle", "Save the current watercolour/terrain shader settings as a named preset. Usage: savestyle <name>"],
         [loadstyle,       "loadstyle", "Load a saved shader-settings preset. Usage: loadstyle <name>"],
         [liststyles,      "liststyles","List saved shader-settings presets."],
-        [dcmanager,       "dcmanager", "Toggle the DC terrain manager (threaded re-mesh of a bubble around you). Usage: dcmanager [on|off]"],
-        [dcerror,         "dcerror",   "Toggle screen-error terrain LOD (collapse by projected QEF residual in px). Usage: dcerror [on|off]"],
-        [dcinval,         "dcinval",   "Toggle the invalidation overlay: blue=voxels an edit changed, green=region re-meshed, fading. Shows what each edit/move redoes."],
-        [dcbudget,        "dcbudget",  "Toggle the B2 detail budget: auto-tune the LOD threshold toward a frame-time target (refine on slack, coarsen over budget). Usage: dcbudget [on|off]"],
-        [dceps,           "dceps",     "Set the screen-error LOD threshold (px; lower = more detail). Usage: dceps <px>"],
+        [dcinval,         "dcinval",   "Toggle the invalidation overlay: red=triangle too big on screen, yellow=too small; fading. Shows what each edit/move redoes."],
         [fov,             "fov",       "Set the camera field-of-view in degrees (low = telescope/zoom → distant terrain refines under screen-error LOD). Usage: fov <degrees>"],
-        [dccore,          "dccore",    "Toggle the uniform 1m fine core: ON pins fine cells around you (clean edit splices); OFF lets the core collapse by screen-error too (uniform huge tris at high dceps, but edits may crack). Usage: dccore [on|off]"],
-        [dcprune,         "dcprune",   "Toggle the surface-sparse build (exact min/max prune — skips provably-empty cells, fast rebuild). 1 = on (default), 0 = dense build (slow, for comparison). Usage: dcprune <0|1>"],
-        [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight + magenta backfaces (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
-        [dcdump,          "dcdump",    "Write the next clipmap dispatch's mesher inputs to user://dcdump.dat (diagnostic)."],
-        [dcaudit,         "dcaudit",   "Re-mesh and report suspect terrain triangles (degenerate/sliver/tilted) in world coords. Usage: dcaudit"],
+        [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
         [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + mesh-lag."],
         [meshlag,         "meshlag",   "Max mesh lag (ms) the budget controller keeps the worker re-mesh under — higher = more terrain detail, slower re-mesh on a move. Usage: meshlag [ms] (default 500)"],
         [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
@@ -88,9 +79,11 @@ func _table() -> Array:
 func _parse_toggle(state: String, current: bool) -> bool:
     return not current if state == "" else state == "on"
 
+func _terrain_material() -> ShaderMaterial:
+    return load(VoxelConstants.TERRAIN_MATERIAL_PATH)
 
 func set_uniform(param: String, value: float) -> void:
-    var mat := dc_manager.terrain_material
+    var mat: ShaderMaterial = _terrain_material()
     if mat == null:
         LimboConsole.error("no terrain material")
         return
@@ -98,7 +91,7 @@ func set_uniform(param: String, value: float) -> void:
     LimboConsole.info("%s = %s" % [param, value])
 
 func get_uniform(pattern: String = "*") -> void:
-    var mat := dc_manager.terrain_material
+    var mat: ShaderMaterial = _terrain_material()
     if mat == null:
         LimboConsole.error("no terrain material")
         return
@@ -126,7 +119,7 @@ const POST_MAT_PATH := "res://assets/materials/watercolor_post.tres"
 
 # The materials a style spans, keyed for the file: the terrain wash + the ink/vignette post-process.
 func _style_materials() -> Dictionary:
-    return {"terrain": dc_manager.terrain_material, "post": load(POST_MAT_PATH)}
+    return {"terrain": _terrain_material(), "post": load(POST_MAT_PATH)}
 
 func _style_path(name: String) -> String:
     return "%s/%s.txt" % [STYLES_DIR, name.validate_filename()]
@@ -196,78 +189,30 @@ func liststyles() -> void:
         LimboConsole.info("no styles saved yet")
 
 
-func dcmanager(state := "") -> void:
-    var on := _parse_toggle(state, dc_manager.is_enabled())
-    dc_manager.set_enabled(on)
-    LimboConsole.info("dcmanager: %s" % ("on" if on else "off"))
-
 func dcinval(_state := "") -> void:
     var on: bool = inval_overlay.toggle()
-    dc_manager.debug_invalidation = on   # clipmap: gates the (costly) per-edit triangle scan
     if on:
-        world_preview.refresh_diagnostic()   # dcworld: show the LOD diagnostic from the current mesh now
-    LimboConsole.info("dcinval: %s — dcworld LOD: red=triangle too big on screen, yellow=too small; (clipmap: blue=voxels changed, green=re-meshed)" % ("on" if on else "off"))
-
-func dcbudget(state := "") -> void:
-    var on := _parse_toggle(state, dc_manager.budget_enabled)
-    dc_manager.budget_enabled = on
-    LimboConsole.info("dcbudget: %s (target %.0f ms/frame, eps now %.2fpx)" % [
-        ("on" if on else "off"), DCTerrainManager.BUDGET_TARGET_MS, dc_manager.eps_px])
-
-func dcerror(state := "") -> void:
-    var on := _parse_toggle(state, dc_manager.error_driven)
-    dc_manager.error_driven = on
-    dc_manager.remesh()
-    LimboConsole.info("dcerror: %s (eps %.2fpx)" % [("on" if on else "off"), dc_manager.eps_px])
-
-func dceps(px: float) -> void:
-    dc_manager.set_eps(maxf(0.1, px))   # cheap in-place re-collapse (retained octree), no field re-sample
-    LimboConsole.info("dceps: %.2fpx" % dc_manager.eps_px)
-
-func dcprune(factor: float) -> void:
-    dc_manager.prune_safety = maxf(0.0, factor)
-    dc_manager.remesh()
-    LimboConsole.info("dcprune: %.2f (%s)" % [dc_manager.prune_safety,
-        "dense build" if dc_manager.prune_safety == 0.0 else "surface-sparse"])
+        world_preview.refresh_diagnostic()   # show the LOD diagnostic from the current mesh now
+    LimboConsole.info("dcinval: %s — red=triangle too big on screen, yellow=too small" % ("on" if on else "off"))
 
 func fov(degrees: float) -> void:
     var cam := host.get_viewport().get_camera_3d()
     if cam == null:
         LimboConsole.error("fov: no active camera")
         return
-    cam.fov = clampf(degrees, 1.0, 179.0)   # the DC manager polls FOV each frame → auto re-mesh
+    cam.fov = clampf(degrees, 1.0, 179.0)   # dcworld polls FOV each frame → auto re-mesh
     LimboConsole.info("fov: %.1f°" % cam.fov)
 
-func dccore(state := "") -> void:
-    var on := _parse_toggle(state, dc_manager.uniform_core)
-    dc_manager.uniform_core = on
-    dc_manager.remesh()
-    LimboConsole.info("dccore: %s (fine 1m core %s)" % [("on" if on else "off"), ("pinned" if on else "collapsible")])
-
-# Freeze the render so a defect holds still, fly through it (noclip), and colour backfaces magenta
-# so a backwards triangle (gap fills magenta) reads differently from a missing one (gap stays open).
+# Freeze the render so a defect holds still; fly through it (noclip) to inspect holes.
 func examine(state := "") -> void:
-    var on := _parse_toggle(state, dc_manager.frozen)
-    dc_manager.frozen = on
-    dc_manager.set_debug_backface(on)
+    var on := _parse_toggle(state, not world_preview.is_enabled())
+    world_preview.set_enabled(not on)
     player.set_examine_movement(on)
-    LimboConsole.info("examine: %s — re-mesh %s, noclip fly %s, magenta backfaces %s" % [
-        ("ON" if on else "off"), ("FROZEN" if on else "live"),
-        ("on" if on else "off"), ("on" if on else "off")])
-
-func dcdump() -> void:
-    dc_manager.dump_next = true
-    dc_manager.remesh()
-    LimboConsole.info("dcdump: writing user://dcdump.dat on next re-mesh")
-
-func dcaudit() -> void:
-    dc_manager.audit_current_mesh()
-    LimboConsole.info("dcaudit: scanned the on-screen mesh; suspect triangles printed to stdout (Debug Console)")
+    LimboConsole.info("examine: %s — re-mesh %s, noclip fly %s" % [
+        ("ON" if on else "off"), ("FROZEN" if on else "live"), ("on" if on else "off")])
 
 # `dcworld` is THE terrain render (doc 17 P3): the world-fixed octree, 0.25 m, graded by the screen-error
 # budget controller (eps_px self-tunes against frame time + mesh lag, ~100 ms target / 500 ms ceiling).
-# `dcworld off` blanks it (use `dcmanager on` to fall back to the clipmap render for comparison). `dcworld`
-# (no args) prints the live eps_px + last mesh-lag (also in the perf overlay). `dcworld on <radius_m>` resizes.
 func dcworld(arg := "") -> void:
     if arg.is_valid_float():                       # `dcworld 256` → set coverage radius AND turn on
         world_preview.set_radius(arg.to_float())
@@ -281,9 +226,8 @@ func dcworld(arg := "") -> void:
         return
     var on := _parse_toggle(arg, world_preview.is_enabled())   # `dcworld on|off` (empty → toggle)
     world_preview.set_enabled(on)
-    LimboConsole.info("dcworld: %s (THE world-fixed render, %.0fm coverage @ %.2fm cells, budget-tuned eps)%s" % [
-        "on" if on else "off", world_preview.win_radius_m, world_preview.base_cell,
-        " — `dcmanager on` for the clipmap to compare" if on else " — terrain blank; `dcmanager on` for the clipmap"])
+    LimboConsole.info("dcworld: %s (THE world-fixed render, %.0fm coverage @ %.2fm cells, budget-tuned eps)" % [
+        "on" if on else "off", world_preview.win_radius_m, world_preview.base_cell])
 
 # Set the mesh-lag ceiling (ms) the dcworld budget controller keeps the worker re-mesh under.
 func meshlag(ms := 0.0) -> void:

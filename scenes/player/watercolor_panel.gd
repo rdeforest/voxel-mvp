@@ -1,8 +1,8 @@
 extends CanvasLayer
 
 # Floating, draggable tuning panel for the watercolour-spike shader uniforms (F10 to toggle).
-# Writes the terrain ShaderMaterial live — the SAME cached instance the console set/get and
-# DCTerrainManager use, so changes are immediate. Opening frees the mouse + pauses the tree (tune
+# Writes the terrain ShaderMaterial live — the SAME cached instance the console set/get
+# uses, so changes are immediate. Opening frees the mouse + pauses the tree (tune
 # on a frozen frame, see changes live); closing recaptures the mouse + unpauses so you can fly and
 # check that the wash sticks in motion. Self-contained: loads the material by path.
 

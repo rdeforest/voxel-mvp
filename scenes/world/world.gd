@@ -3,7 +3,6 @@ extends Node3D
 @onready var _integrity: StructuralIntegrity = $StructuralIntegrity
 @onready var _player:    CharacterBody3D     = $Player
 
-var _dc_manager: DCTerrainManager
 var _inval_overlay: Node3D
 var _world_preview: DcWorldPreview
 var _dc_collision: DCCollisionManager
@@ -39,15 +38,8 @@ func _ready() -> void:
     if not resetting and SavePaths.editstore_exists():
         _edit_store.load_from(SavePaths.EDITSTORE_FILE)   # S4: restore persisted terrain edits into the store
     _integrity.set_store(_edit_store.store)               # solidity checks + falling-body classification
-    _dc_manager = DCTerrainManager.new()
-    add_child(_dc_manager)
-    _dc_manager.setup(_player, _edit_store.store)   # render sources SDF + material from the store
-    # The clipmap render is no longer the default — the world-fixed octree (dcworld) is (doc 17 P3). The
-    # clipmap stays available via `dcmanager` for side-by-side comparison.
     _inval_overlay = preload("res://scenes/player/invalidation_overlay.gd").new()
     add_child(_inval_overlay)
-    _dc_manager.region_invalidated.connect(_inval_overlay.highlight)        # `dcinval` toggles it
-    _dc_manager.triangles_invalidated.connect(_inval_overlay.highlight_triangles)
     _world_preview = DcWorldPreview.new()
     add_child(_world_preview)
     _world_preview.setup(_player, _edit_store.store)       # doc 16/17: world-fixed incremental octree
@@ -96,8 +88,7 @@ func _wire_structural_sims() -> void:
 
 func _wire_console() -> void:
     _console = ConsoleCommands.new()
-    _console.host              = self
-    _console.dc_manager    = _dc_manager
+    _console.host          = self
     _console.inval_overlay = _inval_overlay
     _console.world_preview = _world_preview
     _console.pbd_structure     = _pbd_structure

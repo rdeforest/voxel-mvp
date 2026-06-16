@@ -1204,7 +1204,7 @@ Array DCOctreeMesher::mesh_clipmap(
 	oct.error_driven = error_driven;
 	oct.world_origin = lattice_world_origin;
 	// Emit-box filter: when emit_min != emit_max (caller set them), restrict output to
-	// triangles owned by cells inside [emit_min, emit_max). Same mechanism as mesh_subregion.
+	// triangles owned by cells inside [emit_min, emit_max).
 	if (emit_min != emit_max) {
 		oct.emit_filter = true;
 		oct.emit_min = emit_min;
@@ -1244,63 +1244,6 @@ Array DCOctreeMesher::mesh_clipmap(
 	if (prune_safety > 0.0) {
 		clip.build_mips(); // min/max pyramids for the exact surface-sparse prune
 	}
-	oct.run();
-
-	_last_tri_owners      = oct.tri_owners;
-	_last_tri_owner_sizes = oct.tri_owner_sizes;
-	return pack_output(oct);
-}
-
-Array DCOctreeMesher::mesh_subregion(
-		const PackedFloat32Array &data,
-		int dim,
-		Vector3 data_origin,
-		double cell,
-		Vector3i sub_origin,
-		int sub_size,
-		Vector3i core_min,
-		Vector3i core_max,
-		const PackedByteArray &indices,
-		const PackedColorArray &palette) {
-	Array out;
-	_last_tri_owners      = PackedVector3Array();
-	_last_tri_owner_sizes = PackedFloat32Array();
-	if (dim < 2 || sub_size < 1 || data.size() != int64_t(dim) * dim * dim) {
-		ERR_PRINT("DCOctreeMesher::mesh_subregion: bad arguments");
-		return out;
-	}
-	const bool with_indices = indices.size() == data.size() && palette.size() > 0;
-
-	// One uniform level at the data resolution; no error-driven collapse, so the cube is
-	// meshed at 1m throughout — identical per-cell vertices to the full build's fine core.
-	Octree oct;
-	Clipmap clip;
-	oct.src = &clip;
-	oct.emit_color = with_indices;
-	oct.palette = palette;
-	oct.root_size = sub_size;
-	oct.max_depth = 0;
-	for (int s = sub_size; s > 1; s >>= 1) {
-		oct.max_depth++;
-	}
-	oct.error_driven = false;
-	oct.world_origin = sub_origin;          // cells.origin is local to sub_origin -> owners are world
-	oct.emit_filter = true;
-	oct.emit_min = core_min;
-	oct.emit_max = core_max;
-	clip.center = Vector3();
-	clip.half0 = double(sub_size) * 4.0; // one level, so level_index is always 0 anyway
-	clip.levels.resize(1);
-	Level lv;
-	lv.data = data.ptr();
-	lv.origin = data_origin;
-	lv.cell = cell;
-	lv.dim = dim;
-	if (with_indices) {
-		lv.idx = indices.ptr();
-	}
-	clip.levels[0] = lv;
-
 	oct.run();
 
 	_last_tri_owners      = oct.tri_owners;
@@ -1439,11 +1382,6 @@ void DCOctreeMesher::_bind_methods() {
 			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(Vector3i()),
 			DEFVAL(TypedArray<PackedByteArray>()), DEFVAL(PackedColorArray()), DEFVAL(false), DEFVAL(0.0),
 			DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(Vector3i()));
-	ClassDB::bind_method(
-			D_METHOD("mesh_subregion", "data", "dim", "data_origin", "cell", "sub_origin", "sub_size",
-					"core_min", "core_max", "indices", "palette"),
-			&DCOctreeMesher::mesh_subregion,
-			DEFVAL(PackedByteArray()), DEFVAL(PackedColorArray()));
 	ClassDB::bind_method(
 			D_METHOD("mesh_world", "store", "world_origin", "depth", "base_cell",
 					"camera", "proj", "eps_px", "error_driven", "palette", "win_min", "win_max"),

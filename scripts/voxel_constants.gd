@@ -104,6 +104,6 @@ const PLAYER_CLEARANCE := 1.0
 # ============================================================================
 # Asset paths
 # ============================================================================
-# Shared by DcWorldPreview, DCTerrainManager, and WorldSnapshot — single source
+# Shared by DcWorldPreview, ConsoleCommands, and WorldSnapshot — single source
 # so a rename doesn't require three edits.
 const TERRAIN_MATERIAL_PATH := "res://assets/materials/terrain_surface.tres"
