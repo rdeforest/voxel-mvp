@@ -57,13 +57,16 @@ so far empties are skipped at every distance. Validated by an `eps_px` sweep at 
 **never chosen** because the budget controller settles `eps_px` where cost fits. There is **no separate
 floor to tune** (an earlier divergence added one; corrected in `0b43068`).
 
-**Still to wire — the budget controller (doc 13 B2), driving the one knob against TWO costs:**
-- **Frame time** (the render: triangle count) — the usual screen-error budget.
-- **Mesh lag** (the worker build's WORK ms) — start target **≤ 100 ms**, ceiling **≤ 500 ms**: under 500 ms
-  spend more CPU (lower `eps_px`, more detail); over 500 ms raise `eps_px` (coarser). (Not an FPS game, so
-  this lag budget is generous during dev; tighten later if needed.)
-- So: start `eps_px` high (coarse, cheap), tighten until EITHER frame time OR mesh-lag budget is the binding
-  constraint. `eps_px` is the only operating point; everything else (ACCEL_DIM, depth) is API-shape.
+**Budget controller (doc 13 B2) — WIRED + GPU-CONFIRMED (2026-06-15).** `DcWorldPreview` starts `eps_px`
+coarse (48) and self-tunes against two costs: **frame time** (render) and **mesh lag** (worker WORK ms,
+target ≤100 ms / ceiling ≤500 ms; not an FPS game). Coarsen if either is over, refine only when both have
+headroom; backs off ×1.4, refines ×0.9. `dcworld` is now a 128 m coverage window, graded floor derived from
+`eps_px`, full-rebuild on move. **In-game it settles ~`eps_px=94`** — works, terrain blooms coarse→detailed
+then holds. `eps_px` is the only operating point (ACCEL_DIM, depth are API-shape).
+- *Why it settles coarse-ish (~94, not finer):* the **accel-bake floor** — the concentric bake is a fixed
+  mesh-lag cost independent of `eps_px`, so it eats lag budget the controller would otherwise spend on
+  detail. Lowering it (incremental accel bake / serve `value()` from the baked grid) frees budget to refine.
+  Not chased yet (Robert: meshing perf fine for now).
 
 ### P2.5 — Incremental band-diff (move latency) — keeps mesh lag down as eps tightens
 A full graded rebuild on each move is the worker cost the lag budget caps; the endgame (doc 13 B3) is to
@@ -89,3 +92,15 @@ mesher, don't copy). Collision stays on `VoxelMesherDC` until its own consolidat
   not a world-octree bug. Rare (~1 per few thousand triangles). **Fix hypothesis:** give each triangle its
   OWN outward — the mean of its three vertices' QEF normals (free, already computed) or the field gradient
   at its centroid (independent). Touches the live render → needs GPU eyes. Logged, deferred (2026-06-15).
+- **Cracks INSIDE the coverage (crack-free-WITH-collapse).** Seen on `dcworld` in-game (2026-06-15) — small
+  see-through gaps not at the window rim. This is the gate the headless suite can't check (collapsed boundary
+  cells defeat the rim audit), so it's a GUI bug. **Must be fixed before P3** (retiring the clipmap needs a
+  watertight render). Deferred for now (Robert: not chasing yet). Likely the point-location stitch across a
+  collapse-induced size jump in the graded octree; the `dcinval`/`dcaudit` tools localize it.
+
+## Future ideas (parked)
+
+- **"Low-poly" material / geometry-source flag.** GPU-eyeing `dcworld` showed coarse (low-poly) terrain makes
+  the watercolour line-art read *better*. So a per-material or per-geometry-source "low-poly" mark — render
+  it deliberately coarse (a higher local `eps_px` floor, or a cap on subdivision) — could be an art lever,
+  not just a perf fallback. Tangential to doc 17's substrate; capture for the art pass (doc 10 v0.2). (2026-06-15)
