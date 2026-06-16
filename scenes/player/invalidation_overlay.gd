@@ -11,12 +11,27 @@ const LIFETIME := 5.0
 const THICKNESS := 0.04                 # ImmediateMesh lines are 1px; draw each a few times offset
 const BLUE  := Color(0.25, 0.55, 1.0)   # voxels an edit changed
 const GREEN := Color(0.25, 1.0,  0.45)  # triangles re-meshed
+const DIAG_LARGE := Color(0.95, 0.25, 0.2)  # diagnostic: triangle too big on screen (under-resolved)
+const DIAG_SMALL := Color(0.95, 0.9,  0.2)  # diagnostic: triangle too small on screen (over-resolved)
 
 var _boxes: Array = []   # [{min: Vector3, max: Vector3, color: Color, t: float}]
 var _tris:  Array = []   # [{verts: PackedVector3Array (multiple of 3, world), t: float}]
+var _diag_large: PackedVector3Array = PackedVector3Array()  # persistent dcworld LOD diagnostic (replaced each mesh)
+var _diag_small: PackedVector3Array = PackedVector3Array()
 var _im: ImmediateMesh
 var _enabled := false
 var _clock := 0.0
+
+
+func is_enabled() -> bool:
+    return _enabled
+
+
+# dcworld's LOD diagnostic: triangles whose projected screen size is off target (big = under-resolved,
+# small = over-resolved). Persistent (no fade) — replaced wholesale each re-mesh. World-space verts in 3s.
+func set_diagnostic(too_large: PackedVector3Array, too_small: PackedVector3Array) -> void:
+    _diag_large = too_large
+    _diag_small = too_small
 
 
 func _ready() -> void:
@@ -45,6 +60,8 @@ func toggle() -> bool:
     if not _enabled:
         _boxes.clear()
         _tris.clear()
+        _diag_large = PackedVector3Array()
+        _diag_small = PackedVector3Array()
         _im.clear_surfaces()
     return _enabled
 
@@ -59,19 +76,24 @@ func highlight(box_min: Vector3, box_max: Vector3, kind: int) -> void:
 # The ACTUAL invalidated mesh triangles (world-space verts, groups of 3), drawn as green
 # wireframes — shows the LOD/cell structure the alignment grabbed, not just its bounding box.
 func highlight_triangles(world_verts: PackedVector3Array) -> void:
-    if not _enabled or world_verts.size() < 3:
-        return
-    _tris.append({"verts": world_verts, "t": _clock})
+    if _enabled and world_verts.size() >= 3:
+        _tris.append({"verts": world_verts, "t": _clock})
 
 
 func _process(dt: float) -> void:
     _clock += dt
     _im.clear_surfaces()
-    if not _enabled or (_boxes.is_empty() and _tris.is_empty()):
+
+    if not _enabled or (_boxes.is_empty() and _tris.is_empty() and _diag_large.is_empty() and _diag_small.is_empty()):
         return
+
     var live_b: Array = []
     var live_t: Array = []
     _im.surface_begin(Mesh.PRIMITIVE_LINES)
+
+    _emit_tris(_diag_large, DIAG_LARGE)   # dcworld LOD diagnostic (persistent — no fade)
+    _emit_tris(_diag_small, DIAG_SMALL)
+
     for b in _boxes:
         var age: float = _clock - b.t
         if age >= LIFETIME:
@@ -80,6 +102,7 @@ func _process(dt: float) -> void:
         var c: Color = b.color
         c.a = 1.0 - age / LIFETIME
         _emit_box(b.min, b.max, c)
+
     for tg in _tris:
         var age: float = _clock - tg.t
         if age >= LIFETIME:
@@ -88,6 +111,7 @@ func _process(dt: float) -> void:
         var c := GREEN
         c.a = 1.0 - age / LIFETIME
         _emit_tris(tg.verts, c)
+
     _im.surface_end()
     _boxes = live_b
     _tris = live_t

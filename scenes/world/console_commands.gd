@@ -205,8 +205,10 @@ func dcmanager(state := "") -> void:
 
 func dcinval(_state := "") -> void:
     var on: bool = inval_overlay.toggle()
-    dc_manager.debug_invalidation = on   # gates the (costly) per-edit triangle scan
-    LimboConsole.info("dcinval: %s — blue=voxels changed, green=triangles re-meshed (fades)" % ("on" if on else "off"))
+    dc_manager.debug_invalidation = on   # clipmap: gates the (costly) per-edit triangle scan
+    if on:
+        world_preview.refresh_diagnostic()   # dcworld: show the LOD diagnostic from the current mesh now
+    LimboConsole.info("dcinval: %s — dcworld LOD: red=triangle too big on screen, yellow=too small; (clipmap: blue=voxels changed, green=re-meshed)" % ("on" if on else "off"))
 
 func dcbudget(state := "") -> void:
     var on := _parse_toggle(state, dc_manager.budget_enabled)

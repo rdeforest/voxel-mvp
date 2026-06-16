@@ -55,6 +55,7 @@ func _ready() -> void:
     _world_preview = DcWorldPreview.new()
     add_child(_world_preview)
     _world_preview.setup(_player, _edit_store.store)       # doc 16/17: world-fixed incremental octree
+    _world_preview.set_diagnostic_overlay(_inval_overlay)  # `dcinval` highlights its off-target LOD triangles
     _world_preview.set_enabled(true)                       # THE terrain render (doc 17 P3); `dcworld` toggles it
     # Body-driven JIT terrain collision from our DC mesher, sourced from the EditStore
     # (generator + edits) — godot_voxel collision is off (world.tscn generate_collisions

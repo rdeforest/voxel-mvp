@@ -58,6 +58,12 @@ var _job_win_min := Vector3i.ZERO
 var _job_win_max := Vector3i.ZERO
 var _job_work_ms := 0.0              # worker build time of the last job = mesh lag (controller signal)
 var _palette: PackedColorArray      # material id → albedo (per-vertex colours), like the clipmap render
+var _inval: Node3D                  # the invalidation overlay (dcinval) — fed the LOD diagnostic
+
+# dcinval diagnostic thresholds: a triangle whose owner cell projects to more than LARGE×eps px is
+# under-resolved (chunky); less than SMALL×eps is over-resolved (wasteful). Relative to the live eps_px.
+const DIAG_LARGE_MULT := 8.0
+const DIAG_SMALL_MULT := 0.5
 
 # The production terrain shader (same instance the clipmap render + the `set`/`get` console tunables use —
 # Godot caches by path), so dcworld as the live render looks like the terrain always has.
@@ -81,6 +87,50 @@ func _on_terrain_edit(_event: VoxelEvent) -> void:
 
 func is_enabled() -> bool:
     return _enabled
+
+
+func set_diagnostic_overlay(overlay: Node3D) -> void:
+    _inval = overlay
+
+
+# Recompute the dcinval LOD diagnostic from the last mesh (called on mesh-apply and when dcinval turns on).
+func refresh_diagnostic() -> void:
+    if _inval != null and _inval.is_enabled() and _task_id == -1:
+        _emit_diagnostic()
+
+
+# Flag triangles whose owner cell projects off-target on screen: too big (under-resolved) or too small
+# (over-resolved) vs the live eps_px. Pushes two world-space wireframe sets to the overlay (red / yellow).
+func _emit_diagnostic() -> void:
+    if _job_arrays.is_empty():
+        _inval.set_diagnostic(PackedVector3Array(), PackedVector3Array())
+        return
+    var verts: PackedVector3Array = _job_arrays[Mesh.ARRAY_VERTEX]
+    var idx: PackedInt32Array = _job_arrays[Mesh.ARRAY_INDEX]
+    var owners := _mesher.get_last_triangle_owners()
+    var sizes := _mesher.get_last_triangle_owner_sizes()
+    if owners.size() * 3 != idx.size():
+        return # owner array doesn't match this mesh — skip rather than mis-map
+    var ro := Vector3(_root_origin_i)
+    var cam_world := (_job_cam + ro) * base_cell
+    var big := PackedVector3Array()
+    var small := PackedVector3Array()
+    var t := 0
+    for base in range(0, idx.size(), 3):
+        var s_world: float = sizes[t] * base_cell
+        var center_world: Vector3 = (owners[t] + Vector3.ONE * (sizes[t] * 0.5)) * base_cell
+        var d := maxf(center_world.distance_to(cam_world), 0.001)
+        var px := s_world * _job_proj / d
+        if px > _job_eps * DIAG_LARGE_MULT or px < _job_eps * DIAG_SMALL_MULT:
+            var a := (ro + verts[idx[base]]) * base_cell
+            var b := (ro + verts[idx[base + 1]]) * base_cell
+            var c := (ro + verts[idx[base + 2]]) * base_cell
+            if px > _job_eps * DIAG_LARGE_MULT:
+                big.append(a); big.append(b); big.append(c)
+            else:
+                small.append(a); small.append(b); small.append(c)
+        t += 1
+    _inval.set_diagnostic(big, small)
 
 
 # Tune the coverage radius live (the `dcworld <radius>` arg). Capped so the window fits inside the root with
@@ -218,6 +268,8 @@ func _finish() -> void:
     visible = true
     Perf.report("dcworld swap (main)", (Time.get_ticks_usec() - t0) / 1000.0)
     Perf.mark_event()
+    if _inval != null and _inval.is_enabled():
+        _emit_diagnostic()   # refresh the dcinval LOD overlay for this mesh
     _control()
 
 
