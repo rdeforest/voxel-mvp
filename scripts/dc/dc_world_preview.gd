@@ -26,7 +26,8 @@ const RECENTER     := 6.0     # re-mesh once the player drifts this far (m)
 const EPS_START    := 48.0    # start with a big error allowance (coarse) — the controller tightens it
 const EPS_MIN      := 1.0
 const EPS_MAX      := 256.0
-const FRAME_BUDGET := 16.0    # ms — frame-time ceiling (render cost); generous, not an FPS game
+var frame_budget := 16.0      # ms — frame-gen (render) budget; the `dcframebudget` console knob. Refine while
+                              # render cost < half this, back off above it. Generous default — not an FPS game.
 
 var mesh_ceil   := 500.0  # ms — over this mesh lag: coarsen (raise eps). The `meshlag` console knob.
 var mesh_target := 100.0  # ms — under this (and frame headroom): refine (lower eps). Scales with the ceiling.
@@ -281,8 +282,8 @@ func _finish() -> void:
 # comfort band eps stops moving, so tuning rebuilds stop. The floor + collapse both derive from _eps_px.
 func _control() -> void:
     var prev := _eps_px
-    var over := _job_work_ms > mesh_ceil or _frame_ms > FRAME_BUDGET
-    var under := _job_work_ms < mesh_target and _frame_ms < FRAME_BUDGET * 0.5
+    var over := _job_work_ms > mesh_ceil or _frame_ms > frame_budget
+    var under := _job_work_ms < mesh_target and _frame_ms < frame_budget * 0.5
     if over:
         _eps_px = minf(_eps_px * 1.4, EPS_MAX)
     elif under:
@@ -295,6 +296,11 @@ func _control() -> void:
 func set_max_lag(ms: float) -> void:
     mesh_ceil = maxf(50.0, ms)
     mesh_target = mesh_ceil * 0.2
+    _eps_dirty = true   # kick the controller to re-tune toward the new budget even while stationary
+
+
+func set_frame_budget(ms: float) -> void:
+    frame_budget = maxf(1.0, ms)
     _eps_dirty = true   # kick the controller to re-tune toward the new budget even while stationary
 
 
