@@ -102,8 +102,12 @@ func _process(_dt: float) -> void:
     # Record the ACTUAL frame-generation cost every frame (cheap; even while hidden so history is ready).
     # This is the work to make a frame — NOT the display interval, which vsync/fps_max clamp.
     var gpu_ms := _gpu_ms()
-    var cpu_ms := _cpu_ms()
-    var gen_ms := maxf(cpu_ms, gpu_ms)   # the limiter: the frame time you'd get uncapped
+    var proc_ms := _process_ms()
+    var render_cpu_ms := _render_cpu_ms()
+    # The frame time you'd get uncapped: the larger of main-thread compute and GPU compute — both
+    # cap-independent. The render-server CPU time is NOT folded in: under vsync it absorbs the present/
+    # swapchain-acquire block (a wait, not work) and would inflate this. Shown separately below.
+    var gen_ms := maxf(proc_ms, gpu_ms)
     _frames.append(gen_ms)
     _marks.append(1 if _pending_mark else 0)
     _pending_mark = false
@@ -118,7 +122,7 @@ func _process(_dt: float) -> void:
     var ticks := Engine.get_physics_frames() - _last_physics_frame
     _last_physics_frame = Engine.get_physics_frames()
     var lines: Array[String] = [
-        "frame gen %.2f ms  (CPU %.2f / GPU %.2f)" % [gen_ms, cpu_ms, gpu_ms],
+        "frame gen %.2f ms  (proc %.2f / GPU %.2f)   render-cpu %.2f" % [gen_ms, proc_ms, gpu_ms, render_cpu_ms],
         "FPS %.1f (display, capped)   phys %d ticks/frame" % [fps, ticks],
     ]
     var labels := _times.keys()
@@ -143,16 +147,22 @@ func _process(_dt: float) -> void:
     _label.text = "\n".join(lines)
 
 
-# GPU time to render the last frame, in ms (cap-independent — measured by the rendering server).
+# GPU time to render the last frame, in ms (cap-independent — GPU execution, measured by the render server).
 func _gpu_ms() -> float:
     return RenderingServer.viewport_get_measured_render_time_gpu(get_viewport().get_viewport_rid())
 
 
-# CPU time to produce the last frame, in ms: the main-thread process step + the render-server CPU time.
-# Both are cap-independent (the engine sleeps the rest of the interval when vsync/fps_max throttle).
-func _cpu_ms() -> float:
-    return Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0 \
-            + RenderingServer.viewport_get_measured_render_time_cpu(get_viewport().get_viewport_rid())
+# Main-thread compute this frame, in ms (the _process step). Cap-independent: the fps_max throttle is a
+# post-frame sleep and vsync blocks the render thread — neither is counted here.
+func _process_ms() -> float:
+    return Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+
+
+# Render-server CPU time to build + submit the frame, in ms. NOT cap-independent: under vsync the render
+# thread blocks acquiring the next swapchain image (the present-wait), and that block is counted here — so
+# this rises under vsync though the work is unchanged. Shown for info; kept out of the frame-gen estimate.
+func _render_cpu_ms() -> float:
+    return RenderingServer.viewport_get_measured_render_time_cpu(get_viewport().get_viewport_rid())
 
 
 func _frame_color(ms: float) -> Color:
