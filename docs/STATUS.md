@@ -88,6 +88,20 @@ cell-aligned, copy the overlap, sample only the entered shell. Unlocks both lowe
 progressive-refinement feature (cheap grows → controller keeps refining a held view toward the 0.25 m floor).
 **Heightfield-derived accel (O(dim³)→O(dim²) for the generator) was CONSIDERED and REJECTED** — it assumes the
 generator is forever a heightfield; manifesto/no-compromise says don't (procedural skyscraper + player mods someday).
+
+**Perf: multithread the mesher (`perf/mesher-threads` branch) — IN PROGRESS.** The DC remesh is a SINGLE
+`WorkerThreadPool` task → one core does the whole build while the other 23 idle (atop confirms; `<50%` on one core
+is most likely atop's 10s averaging window over a ~5s burst, not stalls). At meshlag 20s / coverage 256 the controller
+settled at eps 19 (~5s remesh) because the refine target is `mesh_ceil*0.2` = 4s (comfort band `[0.2×ceil, ceil]`), NOT
+because of the ceiling. The unlock: parallelize the build → cheaper remesh → controller refines far past 19. Plan:
+(1) **instrument the phases** (accel-bake vs build-sample vs collapse/emit ms) — diagnose-before-fix, we don't yet know
+where the 4s goes (octree descent + multi-octave FastNoiseLite per sample × tens of millions of samples could be honest
+compute); (2) **runtime thread-count knob** (`dcthreads` console) — also the instrument for the SMT question (sweep past
+physical-core count: keeps scaling → latency-bound/SMT-helps; plateaus → compute-bound); (3) **parallelize the accel
+bake** (pure `dim³` independent loop, safe first win); (4) **parallelize the build leaf-sampling** (the likely-dominant
+cost) via a structure-pass-then-parallel-sample-pass split — the tree-structure decisions need only the accel+floor (no
+field samples), so leaf QEF sampling can be a separate parallel pass over the leaf list, sidestepping the shared
+node-array/free-list thread-unsafety. Byte-identical build tests gate parallel correctness.
 - [ ] `scenes/` — unread
 - [ ] `test/` — unread (lower priority)
 Suggested resume order when picking back up: a small leaf file first (e.g. `scripts/voxel_constants.gd`,
