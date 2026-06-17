@@ -64,6 +64,12 @@ reasons):** un-pimpl (`DCOctreePersist` still holds the `Clipmap` `mesh_clipmap`
 `Brush` bundle, internal `TerrainParams` (C++), the name+comment sweep on live files, `mesh_world` `ViewParams`. Then
 the **bug bash** (`docs/bugs/`), then MPM (doc 12) / v0.1 backlog (5.5g/h).
 
+**TODO (vocabulary sweep): "terrain" → "matter".** Robert blessed **matter** as the umbrella for "any solid the voxels
+describe, natural or built" (see [[matter-is-the-umbrella-term]]); reserve "terrain" for *natural generated ground*,
+keep "material" = per-cell type. Sweep code + comments + docs renaming the umbrella uses (not the genuine-natural-ground
+ones — judgment per site). Fold into the name+comment sweep. Bare `Vector3(0.5,0.5,0.5)` cell-centers should also become
+`VoxelConstants.VOXEL_CENTER_OFFSET` while touching files (mpm_structure.gd still has ~4).
+
 **Pass-2 read progress (which files Robert has walked, where to resume):**
 - [~] `engine/voxel_dc/` — **PAUSED, come back later.** `dc_octree_mesher.h` fully read (RdF items resolved).
   `dc_octree_mesher.cpp` only ~line 100 of 1409 (`Level::build_mip`/`append_reduced_level` reviewed + cleaned).
