@@ -42,7 +42,7 @@ struct Level {
 		x = CLAMP(x, 0, dim - 1);
 		y = CLAMP(y, 0, dim - 1);
 		z = CLAMP(z, 0, dim - 1);
-		return int(idx[x + dim * (y + dim * z)]);
+		return int(idx[voxel_dc::flat_index(x, y, z, dim)]);
 	}
 
 	double at(const Vector3 &world) const {
@@ -102,13 +102,13 @@ struct Level {
 								if (sx >= parent_dim || sy >= parent_dim || sz >= parent_dim) {
 									continue;
 								}
-								int src = sx + parent_dim * (sy + parent_dim * sz);
+								int src = voxel_dc::flat_index(sx, sy, sz, parent_dim);
 								block_min = MIN(block_min, parent_min[src]);
 								block_max = MAX(block_max, parent_max[src]);
 							}
 						}
 					}
-					int dst = x + child_dim * (y + child_dim * z);
+					int dst = voxel_dc::flat_index(x, y, z, child_dim);
 					child_min[dst] = block_min;
 					child_max[dst] = block_max;
 				}
@@ -361,7 +361,7 @@ struct EditStoreSource : public SdfSource {
 		for (int z = 0; z < dim; ++z) {
 			for (int y = 0; y < dim; ++y) {
 				for (int x = 0; x < dim; ++x) {
-					d[x + dim * (y + dim * z)] =
+					d[voxel_dc::flat_index(x, y, z, dim)] =
 							float(value(Vector3(lo.x + x * res, lo.y + y * res, lo.z + z * res)));
 				}
 			}

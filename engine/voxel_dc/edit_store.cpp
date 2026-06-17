@@ -121,7 +121,7 @@ void EditStore::_write_region(int idx, const voxel_dc::ArrayField &sdf, const Pa
 			const int ix = CLAMP(int(Math::floor((c.x - aorigin.x) / cell)), 0, adim - 1);
 			const int iy = CLAMP(int(Math::floor((c.y - aorigin.y) / cell)), 0, adim - 1);
 			const int iz = CLAMP(int(Math::floor((c.z - aorigin.z) / cell)), 0, adim - 1);
-			n.material = indices[ix + adim * (iy + adim * iz)];
+			n.material = indices[voxel_dc::flat_index(ix, iy, iz, adim)];
 		}
 		return;
 	}
@@ -243,9 +243,9 @@ PackedFloat32Array EditStore::fill_region(Vector3i origin, int dim, double cell,
 						wx >= dirty_origin.x && wx < dirty_origin.x + dirty_size.x &&
 						wy >= dirty_origin.y && wy < dirty_origin.y + dirty_size.y &&
 						wz >= dirty_origin.z && wz < dirty_origin.z + dirty_size.z;
-				const int oi = x + dim * (y + dim * z);
+				const int oi = voxel_dc::flat_index(x, y, z, dim);
 				if (has_prev && !in_dirty && px >= 0 && px < dim && py >= 0 && py < dim && pz >= 0 && pz < dim) {
-					w[oi] = pr[px + dim * (py + dim * pz)];
+					w[oi] = pr[voxel_dc::flat_index(px, py, pz, dim)];
 				} else {
 					w[oi] = float(sample(Vector3(wx, wy, wz) * cell));
 				}
@@ -263,7 +263,7 @@ PackedByteArray EditStore::fill_indices_region(Vector3i origin, int dim, double 
 		for (int y = 0; y < dim; ++y) {
 			for (int x = 0; x < dim; ++x) {
 				const Vector3 p = Vector3(origin.x + x, origin.y + y, origin.z + z) * cell;
-				w[x + dim * (y + dim * z)] = uint8_t(material_at(p));
+				w[voxel_dc::flat_index(x, y, z, dim)] = uint8_t(material_at(p));
 			}
 		}
 	}

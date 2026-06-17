@@ -11,6 +11,12 @@
 
 namespace voxel_dc {
 
+// x-fastest 3D->1D index into a dim^3 grid — the one grid layout used throughout
+// (world = origin + lattice * cell). One name for the flatten the grids all share.
+inline int flat_index(int x, int y, int z, int dim) {
+	return x + dim * (y + dim * z);
+}
+
 // Trilinear sampling of a dense SDF grid (x-fastest, dim^3, world = origin + lattice
 // * cell), clamped at the edge. Shared by ArrayField and the mesher's clipmap Level —
 // the one definition of "read this grid" so the two can't drift apart.
@@ -18,7 +24,7 @@ inline double grid_clamped(const float *data, int dim, int x, int y, int z) {
 	x = CLAMP(x, 0, dim - 1);
 	y = CLAMP(y, 0, dim - 1);
 	z = CLAMP(z, 0, dim - 1);
-	return double(data[x + dim * (y + dim * z)]);
+	return double(data[flat_index(x, y, z, dim)]);
 }
 
 inline double sample_trilinear(const float *data, int dim, const Vector3 &origin, double cell, const Vector3 &world) {
