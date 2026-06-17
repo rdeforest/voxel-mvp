@@ -108,6 +108,24 @@ Worth monitoring — this is the closest anyone has come to announcing a
 project in this exact design space. Their Astroneer-like sci-fi setting
 means minimal thematic overlap with our iron-age direction.
 
+## Spiritfarer (Thunder Lotus Games, 2020) — tonal inspiration, not a tech competitor
+
+The entries above are voxel/physics competitors — adjacent in *technology*.
+Spiritfarer is adjacent in *tone*, and on no other axis: a hand-drawn
+management-adventure about ferrying the dead to their final passage, built
+on gentleness rather than conflict. It shares none of this project's terrain,
+voxel, or structural-integrity concerns, and that is the point of listing it
+separately.
+
+**What to learn:** the proof that a game can be wholly engaging without a
+single hostile verb. Spiritfarer is the lived example of several pillars at
+once — *comprehension over conquest* (no game-sanctioned violence), *no
+manipulation the player would resent*, the *dream/death layer* the late game
+spends its weight on, and the hand-drawn, watercolor-adjacent art direction.
+Where Teardown and DRG show how destruction should *feel*, Spiritfarer shows
+the emotional register the rest of the experience should sit in — that care,
+loss, and letting-go can carry a game that never asks the player to fight.
+
 ## The competitive summary
 
 Nobody has shipped a persistent open-world survival game with:
