@@ -69,15 +69,14 @@ struct Level {
 	}
 
 	void append_base_level() {
-		// Level 0: each cell's min and max are just its own sample.
+		// Level 0: each cell's min and max are just its own sample — a bulk copy of the raw grid.
+		// resize() leaves float storage uninitialized, so these memcpys are the only write.
 		int64_t cell_count = int64_t(dim) * dim * dim;
 		LocalVector<float> base_min, base_max;
 		base_min.resize(cell_count);
 		base_max.resize(cell_count);
-		for (int64_t i = 0; i < cell_count; ++i) {
-			base_min[i] = data[i];
-			base_max[i] = data[i];
-		}
+		memcpy(base_min.ptr(), data, sizeof(float) * cell_count);
+		memcpy(base_max.ptr(), data, sizeof(float) * cell_count);
 		mip_min.push_back(base_min);
 		mip_max.push_back(base_max);
 		mip_dim.push_back(dim);
