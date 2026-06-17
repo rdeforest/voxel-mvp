@@ -69,7 +69,9 @@ the **bug bash** (`docs/bugs/`), then MPM (doc 12) / v0.1 backlog (5.5g/h).
   `dc_octree_mesher.cpp` only ~line 100 of 1409 (`Level::build_mip`/`append_reduced_level` reviewed + cleaned).
   Robert started here only because it sorts first (engine < scenes, dc_octree first in the dir) — *not* because it's
   the right starting point. It's the hardest file; resume after the easier ones. Rest of `engine/voxel_dc/` unread.
-- [ ] `scripts/` — unread
+- [ ] `scripts/` — in progress. Done: `voxel_utils.gd` (Robert authored it recently, no changes), `tools/ncls`
+  (his own non-comment-LOC counter, no review needed). Deferred: `voxel_constants.gd` ("does what it says on the
+  tin"; maybe revisit later to shorten comments).
 - [ ] `scenes/` — unread
 - [ ] `test/` — unread (lower priority)
 Suggested resume order when picking back up: a small leaf file first (e.g. `scripts/voxel_constants.gd`,
