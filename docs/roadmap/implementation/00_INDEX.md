@@ -50,6 +50,10 @@ Scoped but not yet begun.
   one-shot plan for building the decentralized replication layer. Successor-game
   work; kept here because the groundwork (`grid_id`, action-journal) lives in
   this project.
+- [`planned/18-volumetric-worldgen.md`](planned/18-volumetric-worldgen.md) — the
+  work-order for design doc 19: rewrite `terrain_field.h`'s `sample()`/`material()`
+  into a pure volumetric stratified generator (strata + caves + overhangs), with
+  the river graph and erosion bake as later tiers.
 
 ## Done
 

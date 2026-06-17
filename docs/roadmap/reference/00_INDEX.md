@@ -18,3 +18,7 @@ exists*, not what it contains.
 - [`06-edit-and-movement-lifecycles.md`](06-edit-and-movement-lifecycles.md)
   — plain-language mental model of the edit and movement pipelines; the
   basis the incremental-LOD-splice design (doc 13) builds on.
+- [`07-worldgen-research.md`](07-worldgen-research.md) — verified literature
+  survey (2009–2024) on volumetric/stratified terrain and erosion simulation;
+  the citations behind design doc 19, including the unsolved tileable-erosion
+  crux.

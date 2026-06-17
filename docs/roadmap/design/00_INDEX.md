@@ -67,3 +67,7 @@ or condensed.
   10: no sense load-bearing alone (mood↔palette, visible-sounds ear→→eye),
   no reflexes required (pause-without-freeze, instantaneous plan execution),
   and the settings menu.
+- [`19-volumetric-worldgen.md`](19-volumetric-worldgen.md) — the decision to
+  make the generator a true volumetric, stratified field (overhangs, caves,
+  layered geology); separates the pure structural levers from the global-flow
+  erosion that stays deferred.
