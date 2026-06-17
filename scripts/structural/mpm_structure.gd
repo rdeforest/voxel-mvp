@@ -10,7 +10,7 @@ extends Node3D
 # render as a MultiMesh of cubes. Standalone for now (driven by `mpmthaw`);
 # the support-loss auto-trigger and retiring PBD come next.
 
-const PARTICLE_SIZE    := 0.45
+const DEBUG_CUBE_SIZE  := 0.45
 const RHO              := 400.0
 const GRID_DIM         := 48     # re-centred on the material each step (no domain walls)
 const SETTLE_DISP      := 0.01   # max displacement/step below which the material counts as settled
@@ -43,7 +43,7 @@ func setup(store: EditStore) -> void:
     _sim.set_sdf_collider(store)
 
     var box := BoxMesh.new()
-    box.size = Vector3.ONE * PARTICLE_SIZE
+    box.size = Vector3.ONE * DEBUG_CUBE_SIZE
 
     _mm = MultiMesh.new()
     _mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -81,7 +81,7 @@ func thaw_sphere(center: Vector3, radius: float, material_index := 1) -> int:
 func thaw_cells(cells: Array, material_index := 1) -> int:
     _material_index = material_index   # freeze fallback only; each particle carries its own material
 
-    var p_vol := 0.125
+    var p_vol  := 0.125
     var p_mass := RHO * p_vol
     var carved := {}   # Vector3i -> true: the cells actually thawed (center sampled solid)
     var box_lo := Vector3(INF, INF, INF)

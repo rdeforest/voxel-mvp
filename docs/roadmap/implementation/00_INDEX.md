@@ -19,10 +19,6 @@ Work underway — partially landed or actively in progress.
 - [`started/05-phase-5_5-architectural-maturation.md`](started/05-phase-5_5-architectural-maturation.md)
   — the v0.1 backlog (5.5a/b shipped; 5.5c/f superseded by MPM/doc 12; 5.5d/e →
   v0.2; 5.5g construction polish + 5.5h QoL/perf/bugs are the live v0.1 work).
-- [`started/17-world-octree-to-production.md`](started/17-world-octree-to-production.md)
-  — the world-fixed octree IS the production render now (P1–P3 done: prune, graded
-  floor + budget controller, incremental band-diff, dcworld swap). Remaining:
-  delete the retired parallel renders (cleanup pass) + the crack bug (bug bash).
 
 ## Planned
 

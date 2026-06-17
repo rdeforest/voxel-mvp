@@ -1,10 +1,12 @@
 # World-Fixed Octree → Production Render (doc 16 Stage C)
 
-**Status:** the world-fixed octree **IS the production render** (P1–P3 done, GPU-verified). What remains is
-deferred by choice, not in progress: **deleting** the retired parallel renders (the **code cleanup pass**)
-and the **inside-coverage cracks** ([`docs/bugs/`](../../../bugs/dc-inside-coverage-cracks.md), the **bug
-bash**). Successor to [doc 16](../done/16-persistent-octree-substrate.md) (which built + proved the substrate);
-this was its Stage C — promote the octree to the render and retire the camera-centered clipmap.
+**Status: DONE.** The world-fixed octree **IS the production render** (P1–P3 done, GPU-verified), and the
+**code cleanup pass landed** — the retired parallel renders (the camera-centered clipmap `DCTerrainManager`,
+the `dcgen`/SVO prototypes, the GDScript splice + `mesh_subregion`) are deleted. The only remaining items are
+the **inside-coverage cracks** and the reversed-ridge triangles — deferred to the **bug bash**, tracked
+one-file-each in [`docs/bugs/`](../../../bugs/00_INDEX.md). Successor to
+[doc 16](16-persistent-octree-substrate.md) (which built + proved the substrate); this was its Stage C —
+promote the octree to the render and retire the camera-centered clipmap.
 
 **Read first:** doc 16 (the substrate + why), `docs/MANIFESTO.md` (one field / one representation / the grid
 is a world-fixed spatial database / no half-measures), and the `dcworld` triage notes in `docs/STATUS.md`.
@@ -80,14 +82,14 @@ controller re-grading); full rebuild only on first build / edit / re-root. Gate:
 **GPU-verify:** the bloom-on-walk is smooth and the controller settles across the cheap-grow / rare-rebuild
 regimes.
 
-### P3 — Make `dcworld` the live render — DONE (2026-06-15); clipmap deletion deferred to the cleanup pass
+### P3 — Make `dcworld` the live render — DONE (2026-06-15); cleanup pass landed (review pass 1)
 `dcworld` is now THE terrain render: enabled at world startup, wearing the production terrain shader +
-material palette; the clipmap is no longer `start_default()`ed (still toggleable via `dcmanager` for
-side-by-side comparison). GPU-verified visually acceptable (Robert, 2026-06-15) — the inside-coverage cracks
-ride along (tracked in `docs/bugs/`, deferred to the post-cleanup bug bash; Robert: "they're a feature now").
-- **Deferred by choice:** *deleting* the camera-centered clipmap + geomorph + `dcgen`/SVO render. They stay
-  as comparison fallbacks until the **code cleanup pass** (Robert's sequence: finish all `started/` docs →
-  cleanup pass → bug bash). So P3's render *swap* is done; the parallel-mesher *deletion* is cleanup work.
+material palette. GPU-verified visually acceptable (Robert, 2026-06-15) — the inside-coverage cracks ride
+along (tracked in `docs/bugs/`, deferred to the bug bash; Robert: "they're a feature now").
+- **Cleanup pass — DONE.** The camera-centered clipmap (`DCTerrainManager`), the GDScript splice +
+  `mesh_subregion`, `dcgen`/`DcSubstratePreview`, and the `SparseVoxelOctree`/GDScript-SVO prototypes are all
+  deleted (commits `4e57cad` SVO/dcgen, `d58e8ce` clipmap). `mesh_clipmap`/`remesh` STAY — they turned out to
+  be the load-bearing collision/falling-chunk/test-oracle mesher, not clipmap-render-only.
 - Collision stays on the DC collision manager (its consolidation is separate).
 
 ## Known bugs (deferred → [`docs/bugs/`](../../../bugs/00_INDEX.md))

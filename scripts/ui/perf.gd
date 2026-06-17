@@ -36,6 +36,7 @@ var _frames: PackedFloat32Array = PackedFloat32Array()   # ring of recent frame 
 var _marks: PackedByteArray = PackedByteArray()           # parallel: 1 = mesh applied that frame
 var _pending_mark := false
 var _drawer: Control
+var _last_gen_ms := 0.0                                   # last frame-gen cost (cap-independent); read by the DC budget controller
 
 
 # A drawing surface that defers back to the host Perf card (keeps everything in one file).
@@ -104,10 +105,14 @@ func _process(_dt: float) -> void:
     var gpu_ms := _gpu_ms()
     var proc_ms := _process_ms()
     var render_cpu_ms := _render_cpu_ms()
-    # The frame time you'd get uncapped: the larger of main-thread compute and GPU compute — both
-    # cap-independent. The render-server CPU time is NOT folded in: under vsync it absorbs the present/
-    # swapchain-acquire block (a wait, not work) and would inflate this. Shown separately below.
-    var gen_ms := maxf(proc_ms, gpu_ms)
+    # Frame-gen = the render cost (CPU submit + GPU), the two signals that DON'T change with the cap.
+    # proc (TIME_PROCESS) is deliberately NOT folded in: under vsync the main thread stalls on frame
+    # pacing / present backpressure and that lands in the process-step timing (proc balloons while
+    # render-cpu + GPU stay put), so it isn't clean work. It's shown separately, labelled. Main-thread
+    # game work here is minor anyway — the mesher runs off-thread (mesh-lag, not proc) — so render-cpu
+    # + GPU is the real per-frame cost.
+    var gen_ms := maxf(render_cpu_ms, gpu_ms)
+    _last_gen_ms = gen_ms
     _frames.append(gen_ms)
     _marks.append(1 if _pending_mark else 0)
     _pending_mark = false
@@ -122,7 +127,7 @@ func _process(_dt: float) -> void:
     var ticks := Engine.get_physics_frames() - _last_physics_frame
     _last_physics_frame = Engine.get_physics_frames()
     var lines: Array[String] = [
-        "frame gen %.2f ms  (proc %.2f / GPU %.2f)   render-cpu %.2f" % [gen_ms, proc_ms, gpu_ms, render_cpu_ms],
+        "frame gen %.2f ms  (render-cpu %.2f / GPU %.2f)   proc %.2f (+present-wait under vsync)" % [gen_ms, render_cpu_ms, gpu_ms, proc_ms],
         "FPS %.1f (display, capped)   phys %d ticks/frame" % [fps, ticks],
     ]
     var labels := _times.keys()
@@ -163,6 +168,12 @@ func _process_ms() -> float:
 # this rises under vsync though the work is unchanged. Shown for info; kept out of the frame-gen estimate.
 func _render_cpu_ms() -> float:
     return RenderingServer.viewport_get_measured_render_time_cpu(get_viewport().get_viewport_rid())
+
+
+# The last frame's cap-independent generation cost (max of render-CPU and GPU), in ms. The DC budget
+# controller reads this for its frame-headroom gate so it isn't fooled by the vsync-capped display dt.
+func frame_gen_ms() -> float:
+    return _last_gen_ms
 
 
 func _frame_color(ms: float) -> Color:

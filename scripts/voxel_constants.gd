@@ -20,24 +20,18 @@ const VOXEL_CENTER_OFFSET := Vector3(VOXEL_HALF, VOXEL_HALF, VOXEL_HALF)
 # every event payload from day one so multi-grid (deferred) lands without churn.
 const GRID_ID := 0
 
-# Sub-metre RENDER/EDIT resolution — the finest world cell the DC render, edit imprints,
-# collision, and the MPM carve/freeze operate at. SEPARATE from VOXEL_SIZE: the gameplay /
-# structural / event grid stays at VOXEL_SIZE (1m), but the surface is sampled and meshed this
-# fine. MUST be 1/2^n so the clipmap's `1<<k` level math stays an exact power-of-two relationship
-# to world (RENDER_SUBDIV = 1/RENDER_BASE_CELL, a power of two). Stage 0 keeps this at 1.0 (no
-# behaviour change); the sub-metre flip sets it to 0.25.
-const RENDER_BASE_CELL := 0.25
-const RENDER_SUBDIV    := 4     # int(round(1.0 / RENDER_BASE_CELL)); power of two
+# How finely the render/edit/collision layer subdivides each gameplay cell, as a power-of-two
+# exponent — the one knob. 2 → 0.25m; 3 → 0.125m; 4 → 0.0625m (×8 / ×64 the render cells, the
+# 1m gameplay/structural grid unchanged).
+const RENDER_SUBDIV_LOG2 := 2
+const RENDER_SUBDIV      := 1 << RENDER_SUBDIV_LOG2           # render cells per axis per gameplay cell
+const RENDER_BASE_CELL   := VOXEL_SIZE / float(RENDER_SUBDIV) # metres per render cell (0.25 at LOG2 = 2)
 
 # Transparent editing overlays (cell ghost, grid, build preview) must draw ON TOP of the
 # full-screen watercolour post-process quad — which reads the opaque screen and repaints every
 # pixel, wiping any transparent geometry drawn before it (render_priority 100 in
 # watercolor_post.tres). These overlays sit above that so they survive the post pass.
 const OVERLAY_RENDER_PRIORITY := 110
-# log2(RENDER_SUBDIV) — extra LOD levels the render adds so the clipmap reaches the same WORLD
-# distance as at 1m (the finer base cell shrinks the octree's world extent by RENDER_SUBDIV, so we
-# add one octave of coverage per halving). MUST equal log2(RENDER_SUBDIV): 1.0→0, 0.5→1, 0.25→2.
-const RENDER_SUBDIV_LOG2 := 2
 
 
 # ============================================================================

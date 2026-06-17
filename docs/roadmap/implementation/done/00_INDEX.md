@@ -18,6 +18,10 @@ contains. Three kinds of doc live here:
 - [`16-persistent-octree-substrate.md`](16-persistent-octree-substrate.md) — the
   world-fixed incremental octree substrate (`mesh_world` + `grow_world`), built,
   proven headless, and previewable (`dcworld`); productionization is doc 17.
+- [`17-world-octree-to-production.md`](17-world-octree-to-production.md) — doc 16's
+  Stage C: promoted the world-fixed octree to THE production render (surface-sparse
+  prune, graded floor + budget controller, incremental band-diff, dcworld swap) and
+  retired the camera-centered clipmap. Deferred render bugs tracked in `docs/bugs/`.
 - [`02-phase-0-foundation.md`](02-phase-0-foundation.md) — scoped the v0.0
   foundation: walking around a procedural voxel world.
 - [`03-phase-2-terrain-modification.md`](03-phase-2-terrain-modification.md)
