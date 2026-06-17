@@ -304,6 +304,12 @@ func set_mesh_threads(n: int) -> void:
     _mesher.set_thread_count(n)
 
 
+# Force a full rebuild on the next frame (re-bake + build + collapse) — the heavy path, for timing
+# experiments via the console without having to walk. _process picks up _dirty and dispatches a build.
+func force_rebuild() -> void:
+    _dirty = true
+
+
 func mesh_phase_report() -> String:
     return "threads %d | last build: accel %.0f + build %.0f + collapse %.0f ms" % [
         _mesher.get_thread_count(),
