@@ -697,6 +697,64 @@ struct Octree {
 		cells[idx].qef = sum;
 	}
 
+	// Parallel split of accumulate_qef's leaf sampling — the build's dominant cost. build() leaves the
+	// tree structure with every leaf's QEF unset; sampling each present leaf (leaf_qef → 12 field reads)
+	// is independent (const reads, writes only its own cell.qef), so it parallelises across g_mesh_threads.
+	// Absent leaves get an empty QEF (a bit-exact no-op in ancestor sums). Pair with accumulate_sums(),
+	// which then rolls the leaves up internal nodes with NO field work — together bit-identical to
+	// accumulate_qef(0), so the result is unchanged whatever the thread count.
+	void sample_leaves_parallel() {
+		LocalVector<int> leaves;
+		for (uint32_t i = 0; i < cells.size(); ++i) {
+			if (cells[i].children[0] < 0) { // structural leaf
+				if (cells[i].absent) {
+					cells[i].qef = Qef();
+				} else {
+					leaves.push_back(int(i));
+				}
+			}
+		}
+		build_samples = int(leaves.size());
+		const int n = int(leaves.size());
+		const int nthreads = (g_mesh_threads > 1 && n >= 64) ? MIN(g_mesh_threads, n) : 1;
+		if (nthreads <= 1) {
+			for (int k = 0; k < n; ++k) {
+				cells[leaves[k]].qef = leaf_qef(leaves[k]);
+			}
+			return;
+		}
+		LocalVector<std::thread> workers;
+		workers.resize(nthreads);
+		for (int t = 0; t < nthreads; ++t) {
+			int k0 = (t * n) / nthreads;
+			int k1 = ((t + 1) * n) / nthreads;
+			workers[t] = std::thread([this, &leaves, k0, k1]() {
+				for (int k = k0; k < k1; ++k) {
+					cells[leaves[k]].qef = leaf_qef(leaves[k]);
+				}
+			});
+		}
+		for (int t = 0; t < nthreads; ++t) {
+			workers[t].join();
+		}
+	}
+
+	// Roll the (already-sampled) leaf QEFs up the tree — same post-order sum as accumulate_qef but with
+	// NO leaf sampling (the leaves are filled by sample_leaves_parallel first). Same summands and order,
+	// so cells[0].qef is bit-identical to accumulate_qef(0).
+	void accumulate_sums(int idx) {
+		if (cells[idx].children[0] < 0) {
+			return; // leaf — qef already set by sample_leaves_parallel
+		}
+		Qef sum;
+		for (int i = 0; i < 8; ++i) {
+			int ch = cells[idx].children[i];
+			accumulate_sums(ch);
+			sum.add(cells[ch].qef);
+		}
+		cells[idx].qef = sum;
+	}
+
 	// Reset every node's leaf flag to its STRUCTURAL state (leaf iff it has no children) and clear the
 	// placed vertex, so collapse_pass + meshing can re-run from scratch on a camera re-walk.
 	void reset_leaves() {
@@ -997,7 +1055,8 @@ struct Octree {
 		// is one empty cell — no quad). half the root => the 8 root children may collapse,
 		// nothing coarser.
 		max_leaf_size = MAX(1, root_size >> 1);
-		accumulate_qef(0);       // QEF up the tree (field-derived, once)
+		sample_leaves_parallel(); // field-derived leaf QEFs (the dominant cost), parallel across g_mesh_threads
+		accumulate_sums(0);       // roll them up the tree (no field work) — bit-identical to accumulate_qef(0)
 		last_build_us = OS::get_singleton()->get_ticks_usec() - t0;
 		uint64_t t1 = OS::get_singleton()->get_ticks_usec();
 		recollapse_and_mesh();   // collapse + mesh (camera-derived, re-runnable)

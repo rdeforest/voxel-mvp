@@ -365,7 +365,7 @@ func test_parallel_bake_matches_serial():
     var parallel: Array = m8.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), origin, whole)
     assert_false(serial.is_empty(),   "serial build produced a surface")
     assert_false(parallel.is_empty(), "parallel build produced a surface")
-    assert_eq(_tri_sigs(parallel), _tri_sigs(serial), "parallel bake (8 threads) == serial bake (byte-identical surface)")
+    assert_eq(_tri_sigs(parallel), _tri_sigs(serial), "parallel (8 threads) == serial (byte-identical surface) — gates both the parallel accel bake AND the parallel leaf sampling")
 
 
 # Direct field sampling == sampling a baked grid of the same field: the crossing topology is decided by

@@ -72,6 +72,9 @@ func setup(follow: Node3D, edit_store: EditStore = null) -> void:
         VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_terrain_edit)
     material_override = load(VoxelConstants.TERRAIN_MATERIAL_PATH)   # the production terrain shader (dcworld is the render now)
     _palette = MaterialPalette.colors()              # per-vertex material colours (placed parts read their material)
+    # Parallel leaf sampling. Capped at 8: the build's serial tree-walk (structure + QEF roll-up) is the
+    # Amdahl ceiling (~4-5x), so more threads buy ~nothing and just hog cores. `dcthreads` overrides for tuning.
+    _mesher.set_thread_count(mini(OS.get_processor_count(), 8))
     visible = false
 
 
