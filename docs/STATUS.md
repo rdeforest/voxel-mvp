@@ -77,7 +77,17 @@ ones — judgment per site). Fold into the name+comment sweep. Bare `Vector3(0.5
   the right starting point. It's the hardest file; resume after the easier ones. Rest of `engine/voxel_dc/` unread.
 - [ ] `scripts/` — in progress. Done: `voxel_utils.gd` (Robert authored it recently, no changes), `tools/ncls`
   (his own non-comment-LOC counter, no review needed). Deferred: `voxel_constants.gd` ("does what it says on the
-  tin"; maybe revisit later to shorten comments).
+  tin"; maybe revisit later to shorten comments). `scripts/structural/mpm_structure.gd` — started (renamed
+  `PARTICLE_SIZE`→`DEBUG_CUBE_SIZE`, `0.5,0.5,0.5`→`VOXEL_CENTER_OFFSET`) then **distracted by a squirrel** → the
+  incremental accel bake (below). Resume mpm_structure later.
+
+**Perf: incremental accel bake (doc 17 P1 nit) — IN PROGRESS.** `grow_world` re-bakes the whole concentric min/max
+prune accel every move (a fixed mesh-lag cost independent of `eps_px` — the floor that stops the controller refining).
+Make it a scrolling-buffer reuse (mirror `EditStore::fill_region`): res-snap each accel level so a move scrolls it
+cell-aligned, copy the overlap, sample only the entered shell. Unlocks both lower per-move lag AND the idle
+progressive-refinement feature (cheap grows → controller keeps refining a held view toward the 0.25 m floor).
+**Heightfield-derived accel (O(dim³)→O(dim²) for the generator) was CONSIDERED and REJECTED** — it assumes the
+generator is forever a heightfield; manifesto/no-compromise says don't (procedural skyscraper + player mods someday).
 - [ ] `scenes/` — unread
 - [ ] `test/` — unread (lower priority)
 Suggested resume order when picking back up: a small leaf file first (e.g. `scripts/voxel_constants.gd`,

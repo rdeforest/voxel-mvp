@@ -330,6 +330,8 @@ struct EditStoreSource : public SdfSource {
 	Clipmap accel;
 	LocalVector<PackedFloat32Array> accel_held; // backs the levels' data ptrs
 	bool has_accel = false;
+	Vector3i accel_win_lo, accel_win_hi;        // octree-local window the current accel covers — reused while unchanged
+	int bake_count = 0;                         // full accel bakes run so far (a test/perf signal; reuse leaves it flat)
 	static const int ACCEL_DIM = 65;            // samples per level axis. Small on purpose: the accel bake is
 	                                            // a fixed mesh-lag cost (independent of eps), so keeping it
 	                                            // cheap frees the lag budget for the controller to refine eps.
@@ -413,6 +415,9 @@ struct EditStoreSource : public SdfSource {
 		}
 		accel.build_mips();
 		has_accel = true;
+		accel_win_lo = win_lo;
+		accel_win_hi = win_hi;
+		++bake_count;
 	}
 
 	Vector3 gradient(const Vector3 &p) const override {
@@ -1362,7 +1367,16 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 		double floor_k = (proj > 0.0 && eps_px > 0.0) ? eps_px / proj : 0.0; // same single-knob derivation
 		_persist->world_src.cam = camera;
 		_persist->world_src.floor_k = floor_k;
-		_persist->world_src.bake_accel(win_min - oct.world_origin, win_max - oct.world_origin, camera, floor_k);
+		// Re-bake the prune accel only when the resident window actually moved. A stationary refine (the
+		// budget controller lowering eps with the camera still) keeps the same window, so the accel from
+		// the last bake still covers every queried box — reuse it (this is what lets a held view keep
+		// refining cheaply, with no fixed per-grow bake cost). A move re-bakes to cover the new leading
+		// edge; reusing a stale window would leave that band uncovered, and an uncovered box prunes away.
+		Vector3i win_lo = win_min - oct.world_origin;
+		Vector3i win_hi = win_max - oct.world_origin;
+		if (win_lo != _persist->world_src.accel_win_lo || win_hi != _persist->world_src.accel_win_hi) {
+			_persist->world_src.bake_accel(win_lo, win_hi, camera, floor_k);
+		}
 		oct.prune_safety = 1.0;
 	}
 	oct.build_samples = 0;
@@ -1382,6 +1396,10 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 // across a long traverse (evicted slots reused), instead of growing every move — the bound the test gates.
 int DCOctreeMesher::get_octree_cell_count() const {
 	return _persist != nullptr ? int(_persist->oct.cells.size()) : 0;
+}
+
+int DCOctreeMesher::get_accel_bake_count() const {
+	return _persist != nullptr ? _persist->world_src.bake_count : 0;
 }
 
 void DCOctreeMesher::_bind_methods() {
@@ -1405,6 +1423,7 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remesh", "camera", "proj", "eps_px"), &DCOctreeMesher::remesh);
 	ClassDB::bind_method(D_METHOD("get_last_build_sample_count"), &DCOctreeMesher::get_last_build_sample_count);
 	ClassDB::bind_method(D_METHOD("get_octree_cell_count"),      &DCOctreeMesher::get_octree_cell_count);
+	ClassDB::bind_method(D_METHOD("get_accel_bake_count"),       &DCOctreeMesher::get_accel_bake_count);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);
 }

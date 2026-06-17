@@ -329,6 +329,25 @@ func test_grow_world_regrades_floor_on_camera_move():
     assert_lt(grow_samples, fresh_samples, "the move re-sampled only the changed band, not the whole window")
 
 
+# Incremental accel reuse (perf): grow_world re-bakes the prune accel ONLY when the resident window moves.
+# A same-window refine (the budget controller lowering eps with the view held) reuses the last bake — the
+# held view keeps refining with no fixed per-grow bake cost — while a window move re-bakes to cover the new
+# leading edge. Reuse CORRECTNESS is gated above (regrade grows same-window; equals_fresh grows moved-window).
+func test_grow_reuses_accel_when_window_unchanged() -> void:
+    var s := _store()
+    var origin := _region_origin(s)
+    var cam := Vector3(16, 16, 120)
+    var a_min := origin;                       var a_max := origin + Vector3i(24, SIZE, SIZE)
+    var b_min := origin + Vector3i(8, 0, 0);   var b_max := origin + WIN_FULL
+    var m := DCOctreeMesher.new()
+    m.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), a_min, a_max)
+    assert_eq(m.get_accel_bake_count(), 1, "the first build bakes the accel once")
+    m.grow_world(Vector3(16, 16, 100), 500.0, 1.0, a_min, a_max)   # same window, lower eps + moved camera → reuse
+    assert_eq(m.get_accel_bake_count(), 1, "a same-window refine reuses the accel (no re-bake)")
+    m.grow_world(cam, 500.0, 2.0, b_min, b_max)                    # window moves A→B → re-bake the leading edge
+    assert_eq(m.get_accel_bake_count(), 2, "a window move re-bakes the accel")
+
+
 # Direct field sampling == sampling a baked grid of the same field: the crossing topology is decided by
 # the field's SIGN at integer cell corners — identical whether read direct (mesh_world) or via a
 # fill_region grid (mesh_clipmap) — so the two meshes share a vertex count (positions differ only by the

@@ -103,6 +103,10 @@ public:
 	// Total slots in the retained octree's cell array (live + free-list). Bounded across a traverse (B1b).
 	int get_octree_cell_count() const;
 
+	// Full prune-accel bakes run so far. grow_world reuses the accel (doesn't bump this) when the
+	// resident window is unchanged — e.g. a stationary refine — so a held view refines without re-baking.
+	int get_accel_bake_count() const;
+
 	// Per-triangle owner cell origins (WORLD lattice) from the last mesh call — same order/count
 	// as the returned ARRAY_INDEX divided by 3.
 	PackedVector3Array get_last_triangle_owners()      const { return _last_tri_owners; }
