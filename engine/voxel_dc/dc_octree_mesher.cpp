@@ -57,56 +57,68 @@ struct Level {
 	LocalVector<int> mip_dim;
 
 	void build_mip() {
+		// Build the min/max pyramid bottom-up: level 0 is the raw grid, each coarser level is
+		// the 2x2x2 min/max of its parent. surface_free() then reads it top-down.
 		mip_min.clear();
 		mip_max.clear();
 		mip_dim.clear();
-		int64_t n = int64_t(dim) * dim * dim;
-		LocalVector<float> mn, mx;
-		mn.resize(n);
-		mx.resize(n);
-		for (int64_t i = 0; i < n; ++i) {
-			mn[i] = data[i];
-			mx[i] = data[i];
+		append_base_level();
+		for (int level_dim = dim; level_dim > 1;) {
+			level_dim = append_reduced_level(level_dim);
 		}
-		mip_min.push_back(mn);
-		mip_max.push_back(mx);
+	}
+
+	void append_base_level() {
+		// Level 0: each cell's min and max are just its own sample.
+		int64_t cell_count = int64_t(dim) * dim * dim;
+		LocalVector<float> base_min, base_max;
+		base_min.resize(cell_count);
+		base_max.resize(cell_count);
+		for (int64_t i = 0; i < cell_count; ++i) {
+			base_min[i] = data[i];
+			base_max[i] = data[i];
+		}
+		mip_min.push_back(base_min);
+		mip_max.push_back(base_max);
 		mip_dim.push_back(dim);
-		int d = dim;
-		while (d > 1) {
-			int nd = (d + 1) / 2;
-			const LocalVector<float> &pmn = mip_min[mip_min.size() - 1];
-			const LocalVector<float> &pmx = mip_max[mip_max.size() - 1];
-			LocalVector<float> cmn, cmx;
-			cmn.resize(int64_t(nd) * nd * nd);
-			cmx.resize(int64_t(nd) * nd * nd);
-			for (int z = 0; z < nd; ++z) {
-				for (int y = 0; y < nd; ++y) {
-					for (int x = 0; x < nd; ++x) {
-						float lo = 1e30f, hi = -1e30f;
-						for (int oz = 0; oz < 2; ++oz) {
-							for (int oy = 0; oy < 2; ++oy) {
-								for (int ox = 0; ox < 2; ++ox) {
-									int sx = x * 2 + ox, sy = y * 2 + oy, sz = z * 2 + oz;
-									if (sx >= d || sy >= d || sz >= d) {
-										continue;
-									}
-									int si = sx + d * (sy + d * sz);
-									lo = MIN(lo, pmn[si]);
-									hi = MAX(hi, pmx[si]);
+	}
+
+	int append_reduced_level(int parent_dim) {
+		// One pyramid step: each child cell takes the min/max over the (up to) 8 parent cells it
+		// covers. Returns the child dimension so the build loop knows when to stop.
+		int child_dim = (parent_dim + 1) / 2;
+		const LocalVector<float> &parent_min = mip_min[mip_min.size() - 1];
+		const LocalVector<float> &parent_max = mip_max[mip_max.size() - 1];
+		LocalVector<float> child_min, child_max;
+		child_min.resize(int64_t(child_dim) * child_dim * child_dim);
+		child_max.resize(int64_t(child_dim) * child_dim * child_dim);
+		for (int z = 0; z < child_dim; ++z) {
+			for (int y = 0; y < child_dim; ++y) {
+				for (int x = 0; x < child_dim; ++x) {
+					float block_min = 1e30f, block_max = -1e30f;
+					for (int oz = 0; oz < 2; ++oz) {
+						for (int oy = 0; oy < 2; ++oy) {
+							for (int ox = 0; ox < 2; ++ox) {
+								int sx = x * 2 + ox, sy = y * 2 + oy, sz = z * 2 + oz;
+								if (sx >= parent_dim || sy >= parent_dim || sz >= parent_dim) {
+									continue;
 								}
+								int src = sx + parent_dim * (sy + parent_dim * sz);
+								block_min = MIN(block_min, parent_min[src]);
+								block_max = MAX(block_max, parent_max[src]);
 							}
 						}
-						int di = x + nd * (y + nd * z);
-						cmn[di] = lo;
-						cmx[di] = hi;
 					}
+					int dst = x + child_dim * (y + child_dim * z);
+					child_min[dst] = block_min;
+					child_max[dst] = block_max;
 				}
 			}
-			mip_min.push_back(cmn);
-			mip_max.push_back(cmx);
-			mip_dim.push_back(nd);
-			d = nd;
 		}
+		mip_min.push_back(child_min);
+		mip_max.push_back(child_max);
+		mip_dim.push_back(child_dim);
+		return child_dim;
 	}
 
 	// True if NO zero-crossing in the lattice box [cmin, cmax] in this level's grid (1-cell margin to
