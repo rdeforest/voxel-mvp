@@ -64,6 +64,17 @@ reasons):** un-pimpl (`DCOctreePersist` still holds the `Clipmap` `mesh_clipmap`
 `Brush` bundle, internal `TerrainParams` (C++), the name+comment sweep on live files, `mesh_world` `ViewParams`. Then
 the **bug bash** (`docs/bugs/`), then MPM (doc 12) / v0.1 backlog (5.5g/h).
 
+**Pass-2 read progress (which files Robert has walked, where to resume):**
+- [~] `engine/voxel_dc/` — **PAUSED, come back later.** `dc_octree_mesher.h` fully read (RdF items resolved).
+  `dc_octree_mesher.cpp` only ~line 100 of 1409 (`Level::build_mip`/`append_reduced_level` reviewed + cleaned).
+  Robert started here only because it sorts first (engine < scenes, dc_octree first in the dir) — *not* because it's
+  the right starting point. It's the hardest file; resume after the easier ones. Rest of `engine/voxel_dc/` unread.
+- [ ] `scripts/` — unread
+- [ ] `scenes/` — unread
+- [ ] `test/` — unread (lower priority)
+Suggested resume order when picking back up: a small leaf file first (e.g. `scripts/voxel_constants.gd`,
+`scripts/voxel_utils.gd`, an `actions/*.gd`) to build momentum, then back to `engine/voxel_dc/` for the C++ heavy lifting.
+
 ### Prior thread (2026-06-15): doc 17 done — dcworld IS the render
 
 **Docs 14 + 16 DONE; doc 17's world-octree is now THE production render (GPU-verified visually).** The path:
