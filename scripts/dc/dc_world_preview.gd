@@ -151,10 +151,12 @@ func set_enabled(on: bool) -> void:
         mesh = null
 
 
-func _process(dt: float) -> void:
+func _process(_dt: float) -> void:
     if not _enabled or _follow == null:
         return
-    _frame_ms = lerpf(_frame_ms, dt * 1000.0, 0.1)   # smoothed frame-time signal for the controller
+    _frame_ms = lerpf(_frame_ms, Perf.frame_gen_ms(), 0.1)   # smoothed REAL frame-gen cost (render-cpu+GPU),
+    # NOT the vsync/fps_max-capped dt — so the controller's frame-headroom gate sees true GPU load, not the
+    # quantised display interval (a 144Hz vsync pins dt at ~6.9ms and only jumps at the fps cliff).
     Perf.status("dcworld", "eps_px %.1f   mesh-lag %.0f ms (%s)" % [_eps_px, _job_work_ms, "grow" if _job_is_grow else "build"])
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
