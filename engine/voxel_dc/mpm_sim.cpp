@@ -8,28 +8,31 @@
 // then integrates once.
 
 void MpmSim::configure(Vector3 origin, int dim, double dx, Vector3 gravity, double floor_y) {
-	_origin = origin;
-	_dim = dim;
-	_dx = dx;
-	_inv_dx = 1.0 / dx;
+	_origin  = origin;
+	_dim     = dim;
+	_dx      = dx;
+	_inv_dx  = 1.0 / dx;
 	_gravity = gravity;
 	_floor_y = floor_y;
-	_gv.resize(_grid_count());
-	_gm.resize(_grid_count());
+
+	_grid_disp.resize(_grid_count());
+	_grid_mass.resize(_grid_count());
 }
 
 int MpmSim::add_particle(Vector3 pos, double mass, double volume, int material) {
-	_x.push_back(pos);
-	_d.push_back(Vector3());
-	_D.push_back(Mat3::zero());
-	_F.push_back(Mat3::identity());
-	_mass.push_back(mass);
-	_vol.push_back(volume);
-	_logJp.push_back(0.0);
-	_pmat.push_back(material);
+	_x       .push_back(pos);
+	_d       .push_back(Vector3());
+	_D       .push_back(Mat3::zero());
+	_F       .push_back(Mat3::identity());
+	_mass    .push_back(mass);
+	_vol     .push_back(volume);
+	_logJp   .push_back(0.0);
+	_pmat    .push_back(material);
 	_sleeping.push_back(0);
-	_still.push_back(0);
+	_still   .push_back(0);
+
 	_awake_count++;
+
 	return int(_x.size()) - 1;
 }
 
@@ -49,23 +52,25 @@ void MpmSim::clear() {
 
 double MpmSim::max_displacement() const {
 	double m = 0.0;
+
 	for (uint32_t i = 0; i < _d.size(); i++) {
 		m = MAX(m, _d[i].length());
 	}
+
 	return m;
 }
 
 void MpmSim::set_sleep_params(double speed, int after, double wake_speed) {
 	_sleep_speed = speed;
 	_sleep_after = after;
-	_wake_speed = wake_speed;
+	_wake_speed  = wake_speed;
 }
 
 void MpmSim::wake_all() {
 	for (uint32_t i = 0; i < _sleeping.size(); i++) {
 		if (_sleeping[i]) {
 			_sleeping[i] = 0;
-			_still[i] = 0;
+			_still[i]    = 0;
 			_awake_count++;
 		}
 	}
@@ -76,7 +81,7 @@ void MpmSim::wake_region(Vector3 center, double radius) {
 	for (uint32_t i = 0; i < _sleeping.size(); i++) {
 		if (_sleeping[i] && _x[i].distance_squared_to(center) < r2) {
 			_sleeping[i] = 0;
-			_still[i] = 0;
+			_still[i]    = 0;
 			_awake_count++;
 		}
 	}
@@ -86,23 +91,28 @@ void MpmSim::step(double dt) {
 	if (_sleep_enabled && _awake_count == 0) {
 		return; // fully quiescent — costs nothing
 	}
+
 	if (_recenter && !_x.is_empty()) {
 		// Slide the world-fixed grid so the material sits in its centre (keeps it off the walls).
 		const Vector3 c = average_position();
 		const double half = _dim * _dx * 0.5;
 		_origin = Vector3(Math::floor(c.x - half), Math::floor(c.y - half), Math::floor(c.z - half));
 	}
+
 	const int gc = _grid_count();
 	for (int it = 0; it < _iterations; it++) {
 		_solve_constraints();
+
 		for (int i = 0; i < gc; i++) {
-			_gv[i] = Vector3();
-			_gm[i] = 0.0;
+			_grid_disp[i] = Vector3();
+			_grid_mass[i] = 0.0;
 		}
+
 		_p2g();
 		_grid_update();
 		_g2p();
 	}
+
 	_integrate(dt);
 }
 
@@ -113,10 +123,11 @@ void MpmSim::_stencil(const Vector3 &pos, int base[3], Vector3 &fx, double w[3][
 	base[2] = int(Math::floor(gx.z - 0.5));
 	fx = gx - Vector3(base[0], base[1], base[2]);
 	const double f[3] = { fx.x, fx.y, fx.z };
+
 	for (int a = 0; a < 3; a++) {
-		w[a][0] = 0.5 * (1.5 - f[a]) * (1.5 - f[a]);
-		w[a][1] = 0.75 - (f[a] - 1.0) * (f[a] - 1.0);
-		w[a][2] = 0.5 * (f[a] - 0.5) * (f[a] - 0.5);
+		w[a][0] = 0.5  * (1.5  - f[a]) * (1.5  - f[a]);
+		w[a][1] = 0.75 - (f[a] - 1.0)  * (f[a] - 1.0);
+		w[a][2] = 0.5  * (f[a] - 0.5)  * (f[a] - 0.5);
 	}
 }
 
@@ -129,9 +140,10 @@ void MpmSim::_p2g() {
 		Vector3 fx;
 		double w[3][3];
 		_stencil(_x[p], base, fx, w);
-		const Vector3 dp = _d[p];
-		const Mat3 Dp = _D[p];
-		const double m = _mass[p];
+		const Vector3 disp   = _d[p];
+		const Mat3    affine = _D[p];
+		const double  m      = _mass[p];
+
 		for (int i = 0; i < 3; i++) {
 			for (int j = 0; j < 3; j++) {
 				for (int k = 0; k < 3; k++) {
@@ -139,11 +151,11 @@ void MpmSim::_p2g() {
 					if (ix < 0 || iy < 0 || iz < 0 || ix >= _dim || iy >= _dim || iz >= _dim) {
 						continue;
 					}
-					const Vector3 dpos = (Vector3(i, j, k) - fx) * _dx;
-					const double weight = w[0][i] * w[1][j] * w[2][k];
-					const int n = ix + iy * _dim + iz * _dim * _dim;
-					_gv[n] += (dp + Dp.xform(dpos)) * (m * weight);
-					_gm[n] += weight * m;
+					const Vector3 dpos   = (Vector3(i, j, k) - fx) * _dx;
+					const double  weight = w[0][i] * w[1][j] * w[2][k];
+					const int     n      = ix + iy * _dim + iz * _dim * _dim;
+					_grid_disp[n] += (disp + affine.xform(dpos)) * (m * weight);
+					_grid_mass[n] += weight * m;
 				}
 			}
 		}
@@ -157,6 +169,7 @@ Vector3 MpmSim::_collider_normal(const Vector3 &p) const {
 			_collider->sample(p + Vector3(0, h, 0)) - _collider->sample(p - Vector3(0, h, 0)),
 			_collider->sample(p + Vector3(0, 0, h)) - _collider->sample(p - Vector3(0, 0, h)));
 	const double len = g.length();
+
 	return len > 1e-9 ? g / len : Vector3(0, 1, 0);
 }
 
@@ -169,22 +182,23 @@ void MpmSim::_apply_collider(const Vector3 &node_world, Vector3 &disp) const {
 	double s0;
 	Vector3 nrm;
 	if (_collider.is_valid()) {
-		s0 = _collider->sample(node_world); // signed distance at the node (≥0 outside)
-		nrm = _collider_normal(node_world); // outward
+		s0  = _collider->sample(node_world); // signed distance at the node (≥0 outside)
+		nrm = _collider_normal(node_world);  // outward
 	} else {
-		s0 = node_world.y - _floor_y;
+		s0  = node_world.y - _floor_y;
 		nrm = Vector3(0, 1, 0);
 	}
-	const double dn = disp.dot(nrm);        // displacement along the outward normal (<0 = inward)
-	const double max_inward = MAX(s0, 0.0); // how far it may still descend before the surface
-	const double excess = -dn - max_inward; // inward motion beyond what's allowed
+	const double dn         = disp.dot(nrm);     // displacement along the outward normal (<0 = inward)
+	const double max_inward = MAX(s0, 0.0);      // how far it may still descend before the surface
+	const double excess     = -dn - max_inward;  // inward motion beyond what's allowed
+
 	if (excess <= 0.0) {
 		return;
 	}
 	disp += nrm * excess; // remove only the excess inward part (no depth-based ejection)
 	if (_friction > 0.0) {
-		const double new_dn = disp.dot(nrm);
-		const Vector3 tang = disp - nrm * new_dn;
+		const double  new_dn = disp.dot(nrm);
+		const Vector3 tang   = disp - nrm * new_dn;
 		disp = nrm * new_dn + tang * (1.0 - _friction);
 	}
 }
@@ -195,12 +209,13 @@ void MpmSim::_grid_update() {
 		for (int iy = 0; iy < _dim; iy++) {
 			for (int ix = 0; ix < _dim; ix++) {
 				const int n = ix + iy * _dim + iz * _dim * _dim;
-				if (_gm[n] <= 1e-9) {
-					_gv[n] = Vector3();
+				if (_grid_mass[n] <= 1e-9) {
+					_grid_disp[n] = Vector3();
 					continue;
 				}
-				Vector3 disp = _gv[n] / _gm[n];
+				Vector3 disp = _grid_disp[n] / _grid_mass[n];
 				_apply_collider(Vector3(_origin.x + ix * _dx, _origin.y + iy * _dx, _origin.z + iz * _dx), disp);
+
 				if ((ix < 2 && disp.x < 0.0) || (ix >= _dim - 2 && disp.x > 0.0)) {
 					disp.x = 0.0;
 				}
@@ -210,7 +225,8 @@ void MpmSim::_grid_update() {
 				if ((iz < 2 && disp.z < 0.0) || (iz >= _dim - 2 && disp.z > 0.0)) {
 					disp.z = 0.0;
 				}
-				_gv[n] = disp;
+
+				_grid_disp[n] = disp;
 			}
 		}
 	}
@@ -220,14 +236,16 @@ void MpmSim::_grid_update() {
 // Handles the sparse-sleeping transition (sleep when still, wake when the grid pushes).
 void MpmSim::_g2p() {
 	const double dinv = 4.0 * _inv_dx * _inv_dx;
-	const int np = int(_x.size());
+	const int    np   = int(_x.size());
+
 	for (int p = 0; p < np; p++) {
 		int base[3];
 		Vector3 fx;
 		double w[3][3];
 		_stencil(_x[p], base, fx, w);
 		Vector3 dnew;
-		Mat3 B = Mat3::zero();
+		Mat3    B = Mat3::zero();
+
 		for (int i = 0; i < 3; i++) {
 			for (int j = 0; j < 3; j++) {
 				for (int k = 0; k < 3; k++) {
@@ -235,9 +253,9 @@ void MpmSim::_g2p() {
 					if (ix < 0 || iy < 0 || iz < 0 || ix >= _dim || iy >= _dim || iz >= _dim) {
 						continue;
 					}
-					const Vector3 dpos = (Vector3(i, j, k) - fx) * _dx;
-					const double weight = w[0][i] * w[1][j] * w[2][k];
-					const Vector3 gd = _gv[ix + iy * _dim + iz * _dim * _dim];
+					const Vector3 dpos   = (Vector3(i, j, k) - fx) * _dx;
+					const double  weight = w[0][i] * w[1][j] * w[2][k];
+					const Vector3 gd     = _grid_disp[ix + iy * _dim + iz * _dim * _dim];
 					dnew += gd * weight;
 					B = B + Mat3::outer(gd, dpos).scaled(dinv * weight);
 				}
@@ -247,7 +265,7 @@ void MpmSim::_g2p() {
 		if (_sleep_enabled && _sleeping[p]) {
 			if (dnew.length() > _wake_speed) { // a disturbance arrived
 				_sleeping[p] = 0;
-				_still[p] = 0;
+				_still[p]    = 0;
 				_awake_count++;
 			}
 			continue; // asleep: don't advect, D stays frozen
@@ -255,10 +273,11 @@ void MpmSim::_g2p() {
 
 		_d[p] = dnew;
 		_D[p] = B;
+
 		if (_sleep_enabled) {
 			if (dnew.length() < _sleep_speed) {
 				if (++_still[p] >= _sleep_after) {
-					_d[p] = Vector3(); // freeze in place; D kept as the cached affine
+					_d[p]       = Vector3(); // freeze in place; D kept as the cached affine
 					_sleeping[p] = 1;
 					_awake_count--;
 				}
@@ -270,27 +289,33 @@ void MpmSim::_g2p() {
 }
 
 Vector3 MpmSim::average_position() const {
-	Vector3 sum;
+	Vector3   sum;
 	const int np = int(_x.size());
+
 	for (int i = 0; i < np; i++) {
 		sum += _x[i];
 	}
+
 	return np > 0 ? sum / double(np) : sum;
 }
 
 double MpmSim::lowest_y() const {
 	double lo = INFINITY;
+
 	for (uint32_t i = 0; i < _x.size(); i++) {
 		lo = MIN(lo, _x[i].y);
 	}
+
 	return lo;
 }
 
 double MpmSim::kinetic_energy() const {
 	double e = 0.0; // displacement² proxy (PB-MPM has no explicit velocity)
+
 	for (uint32_t i = 0; i < _x.size(); i++) {
 		e += 0.5 * _mass[i] * _d[i].length_squared();
 	}
+
 	return e;
 }
 
@@ -300,6 +325,7 @@ bool MpmSim::is_finite() const {
 			return false;
 		}
 	}
+
 	return true;
 }
 
@@ -310,13 +336,16 @@ Dictionary MpmSim::debug_svd(Basis m) const {
 			f.m[i][j] = m.rows[i][j];
 		}
 	}
-	Mat3 u, v;
+
+	Mat3   u, v;
 	double s[3];
 	f.svd(u, s, v);
-	Mat3 sig = Mat3::zero();
+
+	Mat3 sig    = Mat3::zero();
 	sig.m[0][0] = s[0];
 	sig.m[1][1] = s[1];
 	sig.m[2][2] = s[2];
+
 	const Mat3 recon = u * sig * v.transposed();
 	double err = 0.0;
 	for (int i = 0; i < 3; i++) {
@@ -325,45 +354,47 @@ Dictionary MpmSim::debug_svd(Basis m) const {
 			err += d * d;
 		}
 	}
+
 	Dictionary out;
 	out["error"] = Math::sqrt(err);
 	out["det_u"] = u.determinant();
 	out["det_v"] = v.determinant();
-	out["s0"] = s[0];
-	out["s1"] = s[1];
-	out["s2"] = s[2];
+	out["s0"]    = s[0];
+	out["s1"]    = s[1];
+	out["s2"]    = s[2];
+
 	return out;
 }
 
 void MpmSim::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("configure", "origin", "dim", "dx", "gravity", "floor_y"), &MpmSim::configure);
-	ClassDB::bind_method(D_METHOD("set_material", "m"), &MpmSim::set_material);
-	ClassDB::bind_method(D_METHOD("set_iterations", "n"), &MpmSim::set_iterations);
-	ClassDB::bind_method(D_METHOD("set_elastic", "ratio", "relaxation"), &MpmSim::set_elastic);
-	ClassDB::bind_method(D_METHOD("set_contact_friction", "f"), &MpmSim::set_contact_friction);
-	ClassDB::bind_method(D_METHOD("set_sand_friction", "friction_angle_degrees"), &MpmSim::set_sand_friction);
-	ClassDB::bind_method(D_METHOD("set_viscosity", "v"), &MpmSim::set_viscosity);
-	ClassDB::bind_method(D_METHOD("set_damping", "d"), &MpmSim::set_damping);
-	ClassDB::bind_method(D_METHOD("set_recenter", "on"), &MpmSim::set_recenter);
-	ClassDB::bind_method(D_METHOD("set_sdf_collider", "store"), &MpmSim::set_sdf_collider);
-	ClassDB::bind_method(D_METHOD("set_sleeping", "on"), &MpmSim::set_sleeping);
-	ClassDB::bind_method(D_METHOD("set_sleep_params", "speed", "after", "wake_speed"), &MpmSim::set_sleep_params);
-	ClassDB::bind_method(D_METHOD("debug_svd", "m"), &MpmSim::debug_svd);
-	ClassDB::bind_method(D_METHOD("rasterize_to_store", "store", "cell", "radius", "material_index"), &MpmSim::rasterize_to_store);
-	ClassDB::bind_method(D_METHOD("thaw_from_store", "store", "origin", "dim", "cell", "ppa", "mass", "volume"), &MpmSim::thaw_from_store);
-	ClassDB::bind_method(D_METHOD("add_particle", "pos", "mass", "volume", "material"), &MpmSim::add_particle, DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("clear"), &MpmSim::clear);
-	ClassDB::bind_method(D_METHOD("max_displacement"), &MpmSim::max_displacement);
-	ClassDB::bind_method(D_METHOD("step", "dt"), &MpmSim::step);
-	ClassDB::bind_method(D_METHOD("awake_count"), &MpmSim::awake_count);
-	ClassDB::bind_method(D_METHOD("is_asleep"), &MpmSim::is_asleep);
-	ClassDB::bind_method(D_METHOD("wake_all"), &MpmSim::wake_all);
-	ClassDB::bind_method(D_METHOD("wake_region", "center", "radius"), &MpmSim::wake_region);
-	ClassDB::bind_method(D_METHOD("particle_count"), &MpmSim::particle_count);
-	ClassDB::bind_method(D_METHOD("get_position", "i"), &MpmSim::get_position);
-	ClassDB::bind_method(D_METHOD("get_displacement", "i"), &MpmSim::get_displacement);
-	ClassDB::bind_method(D_METHOD("average_position"), &MpmSim::average_position);
-	ClassDB::bind_method(D_METHOD("lowest_y"), &MpmSim::lowest_y);
-	ClassDB::bind_method(D_METHOD("kinetic_energy"), &MpmSim::kinetic_energy);
-	ClassDB::bind_method(D_METHOD("is_finite"), &MpmSim::is_finite);
+	ClassDB::bind_method(D_METHOD("configure",            "origin", "dim", "dx", "gravity", "floor_y"),          &MpmSim::configure);
+	ClassDB::bind_method(D_METHOD("set_material",         "m"),                                                   &MpmSim::set_material);
+	ClassDB::bind_method(D_METHOD("set_iterations",       "n"),                                                   &MpmSim::set_iterations);
+	ClassDB::bind_method(D_METHOD("set_elastic",          "ratio", "relaxation"),                                 &MpmSim::set_elastic);
+	ClassDB::bind_method(D_METHOD("set_contact_friction", "f"),                                                   &MpmSim::set_contact_friction);
+	ClassDB::bind_method(D_METHOD("set_sand_friction",    "friction_angle_degrees"),                              &MpmSim::set_sand_friction);
+	ClassDB::bind_method(D_METHOD("set_viscosity",        "v"),                                                   &MpmSim::set_viscosity);
+	ClassDB::bind_method(D_METHOD("set_damping",          "d"),                                                   &MpmSim::set_damping);
+	ClassDB::bind_method(D_METHOD("set_recenter",         "on"),                                                  &MpmSim::set_recenter);
+	ClassDB::bind_method(D_METHOD("set_sdf_collider",     "store"),                                               &MpmSim::set_sdf_collider);
+	ClassDB::bind_method(D_METHOD("set_sleeping",         "on"),                                                  &MpmSim::set_sleeping);
+	ClassDB::bind_method(D_METHOD("set_sleep_params",     "speed", "after", "wake_speed"),                        &MpmSim::set_sleep_params);
+	ClassDB::bind_method(D_METHOD("debug_svd",            "m"),                                                   &MpmSim::debug_svd);
+	ClassDB::bind_method(D_METHOD("rasterize_to_store",   "store", "cell", "radius", "material_index"),           &MpmSim::rasterize_to_store);
+	ClassDB::bind_method(D_METHOD("thaw_from_store",      "store", "origin", "dim", "cell", "ppa", "mass", "volume"), &MpmSim::thaw_from_store);
+	ClassDB::bind_method(D_METHOD("add_particle",         "pos", "mass", "volume", "material"),                   &MpmSim::add_particle, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("clear"),                                                                        &MpmSim::clear);
+	ClassDB::bind_method(D_METHOD("max_displacement"),                                                             &MpmSim::max_displacement);
+	ClassDB::bind_method(D_METHOD("step",                 "dt"),                                                  &MpmSim::step);
+	ClassDB::bind_method(D_METHOD("awake_count"),                                                                  &MpmSim::awake_count);
+	ClassDB::bind_method(D_METHOD("is_asleep"),                                                                    &MpmSim::is_asleep);
+	ClassDB::bind_method(D_METHOD("wake_all"),                                                                     &MpmSim::wake_all);
+	ClassDB::bind_method(D_METHOD("wake_region",          "center", "radius"),                                    &MpmSim::wake_region);
+	ClassDB::bind_method(D_METHOD("particle_count"),                                                               &MpmSim::particle_count);
+	ClassDB::bind_method(D_METHOD("get_position",         "i"),                                                   &MpmSim::get_position);
+	ClassDB::bind_method(D_METHOD("get_displacement",     "i"),                                                   &MpmSim::get_displacement);
+	ClassDB::bind_method(D_METHOD("average_position"),                                                             &MpmSim::average_position);
+	ClassDB::bind_method(D_METHOD("lowest_y"),                                                                     &MpmSim::lowest_y);
+	ClassDB::bind_method(D_METHOD("kinetic_energy"),                                                               &MpmSim::kinetic_energy);
+	ClassDB::bind_method(D_METHOD("is_finite"),                                                                    &MpmSim::is_finite);
 }

@@ -29,9 +29,11 @@ static func for_each_in_bounding_box(
 
 static func euler_basis(degrees: Vector3) -> Basis:
     var b := Basis.IDENTITY
+
     b = b.rotated(Vector3.RIGHT,   deg_to_rad(degrees.x))
     b = b.rotated(Vector3.UP,      deg_to_rad(degrees.y))
     b = b.rotated(Vector3.FORWARD, deg_to_rad(degrees.z))
+
     return b
 
 
@@ -56,13 +58,16 @@ static func neighbors(pos: Vector3i) -> Array[Vector3i]:
 static func footprint_from_aabb(aabb: AABB) -> Array[Vector3i]:
     if aabb.size == Vector3.ZERO:
         return []
+
     var cell_aabb := _aabb_to_cell_aabb(aabb)
-    var result:   Array[Vector3i] = []
+    var result: Array[Vector3i] = []
+
     for_each_in_bounding_box(
         cell_aabb.position,
         cell_aabb.size,
         func(pos: Vector3i) -> void: result.append(pos)
     )
+
     return result
 
 
@@ -72,6 +77,7 @@ static func _cell_axis(position: float, size: float) -> Array:
     if size >= VoxelConstants.VOXEL_SIZE:
         var origin: float = floor(position)
         return [origin, ceil(position + size) - origin]
+
     return [floor(position + size * 0.5), 1.0]
 
 
@@ -79,4 +85,5 @@ static func _aabb_to_cell_aabb(aabb: AABB) -> AABB:
     var x := _cell_axis(aabb.position.x, aabb.size.x)
     var y := _cell_axis(aabb.position.y, aabb.size.y)
     var z := _cell_axis(aabb.position.z, aabb.size.z)
+
     return AABB(Vector3(x[0], y[0], z[0]), Vector3(x[1], y[1], z[1]))

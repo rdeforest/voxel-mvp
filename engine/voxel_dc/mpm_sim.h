@@ -29,23 +29,23 @@ class MpmSim : public RefCounted {
 	// Particles (one entry per index).
 	LocalVector<Vector3> _x;    // position (world)
 	LocalVector<Vector3> _d;    // displacement this step (= velocity·dt; carries gravity over)
-	LocalVector<Mat3> _D;       // deformation displacement (APIC affine of displacement)
-	LocalVector<Mat3> _F;       // deformation gradient
-	LocalVector<double> _mass;
-	LocalVector<double> _vol;   // initial volume V₀
-	LocalVector<double> _logJp; // sand: log of plastic volume (Drucker-Prager hardening)
+	LocalVector<Mat3>    _D;    // deformation displacement (APIC affine of displacement)
+	LocalVector<Mat3>    _F;    // deformation gradient
+	LocalVector<double>  _mass;
+	LocalVector<double>  _vol;  // initial volume V₀
+	LocalVector<double>  _logJp;// sand: log of plastic volume (Drucker-Prager hardening)
 	LocalVector<int32_t> _pmat; // material index — the cell each particle was thawed from; carried
 	                            // back on freeze so a mixed chunk re-deposits per-cell, not as one material
 
 	// Background grid. One node per lattice point; index = i + j·dim + k·dim². The grid carries
 	// displacement-momentum during P2G, then mass-weighted displacement after GridUpdate.
-	LocalVector<Vector3> _gv;
-	LocalVector<double> _gm;
+	LocalVector<Vector3> _grid_disp;
+	LocalVector<double>  _grid_mass;
 
-	Vector3 _origin = Vector3(0, 0, 0);
-	int _dim = 32;              // nodes per axis
-	double _dx = 1.0;
-	double _inv_dx = 1.0;
+	Vector3 _origin  = Vector3(0, 0, 0);
+	int     _dim     = 32;              // nodes per axis
+	double  _dx      = 1.0;
+	double  _inv_dx  = 1.0;
 
 	Vector3 _gravity = Vector3(0.0, -9.8, 0.0);
 
@@ -53,15 +53,15 @@ class MpmSim : public RefCounted {
 	// (more = stiffer/converged). elasticity_ratio α blends the constraint target between the
 	// rotation (shape preservation, α→1) and the volume-preserving shape (α→0). relaxation is
 	// how far D moves toward the target each iteration.
-	int _material = 0;             // 0/1 = elastic, 2 = sand
-	int _iterations = 5;
-	double _elasticity_ratio = 1.0;   // rotation (shape-preserving) target — stable default
-	double _elastic_relaxation = 0.5; // under-relaxed; high relax + many iters can over-drive
-	double _friction_angle = 35.0; // sand (degrees)
-	double _viscosity = 0.0;       // deviatoric damping (sand uses a little)
-	double _damping = 0.0;         // global velocity damping per step — dissipates energy so
-	                               // material actually comes to rest (PB-MPM otherwise conserves
-	                               // it: a frictionless body slides/bounces forever).
+	int    _material           = 0;    // 0/1 = elastic, 2 = sand
+	int    _iterations         = 5;
+	double _elasticity_ratio   = 1.0;  // rotation (shape-preserving) target — stable default
+	double _elastic_relaxation = 0.5;  // under-relaxed; high relax + many iters can over-drive
+	double _friction_angle     = 35.0; // sand (degrees)
+	double _viscosity          = 0.0;  // deviatoric damping (sand uses a little)
+	double _damping            = 0.0;  // global velocity damping per step — dissipates energy so
+	                                   // material actually comes to rest (PB-MPM otherwise conserves
+	                                   // it: a frictionless body slides/bounces forever).
 
 	// When set, the world-fixed grid re-centres on the particle centroid each step so the
 	// material never reaches the domain walls (the grid is scratch — rebuilt every step — so
@@ -74,20 +74,20 @@ class MpmSim : public RefCounted {
 	// back out along the SDF normal (the grid-resolved contact PBD lacked). Without one, a flat
 	// floor at world y = _floor_y is the fallback (keeps the bare-core tests collider-free).
 	Ref<EditStore> _collider;
-	double _floor_y = 0.0;
+	double _floor_y  = 0.0;
 	double _friction = 0.0; // tangential damping on contact (kept low; see the explicit spike notes)
 
 	// Sparse sleeping (doc 12). A particle whose displacement stays below _sleep_speed·dt for
 	// _sleep_after steps stops being solved/advected: its P2G contribution is cached (D frozen,
 	// d = 0), and it re-wakes when the grid displacement at its location exceeds _wake_speed·dt.
 	// A fully-asleep sim's step() is a no-op. Off by default so the bare-physics tests are clean.
-	bool _sleep_enabled = false;
+	bool                 _sleep_enabled = false;
 	LocalVector<uint8_t> _sleeping;
 	LocalVector<int32_t> _still;
-	int _awake_count = 0;
-	double _sleep_speed = 0.05;
-	int _sleep_after = 80;
-	double _wake_speed = 0.2;
+	int                  _awake_count   = 0;
+	double               _sleep_speed   = 0.05;
+	int                  _sleep_after   = 80;
+	double               _wake_speed    = 0.2;
 
 	int _grid_count() const { return _dim * _dim * _dim; }
 
