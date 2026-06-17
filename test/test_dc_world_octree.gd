@@ -348,6 +348,26 @@ func test_grow_reuses_accel_when_window_unchanged() -> void:
     assert_eq(m.get_accel_bake_count(), 2, "a window move re-bakes the accel")
 
 
+# Parallel accel bake produces byte-identical output to the serial bake: the z-split assigns disjoint
+# ranges to each thread, so the samples written are the same values in the same slots as the serial loop.
+# Build the same windowed mesh_world twice — once at thread_count=1 (serial), once at thread_count=8
+# (parallel) — and assert the triangle sets are identical.
+func test_parallel_bake_matches_serial():
+    var s := _store()
+    var origin := _region_origin(s)
+    var cam := Vector3(16, 16, 220)
+    var whole := origin + WIN_FULL
+    var m1 := DCOctreeMesher.new()
+    m1.set_thread_count(1)
+    var serial: Array = m1.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), origin, whole)
+    var m8 := DCOctreeMesher.new()
+    m8.set_thread_count(8)
+    var parallel: Array = m8.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), origin, whole)
+    assert_false(serial.is_empty(),   "serial build produced a surface")
+    assert_false(parallel.is_empty(), "parallel build produced a surface")
+    assert_eq(_tri_sigs(parallel), _tri_sigs(serial), "parallel bake (8 threads) == serial bake (byte-identical surface)")
+
+
 # Direct field sampling == sampling a baked grid of the same field: the crossing topology is decided by
 # the field's SIGN at integer cell corners — identical whether read direct (mesh_world) or via a
 # fill_region grid (mesh_clipmap) — so the two meshes share a vertex count (positions differ only by the

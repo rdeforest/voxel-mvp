@@ -300,6 +300,18 @@ func _arrays_to_mesh(arrays: Array) -> ArrayMesh:
     return m
 
 
+func set_mesh_threads(n: int) -> void:
+    _mesher.set_thread_count(n)
+
+
+func mesh_phase_report() -> String:
+    return "threads %d | last build: accel %.0f + build %.0f + collapse %.0f ms" % [
+        _mesher.get_thread_count(),
+        _mesher.get_last_accel_ms(),
+        _mesher.get_last_build_ms(),
+        _mesher.get_last_collapse_ms()]
+
+
 func _exit_tree() -> void:
     if _task_id != -1:
         WorkerThreadPool.wait_for_task_completion(_task_id)

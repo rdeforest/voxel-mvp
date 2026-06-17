@@ -6,13 +6,18 @@
 #include "sdf_field.h"
 
 #include "core/math/math_funcs.h"
+#include "core/os/os.h"
 #include "core/templates/local_vector.h"
 #include "scene/resources/mesh.h"
+
+#include <thread>
 
 // CB (cube corners by xyz bits), EDGES (12 corner-pairs), RING (4 cells around an edge),
 // and Qef all come from voxel_dc — shared with the octree storage and mesher so
 // the corner order can't drift between them.
 using namespace voxel_dc;
+
+static int g_mesh_threads = 1; // parallel-bake worker count; 1 = serial (default — unchanged behaviour)
 
 namespace {
 
@@ -360,12 +365,37 @@ struct EditStoreSource : public SdfSource {
 		PackedFloat32Array &data = accel_held[slot];
 		data.resize(int64_t(dim) * dim * dim);
 		float *d = data.ptrw();
-		for (int z = 0; z < dim; ++z) {
-			for (int y = 0; y < dim; ++y) {
-				for (int x = 0; x < dim; ++x) {
-					d[voxel_dc::flat_index(x, y, z, dim)] =
-							float(value(Vector3(lo.x + x * res, lo.y + y * res, lo.z + z * res)));
+		const int nthreads = (g_mesh_threads > 1 && dim >= 4) ? g_mesh_threads : 1;
+		if (nthreads <= 1) {
+			for (int z = 0; z < dim; ++z) {
+				for (int y = 0; y < dim; ++y) {
+					for (int x = 0; x < dim; ++x) {
+						d[voxel_dc::flat_index(x, y, z, dim)] =
+								float(value(Vector3(lo.x + x * res, lo.y + y * res, lo.z + z * res)));
+					}
 				}
+			}
+		} else {
+			// Split z range across nthreads workers — each writes a disjoint contiguous block.
+			// value()->store->sample is const/read-only: concurrent reads are safe.
+			LocalVector<std::thread> workers;
+			workers.resize(nthreads);
+			for (int t = 0; t < nthreads; ++t) {
+				int z0 = (t * dim) / nthreads;
+				int z1 = ((t + 1) * dim) / nthreads;
+				workers[t] = std::thread([this, d, dim, &lo, res, z0, z1]() {
+					for (int z = z0; z < z1; ++z) {
+						for (int y = 0; y < dim; ++y) {
+							for (int x = 0; x < dim; ++x) {
+								d[voxel_dc::flat_index(x, y, z, dim)] =
+										float(value(Vector3(lo.x + x * res, lo.y + y * res, lo.z + z * res)));
+							}
+						}
+					}
+				});
+			}
+			for (int t = 0; t < nthreads; ++t) {
+				workers[t].join();
 			}
 		}
 		Level lv;
@@ -536,6 +566,8 @@ struct Octree {
 	int build_samples = 0;         // leaves whose Hermite data was sampled this build (accumulate_qef) —
 	                               // the field-derived build cost. A grow re-samples only the new band, so
 	                               // this proves the retained interior was NOT resampled (the B1 win).
+	uint64_t last_build_us    = 0; // phase timing: build() + accumulate_qef() (microseconds)
+	uint64_t last_collapse_us = 0; // phase timing: recollapse_and_mesh() (microseconds)
 	LocalVector<Cell> cells;
 	LocalVector<int> free_list;    // (B1b) indices of cells killed by eviction, reused by the next grow so
 	                               // `cells` stays bounded across a long traverse instead of leaking.
@@ -959,13 +991,17 @@ struct Octree {
 
 	void run() {
 		build_samples = 0;
+		uint64_t t0 = OS::get_singleton()->get_ticks_usec();
 		build(Vector3i(0, 0, 0), root_size, 0);
 		// Keep a flat world at >=2 cells/axis so it meshes (a fully-collapsed flat region
 		// is one empty cell — no quad). half the root => the 8 root children may collapse,
 		// nothing coarser.
 		max_leaf_size = MAX(1, root_size >> 1);
 		accumulate_qef(0);       // QEF up the tree (field-derived, once)
+		last_build_us = OS::get_singleton()->get_ticks_usec() - t0;
+		uint64_t t1 = OS::get_singleton()->get_ticks_usec();
 		recollapse_and_mesh();   // collapse + mesh (camera-derived, re-runnable)
+		last_collapse_us = OS::get_singleton()->get_ticks_usec() - t1;
 	}
 
 	// Re-decide collapse against the current camera/proj/eps over the already-built tree + QEFs, then
@@ -1332,11 +1368,17 @@ Array DCOctreeMesher::mesh_world(
 		// Bake the surface-sparse accel (P1+P2) over the window and turn the prune on. Uniform (floor_k==0)
 		// → one res-1 level covering the window; graded → concentric levels (fine near camera, coarse far),
 		// so a large window stays affordable.
+		uint64_t ta0 = OS::get_singleton()->get_ticks_usec();
 		_persist->world_src.bake_accel(win_min - world_origin, win_max - world_origin, camera, floor_k);
+		_last_accel_ms = double(OS::get_singleton()->get_ticks_usec() - ta0) / 1000.0;
 		oct.prune_safety = 1.0;
+	} else {
+		_last_accel_ms = 0.0;
 	}
 	oct.run();
 
+	_last_build_ms    = double(oct.last_build_us)    / 1000.0;
+	_last_collapse_ms = double(oct.last_collapse_us) / 1000.0;
 	_last_tri_owners      = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
 	_last_build_samples   = oct.build_samples;
@@ -1363,6 +1405,7 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	// retained interior isn't rebuilt — its prune decisions stand (geometrically identical, empty either
 	// way). NOTE: grow does not re-grade interior cells whose floor changed with the camera — that's the
 	// incremental band-diff (a later increment); a graded dcworld full-rebuilds on larger moves meanwhile.
+	_last_accel_ms = 0.0; // default: accel reused (no bake cost this grow)
 	if (_persist->world_src.has_accel) {
 		double floor_k = (proj > 0.0 && eps_px > 0.0) ? eps_px / proj : 0.0; // same single-knob derivation
 		_persist->world_src.cam = camera;
@@ -1375,17 +1418,23 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 		Vector3i win_lo = win_min - oct.world_origin;
 		Vector3i win_hi = win_max - oct.world_origin;
 		if (win_lo != _persist->world_src.accel_win_lo || win_hi != _persist->world_src.accel_win_hi) {
+			uint64_t ta0 = OS::get_singleton()->get_ticks_usec();
 			_persist->world_src.bake_accel(win_lo, win_hi, camera, floor_k);
+			_last_accel_ms = double(OS::get_singleton()->get_ticks_usec() - ta0) / 1000.0;
 		}
 		oct.prune_safety = 1.0;
 	}
 	oct.build_samples = 0;
+	uint64_t tb0 = OS::get_singleton()->get_ticks_usec();
 	oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge
 	oct.reaccumulate(0); // roll up ancestor QEFs from cached children — no field sampling
+	_last_build_ms = double(OS::get_singleton()->get_ticks_usec() - tb0) / 1000.0;
 	oct.camera = camera;
 	oct.proj = proj;
 	oct.eps_px = eps_px;
+	uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
 	oct.recollapse_and_mesh();
+	_last_collapse_ms = double(OS::get_singleton()->get_ticks_usec() - tc0) / 1000.0;
 	_last_tri_owners      = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
 	_last_build_samples   = oct.build_samples;
@@ -1400,6 +1449,14 @@ int DCOctreeMesher::get_octree_cell_count() const {
 
 int DCOctreeMesher::get_accel_bake_count() const {
 	return _persist != nullptr ? _persist->world_src.bake_count : 0;
+}
+
+void DCOctreeMesher::set_thread_count(int n) {
+	g_mesh_threads = CLAMP(n, 1, 256);
+}
+
+int DCOctreeMesher::get_thread_count() const {
+	return g_mesh_threads;
 }
 
 void DCOctreeMesher::_bind_methods() {
@@ -1426,4 +1483,9 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_accel_bake_count"),       &DCOctreeMesher::get_accel_bake_count);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);
+	ClassDB::bind_method(D_METHOD("get_last_accel_ms"),    &DCOctreeMesher::get_last_accel_ms);
+	ClassDB::bind_method(D_METHOD("get_last_build_ms"),    &DCOctreeMesher::get_last_build_ms);
+	ClassDB::bind_method(D_METHOD("get_last_collapse_ms"), &DCOctreeMesher::get_last_collapse_ms);
+	ClassDB::bind_method(D_METHOD("set_thread_count", "n"), &DCOctreeMesher::set_thread_count);
+	ClassDB::bind_method(D_METHOD("get_thread_count"),      &DCOctreeMesher::get_thread_count);
 }

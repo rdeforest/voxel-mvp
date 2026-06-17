@@ -36,6 +36,14 @@ class DCOctreeMesher : public RefCounted {
 	// grow_world this counts ONLY the leading-edge band — proof the retained interior was not resampled.
 	int _last_build_samples = 0;
 
+	// Phase timing for the last mesh_world or grow_world call (milliseconds).
+	// _last_accel_ms  = time spent in bake_accel (0 when the accel was reused in grow_world).
+	// _last_build_ms  = time spent in the build/reconcile + reaccumulate pass (field sampling).
+	// _last_collapse_ms = time spent in recollapse_and_mesh (collapse + triangle emit).
+	double _last_accel_ms   = 0.0;
+	double _last_build_ms   = 0.0;
+	double _last_collapse_ms = 0.0;
+
 public:
 	~DCOctreeMesher();
 
@@ -106,6 +114,17 @@ public:
 	// Full prune-accel bakes run so far. grow_world reuses the accel (doesn't bump this) when the
 	// resident window is unchanged — e.g. a stationary refine — so a held view refines without re-baking.
 	int get_accel_bake_count() const;
+
+	// Phase timing for the last mesh_world / grow_world (milliseconds). Read these after the call
+	// to see where the build's time goes: accel bake vs field sampling vs collapse + mesh emit.
+	double get_last_accel_ms()    const { return _last_accel_ms;    }
+	double get_last_build_ms()    const { return _last_build_ms;    }
+	double get_last_collapse_ms() const { return _last_collapse_ms; }
+
+	// Parallel accel-bake worker count. 1 = serial (default, unchanged behaviour); n > 1 splits the
+	// z-loop of bake_accel_level across n std::threads (disjoint regions, no races, byte-identical output).
+	void set_thread_count(int n);
+	int  get_thread_count() const;
 
 	// Per-triangle owner cell origins (WORLD lattice) from the last mesh call — same order/count
 	// as the returned ARRAY_INDEX divided by 3.

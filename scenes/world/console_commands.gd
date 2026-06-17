@@ -56,6 +56,7 @@ func _table() -> Array:
         [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
         [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + mesh-lag."],
         [meshlag,         "meshlag",   "Max mesh lag (ms) the budget controller keeps the worker re-mesh under — higher = more terrain detail, slower re-mesh on a move. Usage: meshlag [ms] (default 500)"],
+        [dcthreads,       "dcthreads", "Parallel accel-bake workers: `dcthreads <n>` sets the thread count; no args prints the phase timing (accel + build + collapse ms). Usage: dcthreads [n]"],
         [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
         [pbddemo,         "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [mpmdemo,         "mpmdemo",   "PB-MPM demo: spawn a live block of continuum material that falls and rests ON the terrain. Usage: mpmdemo [size]"],
@@ -228,6 +229,14 @@ func dcworld(arg := "") -> void:
     world_preview.set_enabled(on)
     LimboConsole.info("dcworld: %s (THE world-fixed render, %.0fm coverage @ %.2fm cells, budget-tuned eps)" % [
         "on" if on else "off", world_preview.win_radius_m, world_preview.base_cell])
+
+# Set parallel accel-bake worker count, or print the last phase timing split.
+func dcthreads(n := 0) -> void:
+    if n > 0:
+        world_preview.set_mesh_threads(n)
+        LimboConsole.info("dcthreads: %d workers" % world_preview._mesher.get_thread_count())
+    else:
+        LimboConsole.info(world_preview.mesh_phase_report())
 
 # Set the mesh-lag ceiling (ms) the dcworld budget controller keeps the worker re-mesh under.
 func meshlag(ms := 0.0) -> void:
