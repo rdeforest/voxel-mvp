@@ -37,7 +37,7 @@ func _on_world_ready(_event: VoxelEvent) -> void:
 # Only react to edits made while MPM is idle — that excludes MPM's own thaw/freeze (which fire with
 # particles in flight) and so breaks the cascade. Gather the edit's exposed solid cells as seeds.
 func _on_edit(event: TerrainSdfChangedEvent) -> void:
-    if not _active or not _integrity.mpm_mode:
+    if not _active:
         return
     if _integrity.mpm == null or _integrity.mpm.active_count() > 0:
         return

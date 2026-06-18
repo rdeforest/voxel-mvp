@@ -2,8 +2,7 @@ class_name ProbeAction
 extends Action
 
 # The "None" tool's click: print everything we know about the targeted cell to
-# the LimboConsole — SDF/support state AND its place in the live PBD network
-# (anchor/dynamic, awake/asleep, held-vs-falling, per-member load + fatigue).
+# the LimboConsole — SDF/material/support and its tracked-set membership.
 # The targeted cell is highlighted in-world (preview) and can be nudged off the
 # raycast hit with the Shift+W/A/E + wheel offset chord, same as build placement,
 # so you can walk the probe through interior / floating cells.
@@ -13,7 +12,6 @@ var hit_normal: Vector3
 var offset:     Vector3
 var store:      EditStore
 var integrity:  StructuralIntegrity
-var pbd:        PbdStructure
 
 
 func _init(p_hit_pos: Vector3, p_hit_normal: Vector3, p_offset: Vector3, p_ctx: ActionContext) -> void:
@@ -22,7 +20,6 @@ func _init(p_hit_pos: Vector3, p_hit_normal: Vector3, p_offset: Vector3, p_ctx: 
     offset     = p_offset
     store      = p_ctx.store
     integrity  = p_ctx.integrity
-    pbd        = p_ctx.pbd
 
 
 func validate() -> bool:
@@ -78,31 +75,6 @@ func report() -> PackedStringArray:
         var rec: VoxelRecord = integrity.terrain_support.voxel_data[cell]
         out.append("  support  %.3f" % rec.support)
         out.append("  dirty    %s" % rec.dirty)
-    out.append_array(_pbd_lines(cell))
-    return out
-
-
-func _pbd_lines(cell: Vector3i) -> PackedStringArray:
-    var out := PackedStringArray()
-    if pbd == null:
-        out.append("  PBD      (no structure)")
-        return out
-    var p := pbd.probe(cell)
-    if not p.get("enabled", false):
-        out.append("  PBD      off (physics_mode pbd to enable)")
-        return out
-    if not p.get("in_network", false):
-        out.append("  PBD      cell not in network")
-        return out
-    out.append("  PBD node %d  %s  %s  %s" % [
-        p.node,
-        "ANCHOR" if p.pinned else "dynamic",
-        "asleep" if p.sleeping else "awake",
-        "held (anchored)" if p.anchored else "FALLING (detached)",
-    ])
-    out.append("    peak load %.0f%% of limit, peak damage %.2f, %d live members" % [
-        p.peak_ratio * 100.0, p.peak_damage, p.members.size(),
-    ])
     return out
 
 

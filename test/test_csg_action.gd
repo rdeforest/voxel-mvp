@@ -24,7 +24,7 @@ func before_each() -> void:
 
 
 func _ctx(player: CharacterBody3D = null) -> ActionContext:
-    return ActionContext.new(_store, player, null, null)
+    return ActionContext.new(_store, player, null)
 
 func _sphere(op: int, radius: float) -> CsgAction:
     return CsgAction.new(

@@ -10,20 +10,18 @@ extends RefCounted
 # command's bare name because it collides with an Object built-in (`set`, `get`) — they
 # are set_uniform / get_uniform; the command STRING the player types is still set/get.
 # `host` is the World node, needed for get_tree() (reset/quit) and parenting the spawned
-# PBD demo (this is RefCounted, so it can't add_child itself). The other collaborators
+# demos (this is RefCounted, so it can't add_child itself). The other collaborators
 # are the subsystems World owns; assign them before register_all().
 
 var host:          Node
 var inval_overlay: Node3D
 var world_preview: DcWorldPreview
-var pbd_structure:     PbdStructure
 var integrity:         StructuralIntegrity
 var player:            CharacterBody3D
 var awake_overlay:     AwakeOverlay
 var edit_store:        EditStoreManager
 var part_index:        PartIndex
 
-var _pbd_demo: PbdDemo   # lazily spawned by `pbddemo`
 var _mpm_demo: MpmDemo   # lazily spawned by `mpmdemo`
 var _flood_viz: FloodViz   # lazily spawned by `floodviz`
 
@@ -60,17 +58,14 @@ func _table() -> Array:
         [dcthreads,       "dcthreads", "Parallel accel-bake workers: `dcthreads <n>` sets the thread count; no args prints the phase timing (accel + build + collapse ms). Usage: dcthreads [n]"],
         [remesh,          "remesh",    "Force a full dcworld rebuild now (re-bake + build + collapse) — trigger a remesh without walking, then read `dcthreads` for the timing."],
         [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
-        [pbddemo,         "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [mpmdemo,         "mpmdemo",   "PB-MPM demo: spawn a live block of continuum material that falls and rests ON the terrain. Usage: mpmdemo [size]"],
         [mpmthaw,         "mpmthaw",   "Thaw the REAL terrain at your aim into MPM: it carves out, falls/deforms, and freezes back when settled. Usage: mpmthaw [radius]"],
-        [physics_mode,    "physics_mode", "Switch the structural sim: 'pbd' (mass-spring, default) or 'mpm' (PB-MPM continuum — unsupported terrain thaws/falls/freezes). Usage: physics_mode [pbd|mpm]"],
         [floodviz,        "floodviz",  "Debug: flood connected solid terrain from your aim (biased down), colouring reached surface cells green. Non-blocking. Usage: floodviz [cells_per_frame]"],
-        [physics_active,  "physics_active", "Toggle the structural physics simulation on your real structures (sag + collapse under load). Usage: physics_active [on|off]"],
         [perf,            "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
         [awake,           "awake",     "Highlight awake physics bodies (debris / collapsed parts) with a box. Usage: awake [on|off]"],
         [reset,           "reset",     "Delete the save (EditStore blob + snapshot) and reload to a fresh world."],
         [quiescent,       "quiescent", "Print whether the world is quiescent (save-ready)."],
-        [settle,          "settle",    "Force the world to rest so a save is never blocked (drains support, sleeps PBD + falling bodies)."],
+        [settle,          "settle",    "Force the world to rest so a save is never blocked (drains the support fixpoint)."],
         [parts,           "parts",     "Print the number of tracked parts."],
         [voxels,          "voxels",    "Print the number of tracked terrain voxels."],
         [tp,              "tp",        "Teleport the player. Usage: tp <x> <y> <z>"],
@@ -259,28 +254,11 @@ func dcframebudget(ms := 0.0) -> void:
     LimboConsole.info("dcframebudget: %.1f ms render budget (refines while < %.1f ms) — higher = more detail, lower fps" % [
         world_preview.frame_budget, world_preview.frame_budget * 0.5])
 
-# Spawn a live PBD structural-physics demo in front of the player (stress-coloured
-# lines; watch it sag and snap). Re-run to reset.
 # How many edited leaves the store holds + its SDF at your position.
 func editstore() -> void:
     var here := player.global_position
     LimboConsole.info("editstore: %d edited leaves; at you store=%.2f" % [
         edit_store.store.leaf_count(), edit_store.store.sample(here)])
-
-
-func pbddemo(kind := "cantilever", size := 12) -> void:
-    var fwd := -player.global_transform.basis.z
-    var base := Vector3i((player.global_position + fwd * 6.0 + Vector3.UP * 4.0).round())
-    var sim: PbdSim
-    match kind:
-        "bridge": sim = PbdDemo.bridge(base, size)
-        "tower":  sim = PbdDemo.tower(base, size)
-        _:        sim = PbdDemo.cantilever(base, size)
-    if _pbd_demo == null:
-        _pbd_demo = PbdDemo.new()
-        host.add_child(_pbd_demo)
-    _pbd_demo.set_sim(sim)
-    LimboConsole.info("pbddemo: %s size %d (%d members)" % [kind, size, sim.member_count()])
 
 # Spawn a live PB-MPM block of elastic material in front of the player; it falls and rests on the
 # real terrain (the EditStore SDF is its collider). Re-run to respawn.
@@ -300,7 +278,7 @@ func mpmthaw(radius := 3.0) -> void:
     if rc == null or not rc.is_colliding():
         LimboConsole.error("mpmthaw: aim at terrain first")
         return
-    # Thaw into the world's wired MpmStructure (the same one save-gating + physics_mode see), not a
+    # Thaw into the world's wired MpmStructure (the same one save-gating + DetachmentScout see), not a
     # private console instance — otherwise the in-flight material is invisible to is_quiescent.
     var n := integrity.mpm.thaw_sphere(rc.get_collision_point(), radius)
     LimboConsole.info("mpmthaw: thawed %d cells (r=%.1f) into MPM" % [n, radius])
@@ -321,27 +299,6 @@ func floodviz(budget := 200) -> void:
     _flood_viz.start(cell, budget)
     LimboConsole.info("floodviz: flooding from %s at %d cells/frame (green = reached surface)" % [cell, budget])
 
-
-# Switch the authoritative structural sim. `mpm` disables PBD and routes loss-of-support cells
-# into the PB-MPM substrate (thaw → fall → freeze); `pbd` restores the mass-spring sim.
-func physics_mode(mode := "") -> void:
-    if mode == "mpm":
-        integrity.mpm_mode = true
-        pbd_structure.set_enabled(false)
-        LimboConsole.info("physics_mode: MPM (PB-MPM continuum) — PBD disabled")
-    elif mode == "pbd":
-        integrity.mpm_mode = false
-        if integrity.mpm != null:
-            integrity.mpm.reset()   # drop any in-flight MPM material so it stops being stepped
-        pbd_structure.set_enabled(true)
-        LimboConsole.info("physics_mode: PBD (mass-spring)")
-    else:
-        LimboConsole.info("physics_mode: %s" % ("mpm" if integrity.mpm_mode else "pbd"))
-
-func physics_active(state := "") -> void:
-    var on := _parse_toggle(state, pbd_structure.is_enabled())
-    pbd_structure.set_enabled(on)
-    LimboConsole.info("physics_active: %s" % ("on" if on else "off"))
 
 func perf(state := "") -> void:
     var on := _parse_toggle(state, Perf.is_shown())

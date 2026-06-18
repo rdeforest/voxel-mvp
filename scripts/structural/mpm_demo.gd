@@ -4,7 +4,7 @@ extends Node3D
 # A watchable demo of the PB-MPM continuum solver (MpmSim, C++): spawn a block of elastic
 # material in front of the player, simulate it live, and render each particle as a small cube
 # via MultiMesh. The collider is the real terrain (the EditStore SDF), so the block falls and
-# rests ON the world — the grid-resolved contact that PBD couldn't do (doc 12). Console:
+# rests ON the world — the grid-resolved contact a mass-spring model couldn't do (doc 12). Console:
 # `mpmdemo [size]`. Standalone — touches nothing else; re-run to respawn. Stepping runs at the
 # physics rate, drawing once per rendered frame.
 

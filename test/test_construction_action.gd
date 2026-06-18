@@ -26,7 +26,7 @@ func _beam() -> Part:
     return preload("res://assets/parts/beam/beam.tres")   # 6x2x2 Wood
 
 func _ctx(store: EditStore) -> ActionContext:
-    return ActionContext.new(store, null, null, null)
+    return ActionContext.new(store, null, null)
 
 
 func test_part_imprints_solid_voxels_with_material() -> void:

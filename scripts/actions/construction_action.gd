@@ -3,8 +3,8 @@ extends AdditiveAction
 
 # Placing a part is a voxel imprint: stamp the part's box brush into the EditStore (SDF +
 # material) via VoxelImprint — no separate Node3D, no part/terrain dichotomy. The part
-# becomes terrain voxels the DC mesher draws (in the part's material colour) and PBD
-# simulates. (docs/roadmap/design/03-dc-qef-geometry.md §"Imprinting, not CSG".)
+# becomes terrain voxels the DC mesher draws (in the part's material colour) and the
+# structural sim simulates. (docs/roadmap/design/03-dc-qef-geometry.md §"Imprinting, not CSG".)
 
 var part:          Part
 var placement_pos: Vector3    # world position for the rotated bottom-center
