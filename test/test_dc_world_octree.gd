@@ -365,7 +365,12 @@ func test_parallel_bake_matches_serial():
     var parallel: Array = m8.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), origin, whole)
     assert_false(serial.is_empty(),   "serial build produced a surface")
     assert_false(parallel.is_empty(), "parallel build produced a surface")
-    assert_eq(_tri_sigs(parallel), _tri_sigs(serial), "parallel (8 threads) == serial (byte-identical surface) — gates both the parallel accel bake AND the parallel leaf sampling")
+    # Byte-identical, not just same triangle SET: the parallel emit pre-assigns vertex slots and
+    # concatenates per-leaf output in cell-index order, so vertices and indices match position-for-
+    # position. Gates the parallel accel bake, the parallel leaf sampling, AND the parallel emit pass.
+    assert_eq(parallel[Mesh.ARRAY_VERTEX], serial[Mesh.ARRAY_VERTEX], "parallel (8) vertices == serial (1), byte-identical order")
+    assert_eq(parallel[Mesh.ARRAY_INDEX],  serial[Mesh.ARRAY_INDEX],  "parallel (8) indices == serial (1), byte-identical order")
+    assert_eq(_tri_sigs(parallel), _tri_sigs(serial), "parallel (8 threads) == serial — same surface")
 
 
 # Direct field sampling == sampling a baked grid of the same field: the crossing topology is decided by

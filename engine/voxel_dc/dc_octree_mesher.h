@@ -44,6 +44,13 @@ class DCOctreeMesher : public RefCounted {
 	double _last_build_ms   = 0.0;
 	double _last_collapse_ms = 0.0;
 
+	// Breakdown of _last_build_ms (mesh_world only): tree construction (serial), leaf sampling
+	// (parallel — the dominant field cost), QEF roll-up (serial). Pinpoints the Amdahl ceiling.
+	double _last_construct_ms = 0.0;
+	double _last_sample_ms    = 0.0;
+	double _last_accum_ms     = 0.0;
+	double _last_collapse_pass_ms = 0.0;
+
 public:
 	~DCOctreeMesher();
 
@@ -121,8 +128,13 @@ public:
 	double get_last_build_ms()    const { return _last_build_ms;    }
 	double get_last_collapse_ms() const { return _last_collapse_ms; }
 
-	// Parallel accel-bake worker count. 1 = serial (default, unchanged behaviour); n > 1 splits the
-	// z-loop of bake_accel_level across n std::threads (disjoint regions, no races, byte-identical output).
+	double get_last_construct_ms() const { return _last_construct_ms; }
+	double get_last_sample_ms()    const { return _last_sample_ms;    }
+	double get_last_accum_ms()     const { return _last_accum_ms;     }
+	double get_last_collapse_pass_ms() const { return _last_collapse_pass_ms; }
+
+	// Parallel worker count for the build's parallel phases (construct / sample / accumulate / collapse /
+	// emit / accel-bake). 1 = serial. Output is deterministic and identical regardless of the count.
 	void set_thread_count(int n);
 	int  get_thread_count() const;
 

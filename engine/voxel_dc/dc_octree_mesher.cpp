@@ -10,6 +10,8 @@
 #include "core/templates/local_vector.h"
 #include "scene/resources/mesh.h"
 
+#include <atomic>
+#include <cstring>
 #include <thread>
 
 // CB (cube corners by xyz bits), EDGES (12 corner-pairs), RING (4 cells around an edge),
@@ -17,7 +19,7 @@
 // the corner order can't drift between them.
 using namespace voxel_dc;
 
-static int g_mesh_threads = 1; // parallel-bake worker count; 1 = serial (default — unchanged behaviour)
+static int g_mesh_threads = 1; // parallel worker count for the build's parallel phases; 1 = serial
 
 namespace {
 
@@ -25,6 +27,43 @@ const double QUERY_EPS = 0.25; // perpendicular offset to land just across an ed
 
 inline Vector3 to_v3(const Vector3i &v) {
 	return Vector3(real_t(v.x), real_t(v.y), real_t(v.z));
+}
+
+// Run fn(i) for i in [0, n) across `nthreads` workers with DYNAMIC load balancing: each worker
+// grabs a chunk of indices off a shared atomic cursor and keeps grabbing until the range is drained,
+// so uneven per-index cost (clustered surface leaves, varying crossing counts) can't strand a thread
+// on one heavy range. nthreads <= 1 runs inline on the calling thread. Joins before returning, so a
+// fn capturing caller locals by reference is safe. Raw std::thread (not WorkerThreadPool) on purpose:
+// this already runs inside a pool task, and waiting on nested pool tasks from a pool thread can deadlock.
+template <typename Fn>
+void parallel_for(int n, int nthreads, Fn fn) {
+	if (nthreads <= 1 || n <= 0) {
+		for (int i = 0; i < n; ++i) {
+			fn(i);
+		}
+		return;
+	}
+	const int chunk = MAX(1, n / (nthreads * 16)); // ~16 grabs/worker: balance vs atomic contention
+	std::atomic<int> cursor(0);
+	LocalVector<std::thread> workers;
+	workers.resize(nthreads);
+	for (int t = 0; t < nthreads; ++t) {
+		workers[t] = std::thread([&fn, &cursor, n, chunk]() {
+			for (;;) {
+				int start = cursor.fetch_add(chunk, std::memory_order_relaxed);
+				if (start >= n) {
+					break;
+				}
+				int end = MIN(start + chunk, n);
+				for (int i = start; i < end; ++i) {
+					fn(i);
+				}
+			}
+		});
+	}
+	for (int t = 0; t < nthreads; ++t) {
+		workers[t].join();
+	}
 }
 
 // One baked SDF grid (a clipmap level): trilinear value (shared voxel_dc sampler) plus
@@ -365,39 +404,17 @@ struct EditStoreSource : public SdfSource {
 		PackedFloat32Array &data = accel_held[slot];
 		data.resize(int64_t(dim) * dim * dim);
 		float *d = data.ptrw();
+		// One worker-grab per z-slab; value()->store->sample is const/read-only, so concurrent reads
+		// are safe and each slab writes a disjoint block. Load-balanced across the accel's many levels.
 		const int nthreads = (g_mesh_threads > 1 && dim >= 4) ? g_mesh_threads : 1;
-		if (nthreads <= 1) {
-			for (int z = 0; z < dim; ++z) {
-				for (int y = 0; y < dim; ++y) {
-					for (int x = 0; x < dim; ++x) {
-						d[voxel_dc::flat_index(x, y, z, dim)] =
-								float(value(Vector3(lo.x + x * res, lo.y + y * res, lo.z + z * res)));
-					}
+		parallel_for(dim, nthreads, [this, d, dim, &lo, res](int z) {
+			for (int y = 0; y < dim; ++y) {
+				for (int x = 0; x < dim; ++x) {
+					d[voxel_dc::flat_index(x, y, z, dim)] =
+							float(value(Vector3(lo.x + x * res, lo.y + y * res, lo.z + z * res)));
 				}
 			}
-		} else {
-			// Split z range across nthreads workers — each writes a disjoint contiguous block.
-			// value()->store->sample is const/read-only: concurrent reads are safe.
-			LocalVector<std::thread> workers;
-			workers.resize(nthreads);
-			for (int t = 0; t < nthreads; ++t) {
-				int z0 = (t * dim) / nthreads;
-				int z1 = ((t + 1) * dim) / nthreads;
-				workers[t] = std::thread([this, d, dim, &lo, res, z0, z1]() {
-					for (int z = z0; z < z1; ++z) {
-						for (int y = 0; y < dim; ++y) {
-							for (int x = 0; x < dim; ++x) {
-								d[voxel_dc::flat_index(x, y, z, dim)] =
-										float(value(Vector3(lo.x + x * res, lo.y + y * res, lo.z + z * res)));
-							}
-						}
-					}
-				});
-			}
-			for (int t = 0; t < nthreads; ++t) {
-				workers[t].join();
-			}
-		}
+		});
 		Level lv;
 		lv.data = data.ptr();
 		lv.origin = Vector3(lo);
@@ -563,11 +580,16 @@ struct Octree {
 	                               // meshed) — the box is the resident WINDOW, its edge the mesh rim. A
 	                               // splice leaves window_mode off: its out-of-box cells ARE meshed so the
 	                               // patch rim can stitch to them (the full build supplies their triangles).
+	LocalVector<int> level_start;  // parallel bottom-up: cell-index where each BFS level begins (for level walks)
 	int build_samples = 0;         // leaves whose Hermite data was sampled this build (accumulate_qef) —
 	                               // the field-derived build cost. A grow re-samples only the new band, so
 	                               // this proves the retained interior was NOT resampled (the B1 win).
 	uint64_t last_build_us    = 0; // phase timing: build() + accumulate_qef() (microseconds)
 	uint64_t last_collapse_us = 0; // phase timing: recollapse_and_mesh() (microseconds)
+	uint64_t last_construct_us = 0; // sub-phase: build() tree construction (serial)
+	uint64_t last_sample_us    = 0; // sub-phase: sample_leaves_parallel() (parallel)
+	uint64_t last_accum_us     = 0; // sub-phase: accumulate_sums() (serial)
+	uint64_t last_collapse_pass_us = 0; // sub-phase: collapse_pass() serial tree walk (within emit bucket)
 	LocalVector<Cell> cells;
 	LocalVector<int> free_list;    // (B1b) indices of cells killed by eviction, reused by the next grow so
 	                               // `cells` stays bounded across a long traverse instead of leaking.
@@ -629,9 +651,11 @@ struct Octree {
 	// A leaf's QEF, built from the 12 cube edges that cross the isosurface (the cell's
 	// own Hermite data at its own size).
 	Qef leaf_qef(int idx) const {
+		return leaf_qef_at(cells[idx].origin, cells[idx].size);
+	}
+
+	Qef leaf_qef_at(const Vector3i &o, int s) const {
 		Qef qef;
-		Vector3i o = cells[idx].origin;
-		int s = cells[idx].size;
 		for (int e = 0; e < 12; ++e) {
 			const int *pa = CB[EDGES[e][0]];
 			const int *pb = CB[EDGES[e][1]];
@@ -717,26 +741,9 @@ struct Octree {
 		build_samples = int(leaves.size());
 		const int n = int(leaves.size());
 		const int nthreads = (g_mesh_threads > 1 && n >= 64) ? MIN(g_mesh_threads, n) : 1;
-		if (nthreads <= 1) {
-			for (int k = 0; k < n; ++k) {
-				cells[leaves[k]].qef = leaf_qef(leaves[k]);
-			}
-			return;
-		}
-		LocalVector<std::thread> workers;
-		workers.resize(nthreads);
-		for (int t = 0; t < nthreads; ++t) {
-			int k0 = (t * n) / nthreads;
-			int k1 = ((t + 1) * n) / nthreads;
-			workers[t] = std::thread([this, &leaves, k0, k1]() {
-				for (int k = k0; k < k1; ++k) {
-					cells[leaves[k]].qef = leaf_qef(leaves[k]);
-				}
-			});
-		}
-		for (int t = 0; t < nthreads; ++t) {
-			workers[t].join();
-		}
+		parallel_for(n, nthreads, [this, &leaves](int k) {
+			cells[leaves[k]].qef = leaf_qef(leaves[k]);
+		});
 	}
 
 	// Roll the (already-sampled) leaf QEFs up the tree — same post-order sum as accumulate_qef but with
@@ -869,6 +876,152 @@ struct Octree {
 		return idx;
 	}
 
+	// Reset a cell slot to a fresh present leaf at (origin, size).
+	void init_cell(int idx, const Vector3i &origin, int size) {
+		Cell &c = cells[idx];
+		c.origin = origin;
+		c.size = size;
+		c.leaf = true;
+		c.absent = false;
+		c.vertex = -1;
+		c.qef = Qef();
+		for (int i = 0; i < 8; ++i) {
+			c.children[i] = -1;
+		}
+	}
+
+	// PARALLEL bottom-up construct: the SAME tree the recursive build() makes (want_leaf decides leaf-or-
+	// descend, NO field sampling), but level-synchronous — each level's frontier is decided and its
+	// children batch-allocated in parallel. Records level_start[] (cell range per BFS level) so accumulate
+	// and collapse can walk by level too. Cell layout is frontier-ordered (a different order than build()'s
+	// DFS) but the SAME SET of cells → identical surface, only vertex NUMBERING differs.
+	void build_bottomup_parallel() {
+		level_start.clear();
+		int root = alloc_cell();
+		init_cell(root, Vector3i(0, 0, 0), root_size);
+		level_start.push_back(0);
+		LocalVector<int> frontier;
+		frontier.push_back(root);
+		int depth = 0;
+		while (!frontier.is_empty()) {
+			const int fn = int(frontier.size());
+			const int dthreads = (g_mesh_threads > 1 && fn >= 256) ? MIN(g_mesh_threads, fn) : 1;
+			LocalVector<uint8_t> descend;
+			descend.resize(fn);
+			const int dep = depth;
+			parallel_for(fn, dthreads, [this, &frontier, &descend, dep](int k) {
+				const int idx = frontier[k];
+				const Vector3i o = cells[idx].origin;
+				const int s = cells[idx].size;
+				if (build_box && !cell_overlaps_build_box(o, s)) {
+					if (window_mode) {
+						cells[idx].absent = true;
+					}
+					descend[k] = 0;
+				} else {
+					descend[k] = (dep >= max_depth || want_leaf(s, o)) ? 0 : 1;
+				}
+			});
+			LocalVector<int> descenders;
+			for (int k = 0; k < fn; ++k) {
+				if (descend[k]) {
+					cells[frontier[k]].leaf = false;
+					descenders.push_back(frontier[k]);
+				}
+			}
+			const int d_count = int(descenders.size());
+			if (d_count == 0) {
+				break;
+			}
+			const int base = int(cells.size());
+			cells.resize_uninitialized(base + int64_t(d_count) * 8); // init_cell fills every new slot in parallel below
+			level_start.push_back(base);
+			const int athreads = (g_mesh_threads > 1 && d_count >= 32) ? MIN(g_mesh_threads, d_count) : 1;
+			parallel_for(d_count, athreads, [this, &descenders, base](int j) {
+				const int fi = descenders[j];
+				const int half = cells[fi].size >> 1;
+				const Vector3i o = cells[fi].origin;
+				for (int c = 0; c < 8; ++c) {
+					const int child = base + j * 8 + c;
+					init_cell(child, o + Vector3i(CB[c][0], CB[c][1], CB[c][2]) * half, half);
+					cells[fi].children[c] = child;
+				}
+			});
+			LocalVector<int> next;
+			next.resize(int64_t(d_count) * 8);
+			for (int j = 0; j < d_count; ++j) {
+				for (int c = 0; c < 8; ++c) {
+					next[j * 8 + c] = base + j * 8 + c;
+				}
+			}
+			frontier = next;
+			++depth;
+		}
+	}
+
+	// Roll leaf QEFs up the tree IN PARALLEL: deepest level first, each internal node sums its 8 children
+	// (children sit in a deeper, already-finished level → no read/write race; distinct parents own distinct
+	// children → no write race). Same per-node summand order (0..7) as accumulate_sums → bit-identical.
+	void accumulate_parallel() {
+		const int L = int(level_start.size());
+		for (int lvl = L - 1; lvl >= 0; --lvl) {
+			const int lo = level_start[lvl];
+			const int hi = (lvl + 1 < L) ? level_start[lvl + 1] : int(cells.size());
+			const int n = hi - lo;
+			const int threads = (g_mesh_threads > 1 && n >= 256) ? MIN(g_mesh_threads, n) : 1;
+			parallel_for(n, threads, [this, lo](int t) {
+				const int idx = lo + t;
+				if (cells[idx].children[0] < 0) {
+					return; // leaf — qef set by sample_leaves_parallel (or empty if absent)
+				}
+				Qef sum;
+				for (int i = 0; i < 8; ++i) {
+					sum.add(cells[cells[idx].children[i]].qef);
+				}
+				cells[idx].qef = sum;
+			});
+		}
+	}
+
+	// One node's collapse decision — the body of collapse_pass without the recursion. Reads only its own
+	// accumulated qef, writes only its own leaf flag + orphans its own (disjoint) subtree.
+	void collapse_test(int idx) {
+		if (cells[idx].children[0] < 0 || !error_driven || cells[idx].qef.count == 0 || cells[idx].size > max_leaf_size) {
+			return;
+		}
+		const Vector3 cmin = to_v3(cells[idx].origin);
+		const Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
+		const Vector3 ctr = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
+		if (uniform_core && src->is_finest_level(ctr)) {
+			return;
+		}
+		const Vector3 v = cells[idx].qef.solve(cmin, cmax);
+		const double we = Math::sqrt(cells[idx].qef.residual(v));
+		const double dist = MAX((ctr - camera).length(), 1e-3);
+		if (we * proj / dist > eps_px) {
+			return;
+		}
+		cells[idx].leaf = true;
+		orphan_subtree(idx);
+	}
+
+	// Screen-error collapse IN PARALLEL: shallowest-meaningful order is irrelevant — each node's decision
+	// reads only its own accumulated qef, so process deepest→shallowest level-by-level (matching the serial
+	// post-order: a node is tested after its subtree). Same per-node test as collapse_pass → bit-identical
+	// leaf flags; same crack-free point-location meshing over the result.
+	void collapse_parallel() {
+		const int L = int(level_start.size());
+		for (int lvl = L - 1; lvl >= 0; --lvl) {
+			const int lo = level_start[lvl];
+			const int hi = (lvl + 1 < L) ? level_start[lvl + 1] : int(cells.size());
+			const int n = hi - lo;
+			const int threads = (g_mesh_threads > 1 && n >= 256) ? MIN(g_mesh_threads, n) : 1;
+			parallel_for(n, threads, [this, lo](int t) {
+				collapse_test(lo + t);
+			});
+		}
+	}
+
 	int find_leaf(const Vector3 &p) const {
 		if (p.x < 0.0 || p.y < 0.0 || p.z < 0.0) {
 			return -1;
@@ -888,16 +1041,17 @@ struct Octree {
 
 	// Place this leaf's vertex from its accumulated QEF. For a collapsed leaf the QEF
 	// holds all the fine crossings within it, so the vertex and normal reflect the real
-	// surface, not a coarse re-sample.
+	// surface, not a coarse re-sample. The slot (cells[idx].vertex) is pre-assigned in
+	// cell-index order by recollapse_and_mesh, so this writes disjoint slots and parallelises.
 	void place_vertex(int idx) {
 		const Qef &qef = cells[idx].qef;
 		Vector3 cmin = to_v3(cells[idx].origin);
 		Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
 		Vector3 v = qef.solve(cmin, cmax);
 		Vector3 n = qef.nsum.length_squared() > 0.0 ? qef.nsum.normalized() : Vector3(0, 1, 0);
-		cells[idx].vertex = int(verts.size());
-		verts.push_back(v);
-		normals.push_back(n);
+		int slot = cells[idx].vertex;
+		verts.set(slot, v);
+		normals.set(slot, n);
 		if (emit_color) {
 			// Sample the solid voxel just behind the surface: the normal points
 			// outward, so step inward to land in the cell that carries the id. Prefer an
@@ -906,10 +1060,10 @@ struct Octree {
 			int id = src->index_prefer_explicit(v - n * 0.5, n);
 			if (id > 0 && id < int(palette.size())) {
 				const Color &c = palette[id];
-				colors.push_back(Color(c.r, c.g, c.b, 0.0)); // a=0 -> explicit material colour
+				colors.set(slot, Color(c.r, c.g, c.b, 0.0)); // a=0 -> explicit material colour
 			} else {
-				colors.push_back(Color(0, 0, 0, 1.0)); // a=1 -> natural (slope-shaded; also the
-													   // default for meshes with no colour array)
+				colors.set(slot, Color(0, 0, 0, 1.0)); // a=1 -> natural (slope-shaded; also the
+														// default for meshes with no colour array)
 			}
 		}
 	}
@@ -946,33 +1100,42 @@ struct Octree {
 		return true;
 	}
 
+	// Per-leaf triangle output for the parallel emit pass: each surviving leaf fills its own sink
+	// (reads of cells/verts are immutable during emit), then recollapse_and_mesh concatenates the
+	// sinks in cell-index order — identical to the old serial single-array emit.
+	struct EmitSink {
+		LocalVector<int32_t> indices;
+		LocalVector<Vector3> owners;
+		LocalVector<float> owner_sizes;
+	};
+
 	// Emit one triangle wound so its front face points `outward` (Godot is CW-from-front,
 	// so reverse when the right-hand normal already points outward). `owner` (world lattice)
 	// is the cell that owns this edge — tagged per triangle for the incremental splice.
 	// `owner_size` is the owner cell's size in lattice units, for the B1 alignment fix.
-	void emit_tri(int i0, int i1, int i2, const Vector3 &outward, const Vector3 &owner, float owner_size) {
+	void emit_tri(EmitSink &sink, int i0, int i1, int i2, const Vector3 &outward, const Vector3 &owner, float owner_size) {
 		Vector3 n = (verts[i1] - verts[i0]).cross(verts[i2] - verts[i0]);
 		if (n.dot(outward) >= 0.0) {
-			indices.push_back(i0); indices.push_back(i2); indices.push_back(i1);
+			sink.indices.push_back(i0); sink.indices.push_back(i2); sink.indices.push_back(i1);
 		} else {
-			indices.push_back(i0); indices.push_back(i1); indices.push_back(i2);
+			sink.indices.push_back(i0); sink.indices.push_back(i1); sink.indices.push_back(i2);
 		}
-		tri_owners.push_back(owner);
-		tri_owner_sizes.push_back(owner_size);
+		sink.owners.push_back(owner);
+		sink.owner_sizes.push_back(owner_size);
 	}
 
 	// Decide winding PER TRIANGLE, not once for the whole quad: a quad spanning a LOD
 	// size jump is non-planar, so a single flip decision leaves one of its two triangles
 	// back-facing — a culled, see-through gap. Orienting each triangle to `outward`
 	// independently keeps the surface consistently wound across the seam.
-	void emit_poly(const int ring[], int rc, const Vector3 &outward, const Vector3 &owner, float owner_size) {
-		emit_tri(ring[0], ring[1], ring[2], outward, owner, owner_size);
+	void emit_poly(EmitSink &sink, const int ring[], int rc, const Vector3 &outward, const Vector3 &owner, float owner_size) {
+		emit_tri(sink, ring[0], ring[1], ring[2], outward, owner, owner_size);
 		if (rc == 4) {
-			emit_tri(ring[0], ring[2], ring[3], outward, owner, owner_size);
+			emit_tri(sink, ring[0], ring[2], ring[3], outward, owner, owner_size);
 		}
 	}
 
-	void try_edge(int leaf_idx, int axis, int u, int w, int su, int sw) {
+	void try_edge(EmitSink &sink, int leaf_idx, int axis, int u, int w, int su, int sw) {
 		Vector3i lo = cells[leaf_idx].origin;
 		int s = cells[leaf_idx].size;
 		lo[u] += su * s;
@@ -1032,16 +1195,16 @@ struct Octree {
 			outward = Vector3();
 			outward[axis] = axis_face;
 		}
-		emit_poly(ring, rc, outward, to_v3(cell_world_origin(leaf_idx)), float(cells[leaf_idx].size));
+		emit_poly(sink, ring, rc, outward, to_v3(cell_world_origin(leaf_idx)), float(cells[leaf_idx].size));
 	}
 
-	void emit_leaf_edges(int leaf_idx) {
+	void emit_leaf_edges(EmitSink &sink, int leaf_idx) {
 		for (int axis = 0; axis < 3; ++axis) {
 			int u = (axis + 1) % 3;
 			int w = (axis + 2) % 3;
 			for (int su = 0; su < 2; ++su) {
 				for (int sw = 0; sw < 2; ++sw) {
-					try_edge(leaf_idx, axis, u, w, su, sw);
+					try_edge(sink, leaf_idx, axis, u, w, su, sw);
 				}
 			}
 		}
@@ -1049,23 +1212,33 @@ struct Octree {
 
 	void run() {
 		build_samples = 0;
-		uint64_t t0 = OS::get_singleton()->get_ticks_usec();
-		build(Vector3i(0, 0, 0), root_size, 0);
-		// Keep a flat world at >=2 cells/axis so it meshes (a fully-collapsed flat region
-		// is one empty cell — no quad). half the root => the 8 root children may collapse,
-		// nothing coarser.
+		// Keep a flat world at >=2 cells/axis so it meshes (a fully-collapsed flat region is one empty
+		// cell — no quad). half the root => the 8 root children may collapse, nothing coarser.
 		max_leaf_size = MAX(1, root_size >> 1);
-		sample_leaves_parallel(); // field-derived leaf QEFs (the dominant cost), parallel across g_mesh_threads
-		accumulate_sums(0);       // roll them up the tree (no field work) — bit-identical to accumulate_qef(0)
-		last_build_us = OS::get_singleton()->get_ticks_usec() - t0;
+		uint64_t t0 = OS::get_singleton()->get_ticks_usec();
+		// Build the tree, sample its leaf QEFs, and roll them up — all level-synchronous parallel (the
+		// construct + accumulate; the sample is already parallel). build_bottomup_parallel records
+		// level_start[] so recollapse_and_mesh's collapse can walk by level in parallel too.
+		build_bottomup_parallel();
+		uint64_t tA = OS::get_singleton()->get_ticks_usec();
+		sample_leaves_parallel();
+		uint64_t tB = OS::get_singleton()->get_ticks_usec();
+		accumulate_parallel();
+		uint64_t tC = OS::get_singleton()->get_ticks_usec();
+		last_construct_us = tA - t0;
+		last_sample_us    = tB - tA;
+		last_accum_us     = tC - tB;
+		last_build_us = tC - t0;
 		uint64_t t1 = OS::get_singleton()->get_ticks_usec();
-		recollapse_and_mesh();   // collapse + mesh (camera-derived, re-runnable)
+		recollapse_and_mesh();
 		last_collapse_us = OS::get_singleton()->get_ticks_usec() - t1;
 	}
 
 	// Re-decide collapse against the current camera/proj/eps over the already-built tree + QEFs, then
-	// re-mesh. No build, no field sampling — this is the Stage 2 movement re-walk (and the tail of a
-	// fresh build). Clears prior output so it is idempotent.
+	// re-mesh. No build (no re-sampling of leaf QEFs) — this is the Stage 2 movement re-walk (and the
+	// tail of a fresh build). It DOES sample the field, though: place_vertex reads the material behind
+	// each vertex, and try_edge reads value/gradient to stitch and wind — so both passes parallelise.
+	// Clears prior output so it is idempotent.
 	void recollapse_and_mesh() {
 		verts.clear();
 		normals.clear();
@@ -1074,17 +1247,77 @@ struct Octree {
 		tri_owners.clear();
 		tri_owner_sizes.clear();
 		reset_leaves();
-		collapse_pass(0);
-		// Pass 1: a vertex per surviving surface leaf. Pass 2: stitch edges.
+		uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
+		// level_start is set only by the parallel bottom-up full build; the grow/reconcile path leaves it
+		// empty (its tree isn't level-laid-out), so that falls back to the serial recursive collapse.
+		if (!level_start.is_empty()) {
+			collapse_parallel();
+		} else {
+			collapse_pass(0);
+		}
+		last_collapse_pass_us = OS::get_singleton()->get_ticks_usec() - tc0;
 		int n = int(cells.size());
+
+		// Pass 1: one vertex per surviving surface leaf. Assign slots SERIALLY in cell-index order (so the
+		// vertex numbering, and the indices that reference it, match the old serial emit), then fill the
+		// QEF solve + material sample in PARALLEL into the disjoint pre-assigned slots.
+		LocalVector<int> vcells;
 		for (int i = 0; i < n; ++i) {
 			if (cells[i].leaf && cells[i].qef.count > 0) {
-				place_vertex(i);
+				cells[i].vertex = int(vcells.size());
+				vcells.push_back(i);
 			}
 		}
+		int vcount = int(vcells.size());
+		verts.resize(vcount);
+		normals.resize(vcount);
+		if (emit_color) {
+			colors.resize(vcount);
+		}
+		const int vthreads = (g_mesh_threads > 1 && vcount >= 64) ? MIN(g_mesh_threads, vcount) : 1;
+		parallel_for(vcount, vthreads, [this, &vcells](int k) {
+			place_vertex(vcells[k]);
+		});
+
+		// Pass 2: stitch edges. Each surviving leaf emits into its OWN sink in parallel (reads of cells/
+		// verts are immutable now), then the sinks concatenate in cell-index order — byte-identical to
+		// the old serial single-array emit (same leaf order, same per-leaf edge order).
+		LocalVector<int> ecells;
 		for (int i = 0; i < n; ++i) {
 			if (cells[i].leaf && cells[i].vertex >= 0) {
-				emit_leaf_edges(i);
+				ecells.push_back(i);
+			}
+		}
+		int ecount = int(ecells.size());
+		LocalVector<EmitSink> sinks;
+		sinks.resize(ecount);
+		const int ethreads = (g_mesh_threads > 1 && ecount >= 64) ? MIN(g_mesh_threads, ecount) : 1;
+		parallel_for(ecount, ethreads, [this, &ecells, &sinks](int e) {
+			emit_leaf_edges(sinks[e], ecells[e]);
+		});
+
+		int64_t total_idx = 0, total_tri = 0;
+		for (int e = 0; e < ecount; ++e) {
+			total_idx += sinks[e].indices.size();
+			total_tri += sinks[e].owners.size();
+		}
+		indices.resize(total_idx);
+		tri_owners.resize(total_tri);
+		tri_owner_sizes.resize(total_tri);
+		int32_t *ip = indices.ptrw();
+		Vector3 *op = tri_owners.ptrw();
+		float *sp = tri_owner_sizes.ptrw();
+		int64_t io = 0, to = 0;
+		for (int e = 0; e < ecount; ++e) {
+			const EmitSink &s = sinks[e];
+			if (s.indices.size() > 0) {
+				memcpy(ip + io, s.indices.ptr(), s.indices.size() * sizeof(int32_t));
+				io += s.indices.size();
+			}
+			if (s.owners.size() > 0) {
+				memcpy(op + to, s.owners.ptr(), s.owners.size() * sizeof(Vector3));
+				memcpy(sp + to, s.owner_sizes.ptr(), s.owner_sizes.size() * sizeof(float));
+				to += s.owners.size();
 			}
 		}
 	}
@@ -1438,6 +1671,10 @@ Array DCOctreeMesher::mesh_world(
 
 	_last_build_ms    = double(oct.last_build_us)    / 1000.0;
 	_last_collapse_ms = double(oct.last_collapse_us) / 1000.0;
+	_last_construct_ms = double(oct.last_construct_us) / 1000.0;
+	_last_sample_ms    = double(oct.last_sample_us)    / 1000.0;
+	_last_accum_ms     = double(oct.last_accum_us)     / 1000.0;
+	_last_collapse_pass_ms = double(oct.last_collapse_pass_us) / 1000.0;
 	_last_tri_owners      = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
 	_last_build_samples   = oct.build_samples;
@@ -1484,6 +1721,7 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 		oct.prune_safety = 1.0;
 	}
 	oct.build_samples = 0;
+	oct.level_start.clear(); // reconcile rebuilds the tree incrementally, not level-laid-out → serial collapse
 	uint64_t tb0 = OS::get_singleton()->get_ticks_usec();
 	oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge
 	oct.reaccumulate(0); // roll up ancestor QEFs from cached children — no field sampling
@@ -1545,6 +1783,10 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_last_accel_ms"),    &DCOctreeMesher::get_last_accel_ms);
 	ClassDB::bind_method(D_METHOD("get_last_build_ms"),    &DCOctreeMesher::get_last_build_ms);
 	ClassDB::bind_method(D_METHOD("get_last_collapse_ms"), &DCOctreeMesher::get_last_collapse_ms);
+	ClassDB::bind_method(D_METHOD("get_last_construct_ms"), &DCOctreeMesher::get_last_construct_ms);
+	ClassDB::bind_method(D_METHOD("get_last_sample_ms"),    &DCOctreeMesher::get_last_sample_ms);
+	ClassDB::bind_method(D_METHOD("get_last_accum_ms"),     &DCOctreeMesher::get_last_accum_ms);
+	ClassDB::bind_method(D_METHOD("get_last_collapse_pass_ms"), &DCOctreeMesher::get_last_collapse_pass_ms);
 	ClassDB::bind_method(D_METHOD("set_thread_count", "n"), &DCOctreeMesher::set_thread_count);
 	ClassDB::bind_method(D_METHOD("get_thread_count"),      &DCOctreeMesher::get_thread_count);
 }
