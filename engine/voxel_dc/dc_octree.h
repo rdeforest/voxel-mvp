@@ -320,6 +320,54 @@ struct Octree {
 		collapse_test(idx); // post-order: decide this node after its subtree (same as collapse_parallel)
 	}
 
+	// Reset a subtree to its STRUCTURAL collapse state (leaf iff no children), so collapse_pass can re-decide
+	// it. Used when an incremental re-decide un-collapses a node whose subtree was orphaned (all leaf=false).
+	void reset_subtree(int idx) {
+		cells[idx].leaf = cells[idx].children[0] < 0;
+		if (cells[idx].children[0] >= 0) {
+			for (int i = 0; i < 8; ++i) {
+				reset_subtree(cells[idx].children[i]);
+			}
+		}
+	}
+
+	// c2 (doc 20): INCREMENTAL collapse — re-decide only the path_dirty subtrees (the cells a drain's
+	// reaccumulate re-summed); clean subtrees keep last grow's leaf flags. Post-order, consuming path_dirty.
+	// A node's own collapse can flip: expand→collapse is handled by collapse_test's orphan_subtree; the
+	// collapse→expand (un-collapse) case must fully re-decide the now-rendered subtree, which was orphaned.
+	void recollapse_dirty(int idx) {
+		if (!cells[idx].path_dirty) {
+			return; // clean subtree — its leaf flags are unchanged from last grow
+		}
+		cells[idx].path_dirty = false;
+		if (cells[idx].children[0] < 0) {
+			cells[idx].leaf = true; // structural leaf
+			return;
+		}
+		bool any_child_marked = false;
+		for (int i = 0; i < 8; ++i) {
+			if (cells[cells[idx].children[i]].path_dirty) {
+				any_child_marked = true;
+			}
+			recollapse_dirty(cells[idx].children[i]);
+		}
+		if (!any_child_marked) {
+			// Tip of the marked tree = the refined cell. Its subtree is freshly built (structural leaf flags),
+			// so collapse_pass decides the whole new subtree's LOD — not just this node.
+			collapse_pass(idx);
+			return;
+		}
+		// Ancestor of a refined cell: only its own collapse can flip (its qef was re-summed). expand→collapse
+		// is handled by collapse_test's orphan_subtree; collapse→expand must restore the orphaned subtree.
+		bool was_leaf = cells[idx].leaf;
+		cells[idx].leaf = false;
+		collapse_test(idx);
+		if (was_leaf && !cells[idx].leaf) {
+			reset_subtree(idx);
+			collapse_pass(idx);
+		}
+	}
+
 	// Tree depth of a cell of the given lattice size (root_size → 0; size 1 → max_depth). Used by the
 	// incremental grow to resume build() at the right depth when expanding an existing leaf into a subtree.
 	int cell_depth(int size) const {
@@ -784,7 +832,7 @@ struct Octree {
 	// tail of a fresh build). It DOES sample the field, though: place_vertex reads the material behind
 	// each vertex, and try_edge reads value/gradient to stitch and wind — so both passes parallelise.
 	// Clears prior output so it is idempotent.
-	void recollapse_and_mesh() {
+	void recollapse_and_mesh(bool incremental = false) {
 		verts.clear();
 		normals.clear();
 		colors.clear();
@@ -793,12 +841,21 @@ struct Octree {
 		tri_owner_sizes.clear();
 		tri_owner_errors.clear();
 		uint64_t tr0 = OS::get_singleton()->get_ticks_usec();
-		reset_leaves();
+		if (incremental) {
+			// c2 (doc 20): keep last grow's leaf flags; only the vertex slots reset (the full emit re-ranks).
+			for (uint32_t i = 0; i < cells.size(); ++i) {
+				cells[i].vertex = -1;
+			}
+		} else {
+			reset_leaves();
+		}
 		uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
 		last_reset_us = tc0 - tr0;
 		// level_start is set only by the parallel bottom-up full build; the grow/reconcile path leaves it
 		// empty (its tree isn't level-laid-out), so that falls back to the serial recursive collapse.
-		if (!level_start.is_empty()) {
+		if (incremental) {
+			recollapse_dirty(0); // re-decide only the path_dirty subtrees; clean leaf flags stand
+		} else if (!level_start.is_empty()) {
 			collapse_parallel();
 		} else {
 			collapse_pass(0);
@@ -1008,8 +1065,10 @@ struct Octree {
 			grow_subtree(x);                                     // at least one per call → always makes progress
 			accumulate_qef(x);                                   // x.qef now current (leaf → accumulated)
 			cells[x].we_valid = false;                           // x's cached solve/residual belonged to its old
-			cells[x].vtx_valid = false;                          // leaf qef — stale now (incremental reaccum skips x)
-			mark_path_dirty(cells[x].parent);                    // mark ancestors so the incremental reaccum descends
+			cells[x].vtx_valid = false;                          // leaf qef — stale now
+			mark_path_dirty(x);                                  // mark x + ancestors: incremental reaccum re-sums
+			                                                     // the path, recollapse_dirty re-collapse-tests x
+
 			if (int64_t(OS::get_singleton()->get_ticks_usec() - t0) >= int64_t(budget_us)) {
 				break;
 			}
@@ -1102,8 +1161,10 @@ struct Octree {
 			cells[idx].we_valid = false;  // qef changed → cached collapse residual is stale
 			cells[idx].vtx_valid = false; // qef changed → cached vertex solve is stale
 		}
-		cells[idx].dirty = false;      // per-frame signals consumed
-		cells[idx].path_dirty = false;
+		cells[idx].dirty = false;      // per-frame signal consumed
+		if (!incremental) {
+			cells[idx].path_dirty = false; // full path: clear here (recollapse won't read marks). Incremental:
+		}                                  // leave them for recollapse_dirty to walk + consume.
 		return changed;
 	}
 };

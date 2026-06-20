@@ -350,7 +350,7 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	oct.reaccumulate(0, reuse_frontier); // c2: a drain (reuse) prunes to the refined path; a rebuild walks all
 	_last_build_ms = double(OS::get_singleton()->get_ticks_usec() - tb0) / 1000.0;
 	uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
-	oct.recollapse_and_mesh();
+	oct.recollapse_and_mesh(reuse_frontier); // c2: a drain re-collapses only the dirty path; a rebuild does all
 	_last_collapse_ms = double(OS::get_singleton()->get_ticks_usec() - tc0) / 1000.0;
 	_last_reset_ms = double(oct.last_reset_us) / 1000.0;
 	_last_collapse_pass_ms = double(oct.last_collapse_pass_us) / 1000.0;
