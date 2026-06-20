@@ -311,6 +311,66 @@ are surface-signature based (order-independent), so they still hold; the byte-
 identical `remesh` test is a *separate* entry point (collision) that keeps the
 current full-emit path. Don't route `remesh` through the persistent buffer.
 
+## I — Incremental grow (O(changed), not O(tree))
+
+### The problem (measured, 2026-06-20)
+
+With the controller driving eps to the floor (max detail until the GPU complains),
+the retained tree reaches **millions of leaves**. Each grow still does O(tree) work
+**serially** even though only the handful of cells it just refined changed:
+`reconcile` re-collects every candidate, `reset_leaves` + `collapse_pass` re-walk
+every cell, only the emit passes are parallel. Result: one core pegged, the rest
+idle, and the refine queue (perf overlay) climbing to ~2M and barely draining — the
+per-grow overhead dwarfs the budgeted refinement slice. The fix is to make a grow
+cost O(*changed*), not O(*tree*). Three increments, gated by the existing invariants.
+
+### Key decision: the frontier queue is keyed by `we`, not on-screen size
+
+P scored refine candidates by **on-screen size** (`size·proj/dist`) — camera-
+relative, so *every* key changes when the camera moves, and no persistent ordering
+survives a move. So the persistent frontier is keyed by the cell's **geometric error
+`we`** (the QEF residual — camera-independent). Refine order becomes "worst *error*
+first" instead of "worst *on-screen* first": a sound, stable proxy that survives
+moves intact. The screen-relevance lives in the eps controller and the error-vs-eps
+collapse, not in the refine key. (Robert's call, 2026-06-20.)
+
+### c1 — Persistent frontier queue (kill the re-discovery)
+
+Maintain the refine-candidate set **incrementally** instead of having `reconcile`
+re-collect it every grow. A cell enters the frontier when it becomes a refinable
+coarse leaf (in-window, `want_leaf` false, no children); it leaves when refined
+(gains children), evicted, or coarsened. Structure: an **indexed binary heap** keyed
+by `we` (a heap + `cell → heap-pos` map for O(log n) delete/decrease-key), or a
+`std::set<(we, idx)>` red-black tree if the constants don't matter. `refine_selected`
+pops the worst-`we` cells until the µs budget; the rest stay queued (no re-walk, no
+re-sort). Removes `reconcile`'s O(tree) collect for stationary refine.
+
+### c2 — Incremental collapse (scope to the dirty set)
+
+At a fixed eps + camera, only the cells whose QEF changed this grow (the refined
+ones + their ancestors — already tracked by the `dirty` flag `reaccumulate`
+propagates) can flip their collapse decision; the rest are identical. So re-run
+`collapse_test` only over the dirty set instead of the global `collapse_pass`. An
+eps *step* (controller) or a camera *move* still changes decisions tree-wide → fall
+back to a full (or band-scoped) re-collapse on those frames, which are rarer than the
+fixed-eps drain grows.
+
+### c3 — Incremental emit + stable slots (realizes 3b)
+
+Re-emit only the changed leaves' triangles, splicing them into the retained vertex/
+index arrays, instead of rebuilding the whole mesh — plus the stable per-leaf slot
+allocator and partial GPU upload from **3b** above. This is the same surgery
+`edit_world` + `emit_filter` + `dc_edit_splicer.gd` already do for edits, extended to
+the refine path. Highest risk/complexity; do last, against the measured floor.
+
+### Gates
+
+`grow==fresh`, `drain==full`, `parallel==serial` all still hold (incremental changes
+*when/how cheaply* a cell refines, never the settled surface). Add the c-analogue of
+`build_samples`: a **stationary refine grow touches O(changed) cells, not O(tree)** —
+assert the per-grow collapse/emit work is proportional to the refined count, not the
+resident count (the proof the re-walk is actually gone).
+
 ## Build sequence & cut line
 
 1. **E — incremental edits — build first.** Biggest perceived-lag win, the most
