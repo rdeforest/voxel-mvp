@@ -110,7 +110,13 @@ public:
 	// mesh_world) — graft cells newly in [win_min, win_max), sampling only them; evict cells that left;
 	// re-collapse + mesh against camera/proj/eps. Byte-identical to a fresh mesh_world of the new window,
 	// but the interior is reused (not resampled). Empty Array if no world octree is retained.
-	Array grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max);
+	// refine_budget caps floor-refinements this grow (C, doc 20): a stationary refine passes a finite budget
+	// so the bloom spreads over frames; -1 = unbudgeted (full grow, used on a move). get_refine_pending()
+	// reports whether cells were left coarse (the caller keeps grow-draining at the same eps until false).
+	Array grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max, int refine_budget = -1);
+
+	// True if the last grow_world left refinement deferred by its budget — drain by growing again (same eps).
+	bool get_refine_pending() const;
 
 	// Incremental edit (doc 20 E): re-mesh the RETAINED world octree after the EditStore field changed inside
 	// [dirty_min, dirty_max) (WORLD lattice), with the window unchanged. Re-samples only the edit box (not the

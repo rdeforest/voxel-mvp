@@ -309,6 +309,40 @@ func test_edit_world_equals_fresh_build():
     assert_lt(edit_samples, fresh_samples, "edit_world re-sampled ONLY the edit box, not the whole window (the E win)")
 
 
+# Stage C (doc 20) — budgeted refinement: a coarse→fine refine, metered to N floor-refinements per grow and
+# drained over several grows (refine_pending guides the loop), must reproduce the SAME surface as one
+# unbudgeted grow to the fine eps. The bloom spreads over frames without changing the settled result.
+func test_grow_world_budgeted_refine_drains_to_full():
+    var s := _store()
+    var origin := _region_origin(s)
+    var cam := Vector3(16, 16, 120)
+    var lo := origin
+    var hi := origin + WIN_FULL
+    const COARSE := 32.0
+    const FINE := 2.0
+
+    # Reference: build coarse, then ONE unbudgeted grow to fine.
+    var rm := DCOctreeMesher.new()
+    rm.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, COARSE, true, PackedColorArray(), lo, hi)
+    var full: Array = rm.grow_world(cam, 500.0, FINE, lo, hi)   # refine_budget defaults to -1 (unbudgeted)
+
+    # Budgeted: same coarse build, then drain to fine 40 refinements at a time.
+    var bm := DCOctreeMesher.new()
+    bm.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, COARSE, true, PackedColorArray(), lo, hi)
+    var drained: Array = []
+    var iters := 0
+    while true:
+        drained = bm.grow_world(cam, 500.0, FINE, lo, hi, 40)
+        iters += 1
+        if not bm.get_refine_pending() or iters > 2000:
+            break
+
+    assert_gt(iters, 1, "budgeted refine was actually metered across several grows (not one pass)")
+    assert_false(bm.get_refine_pending(), "the drain converged (no refinement left pending)")
+    assert_eq(drained[Mesh.ARRAY_VERTEX].size(), full[Mesh.ARRAY_VERTEX].size(), "drained budgeted refine has the same vertex count as one unbudgeted grow")
+    assert_eq(_tri_sigs(drained), _tri_sigs(full), "drained budgeted refine == unbudgeted grow (same settled surface)")
+
+
 # Stage B1b — bounded resident set (leak-proof, prune-robust): sweep the window forward across the root and
 # back to the START (a round trip), repeatedly. The free-list reuses evicted slots, so returning to the same
 # window state must give the EXACT same cell-array size every loop — a leak would grow it each loop. (This

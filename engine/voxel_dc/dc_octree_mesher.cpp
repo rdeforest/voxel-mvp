@@ -602,6 +602,10 @@ struct Octree {
 	int build_samples = 0;         // leaves whose Hermite data was sampled this build (accumulate_qef) —
 	                               // the field-derived build cost. A grow re-samples only the new band, so
 	                               // this proves the retained interior was NOT resampled (the B1 win).
+	int  refine_budget = -1;       // C (doc 20): max FLOOR-refinements (grow_subtree) per reconcile; -1 = no
+	int  refine_count = 0;         // limit (current behaviour). A stationary refine passes a finite budget so
+	bool refine_pending = false;   // each frame does bounded work; deferred cells stay coarse and refine_pending
+	                               // tells the caller to keep draining. NOT applied on a move (window coverage).
 	uint64_t last_build_us    = 0; // phase timing: build() + accumulate_qef() (microseconds)
 	uint64_t last_collapse_us = 0; // phase timing: recollapse_and_mesh() (microseconds)
 	uint64_t last_construct_us = 0; // sub-phase: build() tree construction (serial)
@@ -1433,7 +1437,13 @@ struct Octree {
 			for (int i = 0; i < 8; ++i) {
 				reconcile(cells[idx].children[i]); // still internal — recurse
 			}
+		} else if (refine_budget >= 0 && refine_count >= refine_budget) {
+			// C (doc 20): out of per-frame refinement budget — leave this cell a coarse leaf (its current
+			// QEF stays valid; only the floor wants finer) and flag that more refinement is pending. A later
+			// reconcile at the same eps reaches it again and refines it then — the bloom spreads over frames.
+			refine_pending = true;
 		} else {
+			++refine_count;
 			grow_subtree(idx);   // approached/entered: subdivide to the (finer) floor — samples only this band
 			accumulate_qef(idx);
 		}
@@ -1776,7 +1786,7 @@ Array DCOctreeMesher::mesh_world(
 // (in both windows) keep their tree, QEFs, and vertices: a move re-samples just the leading-edge band,
 // not the whole vicinity. By construction the result is byte-identical to a from-scratch mesh_world of
 // the new window. Benign no-op (empty Array) if nothing is retained — caller falls back to mesh_world.
-Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max) {
+Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max, int refine_budget) {
 	if (_persist == nullptr) {
 		return Array();
 	}
@@ -1810,6 +1820,12 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 		oct.prune_safety = 1.0;
 	}
 	oct.build_samples = 0;
+	// C (doc 20): a stationary refine passes a finite budget so each frame refines at most that many cells
+	// (the rest stay coarse, refine_pending true → caller drains over frames). A move passes -1 (unbudgeted)
+	// so the window is always fully covered. Window grafts/evictions aren't budgeted — only floor refinement.
+	oct.refine_budget = refine_budget;
+	oct.refine_count = 0;
+	oct.refine_pending = false;
 	oct.level_start.clear(); // reconcile rebuilds the tree incrementally, not level-laid-out → serial collapse
 	uint64_t tb0 = OS::get_singleton()->get_ticks_usec();
 	oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge
@@ -1887,6 +1903,10 @@ int DCOctreeMesher::get_octree_cell_count() const {
 	return _persist != nullptr ? int(_persist->oct.cells.size()) : 0;
 }
 
+bool DCOctreeMesher::get_refine_pending() const {
+	return _persist != nullptr && _persist->oct.refine_pending;
+}
+
 int DCOctreeMesher::get_accel_bake_count() const {
 	return _persist != nullptr ? _persist->world_src.bake_count : 0;
 }
@@ -1915,8 +1935,9 @@ void DCOctreeMesher::_bind_methods() {
 			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(PackedColorArray()),
 			DEFVAL(Vector3i()), DEFVAL(Vector3i()));
 	ClassDB::bind_method(
-			D_METHOD("grow_world", "camera", "proj", "eps_px", "win_min", "win_max"),
-			&DCOctreeMesher::grow_world);
+			D_METHOD("grow_world", "camera", "proj", "eps_px", "win_min", "win_max", "refine_budget"),
+			&DCOctreeMesher::grow_world, DEFVAL(-1));
+	ClassDB::bind_method(D_METHOD("get_refine_pending"), &DCOctreeMesher::get_refine_pending);
 	ClassDB::bind_method(
 			D_METHOD("edit_world", "store", "camera", "proj", "eps_px", "dirty_min", "dirty_max"),
 			&DCOctreeMesher::edit_world);

@@ -37,6 +37,11 @@ const REFINE_TARGET_FRAC := 0.8
 var mesh_ceil   := 500.0                          # ms — over this mesh lag: coarsen (raise eps). The `meshlag` console knob.
 var mesh_target := mesh_ceil * REFINE_TARGET_FRAC # ms — under this (and frame headroom): refine (lower eps).
 
+# C (doc 20): floor-refinements per grow while blooming. A stationary refine meters its grow_subtree calls to
+# this many, so each frame does bounded work and the bloom spreads over frames (refine_pending drains it).
+# Bounds the SAMPLING cost; the per-grow emit is still O(window) until 3b. Tunable; `dcrefine` console knob.
+var refine_cells := 4000
+
 var base_cell    := VoxelConstants.RENDER_BASE_CELL  # metres per lattice unit (matches production density)
 var win_radius_m := 128.0                            # resident window half-extent (m) — graded floor + budget make it affordable
 var _eps_px      := EPS_START                        # the single operating point; floor + collapse both derive from it
@@ -69,6 +74,8 @@ var _job_proj := 0.0
 var _job_eps := EPS_START            # eps captured for the in-flight job
 var _job_is_grow := false            # in-flight job is an incremental grow (vs a full build)
 var _job_is_edit := false            # in-flight job is an incremental edit (edit_world)
+var _job_refine_budget := -1         # C: refine budget captured for the worker (-1 = unbudgeted, on a move)
+var _refine_pending := false         # the last grow deferred refinement (budget hit) → keep draining at this eps
 var _job_win_min := Vector3i.ZERO
 var _job_win_max := Vector3i.ZERO
 var _job_edit_min := Vector3i.ZERO   # edit box captured for the worker (WORLD LATTICE)
@@ -192,7 +199,7 @@ func _process(_dt: float) -> void:
     _frame_ms = lerpf(_frame_ms, Perf.frame_gen_ms(), 0.1)   # smoothed REAL frame-gen cost (render-cpu+GPU),
     # NOT the vsync/fps_max-capped dt — so the controller's frame-headroom gate sees true GPU load, not the
     # quantised display interval (a 144Hz vsync pins dt at ~6.9ms and only jumps at the fps cliff).
-    Perf.status("dcworld", "eps_px %.1f   mesh-lag %.0f ms (%s)" % [_eps_px, _job_work_ms, _job_kind()])
+    Perf.status("dcworld", "eps_px %.1f   mesh-lag %.0f ms (%s%s)" % [_eps_px, _job_work_ms, _job_kind(), " refining" if _refine_pending else ""])
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()
@@ -205,8 +212,10 @@ func _process(_dt: float) -> void:
         _dispatch_build(p)
     elif _pending_edit:
         _dispatch_edit(p)
-    elif p.distance_to(_last_center) > RECENTER or _eps_dirty:
-        _dispatch_grow(p)
+    elif p.distance_to(_last_center) > RECENTER:
+        _dispatch_grow(p, -1)            # move: cover the new window fully (unbudgeted)
+    elif _eps_dirty or _refine_pending:
+        _dispatch_grow(p, refine_cells)  # stationary refine: metered — bloom spreads over frames (C, doc 20)
 
 
 # Root origin (LATTICE) snapped to the ROOT_SNAP grid, centred on the player — cells never shift
@@ -273,7 +282,7 @@ func _dispatch_build(p: Vector3) -> void:
 
 # Incremental move: grow_world re-meshes only the band the move/eps change touched, reusing the retained
 # octree (same root, no new store snapshot — grow reads the retained snapshot). The common path while walking.
-func _dispatch_grow(p: Vector3) -> void:
+func _dispatch_grow(p: Vector3, refine_budget: int) -> void:
     _eps_dirty = false
     _last_center = p
     var win := _window(p)
@@ -282,6 +291,7 @@ func _dispatch_grow(p: Vector3) -> void:
     _job_cam = _camera_lattice()
     _job_proj = _view_proj()
     _job_eps = _eps_px
+    _job_refine_budget = refine_budget
     _job_is_grow = true
     _job_is_edit = false
     _task_id = WorkerThreadPool.add_task(_run_job, false, "dcworld grow")
@@ -308,7 +318,7 @@ func _run_job() -> void:
     if _job_is_edit:
         _job_arrays = _mesher.edit_world(_job_store, _job_cam, _job_proj, _job_eps, _job_edit_min, _job_edit_max)
     elif _job_is_grow:
-        _job_arrays = _mesher.grow_world(_job_cam, _job_proj, _job_eps, _job_win_min, _job_win_max)
+        _job_arrays = _mesher.grow_world(_job_cam, _job_proj, _job_eps, _job_win_min, _job_win_max, _job_refine_budget)
     else:
         _job_arrays = _mesher.mesh_world(_job_store, _root_origin_i, DEPTH, base_cell,
                 _job_cam, _job_proj, _job_eps, true, _palette, _job_win_min, _job_win_max)
@@ -330,6 +340,7 @@ func _finish() -> void:
     Perf.mark_event()
     if _inval != null and _inval.is_enabled():
         _emit_diagnostic()   # refresh the dcinval LOD overlay for this mesh
+    _refine_pending = _job_is_grow and _mesher.get_refine_pending()   # C: more refinement deferred → keep draining
     _control()
 
 
@@ -340,7 +351,9 @@ func _finish() -> void:
 func _control() -> void:
     var prev := _eps_px
     var over := _job_work_ms > mesh_ceil or _frame_ms > frame_budget
-    var under := _job_work_ms < mesh_target and _frame_ms < frame_budget * 0.5
+    # C (doc 20): step eps finer only once the CURRENT level is fully bloomed (not _refine_pending) — the
+    # metered drain spreads each level over frames, so the limiter is render frame time, not a mesh spike.
+    var under := not _refine_pending and _job_work_ms < mesh_target and _frame_ms < frame_budget * 0.5
     if over:
         _eps_px = minf(_eps_px * 1.4, EPS_MAX)
     elif under:

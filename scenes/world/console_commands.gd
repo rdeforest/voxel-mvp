@@ -54,6 +54,7 @@ func _table() -> Array:
         [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
         [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + mesh-lag."],
         [meshlag,         "meshlag",   "Max mesh lag (ms) the budget controller keeps the worker re-mesh under — higher = more terrain detail, slower re-mesh on a move. Usage: meshlag [ms] (default 500)"],
+        [dcrefine,        "dcrefine",  "doc 20 C: floor-refinements per grow while the world blooms in. Higher = faster bloom, bigger per-frame cost; lower = smoother, slower. Usage: dcrefine [n] (default 4000)"],
         [dcframebudget,   "dcframebudget", "Per-frame render budget (ms) the controller refines toward — refines while render cost < half this, backs off above it. Higher = more detail, lower fps. Usage: dcframebudget [ms] (default 16)"],
         [dcthreads,       "dcthreads", "Parallel accel-bake workers: `dcthreads <n>` sets the thread count; no args prints the phase timing (accel + build + collapse ms). Usage: dcthreads [n]"],
         [remesh,          "remesh",    "Force a full dcworld rebuild now (re-bake + build + collapse) — trigger a remesh without walking, then read `dcthreads` for the timing."],
@@ -246,6 +247,12 @@ func meshlag(ms := 0.0) -> void:
         world_preview.set_max_lag(ms)
     LimboConsole.info("meshlag: ceiling %.0f ms (refine target %.0f ms) — higher = more detail, slower re-mesh" % [
         world_preview.mesh_ceil, world_preview.mesh_target])
+
+
+func dcrefine(n := 0) -> void:
+    if n > 0:
+        world_preview.refine_cells = n
+    LimboConsole.info("dcrefine: %d floor-refinements per grow while blooming (C) — higher = faster bloom, bigger per-frame cost" % world_preview.refine_cells)
 
 
 func dcframebudget(ms := 0.0) -> void:
