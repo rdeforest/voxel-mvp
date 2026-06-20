@@ -227,7 +227,7 @@ func _tri_sigs(arrays: Array) -> PackedStringArray:
 func test_grow_world_equals_fresh_build():
     var s := _store()
     var origin := _region_origin(s)
-    var cam := Vector3(16, 26, 26)  # DIAG near-camera edit
+    var cam := Vector3(16, 16, 120)
     # A = left ¾ of the root (x ∈ [0,24)); B = right ¾ (x ∈ [8,32)). Overlap x∈[8,24); B gains x[24,32),
     # loses x[0,8). Full extent in y,z. The surface spans x, so both windows carry real surface.
     var a_min := origin;                       var a_max := origin + Vector3i(24, SIZE, SIZE)
@@ -254,7 +254,7 @@ func test_grow_world_equals_fresh_build():
 func test_grow_world_round_trip_is_lossless():
     var s := _store()
     var origin := _region_origin(s)
-    var cam := Vector3(16, 26, 26)  # DIAG near-camera edit
+    var cam := Vector3(16, 16, 120)
     var a_min := origin;                       var a_max := origin + Vector3i(24, SIZE, SIZE)
     var b_min := origin + Vector3i(8, 0, 0);   var b_max := origin + WIN_FULL
     var m := DCOctreeMesher.new()
@@ -351,7 +351,7 @@ func test_grow_world_budgeted_refine_drains_to_full():
 func test_grow_world_bounds_resident_set():
     var s := _store()
     var origin := _region_origin(s)
-    var cam := Vector3(16, 26, 26)  # DIAG near-camera edit
+    var cam := Vector3(16, 16, 120)
     var w := 10 # window width in x; swept across the 32-wide root
     var m := DCOctreeMesher.new()
     var start_min := origin
@@ -412,7 +412,7 @@ func test_grow_world_regrades_floor_on_camera_move():
 func test_grow_reuses_accel_when_window_unchanged() -> void:
     var s := _store()
     var origin := _region_origin(s)
-    var cam := Vector3(16, 26, 26)  # DIAG near-camera edit
+    var cam := Vector3(16, 16, 120)
     var a_min := origin;                       var a_max := origin + Vector3i(24, SIZE, SIZE)
     var b_min := origin + Vector3i(8, 0, 0);   var b_max := origin + WIN_FULL
     var m := DCOctreeMesher.new()
