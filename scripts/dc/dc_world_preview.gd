@@ -21,26 +21,23 @@ const ROOT_SIZE    := 1 << DEPTH  #   (size is free — cells outside the window
 const ROOT_SNAP    := 64      # snap the root origin to this LATTICE grid (cells stay world-aligned)
 const RECENTER     := 6.0     # re-mesh once the player drifts this far (m)
 
-# Budget controller (doc 13 B2): ONE knob, _eps_px, driven against two costs. Start coarse (cheap) and
-# tighten until either binds. Mesh lag = the worker build's WORK ms (terrain latency); frame time = render.
-const EPS_START    := 48.0    # start with a big error allowance (coarse) — the controller tightens it
-const EPS_MIN      := 1.0
+# Budget controller (doc 13 B2 / doc 20): TWO decoupled loops. Loop B — eps tracks RENDER cost (frame time)
+# only: the rendered triangle count is the one thing eps changes, so eps is driven by frame_gen_ms alone, and
+# rises only when there are too many triangles to draw in budget. Loop A — the grow worker's REFINE rate is a
+# wall-clock cap (refine_us). The worker is OFF the render thread, so its work ms must NOT drive eps — that was
+# the old peg: a heavy retained-tree job (over the now-gone mesh-lag ceiling) drove eps to EPS_MAX even with
+# the frame fine. Detail leaves the mesh only via the error gate; eps just sheds triangles when render is over.
+const EPS_START    := 48.0    # start with a big error allowance (coarse, cheap first build) — the controller tightens it
+const EPS_MIN      := 0.5     # finest min-error (px): the sharpest eps the controller drives toward when the frame has headroom
 const EPS_MAX      := 256.0
 var frame_budget := 16.0      # ms — frame-gen (render) budget; the `dcframebudget` console knob. Refine while
                               # render cost < half this, back off above it. Generous default — not an FPS game.
 
-# Fraction of the mesh-lag ceiling the refine target sits at: the controller keeps refining (finer mesh)
-# while lag is under ceiling * this, then stops. Higher = drives to finer detail before settling, at the
-# cost of a re-mesh that runs closer to the ceiling.
-const REFINE_TARGET_FRAC := 0.8
-
-var mesh_ceil   := 500.0                          # ms — over this mesh lag: coarsen (raise eps). The `meshlag` console knob.
-var mesh_target := mesh_ceil * REFINE_TARGET_FRAC # ms — under this (and frame headroom): refine (lower eps).
-
-# C (doc 20): floor-refinements per grow while blooming. A stationary refine meters its grow_subtree calls to
-# this many, so each frame does bounded work and the bloom spreads over frames (refine_pending drains it).
-# Bounds the SAMPLING cost; the per-grow emit is still O(window) until 3b. Tunable; `dcrefine` console knob.
-var refine_cells := 4000
+# C/P (doc 20): wall-clock cap (µs) on refine work per grow while blooming — "do as much as you can in X ms",
+# worst-on-screen first. Each grow refines until this elapses then defers the rest (refine_pending drains it
+# over frames), so the bloom spreads and per-job latency stays bounded. Self-tunes across hardware/scene where
+# a fixed count can't. Tunable; `dcrefine` console knob.
+var refine_us := 8000
 
 # M (doc 20): residency extends this far (metres) beyond the VISIBLE window — kept resident + pre-baked so a
 # turn or backtrack re-samples nothing, and the edge ahead is ready before you reach it. 0 = pre-M (residency
@@ -206,7 +203,7 @@ func _process(_dt: float) -> void:
     _frame_ms = lerpf(_frame_ms, Perf.frame_gen_ms(), 0.1)   # smoothed REAL frame-gen cost (render-cpu+GPU),
     # NOT the vsync/fps_max-capped dt — so the controller's frame-headroom gate sees true GPU load, not the
     # quantised display interval (a 144Hz vsync pins dt at ~6.9ms and only jumps at the fps cliff).
-    Perf.status("dcworld", "eps_px %.1f   mesh-lag %.0f ms (%s%s)" % [_eps_px, _job_work_ms, _job_kind(), " refining" if _refine_pending else ""])
+    Perf.status("dcworld", "eps_px %.1f   job %.0f ms (%s%s)" % [_eps_px, _job_work_ms, _job_kind(), " refining" if _refine_pending else ""])
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()
@@ -222,7 +219,7 @@ func _process(_dt: float) -> void:
     elif p.distance_to(_last_center) > RECENTER:
         _dispatch_grow(p, -1)            # move: cover the new window fully (unbudgeted)
     elif _eps_dirty or _refine_pending:
-        _dispatch_grow(p, refine_cells)  # stationary refine: metered — bloom spreads over frames (C, doc 20)
+        _dispatch_grow(p, refine_us)     # stationary refine: metered by wall-clock — bloom spreads over frames (C, doc 20)
 
 
 # Root origin (LATTICE) snapped to the ROOT_SNAP grid, centred on the player — cells never shift
@@ -365,29 +362,21 @@ func _finish() -> void:
     _control()
 
 
-# The B2 budget controller (doc 13): nudge the one knob, _eps_px, toward the budget. Coarsen (raise eps) if
-# mesh lag or frame time is over budget; refine (lower eps) only when BOTH have headroom. Damped, and it
-# backs off (×1.4) faster than it refines (×0.9). A change marks _eps_dirty → re-mesh applies it; in the
-# comfort band eps stops moving, so tuning rebuilds stop. The floor + collapse both derive from _eps_px.
+# Loop B of the budget controller (doc 20): nudge eps toward the RENDER budget only. Coarsen (raise eps) when
+# frame-gen time is over budget; refine (lower eps) only when the frame has headroom AND the current level is
+# fully bloomed (not _refine_pending — the metered drain spreads each level over frames). Job work-ms does NOT
+# enter here: the worker is off the render thread, so a heavy retained-tree job adds mesh latency, not frame
+# cost — letting it drive eps was the old peg. Damped: backs off (×1.4) faster than it refines (×0.9). A change
+# marks _eps_dirty → re-mesh applies it; in the comfort band eps stops moving. Floor + collapse derive from eps.
 func _control() -> void:
     var prev := _eps_px
-    var over := _job_work_ms > mesh_ceil or _frame_ms > frame_budget
-    # C (doc 20): step eps finer only once the CURRENT level is fully bloomed (not _refine_pending) — the
-    # metered drain spreads each level over frames, so the limiter is render frame time, not a mesh spike.
-    var under := not _refine_pending and _job_work_ms < mesh_target and _frame_ms < frame_budget * 0.5
+    var over := _frame_ms > frame_budget
+    var under := not _refine_pending and _frame_ms < frame_budget * 0.5
     if over:
         _eps_px = minf(_eps_px * 1.4, EPS_MAX)
     elif under:
         _eps_px = maxf(_eps_px * 0.9, EPS_MIN)
     _eps_dirty = absf(_eps_px - prev) > 0.01
-
-
-# `meshlag` console knob: set the mesh-lag ceiling (ms) the controller keeps eps under; the refine target
-# scales with it (REFINE_TARGET_FRAC). Higher = more detail at the cost of slower re-mesh on a move.
-func set_max_lag(ms: float) -> void:
-    mesh_ceil = maxf(50.0, ms)
-    mesh_target = mesh_ceil * REFINE_TARGET_FRAC
-    _eps_dirty = true   # kick the controller to re-tune toward the new budget even while stationary
 
 
 func set_frame_budget(ms: float) -> void:

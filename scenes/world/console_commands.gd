@@ -52,9 +52,8 @@ func _table() -> Array:
         [dcinval,         "dcinval",   "Toggle the invalidation overlay: red=triangle too big on screen, yellow=too small; fading. Shows what each edit/move redoes."],
         [fov,             "fov",       "Set the camera field-of-view in degrees (low = telescope/zoom → distant terrain refines under screen-error LOD). Usage: fov <degrees>"],
         [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
-        [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + mesh-lag."],
-        [meshlag,         "meshlag",   "Max mesh lag (ms) the budget controller keeps the worker re-mesh under — higher = more terrain detail, slower re-mesh on a move. Usage: meshlag [ms] (default 500)"],
-        [dcrefine,        "dcrefine",  "doc 20 C: floor-refinements per grow while the world blooms in. Higher = faster bloom, bigger per-frame cost; lower = smoother, slower. Usage: dcrefine [n] (default 4000)"],
+        [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + job ms."],
+        [dcrefine,        "dcrefine",  "doc 20 C/P: wall-clock cap (ms) on refine work per grow while the world blooms in — do as much as fits in X ms, worst-on-screen first. Higher = faster bloom, longer per-job latency. Usage: dcrefine [ms] (default 8)"],
         [dcretain,        "dcretain",  "doc 20 M: metres kept resident BEYOND the visible window — a turn or backtrack within it re-samples nothing (no re-bloom), and the edge ahead is pre-baked. Higher = more retention + cost. Usage: dcretain [m] (default 128)"],
         [dcframebudget,   "dcframebudget", "Per-frame render budget (ms) the controller refines toward — refines while render cost < half this, backs off above it. Higher = more detail, lower fps. Usage: dcframebudget [ms] (default 16)"],
         [dcthreads,       "dcthreads", "Parallel accel-bake workers: `dcthreads <n>` sets the thread count; no args prints the phase timing (accel + build + collapse ms). Usage: dcthreads [n]"],
@@ -221,7 +220,7 @@ func dcworld(arg := "") -> void:
             world_preview.win_radius_m, world_preview.base_cell])
         return
     if arg == "" and world_preview.is_enabled():   # `dcworld` (no args) → print live stats
-        LimboConsole.info("dcworld: on, %.0fm coverage, eps_px=%.1f, last mesh-lag=%.0fms" % [
+        LimboConsole.info("dcworld: on, %.0fm coverage, eps_px=%.1f, last job=%.0fms" % [
             world_preview.win_radius_m, world_preview._eps_px, world_preview._job_work_ms])
         return
     var on := _parse_toggle(arg, world_preview.is_enabled())   # `dcworld on|off` (empty → toggle)
@@ -242,18 +241,11 @@ func remesh() -> void:
     world_preview.force_rebuild()
     LimboConsole.info("remesh: full dcworld rebuild queued — read `dcthreads` for the phase timing")
 
-# Set the mesh-lag ceiling (ms) the dcworld budget controller keeps the worker re-mesh under.
-func meshlag(ms := 0.0) -> void:
+# Wall-clock cap (ms) on refine work per grow while the world blooms — "do as much as you can in X ms".
+func dcrefine(ms := 0.0) -> void:
     if ms > 0.0:
-        world_preview.set_max_lag(ms)
-    LimboConsole.info("meshlag: ceiling %.0f ms (refine target %.0f ms) — higher = more detail, slower re-mesh" % [
-        world_preview.mesh_ceil, world_preview.mesh_target])
-
-
-func dcrefine(n := 0) -> void:
-    if n > 0:
-        world_preview.refine_cells = n
-    LimboConsole.info("dcrefine: %d floor-refinements per grow while blooming (C) — higher = faster bloom, bigger per-frame cost" % world_preview.refine_cells)
+        world_preview.refine_us = int(ms * 1000.0)
+    LimboConsole.info("dcrefine: %.1f ms refine budget per grow while blooming (C/P) — higher = faster bloom, longer per-job latency" % (world_preview.refine_us / 1000.0))
 
 
 func dcretain(m := -1.0) -> void:

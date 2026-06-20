@@ -309,9 +309,10 @@ func test_edit_world_equals_fresh_build():
     assert_lt(edit_samples, fresh_samples, "edit_world re-sampled ONLY the edit box, not the whole window (the E win)")
 
 
-# Stage C (doc 20) — budgeted refinement: a coarse→fine refine, metered to N floor-refinements per grow and
-# drained over several grows (refine_pending guides the loop), must reproduce the SAME surface as one
-# unbudgeted grow to the fine eps. The bloom spreads over frames without changing the settled result.
+# Stage C/P (doc 20) — budgeted refinement: a coarse→fine refine, metered by a wall-clock budget (microseconds)
+# per grow and drained over several grows (refine_pending guides the loop), must reproduce the SAME surface as
+# one unbudgeted grow to the fine eps. The bloom spreads over frames without changing the settled result. The
+# exact iteration count is machine-dependent (it's a time budget); only "metered (>1) and converges" is asserted.
 func test_grow_world_budgeted_refine_drains_to_full():
     var s := _store()
     var origin := _region_origin(s)
@@ -326,15 +327,16 @@ func test_grow_world_budgeted_refine_drains_to_full():
     rm.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, COARSE, true, PackedColorArray(), lo, hi)
     var full: Array = rm.grow_world(cam, 500.0, FINE, lo, hi)   # refine_budget defaults to -1 (unbudgeted)
 
-    # Budgeted: same coarse build, then drain to fine 40 refinements at a time.
+    # Budgeted: same coarse build, then drain to fine capping refine at 100us per grow (small enough that one
+    # grow can't finish the thousands of candidates → metered over many grows; the cap is the dcrefine knob).
     var bm := DCOctreeMesher.new()
     bm.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, COARSE, true, PackedColorArray(), lo, hi)
     var drained: Array = []
     var iters := 0
     while true:
-        drained = bm.grow_world(cam, 500.0, FINE, lo, hi, 40)
+        drained = bm.grow_world(cam, 500.0, FINE, lo, hi, 100)
         iters += 1
-        if not bm.get_refine_pending() or iters > 2000:
+        if not bm.get_refine_pending() or iters > 20000:
             break
 
     assert_gt(iters, 1, "budgeted refine was actually metered across several grows (not one pass)")

@@ -93,7 +93,7 @@ struct Octree {
 	int build_samples = 0;         // leaves whose Hermite data was sampled this build (accumulate_qef) —
 	                               // the field-derived build cost. A grow re-samples only the new band, so
 	                               // this proves the retained interior was NOT resampled (the B1 win).
-	int  refine_budget = -1;       // C/P (doc 20): max FLOOR-refinements per reconcile; -1 = unbudgeted (a move).
+	int  refine_budget = -1;       // C/P (doc 20): wall-clock µs cap for refine_selected; -1 = unbudgeted (a move).
 	bool refine_pending = false;   // a budgeted reconcile deferred some refinement → caller drains over frames.
 	struct RefineCand { double err; int idx; }; // P: a floor-refine candidate + its on-screen size (projected)
 	LocalVector<RefineCand> refine_cands;        // collected this reconcile; refine_selected() does the worst first
@@ -944,21 +944,28 @@ struct Octree {
 		}
 	}
 
-	// P (doc 20): refine the `budget` candidates that look WORST on screen (largest projected size first),
-	// defer the rest (refine_pending → the caller drains over frames). Order-only vs C: a fully-drained view
-	// is identical to refining every candidate, but the chunky/near cells sharpen first — the bloom resolves
-	// where the player is looking. The deferred candidates' QEFs are untouched, so they're valid as coarse
-	// leaves until a later grow reaches them.
-	void refine_selected(int budget) {
-		if (int(refine_cands.size()) > budget) {
-			std::sort(refine_cands.ptr(), refine_cands.ptr() + refine_cands.size(),
-					[](const RefineCand &a, const RefineCand &b) { return a.err > b.err; });
-			refine_pending = true;
+	// P (doc 20): refine the candidates that look WORST on screen first (largest projected size), spending up
+	// to `budget_us` microseconds of wall-clock — "do as much as you can in X ms" — then defer the rest
+	// (refine_pending → the caller drains over frames). A wall-clock cap self-tunes where a fixed count can't:
+	// the same budget refines fewer chunky cells and more flat ones, tracking real per-cell cost across
+	// hardware and scene. Order-only vs an unbudgeted grow: a fully-drained view is identical to refining
+	// every candidate, but the chunky/near cells sharpen first — the bloom resolves where the player looks.
+	// The deferred candidates' QEFs are untouched, so they're valid as coarse leaves until a later grow.
+	void refine_selected(int budget_us) {
+		if (refine_cands.is_empty()) {
+			return;
 		}
-		int n = MIN(budget, int(refine_cands.size()));
+		std::sort(refine_cands.ptr(), refine_cands.ptr() + refine_cands.size(),
+				[](const RefineCand &a, const RefineCand &b) { return a.err > b.err; });
+		uint64_t t0 = OS::get_singleton()->get_ticks_usec();
+		int n = int(refine_cands.size());
 		for (int k = 0; k < n; ++k) {
-			grow_subtree(refine_cands[k].idx);
+			grow_subtree(refine_cands[k].idx);       // at least one per call → always makes progress
 			accumulate_qef(refine_cands[k].idx);
+			if (int64_t(OS::get_singleton()->get_ticks_usec() - t0) >= int64_t(budget_us)) {
+				refine_pending = (k + 1 < n);        // candidates remain → drain them on a later grow
+				break;
+			}
 		}
 		refine_cands.clear();
 	}

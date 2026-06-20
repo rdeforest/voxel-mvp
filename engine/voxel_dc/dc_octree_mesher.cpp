@@ -337,7 +337,7 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	uint64_t tb0 = OS::get_singleton()->get_ticks_usec();
 	oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge; collect refines
 	if (refine_budget >= 0) {
-		oct.refine_selected(refine_budget); // P: refine the budget WORST-on-screen candidates; defer the rest
+		oct.refine_selected(refine_budget); // C/P: refine worst-on-screen first for up to refine_budget us; defer the rest
 	}
 	oct.reaccumulate(0); // roll up ancestor QEFs from cached children — no field sampling
 	_last_build_ms = double(OS::get_singleton()->get_ticks_usec() - tb0) / 1000.0;
