@@ -960,22 +960,29 @@ struct Octree {
 	// hardware and scene. Order-only vs an unbudgeted grow: a fully-drained view is identical to refining
 	// every candidate, but the chunky/near cells sharpen first — the bloom resolves where the player looks.
 	// The deferred candidates' QEFs are untouched, so they're valid as coarse leaves until a later grow.
+	//
+	// Selection is a HEAP, not a full sort: at max detail the candidate list is millions of leaves but the
+	// budget refines a sliver off the top, so make_heap (O(n)) + pop_heap per refine (O(log n)) beats sorting
+	// the whole list (O(n log n)) by ~log n — a big single-core win, since this runs serially every grow.
 	void refine_selected(int budget_us) {
 		if (refine_cands.is_empty()) {
 			return;
 		}
-		std::sort(refine_cands.ptr(), refine_cands.ptr() + refine_cands.size(),
-				[](const RefineCand &a, const RefineCand &b) { return a.err > b.err; });
+		auto worse = [](const RefineCand &a, const RefineCand &b) { return a.err < b.err; }; // max-heap on err
+		RefineCand *base = refine_cands.ptr();
+		int end = int(refine_cands.size());
+		std::make_heap(base, base + end, worse);
 		uint64_t t0 = OS::get_singleton()->get_ticks_usec();
-		int n = int(refine_cands.size());
-		for (int k = 0; k < n; ++k) {
-			grow_subtree(refine_cands[k].idx);       // at least one per call → always makes progress
-			accumulate_qef(refine_cands[k].idx);
+		while (end > 0) {
+			std::pop_heap(base, base + end, worse);  // worst candidate → slot end-1
+			--end;
+			grow_subtree(base[end].idx);             // at least one per call → always makes progress
+			accumulate_qef(base[end].idx);
 			if (int64_t(OS::get_singleton()->get_ticks_usec() - t0) >= int64_t(budget_us)) {
-				refine_pending = (k + 1 < n);        // candidates remain → drain them on a later grow
 				break;
 			}
 		}
+		refine_pending = (end > 0);                  // candidates remain → drain them on a later grow
 		refine_cands.clear();
 	}
 
