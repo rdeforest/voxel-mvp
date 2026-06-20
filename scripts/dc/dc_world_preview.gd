@@ -29,8 +29,13 @@ const EPS_MAX      := 256.0
 var frame_budget := 16.0      # ms — frame-gen (render) budget; the `dcframebudget` console knob. Refine while
                               # render cost < half this, back off above it. Generous default — not an FPS game.
 
-var mesh_ceil   := 500.0  # ms — over this mesh lag: coarsen (raise eps). The `meshlag` console knob.
-var mesh_target := 100.0  # ms — under this (and frame headroom): refine (lower eps). Scales with the ceiling.
+# Fraction of the mesh-lag ceiling the refine target sits at: the controller keeps refining (finer mesh)
+# while lag is under ceiling * this, then stops. Higher = drives to finer detail before settling, at the
+# cost of a re-mesh that runs closer to the ceiling.
+const REFINE_TARGET_FRAC := 0.8
+
+var mesh_ceil   := 500.0                          # ms — over this mesh lag: coarsen (raise eps). The `meshlag` console knob.
+var mesh_target := mesh_ceil * REFINE_TARGET_FRAC # ms — under this (and frame headroom): refine (lower eps).
 
 var base_cell    := VoxelConstants.RENDER_BASE_CELL  # metres per lattice unit (matches production density)
 var win_radius_m := 128.0                            # resident window half-extent (m) — graded floor + budget make it affordable
@@ -292,10 +297,10 @@ func _control() -> void:
 
 
 # `meshlag` console knob: set the mesh-lag ceiling (ms) the controller keeps eps under; the refine target
-# scales with it (1/5, so 500→100). Higher = more detail at the cost of slower re-mesh on a move.
+# scales with it (REFINE_TARGET_FRAC). Higher = more detail at the cost of slower re-mesh on a move.
 func set_max_lag(ms: float) -> void:
     mesh_ceil = maxf(50.0, ms)
-    mesh_target = mesh_ceil * 0.2
+    mesh_target = mesh_ceil * REFINE_TARGET_FRAC
     _eps_dirty = true   # kick the controller to re-tune toward the new budget even while stationary
 
 
