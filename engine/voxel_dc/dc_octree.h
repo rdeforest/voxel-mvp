@@ -294,10 +294,12 @@ struct Octree {
 	// Reset every node's leaf flag to its STRUCTURAL state (leaf iff it has no children) and clear the
 	// placed vertex, so collapse_pass + meshing can re-run from scratch on a camera re-walk.
 	void reset_leaves() {
-		for (uint32_t i = 0; i < cells.size(); ++i) {
+		const int n = int(cells.size());
+		const int threads = (g_mesh_threads > 1 && n >= 8192) ? MIN(g_mesh_threads, n) : 1;
+		parallel_for(n, threads, [this](int i) { // independent per cell → byte-identical to the serial loop
 			cells[i].leaf = cells[i].children[0] < 0;
 			cells[i].vertex = -1;
-		}
+		});
 	}
 
 	// CAMERA-derived pass (cheap, re-runnable, NO field sampling): collapse a node into one leaf when a
@@ -843,9 +845,9 @@ struct Octree {
 		uint64_t tr0 = OS::get_singleton()->get_ticks_usec();
 		if (incremental) {
 			// c2 (doc 20): keep last grow's leaf flags; only the vertex slots reset (the full emit re-ranks).
-			for (uint32_t i = 0; i < cells.size(); ++i) {
-				cells[i].vertex = -1;
-			}
+			const int n = int(cells.size());
+			const int threads = (g_mesh_threads > 1 && n >= 8192) ? MIN(g_mesh_threads, n) : 1;
+			parallel_for(n, threads, [this](int i) { cells[i].vertex = -1; });
 		} else {
 			reset_leaves();
 		}
@@ -864,17 +866,31 @@ struct Octree {
 		last_collapse_pass_us = tp1 - tc0;
 		int n = int(cells.size());
 
-		// Pass 1: one vertex per surviving surface leaf. Assign slots SERIALLY in cell-index order (so the
-		// vertex numbering, and the indices that reference it, match the old serial emit), then fill the
-		// QEF solve + material sample in PARALLEL into the disjoint pre-assigned slots.
-		LocalVector<int> vcells;
+		// Pass 1: one vertex per surviving surface leaf. The cell-index-order rank IS the vertex slot (so the
+		// indices match the serial emit), but the scattered per-cell read dominates on a drain (place_vertex is
+		// cached) — so PARALLELISE it: mark emitters in parallel, prefix-sum the dense marks for slots (serial
+		// but cache-tight), then fill slot→cell in parallel. Byte-identical to the serial scan.
+		const int cthreads = (g_mesh_threads > 1 && n >= 8192) ? MIN(g_mesh_threads, n) : 1;
+		LocalVector<uint8_t> is_vtx;
+		is_vtx.resize(n);
+		parallel_for(n, cthreads, [this, &is_vtx](int i) {
+			is_vtx[i] = (cells[i].leaf && cells[i].qef.count > 0) ? 1 : 0;
+		});
+		LocalVector<int> voff;
+		voff.resize(n);
+		int vcount = 0;
 		for (int i = 0; i < n; ++i) {
-			if (cells[i].leaf && cells[i].qef.count > 0) {
-				cells[i].vertex = int(vcells.size());
-				vcells.push_back(i);
-			}
+			voff[i] = vcount;
+			vcount += is_vtx[i];
 		}
-		int vcount = int(vcells.size());
+		LocalVector<int> vcells;
+		vcells.resize(vcount);
+		parallel_for(n, cthreads, [this, &is_vtx, &voff, &vcells](int i) {
+			if (is_vtx[i]) {
+				cells[i].vertex = voff[i];
+				vcells[voff[i]] = i;
+			}
+		});
 		verts.resize(vcount);
 		normals.resize(vcount);
 		if (emit_color) {
@@ -890,13 +906,26 @@ struct Octree {
 		// Pass 2: stitch edges. Each surviving leaf emits into its OWN sink in parallel (reads of cells/
 		// verts are immutable now), then the sinks concatenate in cell-index order — byte-identical to
 		// the old serial single-array emit (same leaf order, same per-leaf edge order).
-		LocalVector<int> ecells;
+		// Same parallel compaction for the edge-emit leaf list (cell-index order preserved).
+		LocalVector<uint8_t> is_edge;
+		is_edge.resize(n);
+		parallel_for(n, cthreads, [this, &is_edge](int i) {
+			is_edge[i] = (cells[i].leaf && cells[i].vertex >= 0) ? 1 : 0;
+		});
+		LocalVector<int> eoff;
+		eoff.resize(n);
+		int ecount = 0;
 		for (int i = 0; i < n; ++i) {
-			if (cells[i].leaf && cells[i].vertex >= 0) {
-				ecells.push_back(i);
-			}
+			eoff[i] = ecount;
+			ecount += is_edge[i];
 		}
-		int ecount = int(ecells.size());
+		LocalVector<int> ecells;
+		ecells.resize(ecount);
+		parallel_for(n, cthreads, [this, &is_edge, &eoff, &ecells](int i) {
+			if (is_edge[i]) {
+				ecells[eoff[i]] = i;
+			}
+		});
 		LocalVector<EmitSink> sinks;
 		sinks.resize(ecount);
 		const int ethreads = (g_mesh_threads > 1 && ecount >= 64) ? MIN(g_mesh_threads, ecount) : 1;
