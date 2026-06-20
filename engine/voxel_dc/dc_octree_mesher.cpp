@@ -10,6 +10,7 @@
 #include "core/templates/local_vector.h"
 #include "scene/resources/mesh.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <thread>
@@ -602,10 +603,10 @@ struct Octree {
 	int build_samples = 0;         // leaves whose Hermite data was sampled this build (accumulate_qef) —
 	                               // the field-derived build cost. A grow re-samples only the new band, so
 	                               // this proves the retained interior was NOT resampled (the B1 win).
-	int  refine_budget = -1;       // C (doc 20): max FLOOR-refinements (grow_subtree) per reconcile; -1 = no
-	int  refine_count = 0;         // limit (current behaviour). A stationary refine passes a finite budget so
-	bool refine_pending = false;   // each frame does bounded work; deferred cells stay coarse and refine_pending
-	                               // tells the caller to keep draining. NOT applied on a move (window coverage).
+	int  refine_budget = -1;       // C/P (doc 20): max FLOOR-refinements per reconcile; -1 = unbudgeted (a move).
+	bool refine_pending = false;   // a budgeted reconcile deferred some refinement → caller drains over frames.
+	struct RefineCand { double err; int idx; }; // P: a floor-refine candidate + its on-screen size (projected)
+	LocalVector<RefineCand> refine_cands;        // collected this reconcile; refine_selected() does the worst first
 	uint64_t last_build_us    = 0; // phase timing: build() + accumulate_qef() (microseconds)
 	uint64_t last_collapse_us = 0; // phase timing: recollapse_and_mesh() (microseconds)
 	uint64_t last_construct_us = 0; // sub-phase: build() tree construction (serial)
@@ -1437,16 +1438,36 @@ struct Octree {
 			for (int i = 0; i < 8; ++i) {
 				reconcile(cells[idx].children[i]); // still internal — recurse
 			}
-		} else if (refine_budget >= 0 && refine_count >= refine_budget) {
-			// C (doc 20): out of per-frame refinement budget — leave this cell a coarse leaf (its current
-			// QEF stays valid; only the floor wants finer) and flag that more refinement is pending. A later
-			// reconcile at the same eps reaches it again and refines it then — the bloom spreads over frames.
-			refine_pending = true;
+		} else if (refine_budget >= 0) {
+			// C/P (doc 20): defer this refine — collect it as a candidate scored by on-screen size (a chunky
+			// near cell scores high). grow_world's refine_selected() refines the budget worst first; the rest
+			// stay coarse this frame (their QEF is still valid) and refine on a later grow — the bloom spreads.
+			Vector3 ctr = to_v3(cells[idx].origin) + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
+			double dist = MAX((ctr - camera).length(), 1e-3);
+			refine_cands.push_back(RefineCand{ double(cells[idx].size) * proj / dist, idx });
 		} else {
-			++refine_count;
-			grow_subtree(idx);   // approached/entered: subdivide to the (finer) floor — samples only this band
+			grow_subtree(idx);   // unbudgeted (a move): subdivide to the (finer) floor — full window coverage
 			accumulate_qef(idx);
 		}
+	}
+
+	// P (doc 20): refine the `budget` candidates that look WORST on screen (largest projected size first),
+	// defer the rest (refine_pending → the caller drains over frames). Order-only vs C: a fully-drained view
+	// is identical to refining every candidate, but the chunky/near cells sharpen first — the bloom resolves
+	// where the player is looking. The deferred candidates' QEFs are untouched, so they're valid as coarse
+	// leaves until a later grow reaches them.
+	void refine_selected(int budget) {
+		if (int(refine_cands.size()) > budget) {
+			std::sort(refine_cands.ptr(), refine_cands.ptr() + refine_cands.size(),
+					[](const RefineCand &a, const RefineCand &b) { return a.err > b.err; });
+			refine_pending = true;
+		}
+		int n = MIN(budget, int(refine_cands.size()));
+		for (int k = 0; k < n; ++k) {
+			grow_subtree(refine_cands[k].idx);
+			accumulate_qef(refine_cands[k].idx);
+		}
+		refine_cands.clear();
 	}
 
 	// Reconcile the retained tree to an EDITED field box (doc 20 E) — the window and camera floor are
@@ -1827,20 +1848,24 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 		oct.prune_safety = 1.0;
 	}
 	oct.build_samples = 0;
-	// C (doc 20): a stationary refine passes a finite budget so each frame refines at most that many cells
+	// C/P (doc 20): a stationary refine passes a finite budget so each frame refines at most that many cells
 	// (the rest stay coarse, refine_pending true → caller drains over frames). A move passes -1 (unbudgeted)
 	// so the window is always fully covered. Window grafts/evictions aren't budgeted — only floor refinement.
 	oct.refine_budget = refine_budget;
-	oct.refine_count = 0;
 	oct.refine_pending = false;
-	oct.level_start.clear(); // reconcile rebuilds the tree incrementally, not level-laid-out → serial collapse
-	uint64_t tb0 = OS::get_singleton()->get_ticks_usec();
-	oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge
-	oct.reaccumulate(0); // roll up ancestor QEFs from cached children — no field sampling
-	_last_build_ms = double(OS::get_singleton()->get_ticks_usec() - tb0) / 1000.0;
+	oct.refine_cands.clear();
+	// Set the view BEFORE reconcile: P scores each refine candidate by its on-screen size (needs camera/proj).
 	oct.camera = camera;
 	oct.proj = proj;
 	oct.eps_px = eps_px;
+	oct.level_start.clear(); // reconcile rebuilds the tree incrementally, not level-laid-out → serial collapse
+	uint64_t tb0 = OS::get_singleton()->get_ticks_usec();
+	oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge; collect refines
+	if (refine_budget >= 0) {
+		oct.refine_selected(refine_budget); // P: refine the budget WORST-on-screen candidates; defer the rest
+	}
+	oct.reaccumulate(0); // roll up ancestor QEFs from cached children — no field sampling
+	_last_build_ms = double(OS::get_singleton()->get_ticks_usec() - tb0) / 1000.0;
 	uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
 	oct.recollapse_and_mesh();
 	_last_collapse_ms = double(OS::get_singleton()->get_ticks_usec() - tc0) / 1000.0;
