@@ -339,6 +339,7 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	oct.level_start.clear(); // reconcile rebuilds the tree incrementally, not level-laid-out → serial collapse
 	uint64_t tb0 = OS::get_singleton()->get_ticks_usec();
 	oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge; collect refines
+	_last_refine_queue = int(oct.refine_cands.size()); // outstanding refine work this grow (before the budget drains it)
 	if (refine_budget >= 0) {
 		oct.refine_selected(refine_budget); // C/P: refine worst-on-screen first for up to refine_budget us; defer the rest
 	}
@@ -455,6 +456,7 @@ void DCOctreeMesher::_bind_methods() {
 			&DCOctreeMesher::edit_world);
 	ClassDB::bind_method(D_METHOD("remesh", "camera", "proj", "eps_px"), &DCOctreeMesher::remesh);
 	ClassDB::bind_method(D_METHOD("get_last_build_sample_count"), &DCOctreeMesher::get_last_build_sample_count);
+	ClassDB::bind_method(D_METHOD("get_last_refine_queue_size"), &DCOctreeMesher::get_last_refine_queue_size);
 	ClassDB::bind_method(D_METHOD("get_octree_cell_count"),      &DCOctreeMesher::get_octree_cell_count);
 	ClassDB::bind_method(D_METHOD("get_accel_bake_count"),       &DCOctreeMesher::get_accel_bake_count);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);

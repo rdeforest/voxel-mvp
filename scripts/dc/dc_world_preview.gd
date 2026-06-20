@@ -357,6 +357,7 @@ func _finish() -> void:
     if _inval != null and _inval.is_enabled():
         _emit_diagnostic()   # refresh the dcinval LOD overlay for this mesh
     _refine_pending = _job_is_grow and _mesher.get_refine_pending()   # C: more refinement deferred → keep draining
+    Perf.report_queue(_mesher.get_last_refine_queue_size() if _job_is_grow else 0)   # backlog graph in the perf window
     _control()
 
 

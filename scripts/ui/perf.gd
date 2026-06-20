@@ -38,12 +38,19 @@ var _pending_mark := false
 var _drawer: Control
 var _last_gen_ms := 0.0                                   # last frame-gen cost (cap-independent); read by the DC budget controller
 
+const QUEUE_GRAPH_H := 40.0                               # refine-queue graph height (px)
+const _CYAN := Color(0.30, 0.80, 0.95)
+var _queue: PackedFloat32Array = PackedFloat32Array()     # ring of recent refine-queue sizes (parallel to _frames)
+var _last_queue := 0.0                                    # latest reported refine-queue depth (held between grows)
+var _queue_drawer: Control
 
-# A drawing surface that defers back to the host Perf card (keeps everything in one file).
+
+# A drawing surface that defers to a host-supplied draw callback (keeps every graph in this one file).
 class Strip extends Control:
-    var host
+    var draw_fn: Callable
     func _draw() -> void:
-        host._draw_graph(self)
+        if draw_fn.is_valid():
+            draw_fn.call(self)
 
 
 func _ready() -> void:
@@ -60,10 +67,16 @@ func _ready() -> void:
     content.add_child(_label)
 
     _drawer = Strip.new()
-    _drawer.host                = self
+    _drawer.draw_fn             = _draw_graph
     _drawer.custom_minimum_size = Vector2(GRAPH_W, GRAPH_H)
     _drawer.mouse_filter        = Control.MOUSE_FILTER_IGNORE
     content.add_child(_drawer)
+
+    _queue_drawer = Strip.new()
+    _queue_drawer.draw_fn             = _draw_queue_graph
+    _queue_drawer.custom_minimum_size = Vector2(GRAPH_W, QUEUE_GRAPH_H)
+    _queue_drawer.mouse_filter        = Control.MOUSE_FILTER_IGNORE
+    content.add_child(_queue_drawer)
 
     # Measure the ACTUAL per-frame render cost (CPU + GPU), which is independent of vsync / fps_max — the
     # display interval (get_frames_per_second) clamps to the cap and can't show work below it.
@@ -77,6 +90,11 @@ func _ready() -> void:
 func report(label: String, ms: float) -> void:
     var prev: float = _times[label].ms if _times.has(label) else ms
     _times[label] = { "ms": lerpf(prev, ms, SMOOTH), "frame": Engine.get_process_frames() }
+
+
+# The current refine-queue depth (leaves still wanting sharpening). Held between grows and graphed per frame.
+func report_queue(depth: int) -> void:
+    _last_queue = float(depth)
 
 
 func set_shown(on: bool) -> void:
@@ -116,12 +134,16 @@ func _process(_dt: float) -> void:
     _frames.append(gen_ms)
     _marks.append(1 if _pending_mark else 0)
     _pending_mark = false
+    _queue.append(_last_queue)
     if _frames.size() > GRAPH_CAP:
         _frames.remove_at(0)
         _marks.remove_at(0)
+    if _queue.size() > GRAPH_CAP:
+        _queue.remove_at(0)
     if not _shown:
         return
     _drawer.queue_redraw()
+    _queue_drawer.queue_redraw()
     var fps := Engine.get_frames_per_second()
     var now := Engine.get_process_frames()
     var ticks := Engine.get_physics_frames() - _last_physics_frame
@@ -142,6 +164,7 @@ func _process(_dt: float) -> void:
     # Accounted CPU vs the whole frame: a large, bouncing "other" with small/steady CPU means the
     # cost is GPU / present / unmeasured — not in any timed subsystem (look at the shaders, not here).
     lines.append("Σ CPU %.2f ms   |   other %.2f ms" % [cpu_sum, maxf(0.0, gen_ms - cpu_sum)])
+    lines.append("refine queue %d leaves (cyan graph)" % int(_last_queue))
     var keys := _status.keys()
     keys.sort()
     for key in keys:
@@ -200,3 +223,21 @@ func _draw_graph(c: Control) -> void:
         c.draw_rect(Rect2(x, control_size.y - h, maxf(bw, 1.0), h), _frame_color(ms))
         if _marks[i] != 0:
             c.draw_line(Vector2(x, 0.0), Vector2(x, control_size.y), Color(0.40, 0.70, 1.0, 0.85), 1.0)
+
+
+# Refine-queue graph (cyan): recent backlog depth, auto-scaled to the window's own peak so the TREND reads —
+# bars sloping down = the worker is draining the work it found (progress); flat = treading water; rising = it's
+# finding work faster than it clears. The exact count is in the text line above; this is the shape over time.
+func _draw_queue_graph(c: Control) -> void:
+    var control_size := c.size
+    c.draw_rect(Rect2(Vector2.ZERO, control_size), Color(0.0, 0.0, 0.0, 0.30))
+    var n := _queue.size()
+    if n == 0:
+        return
+    var peak := 1.0
+    for q in _queue:
+        peak = maxf(peak, q)
+    var bw := control_size.x / float(GRAPH_CAP)
+    for i in n:
+        var h := (_queue[i] / peak) * control_size.y
+        c.draw_rect(Rect2(i * bw, control_size.y - h, maxf(bw, 1.0), h), _CYAN)

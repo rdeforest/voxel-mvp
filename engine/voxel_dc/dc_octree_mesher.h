@@ -40,6 +40,10 @@ class DCOctreeMesher : public RefCounted {
 	// grow_world this counts ONLY the leading-edge band — proof the retained interior was not resampled.
 	int _last_build_samples = 0;
 
+	// Outstanding refine work the last grow_world found (refine_cands.size() after reconcile, before the budget
+	// drained it): how many leaves still want sharpening at the current eps. The perf overlay graphs it draining.
+	int _last_refine_queue = 0;
+
 	// Phase timing for the last mesh_world or grow_world call (milliseconds).
 	// _last_accel_ms  = time spent in bake_accel (0 when the accel was reused in grow_world).
 	// _last_build_ms  = time spent in the build/reconcile + reaccumulate pass (field sampling).
@@ -133,6 +137,9 @@ public:
 
 	// Field-sampled leaf count of the last build/grow — after grow_world, just the leading-edge band.
 	int get_last_build_sample_count() const { return _last_build_samples; }
+
+	// Outstanding refine work the last grow found (leaves still wanting sharpening at the current eps).
+	int get_last_refine_queue_size() const { return _last_refine_queue; }
 
 	// Total slots in the retained octree's cell array (live + free-list). Bounded across a traverse (B1b).
 	int get_octree_cell_count() const;
