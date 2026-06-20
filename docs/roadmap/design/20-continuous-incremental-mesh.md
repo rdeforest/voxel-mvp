@@ -355,13 +355,23 @@ eps *step* (controller) or a camera *move* still changes decisions tree-wide →
 back to a full (or band-scoped) re-collapse on those frames, which are rarer than the
 fixed-eps drain grows.
 
-### c3 — Incremental emit + stable slots (realizes 3b)
+### c3 — Incremental emit — SUPERSEDED by measurement (2026-06-20)
 
-Re-emit only the changed leaves' triangles, splicing them into the retained vertex/
-index arrays, instead of rebuilding the whole mesh — plus the stable per-leaf slot
-allocator and partial GPU upload from **3b** above. This is the same surgery
-`edit_world` + `emit_filter` + `dc_edit_splicer.gd` already do for edits, extended to
-the refine path. Highest risk/complexity; do last, against the measured floor.
+The plan was to cache per-leaf triangles + stable slots and re-emit only the changed
+band (the doc's "hard one"). A `dcthreads` probe (threads=1 vs 8 on a ~62K-cell drain)
+**killed that plan before building it**: pass2 (`emit_leaf_edges`/`find_leaf`, the bulk
+of the emit) was *already parallel* (8.8 → 4.0 ms), so the cache would optimize work
+already spread across cores. The real serial bottleneck was elsewhere — pass1's
+vertex-**collection scan** (5.0 ms flat across thread counts; `place_vertex` is cached
+on a drain so the scattered per-cell read dominates) and `reset_leaves`.
+
+So c3 became: **parallelize the serial scans** (reset_leaves + the pass1/pass2 mark→
+prefix-sum→fill compactions), gated by the existing `parallel==serial` byte-identical
+test. Drain recollapse 12.4 → 9.4 ms; pass1 now scales (5.0@1 → 1.9@8). With c1/c2 the
+full drain grow is ~16.6 ms, down from ~32. The cache/stable-slot/partial-GPU-upload
+rewrite (3b) is **not** worth its risk against the measured floor — shelved, not built.
+Lesson: measure the serial-vs-parallel split before optimizing; the obvious target
+(the expensive emit) was already handled.
 
 ### Gates
 
