@@ -540,6 +540,20 @@ struct Cell {
 	                     // meshed. The window boundary is the resident mesh's open rim (like the clipmap's
 	                     // outer edge). Distinct from a splice's build-box-miss leaf, which IS meshed.
 	Qef qef; // accumulated up the tree (own crossings for a leaf; children's sum otherwise)
+
+	// Incremental-grow caches (doc 17 #3). Both the collapse residual and the emitted vertex are pure
+	// functions of `qef` (and the fixed cell box), so a grow that doesn't change this cell's qef can reuse
+	// last frame's solve instead of redoing the SVD — turning the per-grow solve cost from O(window) into
+	// O(changed band). `dirty` is the per-frame signal reconcile sets where it changes a cell and
+	// reaccumulate propagates to ancestors; it clears the *_valid bits, which otherwise persist across grows.
+	// A fresh cell is born with both invalid (solve once), so the full-build path is unaffected.
+	double  we_cache  = 0.0;        // sqrt(qef.residual(solved vertex)) — the collapse screen-error numerator
+	Vector3 vpos_cache;             // solved vertex position (lattice-local)
+	Vector3 vnorm_cache;            // solved vertex normal
+	Color   vcol_cache;             // solved vertex material colour (only when emit_color)
+	bool we_valid  = false;         // we_cache holds this cell's current qef's residual
+	bool vtx_valid = false;         // vpos/vnorm/vcol_cache hold this cell's current qef's solve
+	bool dirty     = false;         // qef changed THIS reconcile → invalidate caches up to the root
 };
 
 // Builds + meshes one octree over a clipmap: subdivide to the clipmap's
@@ -580,6 +594,10 @@ struct Octree {
 	                               // meshed) — the box is the resident WINDOW, its edge the mesh rim. A
 	                               // splice leaves window_mode off: its out-of-box cells ARE meshed so the
 	                               // patch rim can stitch to them (the full build supplies their triangles).
+	bool field_dirty = false;      // edit_world (doc 20 E): the FIELD changed inside [field_dirty_min, max)
+	Vector3i field_dirty_min;      // (WORLD lattice) — reconcile_edit force-resamples present leaves here
+	Vector3i field_dirty_max;      // (the field changed, not just the floor) and refines/coarsens on surface
+	                               // appearing/vanishing; cells outside the box are untouched (no resample).
 	LocalVector<int> level_start;  // parallel bottom-up: cell-index where each BFS level begins (for level walks)
 	int build_samples = 0;         // leaves whose Hermite data was sampled this build (accumulate_qef) —
 	                               // the field-derived build cost. A grow re-samples only the new band, so
@@ -617,6 +635,12 @@ struct Octree {
 		return o.x + size > build_min.x && o.x < build_max.x && o.y + size > build_min.y && o.y < build_max.y && o.z + size > build_min.z && o.z < build_max.z;
 	}
 
+	// Does a cell overlap the edited field box (WORLD lattice)? reconcile_edit walks only these cells.
+	bool cell_overlaps_field_dirty(const Vector3i &origin, int size) const {
+		Vector3i o = origin + world_origin;
+		return o.x + size > field_dirty_min.x && o.x < field_dirty_max.x && o.y + size > field_dirty_min.y && o.y < field_dirty_max.y && o.z + size > field_dirty_min.z && o.z < field_dirty_max.z;
+	}
+
 	// Should this cell stop subdividing and become a leaf? True at the data floor, when
 	// the cell is provably surface-free (prune), or when size is already atomic. This is
 	// the shared predicate build() and reconcile() both check — one definition, no drift.
@@ -633,6 +657,7 @@ struct Octree {
 	// themselves (the extra step stays inline so this helper stays narrowly scoped).
 	void sample_leaf(int idx) {
 		cells[idx].qef = leaf_qef(idx);
+		cells[idx].dirty = true; // qef changed → ancestors re-sum, this leaf's solve caches invalidate (grow path)
 		++build_samples;
 	}
 
@@ -788,28 +813,7 @@ struct Octree {
 		for (int i = 0; i < 8; ++i) {
 			collapse_pass(cells[idx].children[i]);
 		}
-		if (!error_driven || cells[idx].qef.count == 0 || cells[idx].size > max_leaf_size) {
-			return;
-		}
-		Vector3 cmin = to_v3(cells[idx].origin);
-		Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
-		// Never collapse the finest level when uniform_core: a 1m fine core gives edit patches clean
-		// cell boundaries to splice against (incremental meshing). Outer levels still coarsen.
-		if (uniform_core) {
-			Vector3 c = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
-			if (src->is_finest_level(c)) {
-				return;
-			}
-		}
-		Vector3 v = cells[idx].qef.solve(cmin, cmax);
-		double we = Math::sqrt(cells[idx].qef.residual(v));
-		Vector3 ctr = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
-		double dist = MAX((ctr - camera).length(), 1e-3);
-		if (we * proj / dist > eps_px) {
-			return; // on-screen error too large — surface here needs more than one vertex
-		}
-		cells[idx].leaf = true; // collapse: this node is the leaf; its subtree is orphaned
-		orphan_subtree(idx);
+		collapse_test(idx); // post-order: decide this node after its subtree (same as collapse_parallel)
 	}
 
 	// Tree depth of a cell of the given lattice size (root_size → 0; size 1 → max_depth). Used by the
@@ -845,6 +849,9 @@ struct Octree {
 			c.absent = false;
 			c.vertex = -1;
 			c.qef = Qef();
+			c.we_valid = false; // born invalid — a reused slot's cached solve belongs to a dead cell
+			c.vtx_valid = false;
+			c.dirty = false;
 			for (int i = 0; i < 8; ++i) {
 				c.children[i] = -1;
 			}
@@ -885,6 +892,9 @@ struct Octree {
 		c.absent = false;
 		c.vertex = -1;
 		c.qef = Qef();
+		c.we_valid = false; // born invalid — a reused slot's cached solve belongs to a dead cell
+		c.vtx_valid = false;
+		c.dirty = false;
 		for (int i = 0; i < 8; ++i) {
 			c.children[i] = -1;
 		}
@@ -992,11 +1002,23 @@ struct Octree {
 		const Vector3 cmin = to_v3(cells[idx].origin);
 		const Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
 		const Vector3 ctr = cmin + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
+		// Never collapse the finest level when uniform_core: a 1m fine core gives edit patches clean
+		// cell boundaries to splice against (incremental meshing). Outer levels still coarsen.
 		if (uniform_core && src->is_finest_level(ctr)) {
 			return;
 		}
-		const Vector3 v = cells[idx].qef.solve(cmin, cmax);
-		const double we = Math::sqrt(cells[idx].qef.residual(v));
+		// The residual `we` is a pure function of this cell's qef, so a grow reuses last frame's value
+		// unless reaccumulate invalidated it (qef changed) — the screen-error test below still re-runs
+		// every frame (camera/eps move), but the costly SVD solve is skipped for unchanged cells.
+		double we;
+		if (cells[idx].we_valid) {
+			we = cells[idx].we_cache;
+		} else {
+			const Vector3 v = cells[idx].qef.solve(cmin, cmax);
+			we = Math::sqrt(cells[idx].qef.residual(v));
+			cells[idx].we_cache = we;
+			cells[idx].we_valid = true;
+		}
 		const double dist = MAX((ctr - camera).length(), 1e-3);
 		if (we * proj / dist > eps_px) {
 			return;
@@ -1044,27 +1066,39 @@ struct Octree {
 	// surface, not a coarse re-sample. The slot (cells[idx].vertex) is pre-assigned in
 	// cell-index order by recollapse_and_mesh, so this writes disjoint slots and parallelises.
 	void place_vertex(int idx) {
-		const Qef &qef = cells[idx].qef;
-		Vector3 cmin = to_v3(cells[idx].origin);
-		Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
-		Vector3 v = qef.solve(cmin, cmax);
-		Vector3 n = qef.nsum.length_squared() > 0.0 ? qef.nsum.normalized() : Vector3(0, 1, 0);
-		int slot = cells[idx].vertex;
-		verts.set(slot, v);
-		normals.set(slot, n);
-		if (emit_color) {
-			// Sample the solid voxel just behind the surface: the normal points
-			// outward, so step inward to land in the cell that carries the id. Prefer an
-			// inward explicit material so a placed part's faces read the part, while a terrain
-			// vertex beside the part stays natural (the body it bounds is inward, not sideways).
-			int id = src->index_prefer_explicit(v - n * 0.5, n);
-			if (id > 0 && id < int(palette.size())) {
-				const Color &c = palette[id];
-				colors.set(slot, Color(c.r, c.g, c.b, 0.0)); // a=0 -> explicit material colour
-			} else {
-				colors.set(slot, Color(0, 0, 0, 1.0)); // a=1 -> natural (slope-shaded; also the
-														// default for meshes with no colour array)
+		// The solve + material sample are a pure function of this cell's qef, so a grow reuses last frame's
+		// result for a leaf reaccumulate didn't invalidate — only the (cheap) slot write runs every frame.
+		// emit_color is fixed for a retained tree's lifetime (grow_world inherits it), so the cached colour
+		// is always sampled under the same flag it's read back with.
+		if (!cells[idx].vtx_valid) {
+			const Qef &qef = cells[idx].qef;
+			Vector3 cmin = to_v3(cells[idx].origin);
+			Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
+			Vector3 v = qef.solve(cmin, cmax);
+			Vector3 n = qef.nsum.length_squared() > 0.0 ? qef.nsum.normalized() : Vector3(0, 1, 0);
+			cells[idx].vpos_cache = v;
+			cells[idx].vnorm_cache = n;
+			if (emit_color) {
+				// Sample the solid voxel just behind the surface: the normal points
+				// outward, so step inward to land in the cell that carries the id. Prefer an
+				// inward explicit material so a placed part's faces read the part, while a terrain
+				// vertex beside the part stays natural (the body it bounds is inward, not sideways).
+				int id = src->index_prefer_explicit(v - n * 0.5, n);
+				if (id > 0 && id < int(palette.size())) {
+					const Color &c = palette[id];
+					cells[idx].vcol_cache = Color(c.r, c.g, c.b, 0.0); // a=0 -> explicit material colour
+				} else {
+					cells[idx].vcol_cache = Color(0, 0, 0, 1.0); // a=1 -> natural (slope-shaded; also the
+																 // default for meshes with no colour array)
+				}
 			}
+			cells[idx].vtx_valid = true;
+		}
+		int slot = cells[idx].vertex;
+		verts.set(slot, cells[idx].vpos_cache);
+		normals.set(slot, cells[idx].vnorm_cache);
+		if (emit_color) {
+			colors.set(slot, cells[idx].vcol_cache);
 		}
 	}
 
@@ -1376,10 +1410,14 @@ struct Octree {
 	void reconcile(int idx) {
 		int sz = cells[idx].size;
 		if (!cell_overlaps_build_box(cells[idx].origin, sz)) {
-			// Left the window → absent leaf (the placeholder a fresh build leaves here).
-			discard_children(idx);
-			cells[idx].leaf = true;
-			cells[idx].absent = true;
+			// Left the window → absent leaf (the placeholder a fresh build leaves here). Already-absent
+			// cells are a no-op; only a NEWLY evicted cell changed its qef (→ empty), so only it dirties.
+			if (!cells[idx].absent) {
+				discard_children(idx);
+				cells[idx].leaf = true;
+				cells[idx].absent = true;
+				cells[idx].dirty = true;
+			}
 			return;
 		}
 		// In window. build()'s own leaf test: at the data floor, or provably surface-free (pruned).
@@ -1401,23 +1439,74 @@ struct Octree {
 		}
 	}
 
+	// Reconcile the retained tree to an EDITED field box (doc 20 E) — the window and camera floor are
+	// UNCHANGED; only the field values inside [field_dirty_min, max) changed. Walks ONLY cells overlapping
+	// that box (everything else is field- and floor-identical, so it's a no-op — don't even recurse). Inside
+	// the box it differs from reconcile() in one case: a present leaf already at the floor must be RE-SAMPLED
+	// (its field changed), where a move would reuse it. Surface appearing → refine to floor; vanishing →
+	// coarsen. The accel is re-baked over the window before this so want_leaf's prune reflects the edit.
+	// recollapse_and_mesh then re-decides the whole tree's collapse (cheap via 3a's caches), so the result
+	// equals a fresh build of the edited field — the seam to unedited neighbours stitches crack-free by the
+	// same point-location meshing as any LOD jump (no separate-patch boundary problem; we mutate in place).
+	void reconcile_edit(int idx) {
+		int sz = cells[idx].size;
+		if (!cell_overlaps_field_dirty(cells[idx].origin, sz)) {
+			return; // outside the edit → field + floor unchanged → reuse as-is
+		}
+		if (build_box && !cell_overlaps_build_box(cells[idx].origin, sz)) {
+			return; // edit poked past the resident window → leave the rim absent (caller clamps; defensive)
+		}
+		if (want_leaf(sz, cells[idx].origin)) {
+			if (cells[idx].children[0] >= 0) {
+				make_leaf(idx);            // edit removed surface here → coarsen the subtree to one leaf
+			} else {
+				cells[idx].absent = false; // (within the window, so never an eviction)
+				sample_leaf(idx);          // present/entered leaf in the edit box → re-sample the new field
+			}
+		} else if (cells[idx].children[0] >= 0) {
+			for (int i = 0; i < 8; ++i) {
+				reconcile_edit(cells[idx].children[i]);
+			}
+		} else {
+			grow_subtree(idx);   // edit added surface → subdivide to the floor (samples only this band)
+			accumulate_qef(idx);
+		}
+	}
+
 	// Roll accumulated QEFs back up the tree from the (cached) leaf QEFs — NO field sampling. A retained
 	// leaf keeps its cached QEF; an absent leaf contributes empty; an internal node = the in-order sum of
 	// its children. Bit-identical to a full accumulate_qef() because the summands and order are identical.
-	void reaccumulate(int idx) {
+	//
+	// Returns whether this subtree's accumulated qef changed this grow (reconcile flagged the changed leaves
+	// via `dirty`). A node re-sums only when a child changed — otherwise the in-order sum is bit-identical to
+	// last frame's already-stored qef, so the assign is skipped. Where the qef DID change, the cached collapse
+	// residual + vertex solve are invalidated so recollapse/emit redo just those; unchanged cells reuse them.
+	bool reaccumulate(int idx) {
+		bool changed;
 		if (cells[idx].children[0] < 0) {
 			if (cells[idx].absent) {
 				cells[idx].qef = Qef();
 			}
-			return; // present leaf: keep cached QEF (the no-resample property)
+			changed = cells[idx].dirty; // leaf: a re-sampled or newly-evicted leaf (reconcile set dirty)
+		} else {
+			bool any = false;
+			Qef sum;
+			for (int i = 0; i < 8; ++i) {
+				int ch = cells[idx].children[i];
+				any |= reaccumulate(ch);
+				sum.add(cells[ch].qef);
+			}
+			if (any) {
+				cells[idx].qef = sum; // a child changed → this node's accumulated qef changed
+			}
+			changed = any || cells[idx].dirty;
 		}
-		Qef sum;
-		for (int i = 0; i < 8; ++i) {
-			int ch = cells[idx].children[i];
-			reaccumulate(ch);
-			sum.add(cells[ch].qef);
+		if (changed) {
+			cells[idx].we_valid = false;  // qef changed → cached collapse residual is stale
+			cells[idx].vtx_valid = false; // qef changed → cached vertex solve is stale
 		}
-		cells[idx].qef = sum;
+		cells[idx].dirty = false; // per-frame signal consumed
+		return changed;
 	}
 };
 
@@ -1738,6 +1827,55 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	return pack_output(oct);
 }
 
+// Incremental EDIT (doc 20 E): the retained window is unchanged but the EditStore field changed inside
+// [dirty_min, dirty_max) (WORLD lattice). Re-bake the accel over the resident window (its min/max mips are
+// stale over the edit — a newly added surface would otherwise be pruned away), reconcile ONLY the edited box
+// (force-resample its present leaves, refine where surface appeared, coarsen where it vanished), roll up, and
+// recollapse+mesh. The surface equals a fresh mesh_world of the edited field, but only the edit box is
+// re-sampled — not the whole window (the move-path's no-resample property, extended to field changes). Empty
+// Array if no world octree is retained (caller falls back to mesh_world). camera/proj/eps are the current
+// view (unchanged by a pure edit; passed so a re-bake/collapse uses the live operating point).
+Array DCOctreeMesher::edit_world(Vector3 camera, double proj, double eps_px, Vector3i dirty_min, Vector3i dirty_max) {
+	if (_persist == nullptr) {
+		return Array();
+	}
+	Octree &oct = _persist->oct;
+	_last_accel_ms = 0.0;
+	if (_persist->world_src.has_accel) {
+		double floor_k = (proj > 0.0 && eps_px > 0.0) ? eps_px / proj : 0.0;
+		_persist->world_src.cam = camera;
+		_persist->world_src.floor_k = floor_k;
+		uint64_t ta0 = OS::get_singleton()->get_ticks_usec();
+		// Re-bake over the SAME window the last build/grow covered (octree-local, stored on the source).
+		_persist->world_src.bake_accel(_persist->world_src.accel_win_lo, _persist->world_src.accel_win_hi, camera, floor_k);
+		_last_accel_ms = double(OS::get_singleton()->get_ticks_usec() - ta0) / 1000.0;
+	}
+	oct.field_dirty = true;
+	// Pad by one cell: a DC cell's QEF samples its 12 edges' CORNERS, so a cell whose body sits just outside
+	// the changed-field box still has a corner ON the box face that moved — its QEF changed and it must be
+	// re-sampled too. One lattice unit covers a corner-on-boundary touch for a cell of any size; over-
+	// inclusion is safe (re-sampling an unchanged cell yields the same value). Caller passes the field box.
+	oct.field_dirty_min = dirty_min - Vector3i(1, 1, 1);
+	oct.field_dirty_max = dirty_max + Vector3i(1, 1, 1);
+	oct.build_samples = 0;
+	oct.level_start.clear(); // reconcile path: the tree isn't level-laid-out → serial collapse
+	uint64_t tb0 = OS::get_singleton()->get_ticks_usec();
+	oct.reconcile_edit(0); // walk only the edited box — samples only its band
+	oct.reaccumulate(0);   // roll up ancestor QEFs from cached children — no field sampling
+	_last_build_ms = double(OS::get_singleton()->get_ticks_usec() - tb0) / 1000.0;
+	oct.field_dirty = false;
+	oct.camera = camera;
+	oct.proj = proj;
+	oct.eps_px = eps_px;
+	uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
+	oct.recollapse_and_mesh();
+	_last_collapse_ms = double(OS::get_singleton()->get_ticks_usec() - tc0) / 1000.0;
+	_last_tri_owners      = oct.tri_owners;
+	_last_tri_owner_sizes = oct.tri_owner_sizes;
+	_last_build_samples   = oct.build_samples;
+	return pack_output(oct);
+}
+
 // Total slots in the retained octree's cell array (live + free). With B1b's free-list this plateaus
 // across a long traverse (evicted slots reused), instead of growing every move — the bound the test gates.
 int DCOctreeMesher::get_octree_cell_count() const {
@@ -1774,6 +1912,9 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("grow_world", "camera", "proj", "eps_px", "win_min", "win_max"),
 			&DCOctreeMesher::grow_world);
+	ClassDB::bind_method(
+			D_METHOD("edit_world", "camera", "proj", "eps_px", "dirty_min", "dirty_max"),
+			&DCOctreeMesher::edit_world);
 	ClassDB::bind_method(D_METHOD("remesh", "camera", "proj", "eps_px"), &DCOctreeMesher::remesh);
 	ClassDB::bind_method(D_METHOD("get_last_build_sample_count"), &DCOctreeMesher::get_last_build_sample_count);
 	ClassDB::bind_method(D_METHOD("get_octree_cell_count"),      &DCOctreeMesher::get_octree_cell_count);
