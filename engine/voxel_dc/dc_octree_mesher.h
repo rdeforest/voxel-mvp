@@ -32,6 +32,10 @@ class DCOctreeMesher : public RefCounted {
 	// each triangle — the cell size each triangle was meshed at.
 	PackedFloat32Array  _last_tri_owner_sizes;
 
+	// Parallel to _last_tri_owners: the owner leaf's geometric error `we` (QEF residual, lattice units)
+	// for each triangle — the dcinval diagnostic projects it (we * proj / dist) against eps.
+	PackedFloat32Array  _last_tri_owner_errors;
+
 	// Leaves whose Hermite data was sampled by the last build/grow (the field-derived build cost). After a
 	// grow_world this counts ONLY the leading-edge band — proof the retained interior was not resampled.
 	int _last_build_samples = 0;
@@ -159,6 +163,9 @@ public:
 	// Parallel to get_last_triangle_owners(): one float per triangle = owner cell size (lattice
 	// units) — the LOD each triangle was meshed at, used by the dcinval diagnostic.
 	PackedFloat32Array get_last_triangle_owner_sizes() const { return _last_tri_owner_sizes; }
+	// Parallel to get_last_triangle_owners(): owner leaf's geometric error `we` (QEF residual, lattice
+	// units). dcinval projects it (we * proj / dist) vs eps to flag genuinely under/over-resolved triangles.
+	PackedFloat32Array get_last_triangle_owner_errors() const { return _last_tri_owner_errors; }
 
 protected:
 	static void _bind_methods();

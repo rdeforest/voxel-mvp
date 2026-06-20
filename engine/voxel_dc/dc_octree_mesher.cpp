@@ -67,6 +67,7 @@ Array DCOctreeMesher::remesh(Vector3 camera, double proj, double eps_px) {
 	oct.recollapse_and_mesh();
 	_last_tri_owners = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
+	_last_tri_owner_errors = oct.tri_owner_errors;
 	return pack_output(oct);
 }
 
@@ -187,6 +188,7 @@ Array DCOctreeMesher::mesh_clipmap(
 
 	_last_tri_owners      = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
+	_last_tri_owner_errors = oct.tri_owner_errors;
 	return pack_output(oct);
 }
 
@@ -272,6 +274,7 @@ Array DCOctreeMesher::mesh_world(
 	_last_collapse_pass_ms = double(oct.last_collapse_pass_us) / 1000.0;
 	_last_tri_owners      = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
+	_last_tri_owner_errors = oct.tri_owner_errors;
 	_last_build_samples   = oct.build_samples;
 	return pack_output(oct);
 }
@@ -346,6 +349,7 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	_last_collapse_ms = double(OS::get_singleton()->get_ticks_usec() - tc0) / 1000.0;
 	_last_tri_owners      = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
+	_last_tri_owner_errors = oct.tri_owner_errors;
 	_last_build_samples   = oct.build_samples;
 	return pack_output(oct);
 }
@@ -400,6 +404,7 @@ Array DCOctreeMesher::edit_world(Ref<EditStore> store, Vector3 camera, double pr
 	_last_collapse_ms = double(OS::get_singleton()->get_ticks_usec() - tc0) / 1000.0;
 	_last_tri_owners      = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
+	_last_tri_owner_errors = oct.tri_owner_errors;
 	_last_build_samples   = oct.build_samples;
 	return pack_output(oct);
 }
@@ -454,6 +459,7 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_accel_bake_count"),       &DCOctreeMesher::get_accel_bake_count);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);
+	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_errors"), &DCOctreeMesher::get_last_triangle_owner_errors);
 	ClassDB::bind_method(D_METHOD("get_last_accel_ms"),    &DCOctreeMesher::get_last_accel_ms);
 	ClassDB::bind_method(D_METHOD("get_last_build_ms"),    &DCOctreeMesher::get_last_build_ms);
 	ClassDB::bind_method(D_METHOD("get_last_collapse_ms"), &DCOctreeMesher::get_last_collapse_ms);

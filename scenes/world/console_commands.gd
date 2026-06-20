@@ -49,7 +49,7 @@ func _table() -> Array:
         [savestyle,       "savestyle", "Save the current watercolour/terrain shader settings as a named preset. Usage: savestyle <name>"],
         [loadstyle,       "loadstyle", "Load a saved shader-settings preset. Usage: loadstyle <name>"],
         [liststyles,      "liststyles","List saved shader-settings presets."],
-        [dcinval,         "dcinval",   "Toggle the invalidation overlay: red=triangle too big on screen, yellow=too small; fading. Shows what each edit/move redoes."],
+        [dcinval,         "dcinval",   "Toggle the LOD overlay: red = refinement backlog (leaves still coarser than their detail warrants — what the worst-on-screen refiner sharpens next). Clears as the bloom resolves."],
         [fov,             "fov",       "Set the camera field-of-view in degrees (low = telescope/zoom → distant terrain refines under screen-error LOD). Usage: fov <degrees>"],
         [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
         [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + job ms."],
@@ -192,7 +192,7 @@ func dcinval(_state := "") -> void:
     var on: bool = inval_overlay.toggle()
     if on:
         world_preview.refresh_diagnostic()   # show the LOD diagnostic from the current mesh now
-    LimboConsole.info("dcinval: %s — red=triangle too big on screen, yellow=too small" % ("on" if on else "off"))
+    LimboConsole.info("dcinval: %s — red = refinement backlog (leaves still coarser than their detail warrants)" % ("on" if on else "off"))
 
 func fov(degrees: float) -> void:
     var cam := host.get_viewport().get_camera_3d()

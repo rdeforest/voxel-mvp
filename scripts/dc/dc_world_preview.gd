@@ -88,10 +88,12 @@ var _job_work_ms := 0.0              # worker build time of the last job = mesh 
 var _palette: PackedColorArray      # material id → albedo (per-vertex colours), like the clipmap render
 var _inval: Node3D                  # the invalidation overlay (dcinval) — fed the LOD diagnostic
 
-# dcinval diagnostic thresholds: a triangle whose owner cell projects to more than LARGE×eps px is
-# under-resolved (chunky); less than SMALL×eps is over-resolved (wasteful). Relative to the live eps_px.
-const DIAG_LARGE_MULT := 8.0
-const DIAG_SMALL_MULT := 0.5
+# dcinval = the refinement BACKLOG. A triangle's owner leaf carries a geometric error `we`; projected to pixels
+# (we·proj/dist — the exact quantity collapse_test gates on) it exceeds eps precisely when the leaf is coarser
+# than the surface there warrants — i.e. the worker still wants to sharpen it. Highlight leaves over LARGE×eps:
+# the chunky-over-real-detail cells the worst-on-screen refiner works on next; they clear as it sharpens them.
+# Flat ground reads ~0 error so it never shows. No over-resolved pass — max detail is the goal, not the enemy.
+const DIAG_LARGE_MULT := 2.0
 
 func setup(follow: Node3D, edit_store: EditStore = null) -> void:
     _follow = follow
@@ -153,28 +155,24 @@ func _emit_diagnostic() -> void:
     var idx: PackedInt32Array = _job_arrays[Mesh.ARRAY_INDEX]
     var owners := _mesher.get_last_triangle_owners()
     var sizes := _mesher.get_last_triangle_owner_sizes()
-    if owners.size() * 3 != idx.size():
+    var errors := _mesher.get_last_triangle_owner_errors()
+    if owners.size() * 3 != idx.size() or errors.size() != owners.size():
         return # owner array doesn't match this mesh — skip rather than mis-map
     var ro := Vector3(_root_origin_i)
     var cam_world := (_job_cam + ro) * base_cell
-    var big := PackedVector3Array()
-    var small := PackedVector3Array()
+    var backlog := PackedVector3Array()
     var t := 0
     for base in range(0, idx.size(), 3):
-        var s_world: float = sizes[t] * base_cell
+        var we_world: float = errors[t] * base_cell   # owner leaf's geometric error in metres
         var center_world: Vector3 = (owners[t] + Vector3.ONE * (sizes[t] * 0.5)) * base_cell
         var d := maxf(center_world.distance_to(cam_world), 0.001)
-        var px := s_world * _job_proj / d
-        if px > _job_eps * DIAG_LARGE_MULT or px < _job_eps * DIAG_SMALL_MULT:
-            var a := (ro + verts[idx[base]]) * base_cell
-            var b := (ro + verts[idx[base + 1]]) * base_cell
-            var c := (ro + verts[idx[base + 2]]) * base_cell
-            if px > _job_eps * DIAG_LARGE_MULT:
-                big.append(a); big.append(b); big.append(c)
-            else:
-                small.append(a); small.append(b); small.append(c)
+        var px := we_world * _job_proj / d            # error projected to pixels — collapse_test's own metric
+        if px > _job_eps * DIAG_LARGE_MULT:           # coarser than warranted → still in the refine backlog
+            backlog.append((ro + verts[idx[base]]) * base_cell)
+            backlog.append((ro + verts[idx[base + 1]]) * base_cell)
+            backlog.append((ro + verts[idx[base + 2]]) * base_cell)
         t += 1
-    _inval.set_diagnostic(big, small)
+    _inval.set_diagnostic(backlog, PackedVector3Array())
 
 
 # Tune the coverage radius live (the `dcworld <radius>` arg). Capped so the window fits inside the root with
@@ -362,16 +360,19 @@ func _finish() -> void:
     _control()
 
 
-# Loop B of the budget controller (doc 20): nudge eps toward the RENDER budget only. Coarsen (raise eps) when
-# frame-gen time is over budget; refine (lower eps) only when the frame has headroom AND the current level is
-# fully bloomed (not _refine_pending — the metered drain spreads each level over frames). Job work-ms does NOT
-# enter here: the worker is off the render thread, so a heavy retained-tree job adds mesh latency, not frame
-# cost — letting it drive eps was the old peg. Damped: backs off (×1.4) faster than it refines (×0.9). A change
-# marks _eps_dirty → re-mesh applies it; in the comfort band eps stops moving. Floor + collapse derive from eps.
+# Budget controller (doc 20): MAX DETAIL until the GPU complains. eps is the detail TARGET, driven toward the
+# floor whenever the rendered frame has headroom — decoupled from the worker (NOT gated on _refine_pending). A
+# CPU-bound worker used to freeze eps at the coarse start, so terrain never sharpened though the GPU sat idle;
+# now eps heads to the floor and the worker chases it worst-on-screen-first at CPU speed, so the mesh sharpens
+# progressively while the frame stays smooth. Only a real frame-budget overrun (too many triangles for the GPU)
+# raises eps to coarsen — and raising eps sheds the cells with the SMALLEST projected error first (the far /
+# flat ones, smallest on screen), so detail degrades least-visibly. Job work-ms never enters here: the worker
+# is off the render thread, so its latency isn't frame cost. Damped: ×1.4 down-detail vs ×0.9 up-detail, with a
+# 0.8–1.0 budget hysteresis band so eps settles instead of flapping. _eps_dirty re-meshes to apply a change.
 func _control() -> void:
     var prev := _eps_px
     var over := _frame_ms > frame_budget
-    var under := not _refine_pending and _frame_ms < frame_budget * 0.5
+    var under := _frame_ms < frame_budget * 0.8
     if over:
         _eps_px = minf(_eps_px * 1.4, EPS_MAX)
     elif under:

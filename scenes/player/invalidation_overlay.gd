@@ -11,8 +11,8 @@ const LIFETIME := 5.0
 const THICKNESS := 0.04                 # ImmediateMesh lines are 1px; draw each a few times offset
 const BLUE  := Color(0.25, 0.55, 1.0)   # voxels an edit changed
 const GREEN := Color(0.25, 1.0,  0.45)  # triangles re-meshed
-const DIAG_LARGE := Color(0.95, 0.25, 0.2)  # diagnostic: triangle too big on screen (under-resolved)
-const DIAG_SMALL := Color(0.95, 0.9,  0.2)  # diagnostic: triangle too small on screen (over-resolved)
+const DIAG_LARGE := Color(0.95, 0.25, 0.2)  # diagnostic: refinement backlog (leaf coarser than its detail warrants)
+const DIAG_SMALL := Color(0.95, 0.9,  0.2)  # diagnostic: (unused — over-resolved pass retired; max detail is the goal)
 
 var _boxes: Array = []   # [{min: Vector3, max: Vector3, color: Color, t: float}]
 var _tris:  Array = []   # [{verts: PackedVector3Array (multiple of 3, world), t: float}]

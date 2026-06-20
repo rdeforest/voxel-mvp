@@ -40,6 +40,7 @@ struct Cell {
 	// A fresh cell is born with both invalid (solve once), so the full-build path is unaffected.
 	double  we_cache  = 0.0;        // sqrt(qef.residual(solved vertex)) — the collapse screen-error numerator
 	Vector3 vpos_cache;             // solved vertex position (lattice-local)
+	double  verr_cache = 0.0;       // sqrt(qef.residual(vpos)) — this leaf's geometric error (dcinval diagnostic)
 	Vector3 vnorm_cache;            // solved vertex normal
 	Color   vcol_cache;             // solved vertex material colour (only when emit_color)
 	bool we_valid  = false;         // we_cache holds this cell's current qef's residual
@@ -112,6 +113,7 @@ struct Octree {
 	PackedInt32Array indices;
 	PackedVector3Array tri_owners;      // WORLD owner-cell origin per emitted triangle
 	PackedFloat32Array tri_owner_sizes; // parallel: owner cell SIZE (lattice units)
+	PackedFloat32Array tri_owner_errors; // parallel: owner leaf's geometric error `we` (lattice units, dcinval)
 
 	// World-lattice origin of a cell (cells store origin relative to the octree root).
 	Vector3i cell_world_origin(int idx) const {
@@ -572,6 +574,7 @@ struct Octree {
 			Vector3 v = qef.solve(cmin, cmax);
 			Vector3 n = qef.nsum.length_squared() > 0.0 ? qef.nsum.normalized() : Vector3(0, 1, 0);
 			cells[idx].vpos_cache = v;
+			cells[idx].verr_cache = Math::sqrt(qef.residual(v)); // same `we` collapse_test uses — dcinval reads it per emitted leaf
 			cells[idx].vnorm_cache = n;
 			if (emit_color) {
 				// Sample the solid voxel just behind the surface: the normal points
@@ -636,13 +639,14 @@ struct Octree {
 		LocalVector<int32_t> indices;
 		LocalVector<Vector3> owners;
 		LocalVector<float> owner_sizes;
+		LocalVector<float> owner_errs;   // parallel: owner leaf's geometric error (dcinval)
 	};
 
 	// Emit one triangle wound so its front face points `outward` (Godot is CW-from-front,
 	// so reverse when the right-hand normal already points outward). `owner` (world lattice)
 	// is the cell that owns this edge — tagged per triangle for the incremental splice.
 	// `owner_size` is the owner cell's size in lattice units, for the B1 alignment fix.
-	void emit_tri(EmitSink &sink, int i0, int i1, int i2, const Vector3 &outward, const Vector3 &owner, float owner_size) {
+	void emit_tri(EmitSink &sink, int i0, int i1, int i2, const Vector3 &outward, const Vector3 &owner, float owner_size, float owner_err) {
 		Vector3 n = (verts[i1] - verts[i0]).cross(verts[i2] - verts[i0]);
 		if (n.dot(outward) >= 0.0) {
 			sink.indices.push_back(i0); sink.indices.push_back(i2); sink.indices.push_back(i1);
@@ -651,16 +655,17 @@ struct Octree {
 		}
 		sink.owners.push_back(owner);
 		sink.owner_sizes.push_back(owner_size);
+		sink.owner_errs.push_back(owner_err);
 	}
 
 	// Decide winding PER TRIANGLE, not once for the whole quad: a quad spanning a LOD
 	// size jump is non-planar, so a single flip decision leaves one of its two triangles
 	// back-facing — a culled, see-through gap. Orienting each triangle to `outward`
 	// independently keeps the surface consistently wound across the seam.
-	void emit_poly(EmitSink &sink, const int ring[], int rc, const Vector3 &outward, const Vector3 &owner, float owner_size) {
-		emit_tri(sink, ring[0], ring[1], ring[2], outward, owner, owner_size);
+	void emit_poly(EmitSink &sink, const int ring[], int rc, const Vector3 &outward, const Vector3 &owner, float owner_size, float owner_err) {
+		emit_tri(sink, ring[0], ring[1], ring[2], outward, owner, owner_size, owner_err);
 		if (rc == 4) {
-			emit_tri(sink, ring[0], ring[2], ring[3], outward, owner, owner_size);
+			emit_tri(sink, ring[0], ring[2], ring[3], outward, owner, owner_size, owner_err);
 		}
 	}
 
@@ -724,7 +729,7 @@ struct Octree {
 			outward = Vector3();
 			outward[axis] = axis_face;
 		}
-		emit_poly(sink, ring, rc, outward, to_v3(cell_world_origin(leaf_idx)), float(cells[leaf_idx].size));
+		emit_poly(sink, ring, rc, outward, to_v3(cell_world_origin(leaf_idx)), float(cells[leaf_idx].size), float(cells[leaf_idx].verr_cache));
 	}
 
 	void emit_leaf_edges(EmitSink &sink, int leaf_idx) {
@@ -775,6 +780,7 @@ struct Octree {
 		indices.clear();
 		tri_owners.clear();
 		tri_owner_sizes.clear();
+		tri_owner_errors.clear();
 		reset_leaves();
 		uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
 		// level_start is set only by the parallel bottom-up full build; the grow/reconcile path leaves it
@@ -833,9 +839,11 @@ struct Octree {
 		indices.resize(total_idx);
 		tri_owners.resize(total_tri);
 		tri_owner_sizes.resize(total_tri);
+		tri_owner_errors.resize(total_tri);
 		int32_t *ip = indices.ptrw();
 		Vector3 *op = tri_owners.ptrw();
 		float *sp = tri_owner_sizes.ptrw();
+		float *ep = tri_owner_errors.ptrw();
 		int64_t io = 0, to = 0;
 		for (int e = 0; e < ecount; ++e) {
 			const EmitSink &s = sinks[e];
@@ -846,6 +854,7 @@ struct Octree {
 			if (s.owners.size() > 0) {
 				memcpy(op + to, s.owners.ptr(), s.owners.size() * sizeof(Vector3));
 				memcpy(sp + to, s.owner_sizes.ptr(), s.owner_sizes.size() * sizeof(float));
+				memcpy(ep + to, s.owner_errs.ptr(), s.owner_errs.size() * sizeof(float));
 				to += s.owners.size();
 			}
 		}
