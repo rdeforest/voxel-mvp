@@ -287,7 +287,7 @@ func test_edit_world_equals_fresh_build():
     var dmin := Vector3i((ctr - Vector3.ONE * (r + 1.0)).floor())
     var dmax := Vector3i((ctr + Vector3.ONE * (r + 1.0)).ceil())
 
-    var edited: Array = m.edit_world(cam, 500.0, 2.0, dmin, dmax)
+    var edited: Array = m.edit_world(s, cam, 500.0, 2.0, dmin, dmax)
     var edit_samples: int = m.get_last_build_sample_count()
 
     var fm := DCOctreeMesher.new()

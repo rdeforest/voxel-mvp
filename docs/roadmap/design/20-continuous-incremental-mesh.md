@@ -49,6 +49,17 @@ Four innovations close both:
 rebuild is a **re-root** (the player leaves the root box — rare, and itself a
 deferred incremental target).
 
+**Vision framing (not just perf).** The coarse→fine bloom this machinery produces
+— the world resolving *where the player directs attention* — is a **diegetic
+dream-tell**, not an artifact to hide: in dreams, things don't resolve until you
+look at them, which tells the player *"you are the center of the universe."* So
+**P+ (refine toward gaze/motion) is the mechanic, not merely an optimisation**,
+and the bloom's pacing is an aesthetic lever. The game is intended to **open in a
+void** and let the world build coarsely + refine in front of the player. See
+[[world-builds-on-attention-dream-tell]] and design doc 14 (consensus-reality);
+the void-start must reconcile with the world-ready gate (the player likely floats
+until the ground resolves — itself on-theme).
+
 ## Foundation (shipped): grow + 3a solve caches
 
 `grow_world` (doc 17 P2.5) already re-meshes only the band a move/eps change

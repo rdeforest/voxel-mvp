@@ -116,7 +116,7 @@ public:
 	// [dirty_min, dirty_max) (WORLD lattice), with the window unchanged. Re-samples only the edit box (not the
 	// whole window), then re-collapses + meshes against camera/proj/eps. Surface-identical to a fresh
 	// mesh_world of the edited field. Empty Array if no world octree is retained (caller falls back to build).
-	Array edit_world(Vector3 camera, double proj, double eps_px, Vector3i dirty_min, Vector3i dirty_max);
+	Array edit_world(Ref<EditStore> store, Vector3 camera, double proj, double eps_px, Vector3i dirty_min, Vector3i dirty_max);
 
 	// Field-sampled leaf count of the last build/grow — after grow_world, just the leading-edge band.
 	int get_last_build_sample_count() const { return _last_build_samples; }

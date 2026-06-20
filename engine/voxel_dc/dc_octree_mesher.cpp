@@ -1835,10 +1835,15 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 // re-sampled — not the whole window (the move-path's no-resample property, extended to field changes). Empty
 // Array if no world octree is retained (caller falls back to mesh_world). camera/proj/eps are the current
 // view (unchanged by a pure edit; passed so a re-bake/collapse uses the live operating point).
-Array DCOctreeMesher::edit_world(Vector3 camera, double proj, double eps_px, Vector3i dirty_min, Vector3i dirty_max) {
-	if (_persist == nullptr) {
+Array DCOctreeMesher::edit_world(Ref<EditStore> store, Vector3 camera, double proj, double eps_px, Vector3i dirty_min, Vector3i dirty_max) {
+	if (_persist == nullptr || store.is_null()) {
 		return Array();
 	}
+	// Re-point the retained source at the CURRENT store snapshot (it includes the edit). The cached QEFs
+	// outside the edit box still agree with it (the field there is unchanged); reconcile_edit re-samples
+	// the box against this store. A later grow_world also reads this snapshot — the retained source follows.
+	_persist->world_store = store;
+	_persist->world_src.store = store.ptr();
 	Octree &oct = _persist->oct;
 	_last_accel_ms = 0.0;
 	if (_persist->world_src.has_accel) {
@@ -1913,7 +1918,7 @@ void DCOctreeMesher::_bind_methods() {
 			D_METHOD("grow_world", "camera", "proj", "eps_px", "win_min", "win_max"),
 			&DCOctreeMesher::grow_world);
 	ClassDB::bind_method(
-			D_METHOD("edit_world", "camera", "proj", "eps_px", "dirty_min", "dirty_max"),
+			D_METHOD("edit_world", "store", "camera", "proj", "eps_px", "dirty_min", "dirty_max"),
 			&DCOctreeMesher::edit_world);
 	ClassDB::bind_method(D_METHOD("remesh", "camera", "proj", "eps_px"), &DCOctreeMesher::remesh);
 	ClassDB::bind_method(D_METHOD("get_last_build_sample_count"), &DCOctreeMesher::get_last_build_sample_count);

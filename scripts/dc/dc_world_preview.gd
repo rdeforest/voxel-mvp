@@ -53,6 +53,14 @@ var _built := false
 var _dirty := false                  # an edit happened → full rebuild to pick it up
 var _last_center := Vector3.INF
 
+# Incremental edits (doc 20 E): when ON, a terrain edit re-meshes only its box via edit_world instead of a
+# full rebuild. Default OFF — edit_world's localized result is still ~6% off a fresh build (doc 20 §E), so
+# this is a DEBUG toggle (key I) for GPU-eyeing the artifact and the speed, not the default path yet.
+var incremental_edits := false
+var _pending_edit := false           # an incremental edit is queued (box accumulated in _edit_min/_max)
+var _edit_min := Vector3i.ZERO       # accumulated edit box (WORLD LATTICE) since the last edit dispatch
+var _edit_max := Vector3i.ZERO
+
 var _task_id := -1
 var _job_store: EditStore            # immutable snapshot handed to the worker
 var _job_arrays: Array = []
@@ -60,8 +68,11 @@ var _job_cam := Vector3.ZERO
 var _job_proj := 0.0
 var _job_eps := EPS_START            # eps captured for the in-flight job
 var _job_is_grow := false            # in-flight job is an incremental grow (vs a full build)
+var _job_is_edit := false            # in-flight job is an incremental edit (edit_world)
 var _job_win_min := Vector3i.ZERO
 var _job_win_max := Vector3i.ZERO
+var _job_edit_min := Vector3i.ZERO   # edit box captured for the worker (WORLD LATTICE)
+var _job_edit_max := Vector3i.ZERO
 var _job_work_ms := 0.0              # worker build time of the last job = mesh lag (controller signal)
 var _palette: PackedColorArray      # material id → albedo (per-vertex colours), like the clipmap render
 var _inval: Node3D                  # the invalidation overlay (dcinval) — fed the LOD diagnostic
@@ -84,9 +95,27 @@ func setup(follow: Node3D, edit_store: EditStore = null) -> void:
     visible = false
 
 
-func _on_terrain_edit(_event: VoxelEvent) -> void:
-    if _enabled:
-        _dirty = true   # grow only samples NEW cells; an edit in the interior needs a full rebuild
+func _on_terrain_edit(event: VoxelEvent) -> void:
+    if not _enabled:
+        return
+    if incremental_edits and event is TerrainSdfChangedEvent:
+        _accumulate_edit_box(event)   # re-mesh only this box via edit_world (doc 20 E)
+    else:
+        _dirty = true   # default: grow only samples NEW cells, so an interior edit needs a full rebuild
+
+
+# Union the edit's world-metre box into the pending edit box, in WORLD LATTICE (world / base_cell). The
+# worker re-meshes the union once dispatched, so several edits in one frame coalesce into one edit_world.
+func _accumulate_edit_box(e: TerrainSdfChangedEvent) -> void:
+    var lo := Vector3i((e.box_origin / base_cell).floor())
+    var hi := Vector3i(((e.box_origin + e.box_size) / base_cell).ceil())
+    if _pending_edit:
+        _edit_min = _edit_min.min(lo)
+        _edit_max = _edit_max.max(hi)
+    else:
+        _edit_min = lo
+        _edit_max = hi
+        _pending_edit = true
 
 
 func is_enabled() -> bool:
@@ -163,7 +192,7 @@ func _process(_dt: float) -> void:
     _frame_ms = lerpf(_frame_ms, Perf.frame_gen_ms(), 0.1)   # smoothed REAL frame-gen cost (render-cpu+GPU),
     # NOT the vsync/fps_max-capped dt — so the controller's frame-headroom gate sees true GPU load, not the
     # quantised display interval (a 144Hz vsync pins dt at ~6.9ms and only jumps at the fps cliff).
-    Perf.status("dcworld", "eps_px %.1f   mesh-lag %.0f ms (%s)" % [_eps_px, _job_work_ms, "grow" if _job_is_grow else "build"])
+    Perf.status("dcworld", "eps_px %.1f   mesh-lag %.0f ms (%s)" % [_eps_px, _job_work_ms, _job_kind()])
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()
@@ -174,6 +203,8 @@ func _process(_dt: float) -> void:
     # (P2.5 incremental band-diff), reusing the retained octree.
     if not _built or _dirty or _outside_root(p):
         _dispatch_build(p)
+    elif _pending_edit:
+        _dispatch_edit(p)
     elif p.distance_to(_last_center) > RECENTER or _eps_dirty:
         _dispatch_grow(p)
 
@@ -227,6 +258,7 @@ func _dispatch_build(p: Vector3) -> void:
     _built = true
     _dirty = false
     _eps_dirty = false
+    _pending_edit = false                         # a full rebuild already incorporates any pending edit
     _last_center = p
     var win := _window(p)
     _job_win_min = win[0]
@@ -235,6 +267,7 @@ func _dispatch_build(p: Vector3) -> void:
     _job_proj = _view_proj()
     _job_eps = _eps_px                            # capture the operating point for the worker
     _job_is_grow = false
+    _job_is_edit = false
     _task_id = WorkerThreadPool.add_task(_run_job, false, "dcworld build")
 
 
@@ -250,12 +283,31 @@ func _dispatch_grow(p: Vector3) -> void:
     _job_proj = _view_proj()
     _job_eps = _eps_px
     _job_is_grow = true
+    _job_is_edit = false
     _task_id = WorkerThreadPool.add_task(_run_job, false, "dcworld grow")
+
+
+# Incremental edit (doc 20 E): re-mesh ONLY the edited box via edit_world, reusing the retained octree.
+# Snapshot the store (it now includes the edit) so the worker samples it immutably, like the build path.
+func _dispatch_edit(p: Vector3) -> void:
+    _pending_edit = false
+    _job_store = _edit_store.duplicate() if _edit_store != null else null
+    _last_center = p
+    _job_edit_min = _edit_min
+    _job_edit_max = _edit_max
+    _job_cam = _camera_lattice()
+    _job_proj = _view_proj()
+    _job_eps = _eps_px
+    _job_is_grow = false
+    _job_is_edit = true
+    _task_id = WorkerThreadPool.add_task(_run_job, false, "dcworld edit")
 
 
 func _run_job() -> void:
     var t0 := Time.get_ticks_usec()
-    if _job_is_grow:
+    if _job_is_edit:
+        _job_arrays = _mesher.edit_world(_job_store, _job_cam, _job_proj, _job_eps, _job_edit_min, _job_edit_max)
+    elif _job_is_grow:
         _job_arrays = _mesher.grow_world(_job_cam, _job_proj, _job_eps, _job_win_min, _job_win_max)
     else:
         _job_arrays = _mesher.mesh_world(_job_store, _root_origin_i, DEPTH, base_cell,
@@ -307,6 +359,20 @@ func set_max_lag(ms: float) -> void:
 func set_frame_budget(ms: float) -> void:
     frame_budget = maxf(1.0, ms)
     _eps_dirty = true   # kick the controller to re-tune toward the new budget even while stationary
+
+
+# Debug toggle (key I): incremental edits via edit_world vs. the default full-rebuild-on-edit. Returns the
+# new state so the caller can surface it. OFF is the trusted path; ON is the doc-20-E work under inspection.
+func toggle_incremental_edits() -> bool:
+    incremental_edits = not incremental_edits
+    return incremental_edits
+
+
+# The kind of the last job, for the perf overlay (an incremental edit reads "edit", a move "grow").
+func _job_kind() -> String:
+    if _job_is_edit:
+        return "edit"
+    return "grow" if _job_is_grow else "build"
 
 
 func _arrays_to_mesh(arrays: Array) -> ArrayMesh:
