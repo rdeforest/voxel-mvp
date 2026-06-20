@@ -343,6 +343,30 @@ func test_grow_world_budgeted_refine_drains_to_full():
     assert_eq(_tri_sigs(drained), _tri_sigs(full), "drained budgeted refine == unbudgeted grow (same settled surface)")
 
 
+# Stage M (doc 20) — residency / visible split: the residency box (build_box) can be larger than the VISIBLE
+# window (emit filter). Moving only the visible window over a fixed resident region re-samples NOTHING — the M
+# win (no re-bloom on a turn/backtrack) — and the visible window draws a strict subset of the resident surface.
+func test_grow_world_residency_emit_split():
+    var s := _store()
+    var origin := _region_origin(s)
+    var cam := Vector3(16, 16, 120)
+    var rmin := origin                                 # residency = the whole root
+    var rmax := origin + WIN_FULL
+    var a_min := origin;                       var a_max := origin + Vector3i(16, SIZE, SIZE)  # visible A (left)
+    var b_min := origin + Vector3i(16, 0, 0);  var b_max := origin + WIN_FULL                  # visible B (right)
+
+    var m := DCOctreeMesher.new()
+    m.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), rmin, rmax)  # residency sampled once
+    m.grow_world(cam, 500.0, 2.0, rmin, rmax, -1, a_min, a_max)   # visible = A
+    m.grow_world(cam, 500.0, 2.0, rmin, rmax, -1, b_min, b_max)   # move visible to B (residency unchanged)
+    assert_eq(m.get_last_build_sample_count(), 0, "moving only the visible window over fixed residency re-sampled nothing — the M win")
+
+    var draw_a: Array = m.grow_world(cam, 500.0, 2.0, rmin, rmax, -1, a_min, a_max)   # visible = A
+    var draw_all: Array = m.grow_world(cam, 500.0, 2.0, rmin, rmax)                   # no emit filter → draw all
+    assert_gt((draw_a[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), 0, "the visible window drew a surface")
+    assert_lt(_tri_sigs(draw_a).size(), _tri_sigs(draw_all).size(), "the visible window draws a strict subset of the resident surface (emit filter)")
+
+
 # Stage B1b — bounded resident set (leak-proof, prune-robust): sweep the window forward across the root and
 # back to the START (a round trip), repeatedly. The free-list reuses evicted slots, so returning to the same
 # window state must give the EXACT same cell-array size every loop — a leak would grow it each loop. (This

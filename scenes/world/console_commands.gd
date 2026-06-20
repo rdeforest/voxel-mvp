@@ -55,6 +55,7 @@ func _table() -> Array:
         [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + mesh-lag."],
         [meshlag,         "meshlag",   "Max mesh lag (ms) the budget controller keeps the worker re-mesh under — higher = more terrain detail, slower re-mesh on a move. Usage: meshlag [ms] (default 500)"],
         [dcrefine,        "dcrefine",  "doc 20 C: floor-refinements per grow while the world blooms in. Higher = faster bloom, bigger per-frame cost; lower = smoother, slower. Usage: dcrefine [n] (default 4000)"],
+        [dcretain,        "dcretain",  "doc 20 M: metres kept resident BEYOND the visible window — a turn or backtrack within it re-samples nothing (no re-bloom), and the edge ahead is pre-baked. Higher = more retention + cost. Usage: dcretain [m] (default 128)"],
         [dcframebudget,   "dcframebudget", "Per-frame render budget (ms) the controller refines toward — refines while render cost < half this, backs off above it. Higher = more detail, lower fps. Usage: dcframebudget [ms] (default 16)"],
         [dcthreads,       "dcthreads", "Parallel accel-bake workers: `dcthreads <n>` sets the thread count; no args prints the phase timing (accel + build + collapse ms). Usage: dcthreads [n]"],
         [remesh,          "remesh",    "Force a full dcworld rebuild now (re-bake + build + collapse) — trigger a remesh without walking, then read `dcthreads` for the timing."],
@@ -253,6 +254,12 @@ func dcrefine(n := 0) -> void:
     if n > 0:
         world_preview.refine_cells = n
     LimboConsole.info("dcrefine: %d floor-refinements per grow while blooming (C) — higher = faster bloom, bigger per-frame cost" % world_preview.refine_cells)
+
+
+func dcretain(m := -1.0) -> void:
+    if m >= 0.0:
+        world_preview.retain_margin_m = m
+    LimboConsole.info("dcretain: %.0f m kept resident beyond the visible window (M) — turn/backtrack within it doesn't re-bloom" % world_preview.retain_margin_m)
 
 
 func dcframebudget(ms := 0.0) -> void:

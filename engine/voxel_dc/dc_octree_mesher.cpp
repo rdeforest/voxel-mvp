@@ -1786,15 +1786,22 @@ Array DCOctreeMesher::mesh_world(
 // (in both windows) keep their tree, QEFs, and vertices: a move re-samples just the leading-edge band,
 // not the whole vicinity. By construction the result is byte-identical to a from-scratch mesh_world of
 // the new window. Benign no-op (empty Array) if nothing is retained — caller falls back to mesh_world.
-Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max, int refine_budget) {
+Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max, int refine_budget, Vector3i emit_min, Vector3i emit_max) {
 	if (_persist == nullptr) {
 		return Array();
 	}
 	Octree &oct = _persist->oct;
 	oct.build_box = true;
 	oct.window_mode = true;
-	oct.build_min = win_min;
+	oct.build_min = win_min;   // M (doc 20): RESIDENCY box — sampled + kept (can be larger than the view).
 	oct.build_max = win_max;
+	// M (doc 20): emit only the VISIBLE window [emit_min, emit_max) — the retained cells outside it stay
+	// resident (no re-sample on backtrack) and pre-baked (ready when walked into), but aren't drawn. Default
+	// (emit_min == emit_max) draws the whole residency box (pre-M behaviour). The emit boundary stitches to
+	// the resident-but-hidden cells, so it's a clean LOD seam, not an open rim.
+	oct.emit_filter = (emit_min != emit_max);
+	oct.emit_min = emit_min;
+	oct.emit_max = emit_max;
 	// P1/P2: re-bake the accel over the NEW window so the leading-edge band is covered (an uncovered box
 	// would prune the band away). Keep the build's floor_k; recentre the accel on the new camera. The
 	// retained interior isn't rebuilt — its prune decisions stand (geometrically identical, empty either
@@ -1935,8 +1942,8 @@ void DCOctreeMesher::_bind_methods() {
 			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(PackedColorArray()),
 			DEFVAL(Vector3i()), DEFVAL(Vector3i()));
 	ClassDB::bind_method(
-			D_METHOD("grow_world", "camera", "proj", "eps_px", "win_min", "win_max", "refine_budget"),
-			&DCOctreeMesher::grow_world, DEFVAL(-1));
+			D_METHOD("grow_world", "camera", "proj", "eps_px", "win_min", "win_max", "refine_budget", "emit_min", "emit_max"),
+			&DCOctreeMesher::grow_world, DEFVAL(-1), DEFVAL(Vector3i()), DEFVAL(Vector3i()));
 	ClassDB::bind_method(D_METHOD("get_refine_pending"), &DCOctreeMesher::get_refine_pending);
 	ClassDB::bind_method(
 			D_METHOD("edit_world", "store", "camera", "proj", "eps_px", "dirty_min", "dirty_max"),

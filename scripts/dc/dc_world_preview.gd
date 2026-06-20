@@ -42,6 +42,11 @@ var mesh_target := mesh_ceil * REFINE_TARGET_FRAC # ms — under this (and frame
 # Bounds the SAMPLING cost; the per-grow emit is still O(window) until 3b. Tunable; `dcrefine` console knob.
 var refine_cells := 4000
 
+# M (doc 20): residency extends this far (metres) beyond the VISIBLE window — kept resident + pre-baked so a
+# turn or backtrack re-samples nothing, and the edge ahead is ready before you reach it. 0 = pre-M (residency
+# == visible). Bounded cost (O(residency)); clamps to the root. Tunable; `dcretain` console knob.
+var retain_margin_m := 128.0
+
 var base_cell    := VoxelConstants.RENDER_BASE_CELL  # metres per lattice unit (matches production density)
 var win_radius_m := 128.0                            # resident window half-extent (m) — graded floor + budget make it affordable
 var _eps_px      := EPS_START                        # the single operating point; floor + collapse both derive from it
@@ -76,6 +81,8 @@ var _job_is_grow := false            # in-flight job is an incremental grow (vs 
 var _job_is_edit := false            # in-flight job is an incremental edit (edit_world)
 var _job_refine_budget := -1         # C: refine budget captured for the worker (-1 = unbudgeted, on a move)
 var _refine_pending := false         # the last grow deferred refinement (budget hit) → keep draining at this eps
+var _job_emit_min := Vector3i.ZERO   # M: visible window captured for the worker (residency = _job_win_min/max)
+var _job_emit_max := Vector3i.ZERO
 var _job_win_min := Vector3i.ZERO
 var _job_win_max := Vector3i.ZERO
 var _job_edit_min := Vector3i.ZERO   # edit box captured for the worker (WORLD LATTICE)
@@ -234,13 +241,24 @@ func _outside_root(p: Vector3) -> bool:
     return p.x < lo.x or p.y < lo.y or p.z < lo.z or p.x > hi.x or p.y > hi.y or p.z > hi.z
 
 
-# The resident window around the player, in WORLD LATTICE, clamped to the root box.
-func _window(p: Vector3) -> Array:
-    var r := int(ceil(win_radius_m / base_cell))          # radius in lattice units
+# A box of the given radius around the player, in WORLD LATTICE, clamped to the root.
+func _window_at(p: Vector3, radius_m: float) -> Array:
+    var r := int(ceil(radius_m / base_cell))              # radius in lattice units
     var c := Vector3i((p / base_cell).round())
     var lo := _root_origin_i
     var hi := _root_origin_i + Vector3i.ONE * ROOT_SIZE
     return [(c - Vector3i.ONE * r).clamp(lo, hi), (c + Vector3i.ONE * r).clamp(lo, hi)]
+
+
+# Visible window (DRAWN). M (doc 20): the larger residency window below keeps more than this resident.
+func _window(p: Vector3) -> Array:
+    return _window_at(p, win_radius_m)
+
+
+# Residency window (SAMPLED + KEPT, pre-baked) — extends retain_margin_m beyond the visible window so a
+# backtrack or turn re-samples nothing. Clamps to the root, so near a root edge it shrinks toward visible.
+func _retained_window(p: Vector3) -> Array:
+    return _window_at(p, win_radius_m + retain_margin_m)
 
 
 # px per world unit at unit distance (FOV + viewport height only). 0 with no camera.
@@ -285,9 +303,12 @@ func _dispatch_build(p: Vector3) -> void:
 func _dispatch_grow(p: Vector3, refine_budget: int) -> void:
     _eps_dirty = false
     _last_center = p
-    var win := _window(p)
-    _job_win_min = win[0]
-    _job_win_max = win[1]
+    var ret := _retained_window(p)   # M: residency — sampled + kept
+    var vis := _window(p)            # M: visible — drawn (emit filter)
+    _job_win_min = ret[0]
+    _job_win_max = ret[1]
+    _job_emit_min = vis[0]
+    _job_emit_max = vis[1]
     _job_cam = _camera_lattice()
     _job_proj = _view_proj()
     _job_eps = _eps_px
@@ -318,7 +339,7 @@ func _run_job() -> void:
     if _job_is_edit:
         _job_arrays = _mesher.edit_world(_job_store, _job_cam, _job_proj, _job_eps, _job_edit_min, _job_edit_max)
     elif _job_is_grow:
-        _job_arrays = _mesher.grow_world(_job_cam, _job_proj, _job_eps, _job_win_min, _job_win_max, _job_refine_budget)
+        _job_arrays = _mesher.grow_world(_job_cam, _job_proj, _job_eps, _job_win_min, _job_win_max, _job_refine_budget, _job_emit_min, _job_emit_max)
     else:
         _job_arrays = _mesher.mesh_world(_job_store, _root_origin_i, DEPTH, base_cell,
                 _job_cam, _job_proj, _job_eps, true, _palette, _job_win_min, _job_win_max)
