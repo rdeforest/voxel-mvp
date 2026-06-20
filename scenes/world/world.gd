@@ -12,6 +12,7 @@ var _detachment_scout: DetachmentScout
 var _edit_store: EditStoreManager
 var _part_index: PartIndex
 var _console: ConsoleCommands
+var _debug_server: DebugServer
 
 # World-ready gate: gameplay + physics systems start inactive and resume on a
 # WorldReadyEvent. With the store-backed field resident from frame one there's nothing to
@@ -46,6 +47,10 @@ func _ready() -> void:
     _world_preview.set_enabled(true)                       # THE terrain render (doc 17 P3); `dcworld` toggles it
     _player.world_preview = _world_preview                 # key I toggles its incremental-edit path (doc 20 E)
     Perf.set_shown(true)                                   # perf overlay on by default during co-dev; `perf` toggles it
+    if OS.is_debug_build():                                # localhost telemetry/command endpoint (never shipped)
+        _debug_server = DebugServer.new()
+        add_child(_debug_server)
+        _debug_server.setup(_world_preview)
     # Body-driven JIT terrain collision from our DC mesher, sourced from the EditStore
     # (generator + edits) — godot_voxel collision is off (world.tscn generate_collisions
     # = false), so this is the only terrain body.
