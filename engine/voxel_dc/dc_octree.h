@@ -7,6 +7,7 @@
 // case). The incremental grow/reconcile/edit paths (doc 16/17/20) live here too.
 
 #include "dc_mesh_common.h"  // to_v3, QUERY_EPS, g_mesh_threads, parallel_for
+#include "dc_mmap_arena.h"   // MmapArena — the cell arena, disk-paged (M2)
 #include "dc_qef.h"          // voxel_dc::Qef
 #include "dc_sdf_source.h"   // SdfSource
 #include "octree_geometry.h" // voxel_dc::CB / EDGES / RING
@@ -126,7 +127,7 @@ struct Octree {
 	uint64_t last_reset_us = 0;    // recollapse sub-phase: reset_leaves() full O(cells) walk
 	uint64_t last_pass1_us = 0;    // recollapse sub-phase: vertex slot scan + parallel place_vertex
 	uint64_t last_pass2_us = 0;    // recollapse sub-phase: edge scan + parallel emit + concat
-	LocalVector<Cell> cells;
+	MmapArena<Cell> cells; // M2: disk-paged cell arena — hot (visible) cells in RAM, cold (retained) on disk
 	LocalVector<int> free_list;    // (B1b) indices of cells killed by eviction, reused by the next grow so
 	                               // `cells` stays bounded across a long traverse instead of leaking.
 	PackedVector3Array verts;
