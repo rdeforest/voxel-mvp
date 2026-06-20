@@ -186,17 +186,17 @@ func _frame_color(ms: float) -> Color:
 # Called by the Strip child. Draws the frame-time graph across the drawer's own rect (oldest bar
 # left, newest right). Bars stand on a faint dark backdrop so the colours read on the paper card.
 func _draw_graph(c: Control) -> void:
-    var size := c.size
-    var bw := size.x / float(GRAPH_CAP)
-    c.draw_rect(Rect2(Vector2.ZERO, size), Color(0.0, 0.0, 0.0, 0.30))
+    var control_size := c.size
+    var bw := control_size.x / float(GRAPH_CAP)
+    c.draw_rect(Rect2(Vector2.ZERO, control_size), Color(0.0, 0.0, 0.0, 0.30))
     for ms in _LIMITS:                                   # faint reference lines at 8/16/34/100
-        var ry := size.y - clampf(ms / FULL_MS, 0.0, 1.0) * size.y
-        c.draw_line(Vector2(0.0, ry), Vector2(size.x, ry), Color(1.0, 1.0, 1.0, 0.12))
+        var ry := control_size.y - clampf(ms / FULL_MS, 0.0, 1.0) * control_size.y
+        c.draw_line(Vector2(0.0, ry), Vector2(control_size.x, ry), Color(1.0, 1.0, 1.0, 0.12))
     var n := _frames.size()
     for i in n:
         var ms := _frames[i]
-        var h := clampf(ms / FULL_MS, 0.0, 1.0) * size.y
+        var h := clampf(ms / FULL_MS, 0.0, 1.0) * control_size.y
         var x := i * bw
-        c.draw_rect(Rect2(x, size.y - h, maxf(bw, 1.0), h), _frame_color(ms))
+        c.draw_rect(Rect2(x, control_size.y - h, maxf(bw, 1.0), h), _frame_color(ms))
         if _marks[i] != 0:
-            c.draw_line(Vector2(x, 0.0), Vector2(x, size.y), Color(0.40, 0.70, 1.0, 0.85), 1.0)
+            c.draw_line(Vector2(x, 0.0), Vector2(x, control_size.y), Color(0.40, 0.70, 1.0, 0.85), 1.0)
