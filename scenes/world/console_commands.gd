@@ -241,11 +241,13 @@ func remesh() -> void:
     world_preview.force_rebuild()
     LimboConsole.info("remesh: full dcworld rebuild queued — read `dcthreads` for the phase timing")
 
-# Wall-clock cap (ms) on refine work per grow while the world blooms — "do as much as you can in X ms".
+# Ceiling (ms) on the ADAPTIVE refine budget. The budget auto-scales to the grow's rebuild overhead; this
+# caps it, bounding per-grow latency. Higher = faster bloom at huge cell counts, longer per-job latency.
 func dcrefine(ms := 0.0) -> void:
     if ms > 0.0:
-        world_preview.refine_us = int(ms * 1000.0)
-    LimboConsole.info("dcrefine: %.1f ms refine budget per grow while blooming (C/P) — higher = faster bloom, longer per-job latency" % (world_preview.refine_us / 1000.0))
+        world_preview.refine_us_cap = int(ms * 1000.0)
+    LimboConsole.info("dcrefine: budget cap %.1f ms (now %.1f ms, auto-scaled to rebuild overhead) — higher = faster bloom, longer latency" % [
+        world_preview.refine_us_cap / 1000.0, world_preview.refine_us / 1000.0])
 
 
 func dcretain(m := -1.0) -> void:

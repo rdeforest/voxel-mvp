@@ -37,7 +37,10 @@ var frame_budget := 16.0      # ms — frame-gen (render) budget; the `dcframebu
 # worst-on-screen first. Each grow refines until this elapses then defers the rest (refine_pending drains it
 # over frames), so the bloom spreads and per-job latency stays bounded. Self-tunes across hardware/scene where
 # a fixed count can't. Tunable; `dcrefine` console knob.
-var refine_us := 8000
+var refine_us := 8000                 # current per-grow refine budget (µs) — set ADAPTIVELY in _finish each grow
+const REFINE_OVERHEAD_K := 1.5        # refine for K× the grow's rebuild overhead (keeps the useful fraction high)
+const REFINE_US_MIN := 2000           # floor: always refine at least 2 ms so progress never stalls
+var refine_us_cap := 64000            # ceiling on the adaptive budget (µs) — bounds per-grow latency; `dcrefine` knob
 
 # M (doc 20): residency extends this far (metres) beyond the VISIBLE window — kept resident + pre-baked so a
 # turn or backtrack re-samples nothing, and the edge ahead is ready before you reach it. 0 = pre-M (residency
@@ -362,6 +365,13 @@ func _finish() -> void:
         _emit_diagnostic()   # refresh the dcinval LOD overlay for this mesh
     _refine_pending = _job_is_grow and _mesher.get_refine_pending()   # C: more refinement deferred → keep draining
     Perf.report_queue(_mesher.get_last_refine_queue_size() if _job_is_grow else 0)   # backlog graph in the perf window
+    if _job_is_grow:
+        # Adaptive refine budget: each grow pays an O(cells) rebuild (collapse_ms) regardless of how much it
+        # refines, so a tiny fixed budget wastes most of the grow on overhead. Scale the budget to that overhead
+        # (refine for ~K× the rebuild cost) so the useful fraction stays high as the tree grows — measured ~5×
+        # the throughput vs a fixed 8ms at 1.6M cells. Capped (dcrefine) to bound per-grow latency.
+        var overhead_us := _mesher.get_last_collapse_ms() * 1000.0
+        refine_us = clampi(int(REFINE_OVERHEAD_K * overhead_us), REFINE_US_MIN, refine_us_cap)
     _control()
 
 
