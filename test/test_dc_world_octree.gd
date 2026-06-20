@@ -215,6 +215,10 @@ func _tri_sigs(arrays: Array) -> PackedStringArray:
     var idx:   PackedInt32Array   = arrays[Mesh.ARRAY_INDEX]
     var sigs := PackedStringArray()
     for i in range(0, idx.size(), 3):
+        # Skip degenerate (zero-area) triangles — the incremental emit (c3) tombstones removed triangles by
+        # collapsing their indices, which the GPU discards; the rendered surface is the non-degenerate set.
+        if idx[i] == idx[i + 1] or idx[i + 1] == idx[i + 2] or idx[i] == idx[i + 2]:
+            continue
         var t := [verts[idx[i]], verts[idx[i + 1]], verts[idx[i + 2]]]
         var mi := 0
         for k in range(1, 3):
@@ -373,8 +377,10 @@ func test_grow_world_persistent_frontier_drains_with_reuse():
 
     assert_gt(reuse_iters, 0, "the drain ran on the REUSED frontier (not all in the first rebuild grow)")
     assert_false(bm.get_refine_pending(), "the reused-frontier drain converged")
-    assert_eq(drained[Mesh.ARRAY_VERTEX].size(), full[Mesh.ARRAY_VERTEX].size(), "reuse-drained vertex count == one unbudgeted grow")
-    assert_eq(_tri_sigs(drained), _tri_sigs(full), "reuse-drained surface == unbudgeted grow (persistent frontier is correct)")
+    # The incremental emit (c3) leaves holes in the vertex array (freed slots) and tombstoned triangles, so the
+    # raw vertex/triangle counts differ from a dense full build — the RENDERED surface (non-degenerate tris) is
+    # what must match. _tri_sigs skips degenerate triangles, so this is the real correctness gate.
+    assert_eq(_tri_sigs(drained), _tri_sigs(full), "reuse-drained rendered surface == unbudgeted grow (incremental emit is correct)")
 
 
 # Stage M (doc 20) — residency / visible split: the residency box (build_box) can be larger than the VISIBLE

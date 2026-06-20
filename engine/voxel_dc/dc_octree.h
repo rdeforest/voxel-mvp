@@ -49,6 +49,11 @@ struct Cell {
 	bool we_valid  = false;         // we_cache holds this cell's current qef's residual
 	bool vtx_valid = false;         // vpos/vnorm/vcol_cache hold this cell's current qef's solve
 	bool dirty     = false;         // qef changed THIS reconcile → invalidate caches up to the root
+	// c3 tier 1 (doc 20): incremental emit. `vertex` doubles as a STABLE vertex slot across grows; tri_at/tri_n
+	// are this leaf's triangle range in the persistent index/owner arrays (tri_at = first triangle, tri_n = count),
+	// so a drain tombstones the old range + appends the new one instead of rebuilding the whole mesh.
+	int tri_at = 0;                 // first triangle index into the persistent owner/index arrays
+	int tri_n  = 0;                 // number of triangles this leaf currently owns (0 = not emitting)
 };
 
 // Builds + meshes one octree over a clipmap: subdivide to the clipmap's
@@ -102,6 +107,16 @@ struct Octree {
 	struct RefineCand { double err; int idx; }; // P: a floor-refine candidate keyed by its error `we` (camera-indep)
 	LocalVector<RefineCand> refine_cands;        // c1 (doc 20): PERSISTENT frontier heap — drained across grows, rebuilt on change
 	int  refine_heap_end = 0;                    // live heap size in refine_cands[0, refine_heap_end); pops shrink it
+
+	// c3 tier 1 (doc 20): persistent incremental emit. verts/indices/etc. survive across grows; a drain
+	// tombstones changed leaves' triangles (degenerate them in place) and appends the new ones, then a full
+	// emit re-compacts when the tombstone fraction grows. emit_warm = the arrays + per-leaf tri ranges are valid.
+	LocalVector<int> vslot_free;  // recycled vertex slots (from leaves that stopped emitting)
+	int  vslot_high = 0;          // next fresh vertex slot (high-water mark)
+	int  tomb_tris  = 0;          // tombstoned (degenerate) triangles awaiting the next compaction
+	bool emit_warm  = false;      // persistent emit arrays + per-leaf tri_at/tri_n are valid (post full emit)
+	bool emit_track = false;      // recollapse_dirty records changed subtree roots into emit_dirty (incremental emit on)
+	LocalVector<int> emit_dirty;  // subtree roots the incremental emit must re-walk this grow (from recollapse_dirty)
 	uint64_t last_build_us    = 0; // phase timing: build() + accumulate_qef() (microseconds)
 	uint64_t last_collapse_us = 0; // phase timing: recollapse_and_mesh() (microseconds)
 	uint64_t last_construct_us = 0; // sub-phase: build() tree construction (serial)
@@ -357,6 +372,9 @@ struct Octree {
 			// Tip of the marked tree = the refined cell. Its subtree is freshly built (structural leaf flags),
 			// so collapse_pass decides the whole new subtree's LOD — not just this node.
 			collapse_pass(idx);
+			if (emit_track) {
+				emit_dirty.push_back(idx); // c3: its whole subtree's emit changed
+			}
 			return;
 		}
 		// Ancestor of a refined cell: only its own collapse can flip (its qef was re-summed). expand→collapse
@@ -367,6 +385,9 @@ struct Octree {
 		if (was_leaf && !cells[idx].leaf) {
 			reset_subtree(idx);
 			collapse_pass(idx);
+		}
+		if (emit_track && was_leaf != cells[idx].leaf) {
+			emit_dirty.push_back(idx); // c3: this ancestor's collapse flipped → its subtree's emit changed
 		}
 	}
 
@@ -452,6 +473,7 @@ struct Octree {
 		c.dirty = false;
 		c.path_dirty = false;
 		c.parent = -1; // set by the caller's build/grow loop after this returns; root stays -1
+		c.tri_n = 0;   // c3: not emitting yet (no cached triangle range)
 		for (int i = 0; i < 8; ++i) {
 			c.children[i] = -1;
 		}
@@ -610,7 +632,7 @@ struct Octree {
 			return -1;
 		}
 		int idx = 0;
-		while (!cells[idx].leaf) {
+		while (!cells[idx].leaf && cells[idx].children[0] >= 0) {
 			const Cell &c = cells[idx];
 			Vector3 center = to_v3(c.origin) + Vector3(1, 1, 1) * (c.size * 0.5);
 			int i = (p.x >= center.x ? 1 : 0) | (p.y >= center.y ? 2 : 0) | (p.z >= center.z ? 4 : 0);
@@ -805,6 +827,148 @@ struct Octree {
 		}
 	}
 
+	// --- c3 tier 1: incremental emit (tombstone + append) -----------------------------------------------
+	int emit_alloc_slot() {
+		if (!vslot_free.is_empty()) {
+			int s = vslot_free[vslot_free.size() - 1];
+			vslot_free.resize(vslot_free.size() - 1);
+			return s;
+		}
+		return vslot_high++;
+	}
+
+	// Degenerate this leaf's triangles in place (3 equal indices = zero-area, not rendered) and count them
+	// toward the next compaction. The owner/size/err entries stay stale — a degenerate tri never reaches dcinval.
+	void emit_tombstone(int idx) {
+		int at = cells[idx].tri_at;
+		int nt = cells[idx].tri_n;
+		int32_t *ip = indices.ptrw();
+		for (int t = at; t < at + nt; ++t) {
+			int32_t v = ip[t * 3];
+			ip[t * 3 + 1] = v;
+			ip[t * 3 + 2] = v;
+		}
+		tomb_tris += nt;
+		cells[idx].tri_n = 0;
+	}
+
+	void emit_drop(int idx) { // a cell that stopped emitting: tombstone its tris + recycle its vertex slot
+		if (cells[idx].tri_n > 0) {
+			emit_tombstone(idx);
+		}
+		if (cells[idx].vertex >= 0) {
+			vslot_free.push_back(cells[idx].vertex);
+			cells[idx].vertex = -1;
+		}
+	}
+
+	void emit_append(int idx, const EmitSink &s) { // append this leaf's fresh triangles to the persistent arrays
+		cells[idx].tri_at = int(tri_owners.size());
+		cells[idx].tri_n = int(s.owners.size());
+		for (uint32_t k = 0; k < s.indices.size(); ++k) {
+			indices.push_back(s.indices[k]);
+		}
+		for (uint32_t k = 0; k < s.owners.size(); ++k) {
+			tri_owners.push_back(s.owners[k]);
+			tri_owner_sizes.push_back(s.owner_sizes[k]);
+			tri_owner_errors.push_back(s.owner_errs[k]);
+		}
+	}
+
+	// Walk a changed subtree: surviving render leaves go to the re-emit set; cells that stopped emitting drop.
+	// Stop at a render leaf (leaf=true, whether collapsed-internal or structural) AND at any childless cell
+	// (a structural leaf, or one orphaned by a collapse above — orphans are leaf=false but have no children).
+	void emit_walk_dirty(int idx, HashSet<int> &re) {
+		if (cells[idx].leaf || cells[idx].children[0] < 0) {
+			if (cells[idx].leaf && cells[idx].qef.count > 0) {
+				re.insert(idx);
+			} else {
+				emit_drop(idx);
+			}
+			return;
+		}
+		emit_drop(idx); // expanded internal node — not itself a render leaf; clear any stale triangles
+		for (int i = 0; i < 8; ++i) {
+			emit_walk_dirty(cells[idx].children[i], re);
+		}
+	}
+
+	// Collect every render leaf overlapping a LATTICE box — an octree descent that only enters overlapping
+	// subtrees, so it costs O(leaves in the box), not O(box volume).
+	void collect_leaves_in_box(int idx, const Vector3i &bmin, const Vector3i &bmax, HashSet<int> &re) {
+		Vector3i co = cells[idx].origin;
+		int cs = cells[idx].size;
+		if (co.x >= bmax.x || co.x + cs <= bmin.x || co.y >= bmax.y || co.y + cs <= bmin.y ||
+				co.z >= bmax.z || co.z + cs <= bmin.z) {
+			return; // no overlap
+		}
+		if (cells[idx].leaf || cells[idx].children[0] < 0) {
+			if (cells[idx].leaf && cells[idx].qef.count > 0) {
+				re.insert(idx);
+			}
+			return;
+		}
+		for (int i = 0; i < 8; ++i) {
+			collect_leaves_in_box(cells[idx].children[i], bmin, bmax, re);
+		}
+	}
+
+	// Existing leaves adjacent to a changed root reference its (now-moved) vertex slot or share a reassigned
+	// edge, so they re-emit too. The seam is the unit shell around the root box — gathered as six face slabs
+	// (each spanning the full shell cross-section, so edges/corners are covered) via the octree box query.
+	void emit_collect_neighbors(int root, HashSet<int> &re) {
+		Vector3i o = cells[root].origin;
+		int S = cells[root].size;
+		Vector3i lo = o - Vector3i(1, 1, 1);
+		Vector3i hi = o + Vector3i(S + 1, S + 1, S + 1);
+		collect_leaves_in_box(0, lo, Vector3i(o.x, hi.y, hi.z), re);                 // -x face slab
+		collect_leaves_in_box(0, Vector3i(o.x + S, lo.y, lo.z), hi, re);             // +x
+		collect_leaves_in_box(0, Vector3i(lo.x, lo.y, lo.z), Vector3i(hi.x, o.y, hi.z), re);   // -y
+		collect_leaves_in_box(0, Vector3i(lo.x, o.y + S, lo.z), hi, re);             // +y
+		collect_leaves_in_box(0, Vector3i(lo.x, lo.y, lo.z), Vector3i(hi.x, hi.y, o.z), re);   // -z
+		collect_leaves_in_box(0, Vector3i(lo.x, lo.y, o.z + S), hi, re);             // +z
+		re.erase(root); // the root itself isn't its own neighbour
+	}
+
+	void emit_incremental() {
+		uint64_t t0 = OS::get_singleton()->get_ticks_usec();
+		last_reset_us = 0;
+		HashSet<int> re;
+		for (uint32_t r = 0; r < emit_dirty.size(); ++r) {
+			emit_walk_dirty(emit_dirty[r], re); // tombstone vanished tris, collect surviving leaves
+		}
+		for (uint32_t r = 0; r < emit_dirty.size(); ++r) {
+			emit_collect_neighbors(emit_dirty[r], re); // seam leaves around each changed root
+		}
+		// Assign slots to new leaves first, so the edge emit below reads every neighbour's CURRENT slot.
+		for (const int &L : re) {
+			if (cells[L].vertex < 0) {
+				cells[L].vertex = emit_alloc_slot();
+			}
+		}
+		if (int(verts.size()) < vslot_high) {
+			verts.resize(vslot_high);
+			normals.resize(vslot_high);
+			if (emit_color) {
+				colors.resize(vslot_high);
+			}
+		}
+		for (const int &L : re) {
+			place_vertex(L);
+		}
+		uint64_t t1 = OS::get_singleton()->get_ticks_usec();
+		last_pass1_us = t1 - t0;
+		for (const int &L : re) {
+			if (cells[L].tri_n > 0) {
+				emit_tombstone(L); // its old triangles (it survived but its edges may have changed)
+			}
+			EmitSink s;
+			emit_leaf_edges(s, L);
+			emit_append(L, s);
+		}
+		last_pass2_us = OS::get_singleton()->get_ticks_usec() - t1;
+	}
+
 	void run() {
 		build_samples = 0;
 		// Keep a flat world at >=2 cells/axis so it meshes (a fully-collapsed flat region is one empty
@@ -835,16 +999,27 @@ struct Octree {
 	// each vertex, and try_edge reads value/gradient to stitch and wind — so both passes parallelise.
 	// Clears prior output so it is idempotent.
 	void recollapse_and_mesh(bool incremental = false) {
-		verts.clear();
-		normals.clear();
-		colors.clear();
-		indices.clear();
-		tri_owners.clear();
-		tri_owner_sizes.clear();
-		tri_owner_errors.clear();
+		// c3 tier 1: a DRAIN reuses the persistent emit arrays (tombstone + append the changed band) once they
+		// are warm and not too fragmented; a full/rebuild emit — or a compaction when tombstones pile up —
+		// rebuilds the arrays from scratch (which also re-compacts and re-warms the state).
+		bool inc_emit = incremental && emit_warm && (tomb_tris * 3 < int(tri_owners.size()) + 1);
+		emit_track = inc_emit;
+		if (inc_emit) {
+			emit_dirty.clear();
+		} else {
+			verts.clear();
+			normals.clear();
+			colors.clear();
+			indices.clear();
+			tri_owners.clear();
+			tri_owner_sizes.clear();
+			tri_owner_errors.clear();
+		}
 		uint64_t tr0 = OS::get_singleton()->get_ticks_usec();
-		if (incremental) {
-			// c2 (doc 20): keep last grow's leaf flags; only the vertex slots reset (the full emit re-ranks).
+		if (inc_emit) {
+			// keep stable vertex slots + last grow's leaf flags — emit_incremental patches only the changes
+		} else if (incremental) {
+			// compacting full emit on a drain: keep leaf flags (incremental collapse set them), reset slots
 			const int n = int(cells.size());
 			const int threads = (g_mesh_threads > 1 && n >= 8192) ? MIN(g_mesh_threads, n) : 1;
 			parallel_for(n, threads, [this](int i) { cells[i].vertex = -1; });
@@ -864,6 +1039,11 @@ struct Octree {
 		}
 		uint64_t tp1 = OS::get_singleton()->get_ticks_usec();
 		last_collapse_pass_us = tp1 - tc0;
+		if (inc_emit) {
+			emit_incremental(); // tombstone + append only the changed leaves + seam neighbours
+			emit_track = false;
+			return;
+		}
 		int n = int(cells.size());
 
 		// Pass 1: one vertex per surviving surface leaf. The cell-index-order rank IS the vertex slot (so the
@@ -949,6 +1129,8 @@ struct Octree {
 		int64_t io = 0, to = 0;
 		for (int e = 0; e < ecount; ++e) {
 			const EmitSink &s = sinks[e];
+			cells[ecells[e]].tri_at = int(to);            // c3: record this leaf's triangle range for the
+			cells[ecells[e]].tri_n = int(s.owners.size()); // incremental emit's tombstone+append to splice against
 			if (s.indices.size() > 0) {
 				memcpy(ip + io, s.indices.ptr(), s.indices.size() * sizeof(int32_t));
 				io += s.indices.size();
@@ -960,6 +1142,11 @@ struct Octree {
 				to += s.owners.size();
 			}
 		}
+		// c3: a full emit IS a compaction — dense vslots [0,vcount), no tombstones, every leaf's range recorded.
+		vslot_high = vcount;
+		vslot_free.clear();
+		tomb_tris = 0;
+		emit_warm = true;
 		last_pass2_us = OS::get_singleton()->get_ticks_usec() - tp2;
 	}
 
