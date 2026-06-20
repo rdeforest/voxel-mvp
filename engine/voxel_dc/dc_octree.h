@@ -25,6 +25,9 @@ struct Cell {
 	Vector3i origin;
 	int size = 0;
 	int children[8];
+	int parent = -1;       // c2 (doc 20): up-link, so a refine can mark its ancestor path dirty for the
+	                       // incremental reaccumulate/collapse (skip the clean subtrees a drain didn't touch).
+	bool path_dirty = false; // a descendant changed this grow → reaccumulate/recollapse must descend here
 	int vertex = -1;
 	bool leaf = true;
 	bool absent = false; // window_mode: a leaf OUTSIDE the resident window — no QEF, no vertex, not
@@ -380,6 +383,7 @@ struct Octree {
 			Vector3i co = origin + Vector3i(CB[i][0], CB[i][1], CB[i][2]) * half;
 			int child = build(co, half, depth + 1);
 			cells[idx].children[i] = child;
+			cells[child].parent = idx;
 		}
 		return idx;
 	}
@@ -396,6 +400,8 @@ struct Octree {
 		c.we_valid = false; // born invalid — a reused slot's cached solve belongs to a dead cell
 		c.vtx_valid = false;
 		c.dirty = false;
+		c.path_dirty = false;
+		c.parent = -1; // set by the caller's build/grow loop after this returns; root stays -1
 		for (int i = 0; i < 8; ++i) {
 			c.children[i] = -1;
 		}
@@ -456,6 +462,7 @@ struct Octree {
 					const int child = base + j * 8 + c;
 					init_cell(child, o + Vector3i(CB[c][0], CB[c][1], CB[c][2]) * half, half);
 					cells[fi].children[c] = child;
+					cells[child].parent = fi;
 				}
 			});
 			LocalVector<int> next;
@@ -885,6 +892,7 @@ struct Octree {
 			Vector3i co = origin + Vector3i(CB[i][0], CB[i][1], CB[i][2]) * half;
 			int child = build(co, half, d); // build() may reallocate cells — re-index after each call
 			cells[idx].children[i] = child;
+			cells[child].parent = idx;
 		}
 	}
 
@@ -996,8 +1004,12 @@ struct Octree {
 		while (refine_heap_end > 0) {
 			std::pop_heap(base, base + refine_heap_end, worse);  // worst candidate → slot refine_heap_end-1
 			--refine_heap_end;
-			grow_subtree(base[refine_heap_end].idx);             // at least one per call → always makes progress
-			accumulate_qef(base[refine_heap_end].idx);
+			int x = base[refine_heap_end].idx;
+			grow_subtree(x);                                     // at least one per call → always makes progress
+			accumulate_qef(x);                                   // x.qef now current (leaf → accumulated)
+			cells[x].we_valid = false;                           // x's cached solve/residual belonged to its old
+			cells[x].vtx_valid = false;                          // leaf qef — stale now (incremental reaccum skips x)
+			mark_path_dirty(cells[x].parent);                    // mark ancestors so the incremental reaccum descends
 			if (int64_t(OS::get_singleton()->get_ticks_usec() - t0) >= int64_t(budget_us)) {
 				break;
 			}
@@ -1047,7 +1059,23 @@ struct Octree {
 	// via `dirty`). A node re-sums only when a child changed — otherwise the in-order sum is bit-identical to
 	// last frame's already-stored qef, so the assign is skipped. Where the qef DID change, the cached collapse
 	// residual + vertex solve are invalidated so recollapse/emit redo just those; unchanged cells reuse them.
-	bool reaccumulate(int idx) {
+	// Mark idx and its ancestors path_dirty (so the incremental reaccumulate/recollapse descend to a refined
+	// cell instead of walking the whole tree). Stops at the first already-marked node — O(depth) per refine.
+	void mark_path_dirty(int idx) {
+		for (int p = idx; p >= 0 && !cells[p].path_dirty; p = cells[p].parent) {
+			cells[p].path_dirty = true;
+		}
+	}
+
+	// Roll up accumulated QEFs from changed children. `incremental` (a reuse/drain grow): prune subtrees that
+	// aren't path_dirty — their qef + child sum are unchanged, so skip them. A clean child still contributes
+	// its (current) qef to the parent's sum; only the WALK is pruned, so the result equals the full pass.
+	// Non-incremental (rebuild): walk everything (reconcile changed cells without marking the path).
+	bool reaccumulate(int idx, bool incremental) {
+		const bool marked = cells[idx].path_dirty;
+		if (incremental && !marked && !cells[idx].dirty) {
+			return false; // subtree untouched this grow — its qef and caches are still current
+		}
 		bool changed;
 		if (cells[idx].children[0] < 0) {
 			if (cells[idx].absent) {
@@ -1059,19 +1087,23 @@ struct Octree {
 			Qef sum;
 			for (int i = 0; i < 8; ++i) {
 				int ch = cells[idx].children[i];
-				any |= reaccumulate(ch);
+				any |= reaccumulate(ch, incremental);
 				sum.add(cells[ch].qef);
 			}
-			if (any) {
+			// `marked` means a refined descendant changed below this node. That descendant rolled up its own
+			// subtree (accumulate_qef) and returns false from reaccumulate (its qef is already current), so `any`
+			// alone misses it — a marked internal node must re-sum to pull the changed child's qef into its own.
+			if (any || marked) {
 				cells[idx].qef = sum; // a child changed → this node's accumulated qef changed
 			}
-			changed = any || cells[idx].dirty;
+			changed = any || marked || cells[idx].dirty;
 		}
 		if (changed) {
 			cells[idx].we_valid = false;  // qef changed → cached collapse residual is stale
 			cells[idx].vtx_valid = false; // qef changed → cached vertex solve is stale
 		}
-		cells[idx].dirty = false; // per-frame signal consumed
+		cells[idx].dirty = false;      // per-frame signals consumed
+		cells[idx].path_dirty = false;
 		return changed;
 	}
 };

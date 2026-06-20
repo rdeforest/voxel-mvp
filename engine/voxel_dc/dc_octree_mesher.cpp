@@ -347,7 +347,7 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 		oct.refine_selected(refine_budget, reuse_frontier); // worst-error first for up to refine_budget us; defer the rest
 	}
 	_last_refine_queue = oct.refine_heap_end; // remaining backlog after this grow's drain
-	oct.reaccumulate(0); // roll up ancestor QEFs from cached children — no field sampling
+	oct.reaccumulate(0, reuse_frontier); // c2: a drain (reuse) prunes to the refined path; a rebuild walks all
 	_last_build_ms = double(OS::get_singleton()->get_ticks_usec() - tb0) / 1000.0;
 	uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
 	oct.recollapse_and_mesh();
@@ -402,7 +402,7 @@ Array DCOctreeMesher::edit_world(Ref<EditStore> store, Vector3 camera, double pr
 	oct.level_start.clear(); // reconcile path: the tree isn't level-laid-out → serial collapse
 	uint64_t tb0 = OS::get_singleton()->get_ticks_usec();
 	oct.reconcile_edit(0); // walk only the edited box — samples only its band
-	oct.reaccumulate(0);   // roll up ancestor QEFs from cached children — no field sampling
+	oct.reaccumulate(0, false); // edit changed cells without marking the path — full roll-up
 	_last_build_ms = double(OS::get_singleton()->get_ticks_usec() - tb0) / 1000.0;
 	oct.field_dirty = false;
 	oct.camera = camera;
