@@ -915,19 +915,22 @@ struct Octree {
 			}
 			return;
 		}
-		// In window. build()'s own leaf test: at the data floor, or provably surface-free (pruned).
-		if (want_leaf(sz, cells[idx].origin)) {
-			if (cells[idx].children[0] >= 0) {
-				make_leaf(idx); // receded: coarsen the subtree back to one leaf here
-			} else if (cells[idx].absent) {
+		// In window. A refined subtree is RETAINED, never coarsened on recede (doc 20 M): the data is still
+		// accurate, so we keep it and let collapse_pass draw the right LOD by screen-error every grow — a
+		// receded structure re-sharpens instantly on return with no field re-sample. So "has children" is
+		// tested before want_leaf: only eviction (outside the residency box, above) ever frees data. This
+		// is why a grow that receded no longer equals a fresh build — the retained tree renders ≥ detail.
+		if (cells[idx].children[0] >= 0) {
+			for (int i = 0; i < 8; ++i) {
+				reconcile(cells[idx].children[i]); // retained subtree — recurse for grafts/refines within
+			}
+		} else if (want_leaf(sz, cells[idx].origin)) {
+			// build()'s own leaf test: at the data floor, or provably surface-free (pruned).
+			if (cells[idx].absent) {
 				cells[idx].absent = false; // entered the window at the floor
 				sample_leaf(idx);
 			}
 			// else: a present leaf already at the floor — unchanged, reused (not resampled)
-		} else if (cells[idx].children[0] >= 0) {
-			for (int i = 0; i < 8; ++i) {
-				reconcile(cells[idx].children[i]); // still internal — recurse
-			}
 		} else if (refine_budget >= 0) {
 			// C/P (doc 20): defer this refine — collect it as a candidate scored by on-screen size (a chunky
 			// near cell scores high). grow_world's refine_selected() refines the budget worst first; the rest

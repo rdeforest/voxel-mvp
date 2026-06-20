@@ -395,12 +395,15 @@ func test_grow_world_bounds_resident_set():
     assert_eq(_tri_sigs(back_to_start), _tri_sigs(start_built), "a full sweep returns to the start surface (no corruption)")
 
 
-# Stage P2.5 — incremental band-diff on a CAMERA MOVE (graded floor re-grade). With a graded floor
-# (floor = eps_px·dist/proj), moving the camera changes which cells should be fine: cells it approached must
-# refine, cells it receded from must coarsen. grow_world must do this incrementally and produce the SAME
-# surface as a fresh build at the new camera — touching only the changed band, not the whole window. (Same
-# window both times, so this isolates the floor re-grade from window shift.)
-func test_grow_world_regrades_floor_on_camera_move():
+# Retention (doc 20 M / "don't throw out accurate data") — a CAMERA MOVE keeps the band it RECEDED from
+# resident, never coarsening it back to the field. With a graded floor (floor = eps_px*dist/proj), moving
+# refines the band the camera approached (sampling only that band); the receded band's render LOD drops via
+# the error collapse, but its cells stay resident. The proof: moving BACK re-blooms NOTHING — every cell the
+# return needs is still resident, so it re-samples zero field. This intentionally REPLACES the old
+# grow==fresh-on-move gate: a receded grow keeps a deeper tree than a fresh build at the new camera (it
+# renders >= detail from the retained data), so their surfaces no longer match by construction — equality
+# now holds only for approach-only / fixed-camera grows (test_grow_world_equals_fresh_build).
+func test_grow_world_retains_receded_data_on_camera_move():
     var s := _store()
     # depth-7 root (128 lattice), half = 64 — big enough that the floor grades across the window
     var surf := _surface_y(s, 0.5, 0.5)
@@ -416,17 +419,22 @@ func test_grow_world_regrades_floor_on_camera_move():
     var cam_b := Vector3(c - origin) + Vector3(12, 24, 0)
     var m := DCOctreeMesher.new()
     m.mesh_world(s, origin, 7, 1.0, cam_a, proj, eps, true, PackedColorArray(), wmin, wmax)
-    var grown: Array = m.grow_world(cam_b, proj, eps, wmin, wmax)
-    var grow_samples: int = m.get_last_build_sample_count()
+    var grown: Array = m.grow_world(cam_b, proj, eps, wmin, wmax)   # move a->b
+    var move_samples: int = m.get_last_build_sample_count()
 
     var fm := DCOctreeMesher.new()
-    var fresh: Array = fm.mesh_world(s, origin, 7, 1.0, cam_b, proj, eps, true, PackedColorArray(), wmin, wmax)
+    fm.mesh_world(s, origin, 7, 1.0, cam_b, proj, eps, true, PackedColorArray(), wmin, wmax)
     var fresh_samples: int = fm.get_last_build_sample_count()
 
-    assert_gt((fresh[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), 100, "graded build has a real surface")
-    assert_eq(_tri_sigs(grown), _tri_sigs(fresh), "grow with camera move == fresh build at the new camera (floor re-graded)")
-    assert_gt(grow_samples, 0, "the move re-sampled the changed band")
-    assert_lt(grow_samples, fresh_samples, "the move re-sampled only the changed band, not the whole window")
+    assert_gt((grown[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), 100, "the moved grow has a real surface")
+    assert_gt(move_samples, 0, "the move re-sampled the band it approached")
+    assert_lt(move_samples, fresh_samples, "the move sampled only the approached band — the receded band was retained, not re-sampled")
+
+    # The retention win: move BACK to cam_a. Every cell the return needs is still resident (the receded band
+    # was kept, not discarded), so it re-blooms NOTHING — zero field samples. This is the "no accurate data
+    # thrown away on recede" gate; the old code re-sampled here because make_leaf had freed the subtree.
+    m.grow_world(cam_a, proj, eps, wmin, wmax)
+    assert_eq(m.get_last_build_sample_count(), 0, "moving back re-sampled nothing — receded data was retained (no re-bloom)")
 
 
 # Incremental accel reuse (perf): grow_world re-bakes the prune accel ONLY when the resident window moves.
