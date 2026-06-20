@@ -352,6 +352,10 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
 	oct.recollapse_and_mesh();
 	_last_collapse_ms = double(OS::get_singleton()->get_ticks_usec() - tc0) / 1000.0;
+	_last_reset_ms = double(oct.last_reset_us) / 1000.0;
+	_last_collapse_pass_ms = double(oct.last_collapse_pass_us) / 1000.0;
+	_last_pass1_ms = double(oct.last_pass1_us) / 1000.0;
+	_last_pass2_ms = double(oct.last_pass2_us) / 1000.0;
 	_last_tri_owners      = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
 	_last_tri_owner_errors = oct.tri_owner_errors;
@@ -473,6 +477,9 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_last_sample_ms"),    &DCOctreeMesher::get_last_sample_ms);
 	ClassDB::bind_method(D_METHOD("get_last_accum_ms"),     &DCOctreeMesher::get_last_accum_ms);
 	ClassDB::bind_method(D_METHOD("get_last_collapse_pass_ms"), &DCOctreeMesher::get_last_collapse_pass_ms);
+	ClassDB::bind_method(D_METHOD("get_last_reset_ms"), &DCOctreeMesher::get_last_reset_ms);
+	ClassDB::bind_method(D_METHOD("get_last_pass1_ms"), &DCOctreeMesher::get_last_pass1_ms);
+	ClassDB::bind_method(D_METHOD("get_last_pass2_ms"), &DCOctreeMesher::get_last_pass2_ms);
 	ClassDB::bind_method(D_METHOD("set_thread_count", "n"), &DCOctreeMesher::set_thread_count);
 	ClassDB::bind_method(D_METHOD("get_thread_count"),      &DCOctreeMesher::get_thread_count);
 }

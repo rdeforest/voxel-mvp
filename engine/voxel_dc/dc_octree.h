@@ -105,6 +105,9 @@ struct Octree {
 	uint64_t last_sample_us    = 0; // sub-phase: sample_leaves_parallel() (parallel)
 	uint64_t last_accum_us     = 0; // sub-phase: accumulate_sums() (serial)
 	uint64_t last_collapse_pass_us = 0; // sub-phase: collapse_pass() serial tree walk (within emit bucket)
+	uint64_t last_reset_us = 0;    // recollapse sub-phase: reset_leaves() full O(cells) walk
+	uint64_t last_pass1_us = 0;    // recollapse sub-phase: vertex slot scan + parallel place_vertex
+	uint64_t last_pass2_us = 0;    // recollapse sub-phase: edge scan + parallel emit + concat
 	LocalVector<Cell> cells;
 	LocalVector<int> free_list;    // (B1b) indices of cells killed by eviction, reused by the next grow so
 	                               // `cells` stays bounded across a long traverse instead of leaking.
@@ -782,8 +785,10 @@ struct Octree {
 		tri_owners.clear();
 		tri_owner_sizes.clear();
 		tri_owner_errors.clear();
+		uint64_t tr0 = OS::get_singleton()->get_ticks_usec();
 		reset_leaves();
 		uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
+		last_reset_us = tc0 - tr0;
 		// level_start is set only by the parallel bottom-up full build; the grow/reconcile path leaves it
 		// empty (its tree isn't level-laid-out), so that falls back to the serial recursive collapse.
 		if (!level_start.is_empty()) {
@@ -791,7 +796,8 @@ struct Octree {
 		} else {
 			collapse_pass(0);
 		}
-		last_collapse_pass_us = OS::get_singleton()->get_ticks_usec() - tc0;
+		uint64_t tp1 = OS::get_singleton()->get_ticks_usec();
+		last_collapse_pass_us = tp1 - tc0;
 		int n = int(cells.size());
 
 		// Pass 1: one vertex per surviving surface leaf. Assign slots SERIALLY in cell-index order (so the
@@ -814,6 +820,8 @@ struct Octree {
 		parallel_for(vcount, vthreads, [this, &vcells](int k) {
 			place_vertex(vcells[k]);
 		});
+		uint64_t tp2 = OS::get_singleton()->get_ticks_usec();
+		last_pass1_us = tp2 - tp1;
 
 		// Pass 2: stitch edges. Each surviving leaf emits into its OWN sink in parallel (reads of cells/
 		// verts are immutable now), then the sinks concatenate in cell-index order — byte-identical to
@@ -859,6 +867,7 @@ struct Octree {
 				to += s.owners.size();
 			}
 		}
+		last_pass2_us = OS::get_singleton()->get_ticks_usec() - tp2;
 	}
 
 	// --- Incremental window growth (doc 16 Stage B) -------------------------------------------------

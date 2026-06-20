@@ -422,11 +422,15 @@ func force_rebuild() -> void:
 
 
 func mesh_phase_report() -> String:
-    return "threads %d | last build: accel %.0f + build %.0f + collapse %.0f ms" % [
+    return "threads %d | last grow: accel %.0f + build %.0f + collapse %.0f ms  [reset %.1f / collapse-walk %.1f / pass1 %.1f / pass2 %.1f]" % [
         _mesher.get_thread_count(),
         _mesher.get_last_accel_ms(),
         _mesher.get_last_build_ms(),
-        _mesher.get_last_collapse_ms()]
+        _mesher.get_last_collapse_ms(),
+        _mesher.get_last_reset_ms(),
+        _mesher.get_last_collapse_pass_ms(),
+        _mesher.get_last_pass1_ms(),
+        _mesher.get_last_pass2_ms()]
 
 
 func _exit_tree() -> void:

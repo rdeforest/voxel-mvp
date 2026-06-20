@@ -59,6 +59,12 @@ class DCOctreeMesher : public RefCounted {
 	double _last_accum_ms     = 0.0;
 	double _last_collapse_pass_ms = 0.0;
 
+	// Breakdown of recollapse_and_mesh (_last_collapse_ms): reset_leaves, the collapse walk, vertex Pass 1,
+	// edge Pass 2 + concat — to find which O(cells) serial pass dominates a grow (the incremental-emit target).
+	double _last_reset_ms = 0.0;
+	double _last_pass1_ms = 0.0;
+	double _last_pass2_ms = 0.0;
+
 public:
 	~DCOctreeMesher();
 
@@ -158,6 +164,9 @@ public:
 	double get_last_sample_ms()    const { return _last_sample_ms;    }
 	double get_last_accum_ms()     const { return _last_accum_ms;     }
 	double get_last_collapse_pass_ms() const { return _last_collapse_pass_ms; }
+	double get_last_reset_ms() const { return _last_reset_ms; }
+	double get_last_pass1_ms() const { return _last_pass1_ms; }
+	double get_last_pass2_ms() const { return _last_pass2_ms; }
 
 	// Parallel worker count for the build's parallel phases (construct / sample / accumulate / collapse /
 	// emit / accel-bake). 1 = serial. Output is deterministic and identical regardless of the count.
