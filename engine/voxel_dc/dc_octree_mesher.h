@@ -124,7 +124,7 @@ public:
 	// emit_min/max (M, doc 20): the VISIBLE window — only triangles owned by cells inside it are drawn, while
 	// [win_min, win_max) is the larger RESIDENCY box (kept + pre-baked, no re-sample on backtrack). Default
 	// (emit_min == emit_max) draws the whole residency box (pre-M behaviour).
-	Array grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max, int refine_budget = -1, Vector3i emit_min = Vector3i(), Vector3i emit_max = Vector3i());
+	Array grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max, int refine_budget = -1, Vector3i emit_min = Vector3i(), Vector3i emit_max = Vector3i(), bool reuse_frontier = false);
 
 	// True if the last grow_world left refinement deferred by its budget — drain by growing again (same eps).
 	bool get_refine_pending() const;

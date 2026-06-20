@@ -77,6 +77,7 @@ var _job_eps := EPS_START            # eps captured for the in-flight job
 var _job_is_grow := false            # in-flight job is an incremental grow (vs a full build)
 var _job_is_edit := false            # in-flight job is an incremental edit (edit_world)
 var _job_refine_budget := -1         # C: refine budget captured for the worker (-1 = unbudgeted, on a move)
+var _job_reuse := false               # c1: reuse the persistent frontier (pure drain) vs rebuild it (move/eps change)
 var _refine_pending := false         # the last grow deferred refinement (budget hit) → keep draining at this eps
 var _job_emit_min := Vector3i.ZERO   # M: visible window captured for the worker (residency = _job_win_min/max)
 var _job_emit_max := Vector3i.ZERO
@@ -215,9 +216,11 @@ func _process(_dt: float) -> void:
     elif _pending_edit:
         _dispatch_edit(p)
     elif p.distance_to(_last_center) > RECENTER:
-        _dispatch_grow(p, -1)            # move: cover the new window fully (unbudgeted)
+        _dispatch_grow(p, -1, false)     # move: cover the new window fully (unbudgeted, rebuild frontier)
     elif _eps_dirty or _refine_pending:
-        _dispatch_grow(p, refine_us)     # stationary refine: metered by wall-clock — bloom spreads over frames (C, doc 20)
+        # c1 (doc 20): a pure DRAIN (refine_pending, eps unchanged) reuses the persistent frontier — skip the
+        # reconcile re-walk. An eps change rebuilds it (the floor moved, so the candidate set changed).
+        _dispatch_grow(p, refine_us, not _eps_dirty)
 
 
 # Root origin (LATTICE) snapped to the ROOT_SNAP grid, centred on the player — cells never shift
@@ -295,9 +298,10 @@ func _dispatch_build(p: Vector3) -> void:
 
 # Incremental move: grow_world re-meshes only the band the move/eps change touched, reusing the retained
 # octree (same root, no new store snapshot — grow reads the retained snapshot). The common path while walking.
-func _dispatch_grow(p: Vector3, refine_budget: int) -> void:
+func _dispatch_grow(p: Vector3, refine_budget: int, reuse: bool) -> void:
     _eps_dirty = false
     _last_center = p
+    _job_reuse = reuse
     var ret := _retained_window(p)   # M: residency — sampled + kept
     var vis := _window(p)            # M: visible — drawn (emit filter)
     _job_win_min = ret[0]
@@ -334,7 +338,7 @@ func _run_job() -> void:
     if _job_is_edit:
         _job_arrays = _mesher.edit_world(_job_store, _job_cam, _job_proj, _job_eps, _job_edit_min, _job_edit_max)
     elif _job_is_grow:
-        _job_arrays = _mesher.grow_world(_job_cam, _job_proj, _job_eps, _job_win_min, _job_win_max, _job_refine_budget, _job_emit_min, _job_emit_max)
+        _job_arrays = _mesher.grow_world(_job_cam, _job_proj, _job_eps, _job_win_min, _job_win_max, _job_refine_budget, _job_emit_min, _job_emit_max, _job_reuse)
     else:
         _job_arrays = _mesher.mesh_world(_job_store, _root_origin_i, DEPTH, base_cell,
                 _job_cam, _job_proj, _job_eps, true, _palette, _job_win_min, _job_win_max)

@@ -285,7 +285,7 @@ Array DCOctreeMesher::mesh_world(
 // (in both windows) keep their tree, QEFs, and vertices: a move re-samples just the leading-edge band,
 // not the whole vicinity. By construction the result is byte-identical to a from-scratch mesh_world of
 // the new window. Benign no-op (empty Array) if nothing is retained — caller falls back to mesh_world.
-Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max, int refine_budget, Vector3i emit_min, Vector3i emit_max) {
+Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max, int refine_budget, Vector3i emit_min, Vector3i emit_max, bool reuse_frontier) {
 	if (_persist == nullptr) {
 		return Array();
 	}
@@ -331,18 +331,22 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	// so the window is always fully covered. Window grafts/evictions aren't budgeted — only floor refinement.
 	oct.refine_budget = refine_budget;
 	oct.refine_pending = false;
-	oct.refine_cands.clear();
-	// Set the view BEFORE reconcile: P scores each refine candidate by its on-screen size (needs camera/proj).
 	oct.camera = camera;
 	oct.proj = proj;
 	oct.eps_px = eps_px;
 	oct.level_start.clear(); // reconcile rebuilds the tree incrementally, not level-laid-out → serial collapse
 	uint64_t tb0 = OS::get_singleton()->get_ticks_usec();
-	oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge; collect refines
-	_last_refine_queue = int(oct.refine_cands.size()); // outstanding refine work this grow (before the budget drains it)
-	if (refine_budget >= 0) {
-		oct.refine_selected(refine_budget); // C/P: refine worst-on-screen first for up to refine_budget us; defer the rest
+	// c1 (doc 20): reuse_frontier means a pure DRAIN grow — camera + eps + window unchanged, just keep refining
+	// the retained frontier heap. Skip reconcile (no graft/evict/re-collect) entirely — O(changed), not O(tree).
+	// Otherwise rebuild: reconcile re-collects candidates into a fresh frontier, refine_selected heapifies them.
+	if (!reuse_frontier) {
+		oct.refine_cands.clear();
+		oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge; collect refines
 	}
+	if (refine_budget >= 0) {
+		oct.refine_selected(refine_budget, reuse_frontier); // worst-error first for up to refine_budget us; defer the rest
+	}
+	_last_refine_queue = oct.refine_heap_end; // remaining backlog after this grow's drain
 	oct.reaccumulate(0); // roll up ancestor QEFs from cached children — no field sampling
 	_last_build_ms = double(OS::get_singleton()->get_ticks_usec() - tb0) / 1000.0;
 	uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
@@ -448,8 +452,8 @@ void DCOctreeMesher::_bind_methods() {
 			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(PackedColorArray()),
 			DEFVAL(Vector3i()), DEFVAL(Vector3i()));
 	ClassDB::bind_method(
-			D_METHOD("grow_world", "camera", "proj", "eps_px", "win_min", "win_max", "refine_budget", "emit_min", "emit_max"),
-			&DCOctreeMesher::grow_world, DEFVAL(-1), DEFVAL(Vector3i()), DEFVAL(Vector3i()));
+			D_METHOD("grow_world", "camera", "proj", "eps_px", "win_min", "win_max", "refine_budget", "emit_min", "emit_max", "reuse_frontier"),
+			&DCOctreeMesher::grow_world, DEFVAL(-1), DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_refine_pending"), &DCOctreeMesher::get_refine_pending);
 	ClassDB::bind_method(
 			D_METHOD("edit_world", "store", "camera", "proj", "eps_px", "dirty_min", "dirty_max"),

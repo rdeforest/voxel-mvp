@@ -345,6 +345,38 @@ func test_grow_world_budgeted_refine_drains_to_full():
     assert_eq(_tri_sigs(drained), _tri_sigs(full), "drained budgeted refine == unbudgeted grow (same settled surface)")
 
 
+# c1 (doc 20) — persistent frontier: the FIRST budgeted grow rebuilds the frontier heap (reuse_frontier=false);
+# subsequent DRAIN grows pass reuse_frontier=true, skipping reconcile entirely and popping the retained heap
+# where they left off. The settled surface must still equal one unbudgeted grow — proof the persisted heap
+# drains correctly without re-walking the tree. (camera/eps/window are fixed, so reuse is exactly valid.)
+func test_grow_world_persistent_frontier_drains_with_reuse():
+    var s := _store()
+    var origin := _region_origin(s)
+    var cam := Vector3(16, 16, 120)
+    var lo := origin
+    var hi := origin + WIN_FULL
+    const COARSE := 32.0
+    const FINE := 2.0
+
+    var rm := DCOctreeMesher.new()
+    rm.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, COARSE, true, PackedColorArray(), lo, hi)
+    var full: Array = rm.grow_world(cam, 500.0, FINE, lo, hi)   # reference: one unbudgeted grow to fine
+
+    var bm := DCOctreeMesher.new()
+    bm.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, COARSE, true, PackedColorArray(), lo, hi)
+    # First grow REBUILDS the frontier (reuse=false) + drains a 100us slice; the rest drain via reuse=true.
+    var drained: Array = bm.grow_world(cam, 500.0, FINE, lo, hi, 100, Vector3i(), Vector3i(), false)
+    var reuse_iters := 0
+    while bm.get_refine_pending() and reuse_iters < 20000:
+        drained = bm.grow_world(cam, 500.0, FINE, lo, hi, 100, Vector3i(), Vector3i(), true)   # reuse: no reconcile
+        reuse_iters += 1
+
+    assert_gt(reuse_iters, 0, "the drain ran on the REUSED frontier (not all in the first rebuild grow)")
+    assert_false(bm.get_refine_pending(), "the reused-frontier drain converged")
+    assert_eq(drained[Mesh.ARRAY_VERTEX].size(), full[Mesh.ARRAY_VERTEX].size(), "reuse-drained vertex count == one unbudgeted grow")
+    assert_eq(_tri_sigs(drained), _tri_sigs(full), "reuse-drained surface == unbudgeted grow (persistent frontier is correct)")
+
+
 # Stage M (doc 20) — residency / visible split: the residency box (build_box) can be larger than the VISIBLE
 # window (emit filter). Moving only the visible window over a fixed resident region re-samples NOTHING — the M
 # win (no re-bloom on a turn/backtrack) — and the visible window draws a strict subset of the resident surface.

@@ -96,8 +96,9 @@ struct Octree {
 	                               // this proves the retained interior was NOT resampled (the B1 win).
 	int  refine_budget = -1;       // C/P (doc 20): wall-clock µs cap for refine_selected; -1 = unbudgeted (a move).
 	bool refine_pending = false;   // a budgeted reconcile deferred some refinement → caller drains over frames.
-	struct RefineCand { double err; int idx; }; // P: a floor-refine candidate + its on-screen size (projected)
-	LocalVector<RefineCand> refine_cands;        // collected this reconcile; refine_selected() does the worst first
+	struct RefineCand { double err; int idx; }; // P: a floor-refine candidate keyed by its error `we` (camera-indep)
+	LocalVector<RefineCand> refine_cands;        // c1 (doc 20): PERSISTENT frontier heap — drained across grows, rebuilt on change
+	int  refine_heap_end = 0;                    // live heap size in refine_cands[0, refine_heap_end); pops shrink it
 	uint64_t last_build_us    = 0; // phase timing: build() + accumulate_qef() (microseconds)
 	uint64_t last_collapse_us = 0; // phase timing: recollapse_and_mesh() (microseconds)
 	uint64_t last_construct_us = 0; // sub-phase: build() tree construction (serial)
@@ -941,12 +942,14 @@ struct Octree {
 			}
 			// else: a present leaf already at the floor — unchanged, reused (not resampled)
 		} else if (refine_budget >= 0) {
-			// C/P (doc 20): defer this refine — collect it as a candidate scored by on-screen size (a chunky
-			// near cell scores high). grow_world's refine_selected() refines the budget worst first; the rest
-			// stay coarse this frame (their QEF is still valid) and refine on a later grow — the bloom spreads.
-			Vector3 ctr = to_v3(cells[idx].origin) + Vector3(1, 1, 1) * (cells[idx].size * 0.5);
-			double dist = MAX((ctr - camera).length(), 1e-3);
-			refine_cands.push_back(RefineCand{ double(cells[idx].size) * proj / dist, idx });
+			// C/P/I (doc 20): defer this refine — collect it onto the frontier keyed by its geometric error `we`
+			// (the QEF residual of representing this coarse cell as one vertex — how much detail refining recovers).
+			// `we` is camera-independent, so the persistent heap survives camera moves; refine_selected() does the
+			// worst-error first, the rest stay coarse (QEF still valid) until a later grow reaches them.
+			Vector3 cmin = to_v3(cells[idx].origin);
+			Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
+			double we = Math::sqrt(cells[idx].qef.residual(cells[idx].qef.solve(cmin, cmax)));
+			refine_cands.push_back(RefineCand{ we, idx });
 		} else {
 			grow_subtree(idx);   // unbudgeted (a move): subdivide to the (finer) floor — full window coverage
 			accumulate_qef(idx);
@@ -961,29 +964,36 @@ struct Octree {
 	// every candidate, but the chunky/near cells sharpen first — the bloom resolves where the player looks.
 	// The deferred candidates' QEFs are untouched, so they're valid as coarse leaves until a later grow.
 	//
-	// Selection is a HEAP, not a full sort: at max detail the candidate list is millions of leaves but the
-	// budget refines a sliver off the top, so make_heap (O(n)) + pop_heap per refine (O(log n)) beats sorting
-	// the whole list (O(n log n)) by ~log n — a big single-core win, since this runs serially every grow.
-	void refine_selected(int budget_us) {
-		if (refine_cands.is_empty()) {
-			return;
-		}
+	// Selection is a PERSISTENT HEAP (c1, doc 20). The frontier `refine_cands` survives across grows: a grow
+	// that only DRAINS (camera + eps unchanged) reuses it — pop_heap leaves [0, refine_heap_end) a valid heap,
+	// so we just keep popping where we left off, with NO reconcile re-walk and NO re-heapify (O(changed), not
+	// O(tree)). A grow that CHANGED the window/eps rebuilds it (reconcile re-collects → make_heap). The key is
+	// `we` (geometric error, camera-independent — see doc 20 I), so the heap order survives camera moves.
+	// reuse=false: heapify the freshly-collected candidates. reuse=true: continue draining the retained heap.
+	void refine_selected(int budget_us, bool reuse) {
 		auto worse = [](const RefineCand &a, const RefineCand &b) { return a.err < b.err; }; // max-heap on err
 		RefineCand *base = refine_cands.ptr();
-		int end = int(refine_cands.size());
-		std::make_heap(base, base + end, worse);
+		if (!reuse) {
+			refine_heap_end = int(refine_cands.size());
+			if (refine_heap_end > 0) {
+				std::make_heap(base, base + refine_heap_end, worse);
+			}
+		}
+		if (refine_heap_end <= 0) {
+			refine_pending = false;
+			return;
+		}
 		uint64_t t0 = OS::get_singleton()->get_ticks_usec();
-		while (end > 0) {
-			std::pop_heap(base, base + end, worse);  // worst candidate → slot end-1
-			--end;
-			grow_subtree(base[end].idx);             // at least one per call → always makes progress
-			accumulate_qef(base[end].idx);
+		while (refine_heap_end > 0) {
+			std::pop_heap(base, base + refine_heap_end, worse);  // worst candidate → slot refine_heap_end-1
+			--refine_heap_end;
+			grow_subtree(base[refine_heap_end].idx);             // at least one per call → always makes progress
+			accumulate_qef(base[refine_heap_end].idx);
 			if (int64_t(OS::get_singleton()->get_ticks_usec() - t0) >= int64_t(budget_us)) {
 				break;
 			}
 		}
-		refine_pending = (end > 0);                  // candidates remain → drain them on a later grow
-		refine_cands.clear();
+		refine_pending = (refine_heap_end > 0);                  // candidates remain → drain them on a later grow
 	}
 
 	// Reconcile the retained tree to an EDITED field box (doc 20 E) — the window and camera floor are
