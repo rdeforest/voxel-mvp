@@ -45,6 +45,7 @@ func _ready() -> void:
     _world_preview.set_diagnostic_overlay(_inval_overlay)  # `dcinval` highlights its off-target LOD triangles
     _world_preview.set_enabled(true)                       # THE terrain render (doc 17 P3); `dcworld` toggles it
     _player.world_preview = _world_preview                 # key I toggles its incremental-edit path (doc 20 E)
+    Perf.set_shown(true)                                   # perf overlay on by default during co-dev; `perf` toggles it
     # Body-driven JIT terrain collision from our DC mesher, sourced from the EditStore
     # (generator + edits) — godot_voxel collision is off (world.tscn generate_collisions
     # = false), so this is the only terrain body.

@@ -210,8 +210,8 @@ func examine(state := "") -> void:
     LimboConsole.info("examine: %s — re-mesh %s, noclip fly %s" % [
         ("ON" if on else "off"), ("FROZEN" if on else "live"), ("on" if on else "off")])
 
-# `dcworld` is THE terrain render (doc 17 P3): the world-fixed octree, 0.25 m, graded by the screen-error
-# budget controller (eps_px self-tunes against frame time + mesh lag, ~100 ms target / 500 ms ceiling).
+# `dcworld` is THE terrain render (doc 17 P3): the world-fixed octree, graded by the screen-error budget
+# controller (eps_px self-tunes against render frame time; the refine rate self-tunes against the dcrefine ms cap).
 func dcworld(arg := "") -> void:
     if arg.is_valid_float():                       # `dcworld 256` → set coverage radius AND turn on
         world_preview.set_radius(arg.to_float())
