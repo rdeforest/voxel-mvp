@@ -93,6 +93,8 @@ func _stats_json() -> String:
 		"refine_queue": m.get_last_refine_queue_size(),
 		"refine_pending": m.get_refine_pending(),
 		"cells": m.get_octree_cell_count(),
+		"cells_ram_mb": int(m.get_cell_resident_bytes() / 1048576),
+		"cells_disk_mb": int(m.get_cell_arena_bytes() / 1048576),
 		"job_ms": wp._job_work_ms,
 		"job_kind": wp._job_kind(),
 		"refine_us": wp.refine_us,

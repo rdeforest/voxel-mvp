@@ -51,6 +51,8 @@ var base_cell    := VoxelConstants.RENDER_BASE_CELL  # metres per lattice unit (
 var win_radius_m := 128.0                            # resident window half-extent (m) — graded floor + budget make it affordable
 var _eps_px      := EPS_START                        # the single operating point; floor + collapse both derive from it
 var _frame_ms    := 0.0                              # smoothed frame time (render-cost signal)
+var _mem_throttle := 0                               # M2: recompute the cells-RAM/disk readout every 30 frames
+var _mem_status  := ""
 var _eps_dirty   := false                            # the controller changed eps → re-mesh to apply it
 
 var _follow:     Node3D
@@ -206,6 +208,13 @@ func _process(_dt: float) -> void:
     # NOT the vsync/fps_max-capped dt — so the controller's frame-headroom gate sees true GPU load, not the
     # quantised display interval (a 144Hz vsync pins dt at ~6.9ms and only jumps at the fps cliff).
     Perf.status("dcworld", "eps_px %.1f   job %.0f ms (%s%s)" % [_eps_px, _job_work_ms, _job_kind(), " refining" if _refine_pending else ""])
+    _mem_throttle += 1
+    if _mem_throttle >= 30:   # M2: cells RAM (resident) vs disk (arena) — mincore is cheap but not every frame
+        _mem_throttle = 0
+        var ram := _mesher.get_cell_resident_bytes() / 1048576.0
+        var disk := _mesher.get_cell_arena_bytes() / 1048576.0
+        _mem_status = "%.1fM cells   RAM %.1f GB / arena %.1f GB" % [_mesher.get_octree_cell_count() / 1.0e6, ram / 1024.0, disk / 1024.0]
+    Perf.status("dcmem", _mem_status)
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()

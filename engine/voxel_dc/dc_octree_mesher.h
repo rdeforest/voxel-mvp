@@ -149,6 +149,8 @@ public:
 
 	// Total slots in the retained octree's cell array (live + free-list). Bounded across a traverse (B1b).
 	int get_octree_cell_count() const;
+	int64_t get_cell_arena_bytes() const;    // M2: total cell-arena size (disk)
+	int64_t get_cell_resident_bytes() const; // M2: cells currently in RAM (mincore)
 
 	// Full prune-accel bakes run so far. grow_world reuses the accel (doesn't bump this) when the
 	// resident window is unchanged — e.g. a stationary refine — so a held view refines without re-baking.

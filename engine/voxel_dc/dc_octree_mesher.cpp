@@ -424,6 +424,16 @@ int DCOctreeMesher::get_octree_cell_count() const {
 	return _persist != nullptr ? int(_persist->oct.cells.size()) : 0;
 }
 
+// M2: total cell-arena bytes (size on disk) vs resident bytes (in RAM, via mincore) — the page-in/page-out
+// split. resident == total means everything's cached; resident << total means cold cells paged to disk.
+int64_t DCOctreeMesher::get_cell_arena_bytes() const {
+	return _persist != nullptr ? _persist->oct.cells.size() * int64_t(sizeof(*_persist->oct.cells.base)) : 0;
+}
+
+int64_t DCOctreeMesher::get_cell_resident_bytes() const {
+	return _persist != nullptr ? _persist->oct.cells.resident_bytes() : 0;
+}
+
 bool DCOctreeMesher::get_refine_pending() const {
 	return _persist != nullptr && _persist->oct.refine_pending;
 }
@@ -466,6 +476,8 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_last_build_sample_count"), &DCOctreeMesher::get_last_build_sample_count);
 	ClassDB::bind_method(D_METHOD("get_last_refine_queue_size"), &DCOctreeMesher::get_last_refine_queue_size);
 	ClassDB::bind_method(D_METHOD("get_octree_cell_count"),      &DCOctreeMesher::get_octree_cell_count);
+	ClassDB::bind_method(D_METHOD("get_cell_arena_bytes"),      &DCOctreeMesher::get_cell_arena_bytes);
+	ClassDB::bind_method(D_METHOD("get_cell_resident_bytes"),   &DCOctreeMesher::get_cell_resident_bytes);
 	ClassDB::bind_method(D_METHOD("get_accel_bake_count"),       &DCOctreeMesher::get_accel_bake_count);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);
