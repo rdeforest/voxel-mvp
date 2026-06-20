@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Run the game under gdb so a NATIVE (C++) crash drops into the debugger with a backtrace,
+# instead of silently killing the process (the GDScript/F5 debugger can't catch a segfault).
+# Usage: tools/debug-run [extra godot args]   (Ctrl-C, then `bt` at the gdb prompt on a crash)
+set -e
+cd "$(dirname "$0")/.."
+GODOT="$(readlink -f bin/godot)"
+exec gdb -q -ex 'run' --args "$GODOT" --path . "$@"

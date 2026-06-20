@@ -39,6 +39,8 @@ var frame_budget := 16.0      # ms — frame-gen (render) budget; the `dcframebu
 # a fixed count can't. Tunable; `dcrefine` console knob.
 var refine_us := 8000                 # per-grow refine budget (µs); `dcrefine` knob. With the incremental emit a
                                       # grow is O(refined), so this is just a latency target, not overhead to amortize.
+var max_cells := 80_000_000           # memory budget: stop refining past this many octree cells (~350 B each ≈
+                                      # 28 GB). At LOG2=4 max-detail the arena would otherwise exhaust RAM. `dcmaxcells`.
 
 # M (doc 20): residency extends this far (metres) beyond the VISIBLE window — kept resident + pre-baked so a
 # turn or backtrack re-samples nothing, and the edge ahead is ready before you reach it. 0 = pre-M (residency
@@ -218,9 +220,12 @@ func _process(_dt: float) -> void:
         _dispatch_edit(p)
     elif p.distance_to(_last_center) > RECENTER:
         _dispatch_grow(p, -1, false)     # move: cover the new window fully (unbudgeted, rebuild frontier)
-    elif _eps_dirty or _refine_pending:
+    elif (_eps_dirty or _refine_pending) and _mesher.get_octree_cell_count() < max_cells:
         # c1 (doc 20): a pure DRAIN (refine_pending, eps unchanged) reuses the persistent frontier — skip the
         # reconcile re-walk. An eps change rebuilds it (the floor moved, so the candidate set changed).
+        # Memory budget: stop refining past max_cells — at LOG2=4 max-detail the cell arena would exhaust RAM
+        # (~350 bytes/cell). The world holds at the detail that fit; a move still evicts + refines. mmap is the
+        # real ceiling-raiser (M2); this is the honest "max detail until RAM is full" hardware-limit behaviour.
         _dispatch_grow(p, refine_us, not _eps_dirty)
 
 
@@ -378,7 +383,8 @@ func _finish() -> void:
 func _control() -> void:
     var prev := _eps_px
     var over := _frame_ms > frame_budget
-    var under := _frame_ms < frame_budget * 0.8
+    # Don't drive finer than the memory budget can hold (the refine dispatch is gated on max_cells too).
+    var under := _frame_ms < frame_budget * 0.8 and _mesher.get_octree_cell_count() < max_cells
     if over:
         _eps_px = minf(_eps_px * 1.4, EPS_MAX)
     elif under:

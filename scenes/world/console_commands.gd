@@ -55,6 +55,7 @@ func _table() -> Array:
         [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + job ms."],
         [dcrefine,        "dcrefine",  "doc 20 C/P: wall-clock cap (ms) on refine work per grow while the world blooms in — do as much as fits in X ms, worst-on-screen first. Higher = faster bloom, longer per-job latency. Usage: dcrefine [ms] (default 8)"],
         [dcretain,        "dcretain",  "doc 20 M: metres kept resident BEYOND the visible window — a turn or backtrack within it re-samples nothing (no re-bloom), and the edge ahead is pre-baked. Higher = more retention + cost. Usage: dcretain [m] (default 128)"],
+        [dcmaxcells,      "dcmaxcells", "Memory budget: stop refining past this many octree cells (~350 B each). At LOG2=4 max-detail the arena would otherwise exhaust RAM. Usage: dcmaxcells [millions] (default 80)"],
         [dcframebudget,   "dcframebudget", "Per-frame render budget (ms) the controller refines toward — refines while render cost < half this, backs off above it. Higher = more detail, lower fps. Usage: dcframebudget [ms] (default 16)"],
         [dcthreads,       "dcthreads", "Parallel accel-bake workers: `dcthreads <n>` sets the thread count; no args prints the phase timing (accel + build + collapse ms). Usage: dcthreads [n]"],
         [remesh,          "remesh",    "Force a full dcworld rebuild now (re-bake + build + collapse) — trigger a remesh without walking, then read `dcthreads` for the timing."],
@@ -247,6 +248,13 @@ func dcrefine(ms := 0.0) -> void:
     if ms > 0.0:
         world_preview.refine_us = int(ms * 1000.0)
     LimboConsole.info("dcrefine: %.1f ms refine budget per grow" % (world_preview.refine_us / 1000.0))
+
+
+func dcmaxcells(millions := 0.0) -> void:
+    if millions > 0.0:
+        world_preview.max_cells = int(millions * 1_000_000.0)
+    LimboConsole.info("dcmaxcells: %.0fM cell budget (now %.1fM live) — refinement holds past this to spare RAM" % [
+        world_preview.max_cells / 1_000_000.0, world_preview._mesher.get_octree_cell_count() / 1_000_000.0])
 
 
 func dcretain(m := -1.0) -> void:
