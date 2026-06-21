@@ -442,11 +442,19 @@ int DCOctreeMesher::get_octree_cell_count() const {
 // M2: total cell-arena bytes (size on disk) vs resident bytes (in RAM, via mincore) — the page-in/page-out
 // split. resident == total means everything's cached; resident << total means cold cells paged to disk.
 int64_t DCOctreeMesher::get_cell_arena_bytes() const {
-	return _persist != nullptr ? _persist->oct.cells.size() * int64_t(sizeof(*_persist->oct.cells.base)) : 0;
+	if (_persist == nullptr) {
+		return 0;
+	}
+	const Octree &o = _persist->oct; // hot/cold split: sum both arenas (hot Cell + cold Qef)
+	return o.cells.size() * int64_t(sizeof(*o.cells.base)) + o.qefs.size() * int64_t(sizeof(*o.qefs.base));
 }
 
 int64_t DCOctreeMesher::get_cell_resident_bytes() const {
-	return _persist != nullptr ? _persist->oct.cells.resident_bytes() : 0;
+	if (_persist == nullptr) {
+		return 0;
+	}
+	const Octree &o = _persist->oct;
+	return o.cells.resident_bytes() + o.qefs.resident_bytes();
 }
 
 // M2: false if any cell arena failed to get a disk-backed temp file and fell back to anonymous RAM (OOM risk).

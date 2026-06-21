@@ -34,7 +34,9 @@ struct Cell {
 	bool absent = false; // window_mode: a leaf OUTSIDE the resident window — no QEF, no vertex, not
 	                     // meshed. The window boundary is the resident mesh's open rim (like the clipmap's
 	                     // outer edge). Distinct from a splice's build-box-miss leaf, which IS meshed.
-	Qef qef; // accumulated up the tree (own crossings for a leaf; children's sum otherwise)
+	// Hot/cold split: the QEF (the big, ~120 B cold field) lives in the parallel `qefs` arena, NOT here — the
+	// full-arena hot passes (reconcile / reset_leaves / collapse) never read it, so keeping it out of the hot
+	// Cell shrinks what they stream from disk (296→256→~136 B/cell). Indexed by the same cell index. See `qefs`.
 
 	// Incremental-grow caches (doc 17 #3). Both the collapse residual and the emitted vertex are pure
 	// functions of `qef` (and the fixed cell box), so a grow that doesn't change this cell's qef can reuse
@@ -131,6 +133,8 @@ struct Octree {
 	uint64_t last_reconcile_us = 0; // grow sub-phase: reconcile() the O(tree) graft/evict/collect walk (c4 target)
 	uint64_t last_reaccum_us   = 0; // grow sub-phase: reaccumulate() the O(tree-or-changed) QEF re-sum (c4 target)
 	MmapArena<Cell> cells; // M2: disk-paged cell arena — hot (visible) cells in RAM, cold (retained) on disk
+	MmapArena<Qef>  qefs;  // hot/cold split: per-cell QEF, parallel to `cells` (same index). Grown in lockstep
+	                       // (alloc_cell / resize_uninitialized mirror to both) so qefs[i] is the QEF of cells[i].
 	LocalVector<int> free_list;    // (B1b) indices of cells killed by eviction, reused by the next grow so
 	                               // `cells` stays bounded across a long traverse instead of leaking.
 	PackedVector3Array verts;
@@ -179,7 +183,7 @@ struct Octree {
 	// Call sites that are transitioning an absent leaf to present must set absent=false
 	// themselves (the extra step stays inline so this helper stays narrowly scoped).
 	void sample_leaf(int idx) {
-		cells[idx].qef = leaf_qef(idx);
+		qefs[idx] = leaf_qef(idx);
 		cells[idx].dirty = true; // qef changed → ancestors re-sum, this leaf's solve caches invalidate (grow path)
 		++build_samples;
 	}
@@ -254,7 +258,7 @@ struct Octree {
 			// An absent leaf (outside the window) contributes an empty QEF (count 0) — a bit-exact no-op
 			// in its ancestors' sums, so a windowed/incremental build's QEFs equal a full build's.
 			if (cells[idx].absent) {
-				cells[idx].qef = Qef();
+				qefs[idx] = Qef();
 			} else {
 				sample_leaf(idx);
 			}
@@ -264,9 +268,9 @@ struct Octree {
 		for (int i = 0; i < 8; ++i) {
 			int ch = cells[idx].children[i];
 			accumulate_qef(ch);
-			sum.add(cells[ch].qef);
+			sum.add(qefs[ch]);
 		}
-		cells[idx].qef = sum;
+		qefs[idx] = sum;
 	}
 
 	// Parallel split of accumulate_qef's leaf sampling — the build's dominant cost. build() leaves the
@@ -280,7 +284,7 @@ struct Octree {
 		for (uint32_t i = 0; i < cells.size(); ++i) {
 			if (cells[i].children[0] < 0) { // structural leaf
 				if (cells[i].absent) {
-					cells[i].qef = Qef();
+					qefs[i] = Qef();
 				} else {
 					leaves.push_back(int(i));
 				}
@@ -290,13 +294,13 @@ struct Octree {
 		const int n = int(leaves.size());
 		const int nthreads = (g_mesh_threads > 1 && n >= 64) ? MIN(g_mesh_threads, n) : 1;
 		parallel_for(n, nthreads, [this, &leaves](int k) {
-			cells[leaves[k]].qef = leaf_qef(leaves[k]);
+			qefs[leaves[k]] = leaf_qef(leaves[k]);
 		});
 	}
 
 	// Roll the (already-sampled) leaf QEFs up the tree — same post-order sum as accumulate_qef but with
 	// NO leaf sampling (the leaves are filled by sample_leaves_parallel first). Same summands and order,
-	// so cells[0].qef is bit-identical to accumulate_qef(0).
+	// so qefs[0] is bit-identical to accumulate_qef(0).
 	void accumulate_sums(int idx) {
 		if (cells[idx].children[0] < 0) {
 			return; // leaf — qef already set by sample_leaves_parallel
@@ -305,9 +309,9 @@ struct Octree {
 		for (int i = 0; i < 8; ++i) {
 			int ch = cells[idx].children[i];
 			accumulate_sums(ch);
-			sum.add(cells[ch].qef);
+			sum.add(qefs[ch]);
 		}
-		cells[idx].qef = sum;
+		qefs[idx] = sum;
 	}
 
 	// Reset every node's leaf flag to its STRUCTURAL state (leaf iff it has no children) and clear the
@@ -418,6 +422,7 @@ struct Octree {
 		}
 		int i = int(cells.size());
 		cells.push_back(Cell());
+		qefs.push_back(Qef()); // hot/cold split: keep the QEF arena index-synced with cells
 		return i;
 	}
 
@@ -430,7 +435,7 @@ struct Octree {
 			c.leaf = true;
 			c.absent = false;
 			c.vertex = -1;
-			c.qef = Qef();
+			qefs[idx] = Qef(); // hot/cold split: QEF lives in the parallel arena (c is the hot Cell at idx)
 			c.we_valid = false; // born invalid — a reused slot's cached solve belongs to a dead cell
 			c.vtx_valid = false;
 			c.dirty = false;
@@ -474,7 +479,7 @@ struct Octree {
 		c.leaf = true;
 		c.absent = false;
 		c.vertex = -1;
-		c.qef = Qef();
+		qefs[idx] = Qef(); // hot/cold split: QEF lives in the parallel arena (c is the hot Cell at idx)
 		c.we_valid = false; // born invalid — a reused slot's cached solve belongs to a dead cell
 		c.vtx_valid = false;
 		c.dirty = false;
@@ -542,6 +547,7 @@ struct Octree {
 				break;
 			}
 			cells.resize_uninitialized(base + int64_t(d_count) * 8); // init_cell fills every new slot in parallel below
+			qefs.resize_uninitialized(base + int64_t(d_count) * 8);  // hot/cold split: same slots in the QEF arena
 			level_start.push_back(base);
 			const int athreads = (g_mesh_threads > 1 && d_count >= 32) ? MIN(g_mesh_threads, d_count) : 1;
 			parallel_for(d_count, athreads, [this, &descenders, base](int j) {
@@ -584,9 +590,9 @@ struct Octree {
 				}
 				Qef sum;
 				for (int i = 0; i < 8; ++i) {
-					sum.add(cells[cells[idx].children[i]].qef);
+					sum.add(qefs[cells[idx].children[i]]);
 				}
-				cells[idx].qef = sum;
+				qefs[idx] = sum;
 			});
 		}
 	}
@@ -594,7 +600,7 @@ struct Octree {
 	// One node's collapse decision — the body of collapse_pass without the recursion. Reads only its own
 	// accumulated qef, writes only its own leaf flag + orphans its own (disjoint) subtree.
 	void collapse_test(int idx) {
-		if (cells[idx].children[0] < 0 || !error_driven || cells[idx].qef.count == 0 || cells[idx].size > max_leaf_size) {
+		if (cells[idx].children[0] < 0 || !error_driven || qefs[idx].count == 0 || cells[idx].size > max_leaf_size) {
 			return;
 		}
 		const Vector3 cmin = to_v3(cells[idx].origin);
@@ -612,8 +618,8 @@ struct Octree {
 		if (cells[idx].we_valid) {
 			we = cells[idx].we_cache;
 		} else {
-			const Vector3 v = cells[idx].qef.solve(cmin, cmax);
-			we = Math::sqrt(cells[idx].qef.residual(v));
+			const Vector3 v = qefs[idx].solve(cmin, cmax);
+			we = Math::sqrt(qefs[idx].residual(v));
 			cells[idx].we_cache = we;
 			cells[idx].we_valid = true;
 		}
@@ -669,7 +675,7 @@ struct Octree {
 		// emit_color is fixed for a retained tree's lifetime (grow_world inherits it), so the cached colour
 		// is always sampled under the same flag it's read back with.
 		if (!cells[idx].vtx_valid) {
-			const Qef &qef = cells[idx].qef;
+			const Qef &qef = qefs[idx];
 			Vector3 cmin = to_v3(cells[idx].origin);
 			Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
 			Vector3 v = qef.solve(cmin, cmax);
@@ -898,7 +904,7 @@ struct Octree {
 	// (a structural leaf, or one orphaned by a collapse above — orphans are leaf=false but have no children).
 	void emit_walk_dirty(int idx, HashSet<int> &re) {
 		if (cells[idx].leaf || cells[idx].children[0] < 0) {
-			if (cells[idx].leaf && cells[idx].qef.count > 0) {
+			if (cells[idx].leaf && qefs[idx].count > 0) {
 				re.insert(idx);
 			} else {
 				emit_drop(idx);
@@ -921,7 +927,7 @@ struct Octree {
 			return; // no overlap
 		}
 		if (cells[idx].leaf || cells[idx].children[0] < 0) {
-			if (cells[idx].leaf && cells[idx].qef.count > 0) {
+			if (cells[idx].leaf && qefs[idx].count > 0) {
 				re.insert(idx);
 			}
 			return;
@@ -1072,7 +1078,7 @@ struct Octree {
 		LocalVector<uint8_t> is_vtx;
 		is_vtx.resize(n);
 		parallel_for(n, cthreads, [this, &is_vtx](int i) {
-			is_vtx[i] = (cells[i].leaf && cells[i].qef.count > 0) ? 1 : 0;
+			is_vtx[i] = (cells[i].leaf && qefs[i].count > 0) ? 1 : 0;
 		});
 		LocalVector<int> voff;
 		voff.resize(n);
@@ -1198,7 +1204,7 @@ struct Octree {
 			}
 			cells[idx].children[i] = -1;
 		}
-		cells[idx].qef = Qef();
+		qefs[idx] = Qef();
 		cells[idx].vertex = -1;
 		cells[idx].leaf = true;
 		cells[idx].absent = true;
@@ -1258,7 +1264,7 @@ struct Octree {
 			// worst-error first, the rest stay coarse (QEF still valid) until a later grow reaches them.
 			Vector3 cmin = to_v3(cells[idx].origin);
 			Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
-			double we = Math::sqrt(cells[idx].qef.residual(cells[idx].qef.solve(cmin, cmax)));
+			double we = Math::sqrt(qefs[idx].residual(qefs[idx].solve(cmin, cmax)));
 			refine_cands.push_back(RefineCand{ we, idx });
 		} else {
 			grow_subtree(idx);   // unbudgeted (a move): subdivide to the (finer) floor — full window coverage
@@ -1375,7 +1381,7 @@ struct Octree {
 		bool changed;
 		if (cells[idx].children[0] < 0) {
 			if (cells[idx].absent) {
-				cells[idx].qef = Qef();
+				qefs[idx] = Qef();
 			}
 			changed = cells[idx].dirty; // leaf: a re-sampled or newly-evicted leaf (reconcile set dirty)
 		} else {
@@ -1384,13 +1390,13 @@ struct Octree {
 			for (int i = 0; i < 8; ++i) {
 				int ch = cells[idx].children[i];
 				any |= reaccumulate(ch, incremental);
-				sum.add(cells[ch].qef);
+				sum.add(qefs[ch]);
 			}
 			// `marked` means a refined descendant changed below this node. That descendant rolled up its own
 			// subtree (accumulate_qef) and returns false from reaccumulate (its qef is already current), so `any`
 			// alone misses it — a marked internal node must re-sum to pull the changed child's qef into its own.
 			if (any || marked) {
-				cells[idx].qef = sum; // a child changed → this node's accumulated qef changed
+				qefs[idx] = sum; // a child changed → this node's accumulated qef changed
 			}
 			changed = any || marked || cells[idx].dirty;
 		}
