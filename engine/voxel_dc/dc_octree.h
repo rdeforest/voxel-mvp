@@ -42,10 +42,10 @@ struct Cell {
 	// O(changed band). `dirty` is the per-frame signal reconcile sets where it changes a cell and
 	// reaccumulate propagates to ancestors; it clears the *_valid bits, which otherwise persist across grows.
 	// A fresh cell is born with both invalid (solve once), so the full-build path is unaffected.
-	double  we_cache  = 0.0;        // sqrt(qef.residual(solved vertex)) — the collapse screen-error numerator
-	Vector3 vpos_cache;             // solved vertex position (lattice-local)
-	double  verr_cache = 0.0;       // sqrt(qef.residual(vpos)) — this leaf's geometric error (dcinval diagnostic)
-	Vector3 vnorm_cache;            // solved vertex normal
+	float   we_cache  = 0.0f;       // sqrt(qef.residual(solved vertex)) — the collapse screen-error numerator
+	F3      vpos_cache;             // solved vertex position (lattice-local) — emitted as a float GPU vertex
+	float   verr_cache = 0.0f;      // sqrt(qef.residual(vpos)) — this leaf's geometric error (dcinval diagnostic)
+	F3      vnorm_cache;            // solved vertex normal
 	Color   vcol_cache;             // solved vertex material colour (only when emit_color)
 	bool we_valid  = false;         // we_cache holds this cell's current qef's residual
 	bool vtx_valid = false;         // vpos/vnorm/vcol_cache hold this cell's current qef's solve
@@ -673,7 +673,7 @@ struct Octree {
 			Vector3 cmin = to_v3(cells[idx].origin);
 			Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
 			Vector3 v = qef.solve(cmin, cmax);
-			Vector3 n = qef.nsum.length_squared() > 0.0 ? qef.nsum.normalized() : Vector3(0, 1, 0);
+			Vector3 n = qef.nsum.length_squared() > 0.0 ? Vector3(qef.nsum).normalized() : Vector3(0, 1, 0);
 			cells[idx].vpos_cache = v;
 			cells[idx].verr_cache = Math::sqrt(qef.residual(v)); // same `we` collapse_test uses — dcinval reads it per emitted leaf
 			cells[idx].vnorm_cache = n;
