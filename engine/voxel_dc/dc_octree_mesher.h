@@ -24,6 +24,8 @@ class DCOctreeMesher : public RefCounted {
 	// can re-decide collapse against a new camera without re-sampling. Null until the first build.
 	DCOctreePersist *_persist = nullptr;
 
+	bool _verify_emit = false; // debug: post-emit dangling-slot self-check; survives persist recreation (re-root)
+
 	// Per-triangle owner cell origin (WORLD lattice) of the last mesh call. One Vector3
 	// (integer-valued) per emitted triangle; read by the dcinval LOD diagnostic overlay.
 	PackedVector3Array  _last_tri_owners;
@@ -155,6 +157,11 @@ public:
 	int64_t get_cell_arena_bytes() const;    // M2: total cell-arena size (disk)
 	int64_t get_cell_resident_bytes() const; // M2: cells currently in RAM (mincore)
 	bool is_arena_disk_backed() const;       // M2: false = fell back to anon RAM (OOM risk) → game warns
+
+	// Debug: enable a post-emit self-check that flags dangling-slot triangles (the "unrelated vertices" bug).
+	void    set_verify_emit(bool on);
+	int     get_last_bad_tri_count() const;  // # bad triangles in the last emit (0 = clean)
+	Vector3 get_last_bad_tri_pos() const;    // a vertex (lattice-local) of the first bad triangle, to localise
 
 	// Full prune-accel bakes run so far. grow_world reuses the accel (doesn't bump this) when the
 	// resident window is unchanged — e.g. a stationary refine — so a held view refines without re-baking.

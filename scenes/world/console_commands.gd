@@ -16,6 +16,7 @@ extends RefCounted
 var host:          Node
 var inval_overlay: Node3D
 var world_preview: DcWorldPreview
+var _dcverify_on := false   # debug: post-emit dangling-slot self-check (dcverify command)
 var integrity:         StructuralIntegrity
 var player:            CharacterBody3D
 var awake_overlay:     AwakeOverlay
@@ -58,6 +59,7 @@ func _table() -> Array:
         [dcmaxcells,      "dcmaxcells", "Memory budget: stop refining past this many octree cells (~350 B each). At LOG2=4 max-detail the arena would otherwise exhaust RAM. Usage: dcmaxcells [millions] (default 80)"],
         [dcframebudget,   "dcframebudget", "Per-frame render budget (ms) the controller refines toward — refines while render cost < half this, backs off above it. Higher = more detail, lower fps. Usage: dcframebudget [ms] (default 16)"],
         [dcthreads,       "dcthreads", "Parallel accel-bake workers: `dcthreads <n>` sets the thread count; no args prints the phase timing (accel + build + collapse ms). Usage: dcthreads [n]"],
+        [dcverify,        "dcverify",  "Debug: toggle the post-emit self-check for dangling-slot triangles (the 'unrelated vertices' bug). When on, a Toast fires the moment an emit produces a bad triangle, naming the op + location. Costs an O(tris) scan per emit. Usage: dcverify [on|off]"],
         [remesh,          "remesh",    "Force a full dcworld rebuild now (re-bake + build + collapse) — trigger a remesh without walking, then read `dcthreads` for the timing."],
         [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
         [mpmdemo,         "mpmdemo",   "PB-MPM demo: spawn a live block of continuum material that falls and rests ON the terrain. Usage: mpmdemo [size]"],
@@ -261,6 +263,17 @@ func dcretain(m := -1.0) -> void:
     if m >= 0.0:
         world_preview.retain_margin_m = m
     LimboConsole.info("dcretain: %.0f m kept resident beyond the visible window (M) — turn/backtrack within it doesn't re-bloom" % world_preview.retain_margin_m)
+
+
+func dcverify(arg := "") -> void:
+    if arg == "on":
+        _dcverify_on = true
+    elif arg == "off":
+        _dcverify_on = false
+    else:
+        _dcverify_on = not _dcverify_on
+    world_preview._mesher.set_verify_emit(_dcverify_on)
+    LimboConsole.info("dcverify: %s — post-emit dangling-slot self-check (Toast fires on a bad triangle)" % ("ON" if _dcverify_on else "OFF"))
 
 
 func dcframebudget(ms := 0.0) -> void:

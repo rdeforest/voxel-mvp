@@ -239,6 +239,7 @@ Array DCOctreeMesher::mesh_world(
 	oct.root_size = 1 << depth;
 	oct.max_depth = depth;
 	oct.cell_budget = max_cells; // memory budget: build stops descending past this (0 = arena cap only)
+	oct.verify_emit_on = _verify_emit; // debug self-check survives this rebuild
 	oct.camera = camera;
 	oct.proj = proj;
 	oct.eps_px = eps_px;
@@ -457,6 +458,21 @@ int64_t DCOctreeMesher::get_cell_resident_bytes() const {
 	return o.cells.resident_bytes() + o.qefs.resident_bytes();
 }
 
+void DCOctreeMesher::set_verify_emit(bool on) {
+	_verify_emit = on;
+	if (_persist != nullptr) {
+		_persist->oct.verify_emit_on = on; // apply to the live octree; mesh_world re-applies on a rebuild
+	}
+}
+
+int DCOctreeMesher::get_last_bad_tri_count() const {
+	return _persist != nullptr ? _persist->oct.last_bad_tris : 0;
+}
+
+Vector3 DCOctreeMesher::get_last_bad_tri_pos() const {
+	return _persist != nullptr ? _persist->oct.last_bad_pos : Vector3();
+}
+
 // M2: false if any cell arena failed to get a disk-backed temp file and fell back to anonymous RAM (OOM risk).
 bool DCOctreeMesher::is_arena_disk_backed() const {
 	return !voxel_dc::dc_mesh::g_arena_anon_fallback;
@@ -507,6 +523,9 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cell_arena_bytes"),      &DCOctreeMesher::get_cell_arena_bytes);
 	ClassDB::bind_method(D_METHOD("get_cell_resident_bytes"),   &DCOctreeMesher::get_cell_resident_bytes);
 	ClassDB::bind_method(D_METHOD("is_arena_disk_backed"),      &DCOctreeMesher::is_arena_disk_backed);
+	ClassDB::bind_method(D_METHOD("set_verify_emit", "on"),     &DCOctreeMesher::set_verify_emit);
+	ClassDB::bind_method(D_METHOD("get_last_bad_tri_count"),    &DCOctreeMesher::get_last_bad_tri_count);
+	ClassDB::bind_method(D_METHOD("get_last_bad_tri_pos"),      &DCOctreeMesher::get_last_bad_tri_pos);
 	ClassDB::bind_method(D_METHOD("get_accel_bake_count"),       &DCOctreeMesher::get_accel_bake_count);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);

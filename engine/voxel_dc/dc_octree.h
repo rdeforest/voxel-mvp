@@ -121,6 +121,9 @@ struct Octree {
 	bool emit_warm  = false;      // persistent emit arrays + per-leaf tri_at/tri_n are valid (post full emit)
 	bool emit_track = false;      // recollapse_dirty records changed subtree roots into emit_dirty (incremental emit on)
 	LocalVector<int> emit_dirty;  // subtree roots the incremental emit must re-walk this grow (from recollapse_dirty)
+	bool verify_emit_on = false;  // debug: run verify_emit() after each emit to catch dangling-slot triangles
+	int  last_bad_tris  = 0;      // verify_emit result: non-degenerate triangles spanning ≫ their owner cell
+	Vector3 last_bad_pos;         // a vertex (lattice-local) of the first bad triangle found, for localising it
 	uint64_t last_build_us    = 0; // phase timing: build() + accumulate_qef() (microseconds)
 	uint64_t last_collapse_us = 0; // phase timing: recollapse_and_mesh() (microseconds)
 	uint64_t last_construct_us = 0; // sub-phase: build() tree construction (serial)
@@ -322,6 +325,10 @@ struct Octree {
 		parallel_for(n, threads, [this](int i) { // independent per cell → byte-identical to the serial loop
 			cells[i].leaf = cells[i].children[0] < 0;
 			cells[i].vertex = -1;
+			cells[i].tri_n = 0;          // the full emit rebuilds the index array + only re-stamps tri_at/tri_n on
+			                             // EMITTING leaves, so a leaf that stops emitting would keep a STALE range
+			                             // pointing at another leaf's triangles — a later incremental drain would
+			                             // then tombstone the wrong leaf. Reset here so non-emitters carry tri_n=0.
 			cells[i].path_dirty = false; // c4: a move does a FULL collapse (camera changed) and won't consume the
 			                             // incremental-reaccumulate marks, so clear them here or they leak to the
 			                             // next grow and decay reaccumulate back toward O(tree). Free — already O(n).
@@ -1043,10 +1050,12 @@ struct Octree {
 		if (inc_emit) {
 			// keep stable vertex slots + last grow's leaf flags — emit_incremental patches only the changes
 		} else if (incremental) {
-			// compacting full emit on a drain: keep leaf flags (incremental collapse set them), reset slots
+			// compacting full emit on a drain: keep leaf flags (incremental collapse set them), reset slots +
+			// tri ranges (this rebuilds the index array, so non-emitters must not keep a stale tri range — see
+			// reset_leaves; otherwise a later incremental drain tombstones the wrong leaf's triangles).
 			const int n = int(cells.size());
 			const int threads = (g_mesh_threads > 1 && n >= 8192) ? MIN(g_mesh_threads, n) : 1;
-			parallel_for(n, threads, [this](int i) { cells[i].vertex = -1; });
+			parallel_for(n, threads, [this](int i) { cells[i].vertex = -1; cells[i].tri_n = 0; });
 		} else {
 			reset_leaves();
 		}
@@ -1066,6 +1075,9 @@ struct Octree {
 		if (inc_emit) {
 			emit_incremental(); // tombstone + append only the changed leaves + seam neighbours
 			emit_track = false;
+			if (verify_emit_on) {
+				verify_emit();
+			}
 			return;
 		}
 		int n = int(cells.size());
@@ -1172,6 +1184,43 @@ struct Octree {
 		tomb_tris = 0;
 		emit_warm = true;
 		last_pass2_us = OS::get_singleton()->get_ticks_usec() - tp2;
+		if (verify_emit_on) {
+			verify_emit();
+		}
+	}
+
+	// Debug self-check for the incremental-emit accounting: a non-degenerate triangle whose vertices span far
+	// beyond its owner cell is the signature of a dangling vertex slot (a freed+reused slot still indexed by a
+	// triangle that wasn't re-emitted). A legit triangle — even across a LOD jump — stays within a few cells of
+	// its owner, so 16x the owner size is a wide margin that only a snapped-to-an-unrelated-vertex tri trips.
+	// Out-of-range indices are counted too (a corrupt slot reference). O(triangles); gated by verify_emit_on.
+	void verify_emit() {
+		last_bad_tris = 0;
+		const int32_t *ip = indices.ptr();
+		const float *szp = tri_owner_sizes.ptr();
+		const Vector3 *vp = verts.ptr();
+		const int vn = int(verts.size());
+		const int nt = int(indices.size()) / 3;
+		const int no = int(tri_owner_sizes.size());
+		for (int t = 0; t < nt; ++t) {
+			const int a = ip[t * 3], b = ip[t * 3 + 1], c = ip[t * 3 + 2];
+			if (a == b || b == c || a == c) {
+				continue; // degenerate = tombstone, not drawn
+			}
+			if (a < 0 || a >= vn || b < 0 || b >= vn || c < 0 || c >= vn) {
+				if (last_bad_tris == 0 && a >= 0 && a < vn) { last_bad_pos = vp[a]; }
+				++last_bad_tris;
+				continue;
+			}
+			const Vector3 va = vp[a], vb = vp[b], vc = vp[c];
+			const double e = MAX(MAX((va - vb).length_squared(), (vb - vc).length_squared()), (va - vc).length_squared());
+			const double sz = (t < no) ? MAX(double(szp[t]), 1.0) : 1.0;
+			const double lim = 16.0 * sz;
+			if (e > lim * lim) {
+				if (last_bad_tris == 0) { last_bad_pos = va; }
+				++last_bad_tris;
+			}
+		}
 	}
 
 	// --- Incremental window growth (doc 16 Stage B) -------------------------------------------------

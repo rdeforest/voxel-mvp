@@ -531,3 +531,33 @@ func test_mesh_world_matches_baked_grid_topology():
     var wv: PackedVector3Array = _world_arrays(s, origin, false)[Mesh.ARRAY_VERTEX]
     var bv: PackedVector3Array = _baked_arrays(s, origin, false)[Mesh.ARRAY_VERTEX]
     assert_eq(wv.size(), bv.size(), "direct-sampled vertex count == baked-grid vertex count (same topology)")
+
+
+# Move-then-drain interleaves the FULL emit (a move re-emits everything) with the INCREMENTAL emit (a drain
+# tombstones + appends only the changed band). That boundary is where the vertex-slot / per-leaf triangle-range
+# accounting can drift — a freed slot reused while still indexed (a triangle between unrelated vertices), or a
+# stale per-leaf range tombstoning the wrong leaf after the full emit only re-stamps emitting leaves. Run the
+# emit self-check across the sequence: no dangling-slot triangle may appear. Also guards the verifier itself
+# against false-positiving on the legit LOD-jump triangles in the trusted mesher output.
+func test_grow_world_move_then_drain_emit_is_clean():
+    var s := _store()
+    var origin := _region_origin(s)
+    var lo := origin
+    var hi := origin + WIN_FULL
+    var m := DCOctreeMesher.new()
+    m.set_verify_emit(true)
+    var cam := Vector3(16, 16, 120)
+    m.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 8.0, true, PackedColorArray(), lo, hi)
+    assert_eq(m.get_last_bad_tri_count(), 0, "fresh build emit is clean")
+    m.grow_world(cam, 500.0, 2.0, lo, hi)            # eps change → full emit, refine to fine
+    assert_eq(m.get_last_bad_tri_count(), 0, "drain-to-fine full emit is clean")
+    for step in range(1, 5):
+        var c := cam + Vector3(8 * step, 0, 0)
+        m.grow_world(c, 500.0, 2.0, lo, hi)          # MOVE → full emit over the retained tree
+        assert_eq(m.get_last_bad_tri_count(), 0, "move %d full emit is clean" % step)
+        m.grow_world(c, 500.0, 2.0, lo, hi, 100, Vector3i(), Vector3i(), false)  # first drain rebuilds the frontier
+        var iters := 0
+        while m.get_refine_pending() and iters < 5000:
+            m.grow_world(c, 500.0, 2.0, lo, hi, 100, Vector3i(), Vector3i(), true)  # INCREMENTAL drains
+            iters += 1
+        assert_eq(m.get_last_bad_tri_count(), 0, "move %d incremental drain emit is clean" % step)
