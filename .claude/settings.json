@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(deep-research)",
+      "Workflow(deep-research)",
+      "WebFetch(*)",
+      "Bash(*)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
+    ]
+  }
+}
