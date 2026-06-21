@@ -7,7 +7,8 @@
       "Bash(*)"
     ],
     "additionalDirectories": [
-      "/tmp"
+      "/tmp",
+      "/home/robert/.config/Code/User"
     ]
   }
 }
