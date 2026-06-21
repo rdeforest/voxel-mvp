@@ -12,7 +12,7 @@ Faithful dcworld config — base_cell 0.25, depth 12, 128 m window, camera at ce
 - `eps_px=94` (the in-game settle point): **6** interior count-1 edges, all >32 lattice from any window face.
 - `eps_px=32`: **24**.
 Detector: post-mesh edge histogram → interior edges used by only ONE triangle, both endpoints far from the
-window faces (so not a legit open-rim cut). Probe: `tmp/probe_faithful_cracks.gd` (config above). A
+window faces (so not a legit open-rim cut). Probe: `scripts/dev/probe_faithful_cracks.gd` (config above). A
 uniform-fine floor (no grading) shows **0** — the grading is the trigger.
 
 ## Root cause (precise)
