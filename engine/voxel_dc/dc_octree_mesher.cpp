@@ -211,7 +211,8 @@ Array DCOctreeMesher::mesh_world(
 		bool error_driven,
 		const PackedColorArray &palette,
 		Vector3i win_min,
-		Vector3i win_max) {
+		Vector3i win_max,
+		int64_t max_cells) {
 	Array out;
 	if (store.is_null() || depth < 1 || base_cell <= 0.0) {
 		ERR_PRINT("DCOctreeMesher::mesh_world: bad arguments");
@@ -220,8 +221,13 @@ Array DCOctreeMesher::mesh_world(
 	// Retain the world octree (like a full mesh_clipmap) so remesh() can re-collapse it against a new
 	// camera with no field resampling — the persistent-octree foundation for incremental movement. The
 	// EditStoreSource + a Ref to the store live in the persist so oct.src stays valid across remesh().
+	// Null _persist BEFORE freeing it: this runs on the worker, but the debug server reads _persist-derived
+	// telemetry from the main thread — a dangling pointer between memdelete and reassignment would be a UAF,
+	// while a null is caught by the getters' null-check (they return 0). The old object is freed via a local.
 	if (_persist != nullptr) {
-		memdelete(_persist);
+		DCOctreePersist *old = _persist;
+		_persist = nullptr;
+		memdelete(old);
 	}
 	_persist = memnew(DCOctreePersist);
 	_persist->world_store = store;
@@ -232,6 +238,7 @@ Array DCOctreeMesher::mesh_world(
 	oct.palette = palette;
 	oct.root_size = 1 << depth;
 	oct.max_depth = depth;
+	oct.cell_budget = max_cells; // memory budget: build stops descending past this (0 = arena cap only)
 	oct.camera = camera;
 	oct.proj = proj;
 	oct.eps_px = eps_px;
@@ -434,6 +441,11 @@ int64_t DCOctreeMesher::get_cell_resident_bytes() const {
 	return _persist != nullptr ? _persist->oct.cells.resident_bytes() : 0;
 }
 
+// M2: false if any cell arena failed to get a disk-backed temp file and fell back to anonymous RAM (OOM risk).
+bool DCOctreeMesher::is_arena_disk_backed() const {
+	return !voxel_dc::dc_mesh::g_arena_anon_fallback;
+}
+
 bool DCOctreeMesher::get_refine_pending() const {
 	return _persist != nullptr && _persist->oct.refine_pending;
 }
@@ -461,10 +473,10 @@ void DCOctreeMesher::_bind_methods() {
 			DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(Vector3i()));
 	ClassDB::bind_method(
 			D_METHOD("mesh_world", "store", "world_origin", "depth", "base_cell",
-					"camera", "proj", "eps_px", "error_driven", "palette", "win_min", "win_max"),
+					"camera", "proj", "eps_px", "error_driven", "palette", "win_min", "win_max", "max_cells"),
 			&DCOctreeMesher::mesh_world,
 			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(PackedColorArray()),
-			DEFVAL(Vector3i()), DEFVAL(Vector3i()));
+			DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(0));
 	ClassDB::bind_method(
 			D_METHOD("grow_world", "camera", "proj", "eps_px", "win_min", "win_max", "refine_budget", "emit_min", "emit_max", "reuse_frontier"),
 			&DCOctreeMesher::grow_world, DEFVAL(-1), DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(false));
@@ -478,6 +490,7 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_octree_cell_count"),      &DCOctreeMesher::get_octree_cell_count);
 	ClassDB::bind_method(D_METHOD("get_cell_arena_bytes"),      &DCOctreeMesher::get_cell_arena_bytes);
 	ClassDB::bind_method(D_METHOD("get_cell_resident_bytes"),   &DCOctreeMesher::get_cell_resident_bytes);
+	ClassDB::bind_method(D_METHOD("is_arena_disk_backed"),      &DCOctreeMesher::is_arena_disk_backed);
 	ClassDB::bind_method(D_METHOD("get_accel_bake_count"),       &DCOctreeMesher::get_accel_bake_count);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);

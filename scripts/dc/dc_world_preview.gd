@@ -39,8 +39,8 @@ var frame_budget := 16.0      # ms — frame-gen (render) budget; the `dcframebu
 # a fixed count can't. Tunable; `dcrefine` console knob.
 var refine_us := 8000                 # per-grow refine budget (µs); `dcrefine` knob. With the incremental emit a
                                       # grow is O(refined), so this is just a latency target, not overhead to amortize.
-var max_cells := 80_000_000           # memory budget: stop refining past this many octree cells (~350 B each ≈
-                                      # 28 GB). At LOG2=4 max-detail the arena would otherwise exhaust RAM. `dcmaxcells`.
+var max_cells := 80_000_000           # memory budget: stop refining past this many octree cells (296 B each ≈
+                                      # 24 GB). At LOG2=4 max-detail the arena would otherwise exhaust RAM. `dcmaxcells`.
 
 # M (doc 20): residency extends this far (metres) beyond the VISIBLE window — kept resident + pre-baked so a
 # turn or backtrack re-samples nothing, and the edge ahead is ready before you reach it. 0 = pre-M (residency
@@ -51,8 +51,9 @@ var base_cell    := VoxelConstants.RENDER_BASE_CELL  # metres per lattice unit (
 var win_radius_m := 128.0                            # resident window half-extent (m) — graded floor + budget make it affordable
 var _eps_px      := EPS_START                        # the single operating point; floor + collapse both derive from it
 var _frame_ms    := 0.0                              # smoothed frame time (render-cost signal)
-var _mem_throttle := 0                               # M2: recompute the cells-RAM/disk readout every 30 frames
-var _mem_status  := ""
+var _mem_status  := ""                               # M2: cells/RAM/arena readout, refreshed by the worker in _run_job
+var _ram_throttle := 0                               # M2: the RAM-resident scan (mincore) is the costly part —
+var _ram_gb := 0.0                                   # refresh it only every Nth job, not every job
 var _eps_dirty   := false                            # the controller changed eps → re-mesh to apply it
 
 var _follow:     Node3D
@@ -62,6 +63,7 @@ var _enabled := false
 var _mesher := DCOctreeMesher.new()  # persistent — holds the retained octree across frames
 var _root_origin_i := Vector3i.ZERO  # LATTICE coords of the root's (0,0,0) corner
 var _built := false
+var _arena_checked := false          # M2: one-shot — did we pop the "arena not disk-backed" warning yet?
 var _dirty := false                  # an edit happened → full rebuild to pick it up
 var _last_center := Vector3.INF
 
@@ -76,6 +78,7 @@ var _edit_max := Vector3i.ZERO
 var _task_id := -1
 var _job_store: EditStore            # immutable snapshot handed to the worker
 var _job_arrays: Array = []
+var _job_mesh: ArrayMesh             # tier-2: the ArrayMesh built ON the worker thread (not in _finish)
 var _job_cam := Vector3.ZERO
 var _job_proj := 0.0
 var _job_eps := EPS_START            # eps captured for the in-flight job
@@ -208,13 +211,7 @@ func _process(_dt: float) -> void:
     # NOT the vsync/fps_max-capped dt — so the controller's frame-headroom gate sees true GPU load, not the
     # quantised display interval (a 144Hz vsync pins dt at ~6.9ms and only jumps at the fps cliff).
     Perf.status("dcworld", "eps_px %.1f   job %.0f ms (%s%s)" % [_eps_px, _job_work_ms, _job_kind(), " refining" if _refine_pending else ""])
-    _mem_throttle += 1
-    if _mem_throttle >= 30:   # M2: cells RAM (resident) vs disk (arena) — mincore is cheap but not every frame
-        _mem_throttle = 0
-        var ram := _mesher.get_cell_resident_bytes() / 1048576.0
-        var disk := _mesher.get_cell_arena_bytes() / 1048576.0
-        _mem_status = "%.1fM cells   RAM %.1f GB / arena %.1f GB" % [_mesher.get_octree_cell_count() / 1.0e6, ram / 1024.0, disk / 1024.0]
-    Perf.status("dcmem", _mem_status)
+    Perf.status("dcmem", _mem_status)   # computed on the worker in _run_job (race-free, off the main thread)
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()
@@ -228,12 +225,18 @@ func _process(_dt: float) -> void:
     elif _pending_edit:
         _dispatch_edit(p)
     elif p.distance_to(_last_center) > RECENTER:
-        _dispatch_grow(p, -1, false)     # move: cover the new window fully (unbudgeted, rebuild frontier)
+        # Move: always re-window (graft new coverage at the floor, evict behind) so the player can walk; but
+        # BUDGET the sub-floor refinement, and cut it to 0 past max_cells. Unbudgeted moves refined each new
+        # band to the eps floor in one shot and retention kept all of it, so a walk grew the tree without bound
+        # (max_cells gated only the stationary drain, not moves). Budgeted, the move's deferred refinement
+        # drains through the gated path below, so the whole system respects the cell budget.
+        var move_budget := refine_us if _mesher.get_octree_cell_count() < max_cells else 0
+        _dispatch_grow(p, move_budget, false)
     elif (_eps_dirty or _refine_pending) and _mesher.get_octree_cell_count() < max_cells:
         # c1 (doc 20): a pure DRAIN (refine_pending, eps unchanged) reuses the persistent frontier — skip the
         # reconcile re-walk. An eps change rebuilds it (the floor moved, so the candidate set changed).
         # Memory budget: stop refining past max_cells — at LOG2=4 max-detail the cell arena would exhaust RAM
-        # (~350 bytes/cell). The world holds at the detail that fit; a move still evicts + refines. mmap is the
+        # (296 bytes/cell). The world holds at the detail that fit; a move still evicts + refines. mmap is the
         # real ceiling-raiser (M2); this is the honest "max detail until RAM is full" hardware-limit behaviour.
         _dispatch_grow(p, refine_us, not _eps_dirty)
 
@@ -356,8 +359,26 @@ func _run_job() -> void:
         _job_arrays = _mesher.grow_world(_job_cam, _job_proj, _job_eps, _job_win_min, _job_win_max, _job_refine_budget, _job_emit_min, _job_emit_max, _job_reuse)
     else:
         _job_arrays = _mesher.mesh_world(_job_store, _root_origin_i, DEPTH, base_cell,
-                _job_cam, _job_proj, _job_eps, true, _palette, _job_win_min, _job_win_max)
+                _job_cam, _job_proj, _job_eps, true, _palette, _job_win_min, _job_win_max, max_cells)
+    # Tier-2: pack the ArrayMesh HERE on the worker, not in _finish on the main thread. The array→GPU-format
+    # conversion is O(mesh) and was the ~1s main-thread stall at large meshes. RenderingServer is a
+    # multithreaded command queue with no main-thread guard on mesh creation, so the pack runs off-thread and
+    # the GPU upload command is marshalled safely; _finish then just assigns the finished mesh (a cheap swap).
+    _job_mesh = _arrays_to_mesh(_job_arrays)
     _job_work_ms = (Time.get_ticks_usec() - t0) / 1000.0   # mesh lag = the controller's primary signal
+    _refresh_mem_status()   # M2 telemetry computed HERE (worker owns _persist this job) — never on the main thread
+
+
+# M2 readout: cells (O(1)) + arena bytes (O(1)) every job; the RAM-resident mincore scan (O(resident pages),
+# a real hitch at hundreds of GB) only every Nth job. Runs on the worker at the end of _run_job — _persist is
+# stable (this thread just built it) and the main thread never touches it, so there's no race and no stall.
+func _refresh_mem_status() -> void:
+    _ram_throttle += 1
+    if _ram_throttle >= 10:
+        _ram_throttle = 0
+        _ram_gb = _mesher.get_cell_resident_bytes() / 1073741824.0
+    var disk := _mesher.get_cell_arena_bytes() / 1073741824.0
+    _mem_status = "%.1fM cells   RAM %.1f GB / arena %.1f GB" % [_mesher.get_octree_cell_count() / 1.0e6, _ram_gb, disk]
 
 
 func _finish() -> void:
@@ -366,7 +387,8 @@ func _finish() -> void:
     if not _enabled:
         return
     var t0 := Time.get_ticks_usec()
-    mesh = _arrays_to_mesh(_job_arrays)
+    mesh = _job_mesh                  # tier-2: built on the worker — this is now a cheap RID swap, not a pack+upload
+    _job_mesh = null
     # mesh_world verts are lattice-local to the root corner; place + scale back to world metres.
     global_position = Vector3(_root_origin_i) * base_cell
     scale = Vector3.ONE * base_cell
@@ -377,7 +399,34 @@ func _finish() -> void:
         _emit_diagnostic()   # refresh the dcinval LOD overlay for this mesh
     _refine_pending = _job_is_grow and _mesher.get_refine_pending()   # C: more refinement deferred → keep draining
     Perf.report_queue(_mesher.get_last_refine_queue_size() if _job_is_grow else 0)   # backlog graph in the perf window
+    _check_arena_backing()   # M2: first build done → the cell arena has initialised; warn if it isn't disk-backed
     _control()
+
+
+# M2: the cell arena initialises lazily on the first build. If it couldn't create a disk-backed temp file (no
+# writable ./tmp or $DC_ARENA_DIR, or only tmpfs available) it falls back to anonymous RAM and the OOM-killer is
+# back in play at high detail. That must never be a silent surprise, so pop a modal the moment we detect it.
+func _check_arena_backing() -> void:
+    if _arena_checked:
+        return
+    _arena_checked = true
+    if _mesher.is_arena_disk_backed():
+        return
+    push_warning("DC cell arena fell back to anonymous RAM (no disk-backed temp file) — OOM risk at high detail.")
+    if DisplayServer.get_name() == "headless":
+        return
+    var dlg := AcceptDialog.new()
+    dlg.title = "⚠  Cell arena: no disk paging"
+    dlg.dialog_text = ("The DC cell arena could not create a disk-backed temp file\n" +
+            "(tried $DC_ARENA_DIR, ./tmp, /var/tmp) and fell back to RAM.\n\n" +
+            "Cold cells can no longer page to disk, so the OOM-killer can\n" +
+            "strike at high detail. Set DC_ARENA_DIR to a writable path on\n" +
+            "a real (non-tmpfs) disk and relaunch.")
+    dlg.process_mode = Node.PROCESS_MODE_ALWAYS
+    get_tree().root.add_child(dlg)
+    dlg.confirmed.connect(dlg.queue_free)
+    dlg.canceled.connect(dlg.queue_free)
+    dlg.popup_centered()
 
 
 # Budget controller (doc 20): MAX DETAIL until the GPU complains. eps is the detail TARGET, driven toward the

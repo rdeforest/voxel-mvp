@@ -381,6 +381,44 @@ Lesson: measure the serial-vs-parallel split before optimizing; the obvious targ
 assert the per-grow collapse/emit work is proportional to the refined count, not the
 resident count (the proof the re-walk is actually gone).
 
+### c4 — Incremental reconcile for MOVES (next; 2026-06-21)
+
+c1 killed the O(tree) frontier re-collect for *stationary* drains (`reuse=true`). A
+**move** still pays it: `grow_world` re-windows with `reuse=false`, so `reconcile`
+re-walks the whole retained tree — to rebuild the frontier (the screen-error floor is
+distance-graded, so a move can flip `want_leaf` tree-wide) and to find grafts/evicts. At
+M-thesis scale this dominates: ~3.8 s `build_ms` walking a 725M-cell tree on a re-root;
+flying over a mountain, meshing lagged the camera ~10× (Robert: "a factor of 10 between
+current 'not good' and a future 'not bad'"). The fix: maintain the frontier persistently
+across moves too — add only boundary grafts, drop evicted/refined, and skip clean
+interior subtrees (fully inside both old and new windows, no eps change → no graft/evict).
+Harder than c1 because the graded floor shifts candidates tree-wide; open question is
+whether to tolerate a slightly-stale frontier (cheap, self-correcting over frames) or
+track exact eligibility. Gated by approach-only `grow==fresh` + the O(changed) assertion.
+
+This session (2026-06-21) landed the **containment** around c4, not the fix: a build
+cell-budget (`mesh_world` stops at `max_cells`/arena-cap — a re-root into dense LOG2=4
+terrain had blown past the `1<<30` int-index cap and SIGILL'd; M2 turned the old OOM into
+that abort); the ArrayMesh pack moved onto the worker thread (the ~1 s main-thread
+pack+upload stall is gone — a cheap RID swap remains; RenderingServer is a multithreaded
+command queue, no main-thread guard); and telemetry moved off the main thread (fixing a
+mincore hitch + a `_persist` UAF race). Detail:
+[`done/extras-11-mesher-scale-hardening.md`](../implementation/done/extras-11-mesher-scale-hardening.md).
+
+### Cell shrink — float QEF (queued BEHIND c4; 2026-06-21)
+
+`sizeof(Cell)` = **296 B** (verified). Qef 136 (6-double ATA + 3 `Vector3` @ 24 in the
+`precision=double` build + btb + count), solve caches 80 (vpos/vnorm/vcol + we/verr),
+`children[8]` 32, identity/topology ~48. The QEF + caches live in cell-**local** coords
+(small magnitudes), so `float` very likely has ample precision though world coords stay
+double — storing them `float` roughly halves both, **~296 → ~190 B**. Buys ~1.6× more
+cells per GB (delays mmap paging) *and* a faster grow walk (the O(tree) reconcile is
+memory-bandwidth-bound): a constant-factor win that **stacks** with c4's asymptotic one.
+Risk: the QEF solve places the vertex = mesh quality → validate against the watertight/
+quality gates + GPU eyes. Second, cleaner lever: `children[8]` → one `first_child` index
+(−28 B), since the build allocates the 8 children contiguously — but needs `grow_subtree`
+to allocate child blocks contiguously too (the free-list path isn't). c4 first, then this.
+
 ## Build sequence & cut line
 
 1. **E — incremental edits — build first.** Biggest perceived-lag win, the most

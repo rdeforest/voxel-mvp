@@ -12,12 +12,21 @@
 
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/statfs.h>
 #include <unistd.h>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace voxel_dc {
 namespace dc_mesh {
+
+// Set true if ANY arena failed to get a disk-backed temp file and fell back to anonymous (RAM) memory — the
+// OOM-safety is then GONE. The game surfaces this as an in-game pop-up so it can never be a silent surprise.
+inline bool g_arena_anon_fallback = false;
+inline char g_arena_dir[256] = { 0 }; // the disk dir an arena actually used (empty if fell back to anon)
+inline constexpr long DC_TMPFS_MAGIC = 0x01021994; // tmpfs is RAM-backed — skip it (would defeat disk paging)
 
 template <typename T>
 struct MmapArena {
@@ -52,11 +61,26 @@ struct MmapArena {
 			_cap = cap_limit;
 		}
 		_bytes = _cap * int64_t(sizeof(T));
-		char tmpl[] = "./tmp/dc_arena_XXXXXX";
-		fd = mkstemp(tmpl);
-		if (fd >= 0) {
-			unlink(tmpl); // the open fd keeps the inode for MAP_SHARED; auto-removed on close
-			if (ftruncate(fd, _bytes) != 0) {
+		// Try real-disk temp dirs in order; first one that gives a non-tmpfs, writable, truncatable file wins.
+		const char *env = getenv("DC_ARENA_DIR");
+		const char *dirs[] = { env, "./tmp", "/var/tmp" };
+		for (const char *d : dirs) {
+			if (d == nullptr || d[0] == '\0') {
+				continue;
+			}
+			struct statfs sfb;
+			if (statfs(d, &sfb) == 0 && long(sfb.f_type) == DC_TMPFS_MAGIC) {
+				continue; // RAM-backed — would defeat disk paging
+			}
+			char tmpl[300];
+			snprintf(tmpl, sizeof(tmpl), "%s/dc_arena_XXXXXX", d);
+			fd = mkstemp(tmpl);
+			if (fd >= 0) {
+				unlink(tmpl); // the open fd keeps the inode for MAP_SHARED; auto-removed on close
+				if (ftruncate(fd, _bytes) == 0) {
+					strncpy(g_arena_dir, d, sizeof(g_arena_dir) - 1);
+					break;
+				}
 				close(fd);
 				fd = -1;
 			}
@@ -64,6 +88,7 @@ struct MmapArena {
 		if (fd >= 0) {
 			base = (T *)mmap(nullptr, _bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 		} else {
+			g_arena_anon_fallback = true; // OOM-safety lost — the game pops a warning about this
 			base = (T *)mmap(nullptr, _bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 		}
 		CRASH_COND_MSG(base == MAP_FAILED, "MmapArena: mmap failed (out of address space?)");
@@ -71,6 +96,10 @@ struct MmapArena {
 
 	int64_t size() const { return _size; }
 	bool is_empty() const { return _size == 0; }
+
+	// Hard ceiling: slots this arena can hold (int-index-safe, set on first growth). The build/grow must stop
+	// below this — exceeding it overflows the int cell indices and trips the resize_uninitialized abort.
+	int64_t capacity() const { return _cap; }
 
 	T &operator[](int64_t i) { return base[i]; }
 	const T &operator[](int64_t i) const { return base[i]; }

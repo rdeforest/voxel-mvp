@@ -68,6 +68,7 @@ struct Octree {
 	const SdfSource *src = nullptr;  // field source (Clipmap or EditStoreSource); set by the caller, must outlive run()
 	int root_size = 0;
 	int max_depth = 0;
+	int64_t cell_budget = 0;  // memory budget (cells): build stops descending past this (0 = arena cap only).
 	Vector3 camera;          // viewpoint in root-local lattice space (screen-error LOD)
 	double proj = 0.0;       // viewport_height / (2*tan(fov/2)) — px per world unit at unit distance
 	double eps_px = 0.0;     // screen-space error threshold (px): collapse when we*proj/dist <= eps_px
@@ -524,6 +525,17 @@ struct Octree {
 				break;
 			}
 			const int base = int(cells.size());
+			// Memory budget: stop descending if the next level would exceed it. The arena cap is the hard
+			// int-index-safety ceiling; cell_budget (from max_cells) is the softer user bound. Without this a
+			// re-root into dense terrain at LOG2=4 builds past the cap and resize_uninitialized hard-aborts.
+			const int64_t cap = cells.capacity();
+			const int64_t budget = (cell_budget > 0 && cell_budget < cap) ? cell_budget : cap;
+			if (int64_t(base) + int64_t(d_count) * 8 > budget) {
+				for (int j = 0; j < d_count; ++j) {
+					cells[descenders[j]].leaf = true; // budget hit → keep these coarse (valid leaves, no children)
+				}
+				break;
+			}
 			cells.resize_uninitialized(base + int64_t(d_count) * 8); // init_cell fills every new slot in parallel below
 			level_start.push_back(base);
 			const int athreads = (g_mesh_threads > 1 && d_count >= 32) ? MIN(g_mesh_threads, d_count) : 1;

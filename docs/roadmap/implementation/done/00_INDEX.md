@@ -58,6 +58,11 @@ contains. Three kinds of doc live here:
 - [`extras-10-octree-edit-store.md`](extras-10-octree-edit-store.md) —
   records the EditStore becoming the sole terrain layer and godot_voxel's
   removal from the running game (Phase B S4–S5).
+- [`extras-11-mesher-scale-hardening.md`](extras-11-mesher-scale-hardening.md)
+  — records the M2 follow-on that made the world-octree render survive
+  hundreds of millions of cells (build cell-budget/SIGILL fix, bounded
+  move-grow, off-thread mesh pack, telemetry/`_persist` race fixes, arena
+  fallback pop-up). c4 + the float-QEF cell-shrink remain (doc 20 §I).
 - [`implementation-02-phase-0-foundation.md`](implementation-02-phase-0-foundation.md)
   — records the Phase 0 foundation: procedural terrain, FPS controller,
   gravity, day/night.
