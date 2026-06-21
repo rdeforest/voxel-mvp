@@ -162,6 +162,9 @@ public:
 	void    set_verify_emit(bool on);
 	int     get_last_bad_tri_count() const;  // # bad triangles in the last emit (0 = clean)
 	Vector3 get_last_bad_tri_pos() const;    // a vertex (lattice-local) of the first bad triangle, to localise
+	String  get_last_bad_tri_info() const;   // up to 5 bad tris this emit: owner cell + 3 vertices (REST diag)
+	int64_t get_verify_total_bad() const;    // cumulative bad triangles this session
+	int     get_verify_bad_emits() const;    // cumulative emits with ≥1 bad triangle
 
 	// Full prune-accel bakes run so far. grow_world reuses the accel (doesn't bump this) when the
 	// resident window is unchanged — e.g. a stationary refine — so a held view refines without re-baking.

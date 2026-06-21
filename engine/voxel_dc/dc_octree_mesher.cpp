@@ -473,6 +473,18 @@ Vector3 DCOctreeMesher::get_last_bad_tri_pos() const {
 	return _persist != nullptr ? _persist->oct.last_bad_pos : Vector3();
 }
 
+String DCOctreeMesher::get_last_bad_tri_info() const {
+	return _persist != nullptr ? _persist->oct.last_bad_info : String();
+}
+
+int64_t DCOctreeMesher::get_verify_total_bad() const {
+	return _persist != nullptr ? _persist->oct.verify_total_bad : 0;
+}
+
+int DCOctreeMesher::get_verify_bad_emits() const {
+	return _persist != nullptr ? _persist->oct.verify_bad_emits : 0;
+}
+
 // M2: false if any cell arena failed to get a disk-backed temp file and fell back to anonymous RAM (OOM risk).
 bool DCOctreeMesher::is_arena_disk_backed() const {
 	return !voxel_dc::dc_mesh::g_arena_anon_fallback;
@@ -526,6 +538,9 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_verify_emit", "on"),     &DCOctreeMesher::set_verify_emit);
 	ClassDB::bind_method(D_METHOD("get_last_bad_tri_count"),    &DCOctreeMesher::get_last_bad_tri_count);
 	ClassDB::bind_method(D_METHOD("get_last_bad_tri_pos"),      &DCOctreeMesher::get_last_bad_tri_pos);
+	ClassDB::bind_method(D_METHOD("get_last_bad_tri_info"),     &DCOctreeMesher::get_last_bad_tri_info);
+	ClassDB::bind_method(D_METHOD("get_verify_total_bad"),     &DCOctreeMesher::get_verify_total_bad);
+	ClassDB::bind_method(D_METHOD("get_verify_bad_emits"),     &DCOctreeMesher::get_verify_bad_emits);
 	ClassDB::bind_method(D_METHOD("get_accel_bake_count"),       &DCOctreeMesher::get_accel_bake_count);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);

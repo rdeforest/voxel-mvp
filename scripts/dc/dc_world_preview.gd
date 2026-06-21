@@ -64,6 +64,7 @@ var _mesher := DCOctreeMesher.new()  # persistent — holds the retained octree 
 var _root_origin_i := Vector3i.ZERO  # LATTICE coords of the root's (0,0,0) corner
 var _built := false
 var _arena_checked := false          # M2: one-shot — did we pop the "arena not disk-backed" warning yet?
+var _verify_tripped := false         # dcverify: one-shot Toast on the first bad emit (rest streams via REST)
 var _dirty := false                  # an edit happened → full rebuild to pick it up
 var _last_center := Vector3.INF
 
@@ -400,13 +401,11 @@ func _finish() -> void:
     _refine_pending = _job_is_grow and _mesher.get_refine_pending()   # C: more refinement deferred → keep draining
     Perf.report_queue(_mesher.get_last_refine_queue_size() if _job_is_grow else 0)   # backlog graph in the perf window
     _check_arena_backing()   # M2: first build done → the cell arena has initialised; warn if it isn't disk-backed
-    # Debug: when `dcverify` is on, the worker self-checks the emit for dangling-slot triangles. Surface a hit
-    # immediately with the job kind + a location, so we can see WHICH op (grow/move/edit) produces the bad mesh.
-    var bad: int = _mesher.get_last_bad_tri_count()
-    if bad > 0:
-        var p: Vector3 = _mesher.get_last_bad_tri_pos() * base_cell + global_position
-        Toast.failure("DC emit: %d bad tri(s) after %s near (%.0f, %.0f, %.0f)" % [bad, _job_kind(), p.x, p.y, p.z])
-        push_warning("DC emit verify: %d dangling-slot tri(s) after %s near %s" % [bad, _job_kind(), p])
+    # Debug: when `dcverify` is on, the worker self-checks each emit for dangling-slot triangles. Toast ONCE on
+    # the first trip (no per-frame spam); after that the full diagnostic streams over REST (/stats → "verify").
+    if _mesher.get_last_bad_tri_count() > 0 and not _verify_tripped:
+        _verify_tripped = true
+        Toast.failure("DC emit verify TRIPPED (%s) — diagnostics now on REST /stats" % _job_kind())
     _control()
 
 

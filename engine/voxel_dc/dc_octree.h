@@ -124,6 +124,9 @@ struct Octree {
 	bool verify_emit_on = false;  // debug: run verify_emit() after each emit to catch dangling-slot triangles
 	int  last_bad_tris  = 0;      // verify_emit result: non-degenerate triangles spanning ≫ their owner cell
 	Vector3 last_bad_pos;         // a vertex (lattice-local) of the first bad triangle found, for localising it
+	String  last_bad_info;        // up to 5 bad tris this emit: owner cell + 3 vertices — read over REST to diagnose
+	int64_t verify_total_bad = 0; // cumulative bad triangles across all emits this session (frequency signal)
+	int     verify_bad_emits = 0; // cumulative emits that produced ≥1 bad triangle
 	uint64_t last_build_us    = 0; // phase timing: build() + accumulate_qef() (microseconds)
 	uint64_t last_collapse_us = 0; // phase timing: recollapse_and_mesh() (microseconds)
 	uint64_t last_construct_us = 0; // sub-phase: build() tree construction (serial)
@@ -1196,30 +1199,51 @@ struct Octree {
 	// Out-of-range indices are counted too (a corrupt slot reference). O(triangles); gated by verify_emit_on.
 	void verify_emit() {
 		last_bad_tris = 0;
+		last_bad_info = String();
 		const int32_t *ip = indices.ptr();
 		const float *szp = tri_owner_sizes.ptr();
+		const Vector3 *op = tri_owners.ptr();
 		const Vector3 *vp = verts.ptr();
 		const int vn = int(verts.size());
 		const int nt = int(indices.size()) / 3;
 		const int no = int(tri_owner_sizes.size());
+		const int noo = int(tri_owners.size());
+		auto v3s = [](const Vector3 &v) -> String {
+			return "(" + String::num(v.x, 1) + "," + String::num(v.y, 1) + "," + String::num(v.z, 1) + ")";
+		};
+		int captured = 0;
 		for (int t = 0; t < nt; ++t) {
 			const int a = ip[t * 3], b = ip[t * 3 + 1], c = ip[t * 3 + 2];
 			if (a == b || b == c || a == c) {
 				continue; // degenerate = tombstone, not drawn
 			}
-			if (a < 0 || a >= vn || b < 0 || b >= vn || c < 0 || c >= vn) {
-				if (last_bad_tris == 0 && a >= 0 && a < vn) { last_bad_pos = vp[a]; }
-				++last_bad_tris;
-				continue;
+			const bool oob = (a < 0 || a >= vn || b < 0 || b >= vn || c < 0 || c >= vn);
+			double e = 0.0;
+			if (!oob) {
+				e = MAX(MAX((vp[a] - vp[b]).length_squared(), (vp[b] - vp[c]).length_squared()), (vp[a] - vp[c]).length_squared());
 			}
-			const Vector3 va = vp[a], vb = vp[b], vc = vp[c];
-			const double e = MAX(MAX((va - vb).length_squared(), (vb - vc).length_squared()), (va - vc).length_squared());
 			const double sz = (t < no) ? MAX(double(szp[t]), 1.0) : 1.0;
-			const double lim = 16.0 * sz;
-			if (e > lim * lim) {
-				if (last_bad_tris == 0) { last_bad_pos = va; }
-				++last_bad_tris;
+			if (!oob && e <= (16.0 * sz) * (16.0 * sz)) {
+				continue; // within reach of its owner cell — a legit triangle (even across a LOD jump)
 			}
+			if (last_bad_tris == 0) {
+				last_bad_pos = oob ? Vector3() : vp[a];
+			}
+			++last_bad_tris;
+			if (captured < 5) { // capture the first few for the REST diagnostic — owner cell + the 3 vertices
+				++captured;
+				String owner = (t < noo) ? v3s(op[t]) : String("?"); // tri owner-cell WORLD origin
+				if (oob) {
+					last_bad_info += "OOB owner=" + owner + " slots=[" + itos(a) + "," + itos(b) + "," + itos(c) + "] vn=" + itos(vn) + "\n";
+				} else {
+					last_bad_info += "owner=" + owner + " sz=" + itos(int(sz)) + " maxedge=" + String::num(Math::sqrt(e), 1) +
+							" slots=[" + itos(a) + "," + itos(b) + "," + itos(c) + "] A=" + v3s(vp[a]) + " B=" + v3s(vp[b]) + " C=" + v3s(vp[c]) + "\n";
+				}
+			}
+		}
+		if (last_bad_tris > 0) {
+			verify_total_bad += last_bad_tris;
+			++verify_bad_emits;
 		}
 	}
 

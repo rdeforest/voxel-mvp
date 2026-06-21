@@ -111,6 +111,13 @@ func _stats_json() -> String:
 			"pass1_ms": m.get_last_pass1_ms(),
 			"pass2_ms": m.get_last_pass2_ms(),
 		},
+		"verify": {                                    # dcverify: emit self-check (Claude reads this over REST)
+			"last_bad": m.get_last_bad_tri_count(),
+			"total_bad": m.get_verify_total_bad(),
+			"bad_emits": m.get_verify_bad_emits(),
+			"last_job": wp._job_kind(),
+			"info": m.get_last_bad_tri_info(),
+		},
 	})
 
 
