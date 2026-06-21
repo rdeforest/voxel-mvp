@@ -1192,53 +1192,95 @@ struct Octree {
 		}
 	}
 
-	// Debug self-check for the incremental-emit accounting: a non-degenerate triangle whose vertices span far
-	// beyond its owner cell is the signature of a dangling vertex slot (a freed+reused slot still indexed by a
-	// triangle that wasn't re-emitted). A legit triangle — even across a LOD jump — stays within a few cells of
-	// its owner, so 16x the owner size is a wide margin that only a snapped-to-an-unrelated-vertex tri trips.
-	// Out-of-range indices are counted too (a corrupt slot reference). O(triangles); gated by verify_emit_on.
+	// Two cell boxes touch/overlap on all 3 axes — i.e. they're adjacent (share at least an edge). The (up to 4)
+	// cells around a DC minimal-edge are pairwise touching regardless of their sizes, so a legit triangle's three
+	// owner cells all touch — even across an arbitrary LOD jump. A dangling/reused slot points to a cell that is
+	// NOT touching → that's the real bug, independent of edge length.
+	bool cells_touch(int i, int j) const {
+		const Vector3i a = cells[i].origin;
+		const int as = cells[i].size;
+		const Vector3i b = cells[j].origin;
+		const int bs = cells[j].size;
+		return a.x <= b.x + bs && b.x <= a.x + as && a.y <= b.y + bs && b.y <= a.y + as && a.z <= b.z + bs && b.z <= a.z + as;
+	}
+
+	// Debug self-check for the incremental-emit accounting. The geometric "far apart" test false-positives on
+	// legit large LOD jumps (DC is crack-free across any size jump), so this uses ADJACENCY instead: build a
+	// slot→owning-render-leaf map, then a triangle is bad iff a vertex slot is owned by NO current render leaf
+	// (a freed-but-still-indexed slot) OR its owning cell does not touch the triangle's other two cells (a
+	// reused slot snapped to an unrelated cell). O(cells + triangles); gated by verify_emit_on (debug only).
 	void verify_emit() {
 		last_bad_tris = 0;
 		last_bad_info = String();
 		const int32_t *ip = indices.ptr();
-		const float *szp = tri_owner_sizes.ptr();
-		const Vector3 *op = tri_owners.ptr();
 		const Vector3 *vp = verts.ptr();
 		const int vn = int(verts.size());
 		const int nt = int(indices.size()) / 3;
-		const int no = int(tri_owner_sizes.size());
-		const int noo = int(tri_owners.size());
+		if (nt == 0) {
+			return;
+		}
+		LocalVector<int> slot_cell; // vertex slot → owning render-leaf cell index (-1 = no live owner)
+		slot_cell.resize(vn);
+		for (int i = 0; i < vn; ++i) {
+			slot_cell[i] = -1;
+		}
+		const int ncells = int(cells.size());
+		for (int i = 0; i < ncells; ++i) {
+			const int v = cells[i].vertex;
+			if (cells[i].leaf && v >= 0 && v < vn && qefs[i].count > 0) {
+				slot_cell[v] = i;
+			}
+		}
 		auto v3s = [](const Vector3 &v) -> String {
 			return "(" + String::num(v.x, 1) + "," + String::num(v.y, 1) + "," + String::num(v.z, 1) + ")";
 		};
 		int captured = 0;
 		for (int t = 0; t < nt; ++t) {
-			const int a = ip[t * 3], b = ip[t * 3 + 1], c = ip[t * 3 + 2];
-			if (a == b || b == c || a == c) {
+			const int s[3] = { ip[t * 3], ip[t * 3 + 1], ip[t * 3 + 2] };
+			if (s[0] == s[1] || s[1] == s[2] || s[0] == s[2]) {
 				continue; // degenerate = tombstone, not drawn
 			}
-			const bool oob = (a < 0 || a >= vn || b < 0 || b >= vn || c < 0 || c >= vn);
-			double e = 0.0;
-			if (!oob) {
-				e = MAX(MAX((vp[a] - vp[b]).length_squared(), (vp[b] - vp[c]).length_squared()), (vp[a] - vp[c]).length_squared());
+			int ci[3] = { -1, -1, -1 };
+			bool bad = false;
+			for (int k = 0; k < 3; ++k) {
+				ci[k] = (s[k] >= 0 && s[k] < vn) ? slot_cell[s[k]] : -1;
+				if (ci[k] < 0) {
+					bad = true; // slot owned by no current render leaf — freed-but-still-indexed
+				}
 			}
-			const double sz = (t < no) ? MAX(double(szp[t]), 1.0) : 1.0;
-			if (!oob && e <= (16.0 * sz) * (16.0 * sz)) {
-				continue; // within reach of its owner cell — a legit triangle (even across a LOD jump)
+			if (!bad) {
+				for (int k = 0; k < 3 && !bad; ++k) {
+					for (int m = k + 1; m < 3 && !bad; ++m) {
+						if (!cells_touch(ci[k], ci[m])) {
+							bad = true; // a vertex cell that doesn't touch the others — snapped to an unrelated cell
+						}
+					}
+				}
 			}
-			if (last_bad_tris == 0) {
-				last_bad_pos = oob ? Vector3() : vp[a];
+			if (!bad) {
+				continue;
+			}
+			if (last_bad_tris == 0 && s[0] >= 0 && s[0] < vn) {
+				last_bad_pos = vp[s[0]];
 			}
 			++last_bad_tris;
-			if (captured < 5) { // capture the first few for the REST diagnostic — owner cell + the 3 vertices
+			if (captured < 5) {
 				++captured;
-				String owner = (t < noo) ? v3s(op[t]) : String("?"); // tri owner-cell WORLD origin
-				if (oob) {
-					last_bad_info += "OOB owner=" + owner + " slots=[" + itos(a) + "," + itos(b) + "," + itos(c) + "] vn=" + itos(vn) + "\n";
-				} else {
-					last_bad_info += "owner=" + owner + " sz=" + itos(int(sz)) + " maxedge=" + String::num(Math::sqrt(e), 1) +
-							" slots=[" + itos(a) + "," + itos(b) + "," + itos(c) + "] A=" + v3s(vp[a]) + " B=" + v3s(vp[b]) + " C=" + v3s(vp[c]) + "\n";
+				String rec = "tri slots=[" + itos(s[0]) + "," + itos(s[1]) + "," + itos(s[2]) + "]";
+				for (int k = 0; k < 3; ++k) {
+					rec += String(k == 0 ? " A" : (k == 1 ? " B" : " C")) + "=";
+					if (s[k] >= 0 && s[k] < vn) {
+						rec += v3s(vp[s[k]]);
+					} else {
+						rec += "OOB";
+					}
+					if (ci[k] >= 0) {
+						rec += "@cell" + v3s(to_v3(cells[ci[k]].origin)) + "sz" + itos(cells[ci[k]].size);
+					} else {
+						rec += "@FREED"; // the smoking gun — referenced slot owned by no live leaf
+					}
 				}
+				last_bad_info += rec + "\n";
 			}
 		}
 		if (last_bad_tris > 0) {
