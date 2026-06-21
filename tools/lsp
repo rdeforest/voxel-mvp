@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# tools/lsp — host the GDScript language server WITHOUT the GUI editor.
+#
+# The LSP lives inside EditorNode (there is no standalone LSP binary), so it
+# needs --editor. But --headless means no GUI and no open scene tabs, so the
+# editor can't do the thing that bites us: silently re-saving / reverting the
+# .tscn files it has open (see CLAUDE.md "editor clobber"). The LSP protocol
+# itself never writes your .gd source — completion/diagnostics are read-only;
+# its one mutating feature (workspace/applyEdit) is a request the VS Code
+# client applies, visibly and undoably.
+#
+# Residual writes are import metadata only: .godot/ (gitignored) and idempotent
+# .uid/.import sidecars regenerated on the startup scan.
+#
+# Point godot-tools at 127.0.0.1:$PORT (default 6005, the extension default).
+# Do NOT run this while the GUI editor is open on the same project — two editor
+# instances race on the .godot/ cache.
+#
+# Usage: tools/lsp [port]        # default 6005, or set LSP_PORT
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+PORT="${1:-${LSP_PORT:-6005}}"
+
+exec bin/godot --path . --headless --editor --lsp-port "$PORT"
