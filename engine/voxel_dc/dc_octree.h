@@ -128,6 +128,8 @@ struct Octree {
 	uint64_t last_reset_us = 0;    // recollapse sub-phase: reset_leaves() full O(cells) walk
 	uint64_t last_pass1_us = 0;    // recollapse sub-phase: vertex slot scan + parallel place_vertex
 	uint64_t last_pass2_us = 0;    // recollapse sub-phase: edge scan + parallel emit + concat
+	uint64_t last_reconcile_us = 0; // grow sub-phase: reconcile() the O(tree) graft/evict/collect walk (c4 target)
+	uint64_t last_reaccum_us   = 0; // grow sub-phase: reaccumulate() the O(tree-or-changed) QEF re-sum (c4 target)
 	MmapArena<Cell> cells; // M2: disk-paged cell arena — hot (visible) cells in RAM, cold (retained) on disk
 	LocalVector<int> free_list;    // (B1b) indices of cells killed by eviction, reused by the next grow so
 	                               // `cells` stays bounded across a long traverse instead of leaking.
@@ -316,6 +318,9 @@ struct Octree {
 		parallel_for(n, threads, [this](int i) { // independent per cell → byte-identical to the serial loop
 			cells[i].leaf = cells[i].children[0] < 0;
 			cells[i].vertex = -1;
+			cells[i].path_dirty = false; // c4: a move does a FULL collapse (camera changed) and won't consume the
+			                             // incremental-reaccumulate marks, so clear them here or they leak to the
+			                             // next grow and decay reaccumulate back toward O(tree). Free — already O(n).
 		});
 	}
 
@@ -1225,6 +1230,7 @@ struct Octree {
 				cells[idx].leaf = true;
 				cells[idx].absent = true;
 				cells[idx].dirty = true;
+				mark_path_dirty(idx); // c4: so incremental reaccumulate descends to this changed (→empty) qef
 			}
 			return;
 		}
@@ -1242,6 +1248,7 @@ struct Octree {
 			if (cells[idx].absent) {
 				cells[idx].absent = false; // entered the window at the floor
 				sample_leaf(idx);
+				mark_path_dirty(idx); // c4: so incremental reaccumulate descends to this grafted leaf's new qef
 			}
 			// else: a present leaf already at the floor — unchanged, reused (not resampled)
 		} else if (refine_budget >= 0) {
@@ -1256,6 +1263,7 @@ struct Octree {
 		} else {
 			grow_subtree(idx);   // unbudgeted (a move): subdivide to the (finer) floor — full window coverage
 			accumulate_qef(idx);
+			mark_path_dirty(idx); // c4: so incremental reaccumulate descends to this newly-refined subtree
 		}
 	}
 

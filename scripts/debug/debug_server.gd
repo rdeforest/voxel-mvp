@@ -103,6 +103,8 @@ func _stats_json() -> String:
 		"threads": m.get_thread_count(),
 		"phase": {
 			"build_ms": m.get_last_build_ms(),
+			"reconcile_ms": m.get_last_reconcile_ms(),
+			"reaccum_ms": m.get_last_reaccum_ms(),
 			"collapse_ms": m.get_last_collapse_ms(),
 			"reset_ms": m.get_last_reset_ms(),
 			"collapse_walk_ms": m.get_last_collapse_pass_ms(),

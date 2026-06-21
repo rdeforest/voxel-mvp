@@ -64,6 +64,8 @@ class DCOctreeMesher : public RefCounted {
 	double _last_reset_ms = 0.0;
 	double _last_pass1_ms = 0.0;
 	double _last_pass2_ms = 0.0;
+	double _last_reconcile_ms = 0.0; // c4 diag: grow's reconcile (O(tree) walk) vs reaccum split
+	double _last_reaccum_ms   = 0.0;
 
 public:
 	~DCOctreeMesher();
@@ -171,6 +173,8 @@ public:
 	double get_last_reset_ms() const { return _last_reset_ms; }
 	double get_last_pass1_ms() const { return _last_pass1_ms; }
 	double get_last_pass2_ms() const { return _last_pass2_ms; }
+	double get_last_reconcile_ms() const { return _last_reconcile_ms; } // c4: the O(tree) reconcile walk (grow)
+	double get_last_reaccum_ms()   const { return _last_reaccum_ms; }   // c4: the O(tree) QEF re-sum (grow)
 
 	// Parallel worker count for the build's parallel phases (construct / sample / accumulate / collapse /
 	// emit / accel-bake). 1 = serial. Output is deterministic and identical regardless of the count.

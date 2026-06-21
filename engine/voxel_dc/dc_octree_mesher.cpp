@@ -350,11 +350,17 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 		oct.refine_cands.clear();
 		oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge; collect refines
 	}
+	oct.last_reconcile_us = OS::get_singleton()->get_ticks_usec() - tb0; // c4: isolate the O(tree) walk cost
 	if (refine_budget >= 0) {
 		oct.refine_selected(refine_budget, reuse_frontier); // worst-error first for up to refine_budget us; defer the rest
 	}
 	_last_refine_queue = oct.refine_heap_end; // remaining backlog after this grow's drain
-	oct.reaccumulate(0, reuse_frontier); // c2: a drain (reuse) prunes to the refined path; a rebuild walks all
+	uint64_t tra0 = OS::get_singleton()->get_ticks_usec();
+	// c4: incremental ALWAYS. reconcile now marks path_dirty at every qef change (graft/evict/unbudgeted-refine),
+	// so a move prunes the re-sum to the changed paths just like a drain — O(changed), not O(tree). reset_leaves
+	// clears the marks afterward (a move's full collapse won't consume them). Gated by grow==fresh.
+	oct.reaccumulate(0, true);
+	oct.last_reaccum_us = OS::get_singleton()->get_ticks_usec() - tra0;
 	_last_build_ms = double(OS::get_singleton()->get_ticks_usec() - tb0) / 1000.0;
 	uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
 	oct.recollapse_and_mesh(reuse_frontier); // c2: a drain re-collapses only the dirty path; a rebuild does all
@@ -363,6 +369,8 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	_last_collapse_pass_ms = double(oct.last_collapse_pass_us) / 1000.0;
 	_last_pass1_ms = double(oct.last_pass1_us) / 1000.0;
 	_last_pass2_ms = double(oct.last_pass2_us) / 1000.0;
+	_last_reconcile_ms = double(oct.last_reconcile_us) / 1000.0;
+	_last_reaccum_ms   = double(oct.last_reaccum_us) / 1000.0;
 	_last_tri_owners      = oct.tri_owners;
 	_last_tri_owner_sizes = oct.tri_owner_sizes;
 	_last_tri_owner_errors = oct.tri_owner_errors;
@@ -505,6 +513,8 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_last_reset_ms"), &DCOctreeMesher::get_last_reset_ms);
 	ClassDB::bind_method(D_METHOD("get_last_pass1_ms"), &DCOctreeMesher::get_last_pass1_ms);
 	ClassDB::bind_method(D_METHOD("get_last_pass2_ms"), &DCOctreeMesher::get_last_pass2_ms);
+	ClassDB::bind_method(D_METHOD("get_last_reconcile_ms"), &DCOctreeMesher::get_last_reconcile_ms);
+	ClassDB::bind_method(D_METHOD("get_last_reaccum_ms"),   &DCOctreeMesher::get_last_reaccum_ms);
 	ClassDB::bind_method(D_METHOD("set_thread_count", "n"), &DCOctreeMesher::set_thread_count);
 	ClassDB::bind_method(D_METHOD("get_thread_count"),      &DCOctreeMesher::get_thread_count);
 }
