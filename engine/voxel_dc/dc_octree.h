@@ -914,6 +914,16 @@ struct Octree {
 		}
 	}
 
+	// Drop a cell, AND if it was emitting (had a slot), collect its neighbours into `re`. Its freed slot goes on
+	// vslot_free and is reused this same emit — so any neighbour whose quad still indexes that slot would dangle
+	// to the reused slot's (possibly far-away) vertex. Re-emitting those neighbours retires their stale tris.
+	void drop_and_collect(int idx, HashSet<int> &re) {
+		if (cells[idx].vertex >= 0) {
+			emit_collect_neighbors(idx, re);
+		}
+		emit_drop(idx);
+	}
+
 	// Walk a changed subtree: surviving render leaves go to the re-emit set; cells that stopped emitting drop.
 	// Stop at a render leaf (leaf=true, whether collapsed-internal or structural) AND at any childless cell
 	// (a structural leaf, or one orphaned by a collapse above — orphans are leaf=false but have no children).
@@ -922,11 +932,11 @@ struct Octree {
 			if (cells[idx].leaf && qefs[idx].count > 0) {
 				re.insert(idx);
 			} else {
-				emit_drop(idx);
+				drop_and_collect(idx, re);
 			}
 			return;
 		}
-		emit_drop(idx); // expanded internal node — not itself a render leaf; clear any stale triangles
+		drop_and_collect(idx, re); // expanded internal node — not itself a render leaf; clear any stale triangles
 		for (int i = 0; i < 8; ++i) {
 			emit_walk_dirty(cells[idx].children[i], re);
 		}
