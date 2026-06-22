@@ -979,6 +979,19 @@ struct Octree {
 		for (uint32_t r = 0; r < emit_dirty.size(); ++r) {
 			emit_collect_neighbors(emit_dirty[r], re); // seam leaves around each changed root
 		}
+		// Expand the re-emit set by ONE more neighbour ring. A seam leaf in `re` emits quads (try_edge) that
+		// reference its OWN ring-cell neighbours; if such a neighbour isn't slotted, try_edge drops the whole
+		// quad (line ~825). The pass above only collected the dirty roots' neighbours, not the neighbours of
+		// those — so the seam leaves' far-side ring cells were unslotted → connected patches of dropped tris,
+		// every drain. Collecting the neighbours of the current `re` set closes that gap (gated by emit_warm
+		// only, so still O(changed)). Snapshot first: emit_collect_neighbors mutates `re`.
+		LocalVector<int> re_layer;
+		for (const int &L : re) {
+			re_layer.push_back(L);
+		}
+		for (uint32_t i = 0; i < re_layer.size(); ++i) {
+			emit_collect_neighbors(re_layer[i], re);
+		}
 		// Assign slots to new leaves first, so the edge emit below reads every neighbour's CURRENT slot.
 		for (const int &L : re) {
 			if (cells[L].vertex < 0) {
