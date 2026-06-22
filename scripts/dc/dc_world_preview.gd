@@ -105,6 +105,38 @@ var _inval: Node3D                  # the invalidation overlay (dcinval) — fed
 # Flat ground reads ~0 error so it never shows. No over-resolved pass — max detail is the goal, not the enemy.
 const DIAG_LARGE_MULT := 2.0
 
+var _root_viz: MeshInstance3D   # dcroot debug toggle: x-ray wireframe of the octree root box (jumps on re-root)
+
+
+# Debug toggle: show the octree ROOT box. A move that crosses near a root face re-roots (full rebuild) — so if
+# missing-geometry artifacts cluster relative to this box, that points at the incremental (within-root) emit.
+# The box is local [0, ROOT_SIZE]; this node sits at the root corner with scale=base_cell, so it auto-follows
+# the root and visibly jumps when re-rooted. x-ray (no_depth_test) so it's locatable through terrain.
+func set_root_viz(on: bool) -> void:
+    if _root_viz == null:
+        _root_viz = MeshInstance3D.new()
+        var mat := StandardMaterial3D.new()
+        mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+        mat.albedo_color = Color(1.0, 0.5, 0.0)
+        mat.no_depth_test = true
+        _root_viz.material_override = mat
+        _root_viz.mesh = _make_root_box_mesh()
+        add_child(_root_viz)
+    _root_viz.visible = on
+
+
+func _make_root_box_mesh() -> ImmediateMesh:
+    var im := ImmediateMesh.new()
+    im.surface_begin(Mesh.PRIMITIVE_LINES)
+    var s := float(ROOT_SIZE)
+    var c := [Vector3(0, 0, 0), Vector3(s, 0, 0), Vector3(s, 0, s), Vector3(0, 0, s),
+              Vector3(0, s, 0), Vector3(s, s, 0), Vector3(s, s, s), Vector3(0, s, s)]
+    for e in [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]:
+        im.surface_add_vertex(c[e[0]])
+        im.surface_add_vertex(c[e[1]])
+    im.surface_end()
+    return im
+
 func setup(follow: Node3D, edit_store: EditStore = null) -> void:
     _follow = follow
     _edit_store = edit_store

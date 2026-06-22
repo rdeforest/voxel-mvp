@@ -561,3 +561,36 @@ func test_grow_world_move_then_drain_emit_is_clean():
             m.grow_world(c, 500.0, 2.0, lo, hi, 100, Vector3i(), Vector3i(), true)  # INCREMENTAL drains
             iters += 1
         assert_eq(m.get_last_bad_tri_count(), 0, "move %d incremental drain emit is clean" % step)
+
+
+# Repro for the incremental-emit DROP (missing near geometry, healed by a full rebuild — confirmed live). The
+# passing reuse test only does stationary pure-refinement; the bug needs MOVEMENT + eps CHANGES (the frame
+# controller raising eps → collapses) interleaved with incremental drains. Oracle: after each incremental
+# drain, remesh() does a FULL emit of the SAME retained tree, so the rendered surfaces must be identical — any
+# difference is the incremental emit dropping/doubling triangles a full rebuild gets right.
+func test_grow_world_incremental_emit_matches_full_under_move_and_eps():
+    var s := _store()
+    var origin := _region_origin(s)
+    var lo := origin
+    var hi := origin + WIN_FULL
+    var m := DCOctreeMesher.new()
+    var cam := Vector3(16, 16, 120)
+    m.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 8.0, true, PackedColorArray(), lo, hi)
+    var epss := [2.0, 6.0, 2.0, 8.0, 3.0]   # alternate fine/coarse → forces refines AND collapses
+    for step in range(epss.size()):
+        var c: Vector3 = cam + Vector3(6.0 * step, 0, 0)   # move each step (window/camera shift)
+        var eps: float = epss[step]
+        m.grow_world(c, 500.0, eps, lo, hi, 100, Vector3i(), Vector3i(), false)  # move/eps change: rebuild frontier
+        var inc: Array = []
+        var iters := 0
+        while m.get_refine_pending() and iters < 8000:
+            inc = m.grow_world(c, 500.0, eps, lo, hi, 100, Vector3i(), Vector3i(), true)  # incremental drains
+            iters += 1
+        if inc.is_empty():
+            inc = m.grow_world(c, 500.0, eps, lo, hi, 100, Vector3i(), Vector3i(), true)
+        var full: Array = m.remesh(c, 500.0, eps)   # FULL emit of the SAME tree — the oracle
+        var si := _tri_sigs(inc)
+        var sf := _tri_sigs(full)
+        assert_eq(si, sf, "step %d (eps %.0f): incremental emit surface == full remesh of same tree" % [step, eps])
+        if si != sf:
+            print("  step %d eps %.0f: inc=%d tris full=%d tris (diff=%d)" % [step, eps, si.size(), sf.size(), absi(si.size() - sf.size())])

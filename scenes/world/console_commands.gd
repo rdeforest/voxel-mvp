@@ -17,6 +17,7 @@ var host:          Node
 var inval_overlay: Node3D
 var world_preview: DcWorldPreview
 var _dcverify_on := false   # debug: post-emit dangling-slot self-check (dcverify command)
+var _dcroot_on := false      # debug: octree root-box wireframe (dcroot command)
 var integrity:         StructuralIntegrity
 var player:            CharacterBody3D
 var awake_overlay:     AwakeOverlay
@@ -60,6 +61,7 @@ func _table() -> Array:
         [dcframebudget,   "dcframebudget", "Per-frame render budget (ms) the controller refines toward — refines while render cost < half this, backs off above it. Higher = more detail, lower fps. Usage: dcframebudget [ms] (default 16)"],
         [dcthreads,       "dcthreads", "Parallel accel-bake workers: `dcthreads <n>` sets the thread count; no args prints the phase timing (accel + build + collapse ms). Usage: dcthreads [n]"],
         [dcverify,        "dcverify",  "Debug: toggle the post-emit self-check for dangling-slot triangles (the 'unrelated vertices' bug). When on, a Toast fires the moment an emit produces a bad triangle, naming the op + location. Costs an O(tris) scan per emit. Usage: dcverify [on|off]"],
+        [dcroot,          "dcroot",    "Debug: toggle an x-ray orange wireframe of the octree ROOT box. It jumps when the world re-roots (a full rebuild) — use it to see whether missing-geometry artifacts correlate with root boundaries. Usage: dcroot [on|off]"],
         [remesh,          "remesh",    "Force a full dcworld rebuild now (re-bake + build + collapse) — trigger a remesh without walking, then read `dcthreads` for the timing."],
         [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
         [mpmdemo,         "mpmdemo",   "PB-MPM demo: spawn a live block of continuum material that falls and rests ON the terrain. Usage: mpmdemo [size]"],
@@ -274,6 +276,17 @@ func dcverify(arg := "") -> void:
         _dcverify_on = not _dcverify_on
     world_preview._mesher.set_verify_emit(_dcverify_on)
     LimboConsole.info("dcverify: %s — post-emit dangling-slot self-check (Toast fires on a bad triangle)" % ("ON" if _dcverify_on else "OFF"))
+
+
+func dcroot(arg := "") -> void:
+    if arg == "on":
+        _dcroot_on = true
+    elif arg == "off":
+        _dcroot_on = false
+    else:
+        _dcroot_on = not _dcroot_on
+    world_preview.set_root_viz(_dcroot_on)
+    LimboConsole.info("dcroot: %s — x-ray wireframe of the octree root box (jumps on re-root)" % ("ON" if _dcroot_on else "OFF"))
 
 
 func dcframebudget(ms := 0.0) -> void:
