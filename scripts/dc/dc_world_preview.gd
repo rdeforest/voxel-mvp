@@ -105,51 +105,16 @@ var _inval: Node3D                  # the invalidation overlay (dcinval) — fed
 # Flat ground reads ~0 error so it never shows. No over-resolved pass — max detail is the goal, not the enemy.
 const DIAG_LARGE_MULT := 2.0
 
-var _root_viz: Node3D   # dcroot debug toggle: parent of the 12 x-ray edge boxes of the octree root (jumps on re-root)
+var _root_viz_on := false   # dcroot debug toggle: live root-relative-position readout in the perf overlay
 
 
-# Debug toggle: show the octree ROOT box. A move that crosses near a root face re-roots (full rebuild) — so if
-# missing-geometry artifacts cluster relative to this box, that points at the incremental (within-root) emit.
-# The box is local [0, ROOT_SIZE]; this node sits at the root corner with scale=base_cell, so it auto-follows
-# the root and visibly jumps when re-rooted. Edges are THICK boxes (3D lines render 1px → invisible at the ~1km
-# root scale) and x-ray (no_depth_test) so they're locatable through terrain.
+# Debug toggle: live readout of your position relative to the octree root (a re-root = a full rebuild, which is
+# the only thing that heals the incremental-emit drop). A 3D root box is useless — the root is 2048 m, so its
+# faces are ~1 km away, AND the drops appear at the CENTRE (near you), nowhere near a boundary. So just report
+# the numbers + Toast the re-root event (the heal moment to correlate against).
 func set_root_viz(on: bool) -> void:
-    if _root_viz == null:
-        _root_viz = Node3D.new()
-        var mat := StandardMaterial3D.new()
-        mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-        # Transparent pass + no_depth_test = the reliable "draw over everything" recipe (no_depth_test alone on an
-        # opaque material gets buried by the depth pre-pass). render_priority pushes it last in that pass.
-        mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-        mat.albedo_color = Color(1.0, 0.5, 0.0, 1.0)
-        mat.no_depth_test = true
-        mat.render_priority = 64
-        var s := float(ROOT_SIZE)
-        var t := s / 128.0   # edge thickness (~16 m world) — visible at the root's ~1 km extent
-        for a in [0.0, s]:
-            for b in [0.0, s]:
-                _add_root_edge(mat, Vector3(s * 0.5, a, b), Vector3(s, t, t))  # 4 edges along X
-                _add_root_edge(mat, Vector3(a, s * 0.5, b), Vector3(t, s, t))  # 4 along Y
-                _add_root_edge(mat, Vector3(a, b, s * 0.5), Vector3(t, t, s))  # 4 along Z
-        add_child(_root_viz)
-    _root_viz.visible = on
-    if on:
-        var ctr := (Vector3(_root_origin_i) + Vector3.ONE * (ROOT_SIZE * 0.5)) * base_cell
-        var pp := _follow.global_position if _follow != null else Vector3.ZERO
-        var off := (pp - ctr).abs()
-        var half := ROOT_SIZE * 0.5 * base_cell
-        push_warning("dcroot ON: root box center (world) = %s ; you are at %s ; ~%.0f m to nearest face" % [
-                ctr, pp, half - maxf(off.x, maxf(off.y, off.z))])
+    _root_viz_on = on
 
-
-func _add_root_edge(mat: Material, pos: Vector3, size: Vector3) -> void:
-    var mi := MeshInstance3D.new()
-    var bm := BoxMesh.new()
-    bm.size = size
-    mi.mesh = bm
-    mi.material_override = mat
-    mi.position = pos
-    _root_viz.add_child(mi)
 
 func setup(follow: Node3D, edit_store: EditStore = null) -> void:
     _follow = follow
@@ -259,6 +224,11 @@ func _process(_dt: float) -> void:
     # quantised display interval (a 144Hz vsync pins dt at ~6.9ms and only jumps at the fps cliff).
     Perf.status("dcworld", "eps_px %.1f   job %.0f ms (%s%s)" % [_eps_px, _job_work_ms, _job_kind(), " refining" if _refine_pending else ""])
     Perf.status("dcmem", _mem_status)   # computed on the worker in _run_job (race-free, off the main thread)
+    if _root_viz_on:
+        var ctr := (Vector3(_root_origin_i) + Vector3.ONE * (ROOT_SIZE * 0.5)) * base_cell
+        var off := (_follow.global_position - ctr).abs()
+        var face := ROOT_SIZE * 0.5 * base_cell - maxf(off.x, maxf(off.y, off.z))   # m to nearest root face
+        Perf.status("dcroot", "%.0f m to nearest root face (re-root ~%.0f m); watch for the re-root Toast" % [face, face - (win_radius_m + 32.0)])
     if _task_id != -1:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()
@@ -268,7 +238,7 @@ func _process(_dt: float) -> void:
     # an eps change (the controller re-grading) goes through grow_world — it re-meshes just the changed band
     # (P2.5 incremental band-diff), reusing the retained octree.
     if not _built or _dirty or _outside_root(p):
-        if _built and not _dirty and _root_viz != null and _root_viz.visible:
+        if _built and not _dirty and _root_viz_on:
             Toast.show_message("dcworld: re-rooted (full rebuild)", Color(1.0, 0.5, 0.0))  # the heal event, when dcroot is on
         _dispatch_build(p)
     elif _pending_edit:
