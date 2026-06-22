@@ -111,31 +111,34 @@ var _root_viz: MeshInstance3D   # dcroot debug toggle: x-ray wireframe of the oc
 # Debug toggle: show the octree ROOT box. A move that crosses near a root face re-roots (full rebuild) — so if
 # missing-geometry artifacts cluster relative to this box, that points at the incremental (within-root) emit.
 # The box is local [0, ROOT_SIZE]; this node sits at the root corner with scale=base_cell, so it auto-follows
-# the root and visibly jumps when re-rooted. x-ray (no_depth_test) so it's locatable through terrain.
+# the root and visibly jumps when re-rooted. Edges are THICK boxes (3D lines render 1px → invisible at the ~1km
+# root scale) and x-ray (no_depth_test) so they're locatable through terrain.
 func set_root_viz(on: bool) -> void:
     if _root_viz == null:
-        _root_viz = MeshInstance3D.new()
+        _root_viz = Node3D.new()
         var mat := StandardMaterial3D.new()
         mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
         mat.albedo_color = Color(1.0, 0.5, 0.0)
         mat.no_depth_test = true
-        _root_viz.material_override = mat
-        _root_viz.mesh = _make_root_box_mesh()
+        var s := float(ROOT_SIZE)
+        var t := s / 256.0   # edge thickness (~8 m world) — visible at the root's ~1 km extent
+        for a in [0.0, s]:
+            for b in [0.0, s]:
+                _add_root_edge(mat, Vector3(s * 0.5, a, b), Vector3(s, t, t))  # 4 edges along X
+                _add_root_edge(mat, Vector3(a, s * 0.5, b), Vector3(t, s, t))  # 4 along Y
+                _add_root_edge(mat, Vector3(a, b, s * 0.5), Vector3(t, t, s))  # 4 along Z
         add_child(_root_viz)
     _root_viz.visible = on
 
 
-func _make_root_box_mesh() -> ImmediateMesh:
-    var im := ImmediateMesh.new()
-    im.surface_begin(Mesh.PRIMITIVE_LINES)
-    var s := float(ROOT_SIZE)
-    var c := [Vector3(0, 0, 0), Vector3(s, 0, 0), Vector3(s, 0, s), Vector3(0, 0, s),
-              Vector3(0, s, 0), Vector3(s, s, 0), Vector3(s, s, s), Vector3(0, s, s)]
-    for e in [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]:
-        im.surface_add_vertex(c[e[0]])
-        im.surface_add_vertex(c[e[1]])
-    im.surface_end()
-    return im
+func _add_root_edge(mat: Material, pos: Vector3, size: Vector3) -> void:
+    var mi := MeshInstance3D.new()
+    var bm := BoxMesh.new()
+    bm.size = size
+    mi.mesh = bm
+    mi.material_override = mat
+    mi.position = pos
+    _root_viz.add_child(mi)
 
 func setup(follow: Node3D, edit_store: EditStore = null) -> void:
     _follow = follow
@@ -254,6 +257,8 @@ func _process(_dt: float) -> void:
     # an eps change (the controller re-grading) goes through grow_world — it re-meshes just the changed band
     # (P2.5 incremental band-diff), reusing the retained octree.
     if not _built or _dirty or _outside_root(p):
+        if _built and not _dirty and _root_viz != null and _root_viz.visible:
+            Toast.show_message("dcworld: re-rooted (full rebuild)", Color(1.0, 0.5, 0.0))  # the heal event, when dcroot is on
         _dispatch_build(p)
     elif _pending_edit:
         _dispatch_edit(p)
