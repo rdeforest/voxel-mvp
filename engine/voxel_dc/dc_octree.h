@@ -1357,7 +1357,8 @@ struct Octree {
 				if (captured < 5) {
 					++captured;
 					const Vector3 ctr = (vp[a] + vp[b] + vp[c]) * (1.0 / 3.0);
-					last_drop_info += "DROPPED tri centre=" + v3str(ctr) + " A=" + v3str(vp[a]) + " B=" + v3str(vp[b]) + " C=" + v3str(vp[c]) + "\n";
+					String own = (t < int(tri_owners.size())) ? (v3str(tri_owners.ptr()[t]) + " sz" + String::num(tri_owner_sizes.ptr()[t], 0)) : String("?");
+					last_drop_info += "DROPPED owner=" + own + " centre=" + v3str(ctr) + " A=" + v3str(vp[a]) + " B=" + v3str(vp[b]) + " C=" + v3str(vp[c]) + "\n";
 				}
 			}
 		}
