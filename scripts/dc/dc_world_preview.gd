@@ -118,10 +118,14 @@ func set_root_viz(on: bool) -> void:
         _root_viz = Node3D.new()
         var mat := StandardMaterial3D.new()
         mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-        mat.albedo_color = Color(1.0, 0.5, 0.0)
+        # Transparent pass + no_depth_test = the reliable "draw over everything" recipe (no_depth_test alone on an
+        # opaque material gets buried by the depth pre-pass). render_priority pushes it last in that pass.
+        mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+        mat.albedo_color = Color(1.0, 0.5, 0.0, 1.0)
         mat.no_depth_test = true
+        mat.render_priority = 64
         var s := float(ROOT_SIZE)
-        var t := s / 256.0   # edge thickness (~8 m world) — visible at the root's ~1 km extent
+        var t := s / 128.0   # edge thickness (~16 m world) — visible at the root's ~1 km extent
         for a in [0.0, s]:
             for b in [0.0, s]:
                 _add_root_edge(mat, Vector3(s * 0.5, a, b), Vector3(s, t, t))  # 4 edges along X
@@ -129,6 +133,13 @@ func set_root_viz(on: bool) -> void:
                 _add_root_edge(mat, Vector3(a, b, s * 0.5), Vector3(t, t, s))  # 4 along Z
         add_child(_root_viz)
     _root_viz.visible = on
+    if on:
+        var ctr := (Vector3(_root_origin_i) + Vector3.ONE * (ROOT_SIZE * 0.5)) * base_cell
+        var pp := _follow.global_position if _follow != null else Vector3.ZERO
+        var off := (pp - ctr).abs()
+        var half := ROOT_SIZE * 0.5 * base_cell
+        push_warning("dcroot ON: root box center (world) = %s ; you are at %s ; ~%.0f m to nearest face" % [
+                ctr, pp, half - maxf(off.x, maxf(off.y, off.z))])
 
 
 func _add_root_edge(mat: Material, pos: Vector3, size: Vector3) -> void:
