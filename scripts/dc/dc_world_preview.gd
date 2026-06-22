@@ -105,7 +105,7 @@ var _inval: Node3D                  # the invalidation overlay (dcinval) — fed
 # Flat ground reads ~0 error so it never shows. No over-resolved pass — max detail is the goal, not the enemy.
 const DIAG_LARGE_MULT := 2.0
 
-var _root_viz: MeshInstance3D   # dcroot debug toggle: x-ray wireframe of the octree root box (jumps on re-root)
+var _root_viz: Node3D   # dcroot debug toggle: parent of the 12 x-ray edge boxes of the octree root (jumps on re-root)
 
 
 # Debug toggle: show the octree ROOT box. A move that crosses near a root face re-roots (full rebuild) — so if
