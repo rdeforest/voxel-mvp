@@ -127,6 +127,11 @@ struct Octree {
 	String  last_bad_info;        // up to 5 bad tris this emit: owner cell + 3 vertices — read over REST to diagnose
 	int64_t verify_total_bad = 0; // cumulative bad triangles across all emits this session (frequency signal)
 	int     verify_bad_emits = 0; // cumulative emits that produced ≥1 bad triangle
+	bool emit_diff_on = false;    // debug: after an incremental emit, full-emit the same tree + diff (catches DROPS)
+	int last_drop_tris = 0;       // triangles the FULL emit has that the incremental dropped (= holes) this emit
+	int last_extra_tris = 0;      // triangles the incremental emit has that the full doesn't (= doubles/dangling)
+	int64_t emit_diff_total_drop = 0; // cumulative dropped triangles this session
+	String last_drop_info;        // up to 5 dropped triangles this emit (centroid) — read over REST to localise
 	uint64_t last_build_us    = 0; // phase timing: build() + accumulate_qef() (microseconds)
 	uint64_t last_collapse_us = 0; // phase timing: recollapse_and_mesh() (microseconds)
 	uint64_t last_construct_us = 0; // sub-phase: build() tree construction (serial)
@@ -1286,6 +1291,83 @@ struct Octree {
 		if (last_bad_tris > 0) {
 			verify_total_bad += last_bad_tris;
 			++verify_bad_emits;
+		}
+	}
+
+	String v3str(const Vector3 &v) const {
+		return "(" + String::num(v.x, 1) + "," + String::num(v.y, 1) + "," + String::num(v.z, 1) + ")";
+	}
+
+	// Position-based, order-independent triangle key: identifies the SAME triangle across the incremental and
+	// full emits even though their vertex slots/order differ. Quantized to 1/16 unit to absorb float noise.
+	static uint64_t tri_key(const Vector3 &a, const Vector3 &b, const Vector3 &c) {
+		auto pk = [](const Vector3 &v) -> uint64_t {
+			uint64_t x = uint64_t(int64_t(Math::round(v.x * 16.0)));
+			uint64_t y = uint64_t(int64_t(Math::round(v.y * 16.0)));
+			uint64_t z = uint64_t(int64_t(Math::round(v.z * 16.0)));
+			return x * 1000003u ^ y * 19349663u ^ z * 83492791u;
+		};
+		const uint64_t ha = pk(a), hb = pk(b), hc = pk(c);
+		return ha + hb + hc + (ha ^ hb ^ hc) * 2654435761u; // commutative → order-independent
+	}
+
+	void build_tri_set(HashSet<uint64_t> &set) const {
+		const int32_t *ip = indices.ptr();
+		const Vector3 *vp = verts.ptr();
+		const int vn = int(verts.size());
+		const int nt = int(indices.size()) / 3;
+		for (int t = 0; t < nt; ++t) {
+			const int a = ip[t * 3], b = ip[t * 3 + 1], c = ip[t * 3 + 2];
+			if (a == b || b == c || a == c) {
+				continue;
+			}
+			if (a < 0 || a >= vn || b < 0 || b >= vn || c < 0 || c >= vn) {
+				continue;
+			}
+			set.insert(tri_key(vp[a], vp[b], vp[c]));
+		}
+	}
+
+	// Debug: the definitive drop catcher. The current arrays hold the INCREMENTAL emit; full-emit the SAME tree
+	// (recollapse_and_mesh(false) — the correct surface), then report every triangle the full emit has that the
+	// incremental lacks (= a DROPPED triangle, i.e. a hole). The full result stays as the displayed mesh, so the
+	// bug is masked on screen while this is on, but the drops are reported via REST for localising. Expensive
+	// (doubles the emit) — debug only, gated by emit_diff_on.
+	void compute_emit_diff() {
+		HashSet<uint64_t> inc;
+		build_tri_set(inc); // the incremental emit's triangles
+		recollapse_and_mesh(false); // full emit of the same tree → arrays now hold the CORRECT surface
+		last_drop_tris = 0;
+		last_extra_tris = 0;
+		last_drop_info = String();
+		HashSet<uint64_t> full;
+		build_tri_set(full);
+		const int32_t *ip = indices.ptr();
+		const Vector3 *vp = verts.ptr();
+		const int vn = int(verts.size());
+		const int nt = int(indices.size()) / 3;
+		int captured = 0;
+		for (int t = 0; t < nt; ++t) {
+			const int a = ip[t * 3], b = ip[t * 3 + 1], c = ip[t * 3 + 2];
+			if (a == b || b == c || a == c || a < 0 || a >= vn || b < 0 || b >= vn || c < 0 || c >= vn) {
+				continue;
+			}
+			if (!inc.has(tri_key(vp[a], vp[b], vp[c]))) { // full has it, incremental dropped it
+				++last_drop_tris;
+				if (captured < 5) {
+					++captured;
+					const Vector3 ctr = (vp[a] + vp[b] + vp[c]) * (1.0 / 3.0);
+					last_drop_info += "DROPPED tri centre=" + v3str(ctr) + " A=" + v3str(vp[a]) + " B=" + v3str(vp[b]) + " C=" + v3str(vp[c]) + "\n";
+				}
+			}
+		}
+		for (const uint64_t &h : inc) {
+			if (!full.has(h)) {
+				++last_extra_tris;
+			}
+		}
+		if (last_drop_tris > 0) {
+			emit_diff_total_drop += last_drop_tris;
 		}
 	}
 

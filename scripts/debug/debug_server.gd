@@ -118,6 +118,11 @@ func _stats_json() -> String:
 			"last_job": wp._job_kind(),
 			"info": m.get_last_bad_tri_info(),
 		},
+		"drop": {                                      # dcdrop: incremental-vs-full emit drop catcher (holes)
+			"last": m.get_last_drop_tris(),
+			"total": m.get_emit_diff_total_drop(),
+			"info": m.get_last_drop_info(),
+		},
 	})
 
 

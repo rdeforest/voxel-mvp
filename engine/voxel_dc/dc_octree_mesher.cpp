@@ -240,6 +240,7 @@ Array DCOctreeMesher::mesh_world(
 	oct.max_depth = depth;
 	oct.cell_budget = max_cells; // memory budget: build stops descending past this (0 = arena cap only)
 	oct.verify_emit_on = _verify_emit; // debug self-check survives this rebuild
+	oct.emit_diff_on = _emit_diff;     // debug drop catcher survives this rebuild
 	oct.camera = camera;
 	oct.proj = proj;
 	oct.eps_px = eps_px;
@@ -365,6 +366,9 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	_last_build_ms = double(OS::get_singleton()->get_ticks_usec() - tb0) / 1000.0;
 	uint64_t tc0 = OS::get_singleton()->get_ticks_usec();
 	oct.recollapse_and_mesh(reuse_frontier); // c2: a drain re-collapses only the dirty path; a rebuild does all
+	if (oct.emit_diff_on && reuse_frontier) {
+		oct.compute_emit_diff(); // debug: full-emit the same tree + report triangles the incremental dropped
+	}
 	_last_collapse_ms = double(OS::get_singleton()->get_ticks_usec() - tc0) / 1000.0;
 	_last_reset_ms = double(oct.last_reset_us) / 1000.0;
 	_last_collapse_pass_ms = double(oct.last_collapse_pass_us) / 1000.0;
@@ -485,6 +489,25 @@ int DCOctreeMesher::get_verify_bad_emits() const {
 	return _persist != nullptr ? _persist->oct.verify_bad_emits : 0;
 }
 
+void DCOctreeMesher::set_emit_diff(bool on) {
+	_emit_diff = on;
+	if (_persist != nullptr) {
+		_persist->oct.emit_diff_on = on;
+	}
+}
+
+int DCOctreeMesher::get_last_drop_tris() const {
+	return _persist != nullptr ? _persist->oct.last_drop_tris : 0;
+}
+
+int64_t DCOctreeMesher::get_emit_diff_total_drop() const {
+	return _persist != nullptr ? _persist->oct.emit_diff_total_drop : 0;
+}
+
+String DCOctreeMesher::get_last_drop_info() const {
+	return _persist != nullptr ? _persist->oct.last_drop_info : String();
+}
+
 // M2: false if any cell arena failed to get a disk-backed temp file and fell back to anonymous RAM (OOM risk).
 bool DCOctreeMesher::is_arena_disk_backed() const {
 	return !voxel_dc::dc_mesh::g_arena_anon_fallback;
@@ -541,6 +564,10 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_last_bad_tri_info"),     &DCOctreeMesher::get_last_bad_tri_info);
 	ClassDB::bind_method(D_METHOD("get_verify_total_bad"),     &DCOctreeMesher::get_verify_total_bad);
 	ClassDB::bind_method(D_METHOD("get_verify_bad_emits"),     &DCOctreeMesher::get_verify_bad_emits);
+	ClassDB::bind_method(D_METHOD("set_emit_diff", "on"),      &DCOctreeMesher::set_emit_diff);
+	ClassDB::bind_method(D_METHOD("get_last_drop_tris"),       &DCOctreeMesher::get_last_drop_tris);
+	ClassDB::bind_method(D_METHOD("get_emit_diff_total_drop"), &DCOctreeMesher::get_emit_diff_total_drop);
+	ClassDB::bind_method(D_METHOD("get_last_drop_info"),       &DCOctreeMesher::get_last_drop_info);
 	ClassDB::bind_method(D_METHOD("get_accel_bake_count"),       &DCOctreeMesher::get_accel_bake_count);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owners"),      &DCOctreeMesher::get_last_triangle_owners);
 	ClassDB::bind_method(D_METHOD("get_last_triangle_owner_sizes"), &DCOctreeMesher::get_last_triangle_owner_sizes);

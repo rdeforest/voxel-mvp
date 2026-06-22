@@ -17,7 +17,8 @@ var host:          Node
 var inval_overlay: Node3D
 var world_preview: DcWorldPreview
 var _dcverify_on := false   # debug: post-emit dangling-slot self-check (dcverify command)
-var _dcroot_on := false      # debug: octree root-box wireframe (dcroot command)
+var _dcroot_on := false      # debug: octree root-relative readout (dcroot command)
+var _dcdrop_on := false      # debug: incremental-vs-full emit drop catcher (dcdrop command)
 var integrity:         StructuralIntegrity
 var player:            CharacterBody3D
 var awake_overlay:     AwakeOverlay
@@ -61,7 +62,8 @@ func _table() -> Array:
         [dcframebudget,   "dcframebudget", "Per-frame render budget (ms) the controller refines toward — refines while render cost < half this, backs off above it. Higher = more detail, lower fps. Usage: dcframebudget [ms] (default 16)"],
         [dcthreads,       "dcthreads", "Parallel accel-bake workers: `dcthreads <n>` sets the thread count; no args prints the phase timing (accel + build + collapse ms). Usage: dcthreads [n]"],
         [dcverify,        "dcverify",  "Debug: toggle the post-emit self-check for dangling-slot triangles (the 'unrelated vertices' bug). When on, a Toast fires the moment an emit produces a bad triangle, naming the op + location. Costs an O(tris) scan per emit. Usage: dcverify [on|off]"],
-        [dcroot,          "dcroot",    "Debug: toggle an x-ray orange wireframe of the octree ROOT box. It jumps when the world re-roots (a full rebuild) — use it to see whether missing-geometry artifacts correlate with root boundaries. Usage: dcroot [on|off]"],
+        [dcroot,          "dcroot",    "Debug: toggle a perf-overlay readout of your distance to the nearest octree root face + a Toast on re-root (the full-rebuild that heals the incremental-emit drop). Usage: dcroot [on|off]"],
+        [dcdrop,          "dcdrop",    "Debug: THE drop catcher. After each incremental drain it full-emits the same tree and reports triangles the incremental DROPPED (= holes) via /stats. Masks the bug on screen (always shows the full emit) but localizes it. Costs a full emit per drain. Usage: dcdrop [on|off]"],
         [remesh,          "remesh",    "Force a full dcworld rebuild now (re-bake + build + collapse) — trigger a remesh without walking, then read `dcthreads` for the timing."],
         [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
         [mpmdemo,         "mpmdemo",   "PB-MPM demo: spawn a live block of continuum material that falls and rests ON the terrain. Usage: mpmdemo [size]"],
@@ -276,6 +278,17 @@ func dcverify(arg := "") -> void:
         _dcverify_on = not _dcverify_on
     world_preview._mesher.set_verify_emit(_dcverify_on)
     LimboConsole.info("dcverify: %s — post-emit dangling-slot self-check (Toast fires on a bad triangle)" % ("ON" if _dcverify_on else "OFF"))
+
+
+func dcdrop(arg := "") -> void:
+    if arg == "on":
+        _dcdrop_on = true
+    elif arg == "off":
+        _dcdrop_on = false
+    else:
+        _dcdrop_on = not _dcdrop_on
+    world_preview._mesher.set_emit_diff(_dcdrop_on)
+    LimboConsole.info("dcdrop: %s — after each drain, full-emit + report dropped triangles via /stats (masks the bug on screen; costs a full emit per drain)" % ("ON" if _dcdrop_on else "OFF"))
 
 
 func dcroot(arg := "") -> void:

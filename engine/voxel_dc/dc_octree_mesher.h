@@ -25,6 +25,7 @@ class DCOctreeMesher : public RefCounted {
 	DCOctreePersist *_persist = nullptr;
 
 	bool _verify_emit = false; // debug: post-emit dangling-slot self-check; survives persist recreation (re-root)
+	bool _emit_diff = false;   // debug: incremental-vs-full emit diff (drop catcher); survives persist recreation
 
 	// Per-triangle owner cell origin (WORLD lattice) of the last mesh call. One Vector3
 	// (integer-valued) per emitted triangle; read by the dcinval LOD diagnostic overlay.
@@ -165,6 +166,12 @@ public:
 	String  get_last_bad_tri_info() const;   // up to 5 bad tris this emit: owner cell + 3 vertices (REST diag)
 	int64_t get_verify_total_bad() const;    // cumulative bad triangles this session
 	int     get_verify_bad_emits() const;    // cumulative emits with ≥1 bad triangle
+
+	// Debug: drop catcher — full-emit the same tree after each incremental emit + report dropped triangles.
+	void    set_emit_diff(bool on);
+	int     get_last_drop_tris() const;      // triangles the incremental emit dropped this grow (= holes)
+	int64_t get_emit_diff_total_drop() const; // cumulative dropped triangles this session
+	String  get_last_drop_info() const;      // up to 5 dropped triangles this grow (centroid + vertices)
 
 	// Full prune-accel bakes run so far. grow_world reuses the accel (doesn't bump this) when the
 	// resident window is unchanged — e.g. a stationary refine — so a held view refines without re-baking.
