@@ -76,3 +76,10 @@ or condensed.
   — per-cell solve caching (shipped), incremental edits (reconcile the edit box,
   not full-rebuild), per-frame budgeted refinement, priority-by-error ordering,
   and a measure-gated persistent GPU buffer. End state: lag only on a re-root.
+- [`21-tech-ladders-and-fire.md`](21-tech-ladders-and-fire.md) — establishes the
+  **tech ladder** pattern (constant outcome, falling cost, gated by insight or
+  geography, never by a stat) using fire as the worked example. Also carries the
+  geology corrections it forced: no flint on a volcanic island, agate/chalcedony
+  from basalt vesicles instead, obsidian requires a late-stage evolved dome, and
+  pyrite from the hydrothermal zones. Includes the failure-legibility rule that
+  applies to every ladder.
