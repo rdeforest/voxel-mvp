@@ -58,14 +58,15 @@ This is a Godot 4.6 game built with **double-precision** (`precision=double` —
 Everything sources SDF + material from the `EditStore`; nothing reads godot_voxel. The subsystems are created in `world.gd:_ready`, not in `world.tscn`:
 
 - **Render — `DcWorldPreview` (`scripts/dc/dc_world_preview.gd`), the `dcworld` render (doc 17).** A single **world-fixed incremental octree** (`DCOctreeMesher.mesh_world` / `grow_world`): screen-error LOD whose one knob `eps_px` is driven by a frame-time + mesh-lag **budget controller**; a move re-meshes only the changed band (incremental refine/coarsen). Default-on at world startup. Wears the production terrain shader + material palette.
-- **Render fallback — `DCTerrainManager` (`scripts/dc/dc_terrain_manager.gd`), the camera-centered clipmap.** The previous render; kept toggleable via `dcmanager` for side-by-side comparison. Retiring it (+ `DcSubstratePreview`/`dcgen`, + the GDScript SVO substrate prototypes) is a pending **cleanup pass**.
 - **Collision — `DCCollisionManager` (`scripts/dc/dc_collision_manager.gd`).** Body-driven JIT collision DC-meshed from the `EditStore` around the player (no godot_voxel). Separate from the render.
 
-Shared QEF solver in `engine/voxel_dc/dc_qef.h`. `DCOctreeMesher` (`mesh_world`/`grow_world`) is covered by `test/test_dc_world_octree.gd`; the clipmap path by `test/test_dc_octree_mesher.gd` + `test/test_dc_real_terrain.gd`. `scripts/dc/` also keeps `dc_edit_splicer.gd` (incremental edit-patch array surgery) and `voxel_octree.gd` + `octree_mesher.gd` (the GDScript SVO substrate prototypes the oracle was ported from). Known render bugs live in `docs/bugs/` (inside-coverage cracks, reversed ridge triangles).
+Shared QEF solver in `engine/voxel_dc/dc_qef.h`. `DCOctreeMesher` (`mesh_world`/`grow_world`) is covered by `test/test_dc_world_octree.gd`; its `mesh_clipmap` entry point (the uniform/two-level meshing core, still used as a meshing harness) by `test/test_dc_octree_mesher.gd` + `test/test_dc_real_terrain.gd`. Known render bugs live in `docs/bugs/` (inside-coverage cracks, reversed ridge triangles).
+
+**Retired (cleanup done).** The earlier camera-centered clipmap render (`DCTerrainManager`, the `dcmanager` toggle), the `DcSubstratePreview`/`dcgen` substrate preview, and the GDScript SVO substrate prototypes (`voxel_octree.gd` + `octree_mesher.gd`, plus the `dc_edit_splicer.gd` edit-patch surgery) were removed once `DcWorldPreview` became the sole render path.
 
 ### Scene graph
 
-`world.tscn` holds only `StructuralIntegrity` + `Player`; the terrain subsystems (`EditStoreManager`, `DcWorldPreview`, `DCTerrainManager`, `DCCollisionManager`, …) are instantiated in `world.gd:_ready`.
+`world.tscn` holds only `StructuralIntegrity` + `Player`; the terrain subsystems (`EditStoreManager`, `DcWorldPreview`, `DCCollisionManager`, …) are instantiated in `world.gd:_ready`.
 
 ```
 world.tscn
@@ -115,7 +116,7 @@ Channel taxonomy (`scripts/events/*_event.gd`):
 - **Derived** (emitted by integrity components): `region_collapsing`. (`voxel_support_changed` was removed in Phase 6 with its only consumer, `CollapseDetector`.)
 - **Lifecycle**: `world_ready` (global, channel-wide; no cells). See "World-ready gate" below.
 
-**World-ready gate.** Gameplay + physics must not act on a half-streamed world (player falling through ungrown ground; PBD anchoring against an SDF that hasn't loaded). So `player.gd`, `StructuralIntegrity`, and `PbdStructure` start `_active = false` and gate their `_physics_process` until they receive `WorldReadyEvent`. `world.gd._process` polls the terrain (`get_voxel_tool().is_area_editable(box around the player)`) each frame and emits `world_ready` once the data has streamed in — with a `WORLD_READY_TIMEOUT` backstop so a bad probe can't freeze the game. The terrain node is **never** gated (pausing it would stall the very streaming we wait on). Subscribers must exist before the event fires (all current ones are built at world startup). PBD additionally keeps a per-structure anchor guard (`_unanchored`) for a structure that spans beyond the loaded area.
+**World-ready gate.** Gameplay + physics must not act on a half-streamed world (player falling through ungrown ground; the structural sim classifying support against an SDF that hasn't loaded). So `player.gd`, `StructuralIntegrity`, and `DetachmentScout` start `_active = false` and gate their `_physics_process`/handlers until they receive `WorldReadyEvent`. The terrain field is the C++ `EditStore` (generator + edits), resident from frame one — there is no godot_voxel streaming to wait on — so `world.gd._process` simply emits `world_ready` on the **first frame** (`_world_ready` one-shot guard); there is nothing to poll and no timeout. The terrain render is **never** gated. Subscribers must exist before the event fires (all current ones are built at world startup).
 
 Each event extends `VoxelEvent { grid_id, cells }`. `cells` is the dispatch footprint — the bus indexes per-cell subscribers against it. `grid_id` is in every payload from day one so multi-grid (Phase 5.5d, deferred) lands without payload churn.
 
@@ -125,40 +126,37 @@ Each event extends `VoxelEvent { grid_id, cells }`. `cells` is the dispatch foot
 
 ### Structural integrity system
 
-> **Authority note.** The live structural simulation is **PBD** (`PbdStructure` +
-> the C++ `PbdSim`), enabled by default at world startup — see "PBD structural
-> simulation" below. The classes here are the **tracking spine** PBD rides on
-> (`TerrainSupport.voxel_data` / `is_natural_terrain`) plus the **falling-chunk
-> lifecycle** PBD reuses. Parts are no longer a separate system: a placed part is
-> imprinted into the EditStore (parts-as-voxels S2) and tracked as ordinary voxels,
-> so PBD already simulates it. The old `PartSupport`/`PartData`/`collapse_part`/
-> strain layer and the `CollapseDetector`/`IntegrityDebug` collapse layer are all
-> deleted. Part *identity* lives in the `PartIndex` sidecar (see "Parts").
+> **Authority note.** The live structural simulation is **PB-MPM** (`MpmStructure` +
+> the C++ `MpmSim`), wired at world startup — see "Terrain collapse (PB-MPM)" below.
+> `TerrainSupport` is the **tracking spine** the sim rides on (`voxel_data` /
+> `is_natural_terrain`); the loss-of-support trigger is `DetachmentScout` +
+> `GroundFlood` (flood-to-bedrock), which replaced the old scalar-support cascade.
+> Parts are no longer a separate system: a placed part is imprinted into the
+> EditStore (parts-as-voxels S2) and tracked as ordinary voxels, so MPM already
+> simulates it. The old `PartSupport`/`PartData`/`collapse_part`/strain layer, the
+> `CollapseDetector`/`IntegrityDebug` collapse layer, and the earlier PBD +
+> `VoxelChunkBody` rigid-body collapse path are all deleted. Part *identity* lives
+> in the `PartIndex` sidecar (see "Parts").
 
 **`StructuralIntegrity`** (`scripts/structural_integrity.gd`) is a `Node` facade:
 
 ```
 StructuralIntegrity (Node, facade)
-├── terrain_support: TerrainSupport   ← voxel_data, is_natural_terrain, propagation (the tracked set PBD reads)
-└── pbd:             PbdStructure      ← set by world.gd; the authoritative sim; folded into is_quiescent
+├── terrain_support: TerrainSupport   ← voxel_data, is_natural_terrain, propagation (the tracked set)
+└── mpm:             MpmStructure      ← set by world.gd; the PB-MPM sim; folded into is_quiescent
 ```
 
-The facade owns `_physics_process` orchestration (drain the support fixpoint; classify falling bodies), `wake_falling_bodies` (needs scene-tree access), and `is_quiescent` (save gating — also requires `pbd.is_settled()`). Mutations come through the bus; the facade exposes the `get_support` query. It subscribes `terrain_sdf_changed` in `_ready` so it can call `wake_falling_bodies` when the world changes.
+The facade owns `_physics_process` orchestration (drain the support fixpoint at `TerrainSupport.PROPAGATION_BUDGET`/frame, once `WorldReadyEvent` flips `_active`) and `is_quiescent`/`force_quiescent` (save gating — requires the dirty queue empty **and** `mpm.active_count() == 0`, since in-flight MPM particles aren't serialised). It exposes the `get_support` query and holds the `store` + `mpm` references `world.gd` injects. The bus-driven structural reactions (registration, phantom-drop, detachment) live in `TerrainSupport` and `DetachmentScout`, not the facade.
 
 **`TerrainSupport`** (`scripts/structural/terrain_support.gd`) owns `voxel_data: Dictionary[Vector3i, VoxelRecord]`, `dirty_queue`, and `_lowest_registered_y`. Subscribes channel-wide in `_init` to `voxel_added`, `voxel_removed`, and `terrain_sdf_changed`. A worklist fixpoint drains `dirty_queue` (FIFO, BFS-order) at `PROPAGATION_BUDGET` (200) cells per physics frame via `process_dirty_queue()`. `is_natural_terrain(pos)` requires both untracked-solid AND bedrock — the combination grants `FULL_SUPPORT` to neighbours.
 
 Classification cascade in `_support_from_neighbor` (priority order): tracked voxel → solid-above (skip) → solid-bedrock (FULL) → suspended-mass (lazy-register, skip) → air (skip).
 
-The scalar `support` it computes is no longer consumed by a collapse system — it survives only as the **gate for suspended-mass discovery**: `_support_from_neighbor` lazily registers a solid neighbour as a tracked cell when the current cell's support clears `FALL_THRESHOLD`, which is how a dug-out overhang becomes the cells PBD simulates. (Fully retiring the scalar would mean replacing that expansion with a PBD-native criterion — a deliberate future task.)
+The scalar `support` it computes is no longer consumed by a collapse system — it survives as the maintainer of the **tracked voxel set** (which the probe read-out reads) and the **gate for suspended-mass discovery**: `_support_from_neighbor` lazily registers a solid neighbour as a tracked cell when the current cell's support clears `FALL_THRESHOLD`. This grows `voxel_data` as a dug-out overhang appears, but it no longer *triggers* the fall — `DetachmentScout` does (below). (Fully retiring the scalar would mean replacing that expansion with a detachment-native criterion — a deliberate future task.)
 
-**Terrain collapse** is PBD's job (see below). It hands the detached cells to `VoxelChunkBody.from_voxels(cells, store)` (`scripts/structural/voxel_chunk_body.gd`) → a `RigidBody3D` whose **visual is a Dual-Contoured mesh of the chunk's own SDF** (sampled before the carve, masked to the component, painted per-cell from `MaterialPalette`) and whose **collision is a greedy-merged box-compound** (V-HACD off-thread is a later upgrade) — then carves the cells out of the SDF. The old flood-fill `CollapseDetector` was deleted in Phase 6.
+**Terrain collapse (PB-MPM).** The trigger is **`DetachmentScout`** (`scripts/structural/detachment_scout.gd`): on a terrain edit made while MPM is idle, it gathers the freshly-exposed solid cells as seeds and floods each connected component **downward toward bedrock** via **`GroundFlood`** (`ground_flood.gd`, non-blocking, a budget of cells/frame, capped at `MAX_DETACH` 700). A component that drains without reaching bedrock under the cap is **DETACHED** and is handed to `MpmStructure.thaw_cells(...)`. The scout only considers edits made while MPM is idle and pauses while material is in flight, so detachment proceeds in settled waves (MPM's own thaw/freeze edits, which fire with particles active, are ignored) — that's what breaks the runaway cascade the old scalar trigger risked.
 
-**Falling body lifecycle.** `VoxelChunkBody` stashes `cell_offsets` (each origin cell's local-space offset from the body's centroid at collapse time) on the body via `set_meta`. `StructuralIntegrity._tick_falling_bodies()` runs every physics frame: for each body with `cell_offsets`, sample SDF at each cell's current world position (via `body.global_transform * offset`):
-- **All cells in solid SDF (fully buried)** → emit `voxel_added` per cell at its current world-cell, free the body. The fallen mass becomes tracked SDF terrain.
-- **Some cells in solid (partially buried)** → `body.freeze = true`. Body locks in place; physics stops simulating it.
-- **No cells in solid (free)** → leave alone; physics handles it (sleeps when at rest). If the body was previously frozen and is now free (e.g., player dug terrain out from around it), unfreeze and wake.
-
-`FillAction.execute` freezes any overlapping `RigidBody3D` **before** mutating SDF, so the next physics tick doesn't squirt the body sideways from the collision overlap. The classifier integrates them on subsequent ticks.
+**MPM thaw/freeze lifecycle.** `MpmStructure` (`scripts/structural/mpm_structure.gd`) wraps the C++ `MpmSim`. `thaw_cells` carves the detached cells out of the SDF and seeds MPM particles in their place (rendered via a `MultiMesh`); the sim falls/deforms the continuum against the rest of the terrain each `tick`. When the particles settle (`_settled_frames`), `_freeze()` rasterises the material back into the EditStore as terrain (`mpm_couple`), queueing the re-mesh boxes closest-to-camera-first (`_pending_chunks`). `active_count() > 0` while any material is in flight — this is what gates saves (above). No `RigidBody3D` is involved.
 
 Typed records (all `RefCounted`, in `scripts/structural/`):
 - `VoxelRecord` — `{support, material, dirty}` for tracked voxels.
@@ -180,7 +178,7 @@ Detailed mechanism rationale (lazy-expansion bounds, pause-correct delta accumul
 
 ### Parts (`scripts/schematics/`, `assets/parts/`)
 
-A **placement is a voxel imprint**, not a spawned Node3D: `ConstructionAction` stamps the part's box brush into the EditStore via the shared `VoxelImprint` (parts-as-voxels S2), so the part becomes ordinary tracked voxels the DC mesher draws and PBD simulates. There is no part scene/instance and no separate part-tracking system — identity goes to the `PartIndex` sidecar (S3), which records each placement's `PartRecord` from a `part_placed` bus event.
+A **placement is a voxel imprint**, not a spawned Node3D: `ConstructionAction` stamps the part's box brush into the EditStore via the shared `VoxelImprint` (parts-as-voxels S2), so the part becomes ordinary tracked voxels the DC mesher draws and MPM simulates. There is no part scene/instance and no separate part-tracking system — identity goes to the `PartIndex` sidecar (S3), which records each placement's `PartRecord` from a `part_placed` bus event.
 
 `Schematic` (base, `Resource`) carries an optional hand-authored footprint. `Part` extends it with `dimensions: Vector3`, `material_name: StringName`, and `world_transform(basis, placement_pos)` (the single source for the ghost, the footprint, and the imprint placement). Bottom-anchored at local Y=0.
 
@@ -193,16 +191,16 @@ Multi-axis rotation: `ConstructionAction.rotation: Vector3` — continuous **deg
 Player controls in **Construction → Build** activity: `[`/`]` cycle parts, `R/T/Y` rotate around Y/X/Z in 15° steps (HUD shows the current angle), `M` cycles material, Shift+W/A/E + wheel adjusts offset. Shift+key always suppresses the underlying WASD movement key — Shift+W is a distinct input from W, not "walk + something."
 
 **Debug overlays:**
-- `V` toggles the **PBD stress-line overlay** (`PbdStructure.toggle_viz` → the green→red→whitening member lines). The old `IntegrityDebug` support-cube overlay and its `H` obscured-pass toggle were removed in Phase 6.
-- `H` toggles the obscured-pass corner markers (only visible with `V` on).
 - `G` toggles the voxel grid overlay (wireframes the targeted cell and its Chebyshev neighborhood, helpful for understanding voxel boundaries during flatten/dig/fill).
 - `F` toggles full-scene wireframe.
+- `I` toggles incremental-edit re-meshing.
+- Structural/MPM debugging is via the console, not a key toggle: `floodviz` (visualise the detachment flood-to-bedrock), `mpmthaw` / `mpmdemo` (thaw real terrain / spawn a demo block into MPM). The old `V`/`H` PBD stress-line and `IntegrityDebug` support-cube overlays were removed with the PBD/collapse layers.
 
 **Action preview rendering:** Every `Action` subclass implements `preview() -> ActionPreview`, returning the cells it would change classified by intent (`air`, `solid`, `part`) plus a `refused` flag. The world-space `VoxelPreviewRenderer` (`scenes/player/voxel_preview_renderer.gd`) builds an Action each frame from the current raycast hit, calls `preview()`, and draws the cells via two ImmediateMesh passes (visible / obscured). Outlines inset 0.05 to avoid z-fighting with the DC terrain surface. Refusal lerps intent colors toward grey. The legacy idealised sphere/plane previews are gone for Dig/Fill/Flatten; Build keeps its part-mesh ghost.
 
 ### Materials
 
-`Materials` (`scripts/materials.gd`) is a `Resource` subclass with `@export` fields (`decay`, `albedo`, `angle_of_repose`, `failure_mode`). Data lives in `assets/materials/<name>.tres`; the class exposes static singleton accessors (`Materials.STONE`, etc.) that lazy-load via `load("res://assets/materials/...")`. `Materials.from_name(StringName)` resolves a Part's `material_name` to the singleton, falling back to STONE for unknown names.
+`Materials` (`scripts/materials/materials.gd`) is a `Resource` subclass with `@export` fields (`decay`, `albedo`, `angle_of_repose`, `failure_mode`). Data lives in `assets/materials/<name>.tres`; the class exposes static singleton accessors (`Materials.STONE`, etc.) that lazy-load via `load("res://assets/materials/...")`. `Materials.from_name(StringName)` resolves a Part's `material_name` to the singleton, falling back to STONE for unknown names.
 
 ### SDF conventions
 
@@ -213,25 +211,24 @@ Player controls in **Construction → Build** activity: `[`/`]` cycle parts, `R/
 
 ### Key conventions
 
-- **Refuse-don't-deform.** Actions refuse via `validate()` when constraints can't be met. `FillAction` extends this to physics state via `intersect_shape` — fills that would overlap a `RigidBody3D` are refused. `ConstructionAction.validate` requires a part cell to overlap existing solid OR rest directly on solid below — a part floating in air is refused, and one that would bury the player is refused.
+- **Refuse-don't-deform.** Actions refuse via `validate()` when constraints can't be met (e.g. `FillAction` refuses within `PLAYER_CLEARANCE` of the player). `ConstructionAction.validate` requires a part cell to overlap existing solid OR rest directly on solid below — a part floating in air is refused, and one that would bury the player is refused. Where an edit can't refuse but might overlap a `RigidBody3D`, the action **freezes** the body before mutating the SDF (`FillAction`/`CsgAction` → `PhysicsUtils.freeze_bodies_in`), so the next physics tick doesn't squirt it sideways from the collision overlap.
 - **Input dispatch via dictionary lookup.** `_key_actions` and `_mouse_button_actions` map keycodes/buttons to callables; no if-chains.
 - **`PLAYER_CLEARANCE = 1.0m`** in `FillAction` and `FlattenAction` prevents filling the player's occupied space.
 - **Mutations go through the bus.** Actions emit primitive events (`terrain_sdf_changed`, `voxel_added`, etc.); they don't call `StructuralIntegrity` directly for state changes. The remaining synchronous facade query is `get_support`.
 - **Subscribe with bound methods, not lambdas.** `self.my_handler` lets the bus weakref the owner and auto-clean. `func(e): handle(e)` has no Object to weakref and would leak until manually unsubscribed.
-- **Wake-on-mutate.** `wake_falling_bodies()` is bus-triggered: `StructuralIntegrity` subscribes to `terrain_sdf_changed`. SDF terrain edits don't signal contact-change to the physics engine, so resting `RigidBody3D`s need an explicit nudge.
 - **Typed dicts (`Dictionary[K, V]`)** for `voxel_data`, `PartIndex._records`. Plain `Dictionary` poisons inferred types from iteration (`for x in dict` makes `x` Variant).
 - **Helper lambdas capture local refs, not `self`.** When a `RefCounted` class holds an `Array[Callable]` whose Callables reference instance fields, the implicit `self` capture forms a cycle. Pass dependencies as parameters and let lambdas close over the locals. See `ToolCatalog._build_catalog` for the pattern.
 
 ### Persistence (`scripts/persistence/`, `scenes/world/world.gd`)
 
 - **Terrain SDF**: the **EditStore blob** (`EditStoreManager`, a sparse octree of edits over the procedural generator) is saved to `user://saves/` by `world.save_edit_store()` on F5 and restored in `world.gd:_ready`. Phase B replaced godot_voxel's `VoxelStreamSQLite` stream with this. Parts persist here too — they're imprinted voxels.
-- **Snapshot**: F5 saves `user://saves/world.snapshot` (V6 schema, `var_to_str`-serialised); F9 reloads the scene. Save is gated on `StructuralIntegrity.is_quiescent()` — dirty queue empty, PBD settled, no awake `RigidBody3D` children — so the saved state is settled. The snapshot holds tracked voxels (with restored support), player state, **shader tunables**, and **tool/activity indices**; it no longer encodes parts separately (they live in the EditStore blob).
+- **Snapshot**: F5 saves `user://saves/world.snapshot` (V6 schema, `var_to_str`-serialised); F9 reloads the scene. Save is gated on `StructuralIntegrity.is_quiescent()` — dirty queue empty **and** MPM settled (`mpm.active_count() == 0`, no material in flight) — so the saved state is settled. The snapshot holds tracked voxels (with restored support), player state, **shader tunables**, and **tool/activity indices**; it no longer encodes parts separately (they live in the EditStore blob).
 - **Restore path**: `world.gd:_ready` loads the snapshot (if present) and the EditStore blob. Tracked voxels skip the propagation queue (saved values were captured while quiescent).
 - **Version check is asymmetric**: newer-than-known schemas are rejected; older ones load with missing fields defaulted. So pre-V6 saves still load, just without newer sections (and any Node3D parts they encoded are ignored — the world was reset for the format change anyway).
 
 ### In-game console (Limbo Console)
 
-`addons/limbo_console` is **vendored** (copied into the repo, not a submodule) at upstream v0.7.0 (`6e4c44d`). The `LimboConsole` autoload (set in `project.godot`) provides the runtime; `~` toggles. Commands live in `scenes/world/console_commands.gd` (a `ConsoleCommands` object the World builds at `_ready`): `set`/`get` (shader uniforms), `reset` (rewind to procedural defaults without touching save files), `quiescent`/`settle`, `parts`, `voxels`, `tp`, `editstore`, plus DC/PBD debug toggles. `register_all()`/`unregister_all()` wire them, guarded by `has_command` so scene reloads (F9, `reset`) don't re-register; `world._exit_tree` unregisters so a freed World leaves no dangling callable.
+`addons/limbo_console` is **vendored** (copied into the repo, not a submodule) at upstream v0.7.0 (`6e4c44d`). The `LimboConsole` autoload (set in `project.godot`) provides the runtime; `~` toggles. Commands live in `scenes/world/console_commands.gd` (a `ConsoleCommands` object the World builds at `_ready`): `set`/`get` (shader uniforms), `reset` (rewind to procedural defaults without touching save files), `quiescent`/`settle`, `parts`, `voxels`, `tp`, `editstore`, plus DC/MPM debug toggles. `register_all()`/`unregister_all()` wire them, guarded by `has_command` so scene reloads (F9, `reset`) don't re-register; `world._exit_tree` unregisters so a freed World leaves no dangling callable.
 
 **Addon policy: vendor, don't submodule.** GUT is vendored too. As a submodule, LimboConsole caused two problems: persistent working-tree noise (Godot regenerates the addon's `*.import` files, which a submodule flags as dirty), and a fragile autoload — the script's UID intermittently failed to land in `.godot/uid_cache.bin` (gitignored, machine-local), so the editor would serialize the autoload as `*uid://…` but the runtime couldn't resolve it (`Nonexistent function 'register_command' in base 'Nil'`). The UID value itself (`dyxornv8vwibg`) is fine; the failures were a stale cache from the half-converted submodule state. Vendoring (a plain project dir) plus a clean cache rebuild registers the UID normally, after which both the path and UID forms resolve. When updating LimboConsole, re-vendor from the pinned upstream commit and re-check the autoload boots clean.
 
