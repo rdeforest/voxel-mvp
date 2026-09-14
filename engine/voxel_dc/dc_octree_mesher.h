@@ -24,6 +24,9 @@ class DCOctreeMesher : public RefCounted {
 	// can re-decide collapse against a new camera without re-sampling. Null until the first build.
 	DCOctreePersist *_persist = nullptr;
 
+	bool _verify_emit = false; // debug: post-emit dangling-slot self-check; survives persist recreation (re-root)
+	bool _emit_diff = false;   // debug: incremental-vs-full emit diff (drop catcher); survives persist recreation
+
 	// Per-triangle owner cell origin (WORLD lattice) of the last mesh call. One Vector3
 	// (integer-valued) per emitted triangle; read by the dcinval LOD diagnostic overlay.
 	PackedVector3Array  _last_tri_owners;
@@ -32,9 +35,17 @@ class DCOctreeMesher : public RefCounted {
 	// each triangle — the cell size each triangle was meshed at.
 	PackedFloat32Array  _last_tri_owner_sizes;
 
+	// Parallel to _last_tri_owners: the owner leaf's geometric error `we` (QEF residual, lattice units)
+	// for each triangle — the dcinval diagnostic projects it (we * proj / dist) against eps.
+	PackedFloat32Array  _last_tri_owner_errors;
+
 	// Leaves whose Hermite data was sampled by the last build/grow (the field-derived build cost). After a
 	// grow_world this counts ONLY the leading-edge band — proof the retained interior was not resampled.
 	int _last_build_samples = 0;
+
+	// Outstanding refine work the last grow_world found (refine_cands.size() after reconcile, before the budget
+	// drained it): how many leaves still want sharpening at the current eps. The perf overlay graphs it draining.
+	int _last_refine_queue = 0;
 
 	// Phase timing for the last mesh_world or grow_world call (milliseconds).
 	// _last_accel_ms  = time spent in bake_accel (0 when the accel was reused in grow_world).
@@ -43,6 +54,21 @@ class DCOctreeMesher : public RefCounted {
 	double _last_accel_ms   = 0.0;
 	double _last_build_ms   = 0.0;
 	double _last_collapse_ms = 0.0;
+
+	// Breakdown of _last_build_ms (mesh_world only): tree construction (serial), leaf sampling
+	// (parallel — the dominant field cost), QEF roll-up (serial). Pinpoints the Amdahl ceiling.
+	double _last_construct_ms = 0.0;
+	double _last_sample_ms    = 0.0;
+	double _last_accum_ms     = 0.0;
+	double _last_collapse_pass_ms = 0.0;
+
+	// Breakdown of recollapse_and_mesh (_last_collapse_ms): reset_leaves, the collapse walk, vertex Pass 1,
+	// edge Pass 2 + concat — to find which O(cells) serial pass dominates a grow (the incremental-emit target).
+	double _last_reset_ms = 0.0;
+	double _last_pass1_ms = 0.0;
+	double _last_pass2_ms = 0.0;
+	double _last_reconcile_ms = 0.0; // c4 diag: grow's reconcile (O(tree) walk) vs reaccum split
+	double _last_reaccum_ms   = 0.0;
 
 public:
 	~DCOctreeMesher();
@@ -97,19 +123,55 @@ public:
 			bool error_driven = false,
 			const PackedColorArray &palette = PackedColorArray(),
 			Vector3i win_min = Vector3i(), // resident window (WORLD lattice); win_min == win_max ⇒ whole root
-			Vector3i win_max = Vector3i());// graded data floor (eps_px/proj) is derived internally — one knob
+			Vector3i win_max = Vector3i(), // graded data floor (eps_px/proj) is derived internally — one knob
+			int64_t max_cells = 0);        // memory budget: build stops descending past this (0 = arena cap only)
 
 	// Incremental window growth (doc 16 Stage B): re-window the RETAINED world octree (from a prior
 	// mesh_world) — graft cells newly in [win_min, win_max), sampling only them; evict cells that left;
 	// re-collapse + mesh against camera/proj/eps. Byte-identical to a fresh mesh_world of the new window,
 	// but the interior is reused (not resampled). Empty Array if no world octree is retained.
-	Array grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max);
+	// refine_budget caps floor-refinements this grow (C, doc 20): a stationary refine passes a finite budget
+	// so the bloom spreads over frames; -1 = unbudgeted (full grow, used on a move). get_refine_pending()
+	// reports whether cells were left coarse (the caller keeps grow-draining at the same eps until false).
+	// emit_min/max (M, doc 20): the VISIBLE window — only triangles owned by cells inside it are drawn, while
+	// [win_min, win_max) is the larger RESIDENCY box (kept + pre-baked, no re-sample on backtrack). Default
+	// (emit_min == emit_max) draws the whole residency box (pre-M behaviour).
+	Array grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max, int refine_budget = -1, Vector3i emit_min = Vector3i(), Vector3i emit_max = Vector3i(), bool reuse_frontier = false);
+
+	// True if the last grow_world left refinement deferred by its budget — drain by growing again (same eps).
+	bool get_refine_pending() const;
+
+	// Incremental edit (doc 20 E): re-mesh the RETAINED world octree after the EditStore field changed inside
+	// [dirty_min, dirty_max) (WORLD lattice), with the window unchanged. Re-samples only the edit box (not the
+	// whole window), then re-collapses + meshes against camera/proj/eps. Surface-identical to a fresh
+	// mesh_world of the edited field. Empty Array if no world octree is retained (caller falls back to build).
+	Array edit_world(Ref<EditStore> store, Vector3 camera, double proj, double eps_px, Vector3i dirty_min, Vector3i dirty_max);
 
 	// Field-sampled leaf count of the last build/grow — after grow_world, just the leading-edge band.
 	int get_last_build_sample_count() const { return _last_build_samples; }
 
+	// Outstanding refine work the last grow found (leaves still wanting sharpening at the current eps).
+	int get_last_refine_queue_size() const { return _last_refine_queue; }
+
 	// Total slots in the retained octree's cell array (live + free-list). Bounded across a traverse (B1b).
 	int get_octree_cell_count() const;
+	int64_t get_cell_arena_bytes() const;    // M2: total cell-arena size (disk)
+	int64_t get_cell_resident_bytes() const; // M2: cells currently in RAM (mincore)
+	bool is_arena_disk_backed() const;       // M2: false = fell back to anon RAM (OOM risk) → game warns
+
+	// Debug: enable a post-emit self-check that flags dangling-slot triangles (the "unrelated vertices" bug).
+	void    set_verify_emit(bool on);
+	int     get_last_bad_tri_count() const;  // # bad triangles in the last emit (0 = clean)
+	Vector3 get_last_bad_tri_pos() const;    // a vertex (lattice-local) of the first bad triangle, to localise
+	String  get_last_bad_tri_info() const;   // up to 5 bad tris this emit: owner cell + 3 vertices (REST diag)
+	int64_t get_verify_total_bad() const;    // cumulative bad triangles this session
+	int     get_verify_bad_emits() const;    // cumulative emits with ≥1 bad triangle
+
+	// Debug: drop catcher — full-emit the same tree after each incremental emit + report dropped triangles.
+	void    set_emit_diff(bool on);
+	int     get_last_drop_tris() const;      // triangles the incremental emit dropped this grow (= holes)
+	int64_t get_emit_diff_total_drop() const; // cumulative dropped triangles this session
+	String  get_last_drop_info() const;      // up to 5 dropped triangles this grow (centroid + vertices)
 
 	// Full prune-accel bakes run so far. grow_world reuses the accel (doesn't bump this) when the
 	// resident window is unchanged — e.g. a stationary refine — so a held view refines without re-baking.
@@ -121,8 +183,18 @@ public:
 	double get_last_build_ms()    const { return _last_build_ms;    }
 	double get_last_collapse_ms() const { return _last_collapse_ms; }
 
-	// Parallel accel-bake worker count. 1 = serial (default, unchanged behaviour); n > 1 splits the
-	// z-loop of bake_accel_level across n std::threads (disjoint regions, no races, byte-identical output).
+	double get_last_construct_ms() const { return _last_construct_ms; }
+	double get_last_sample_ms()    const { return _last_sample_ms;    }
+	double get_last_accum_ms()     const { return _last_accum_ms;     }
+	double get_last_collapse_pass_ms() const { return _last_collapse_pass_ms; }
+	double get_last_reset_ms() const { return _last_reset_ms; }
+	double get_last_pass1_ms() const { return _last_pass1_ms; }
+	double get_last_pass2_ms() const { return _last_pass2_ms; }
+	double get_last_reconcile_ms() const { return _last_reconcile_ms; } // c4: the O(tree) reconcile walk (grow)
+	double get_last_reaccum_ms()   const { return _last_reaccum_ms; }   // c4: the O(tree) QEF re-sum (grow)
+
+	// Parallel worker count for the build's parallel phases (construct / sample / accumulate / collapse /
+	// emit / accel-bake). 1 = serial. Output is deterministic and identical regardless of the count.
 	void set_thread_count(int n);
 	int  get_thread_count() const;
 
@@ -132,6 +204,9 @@ public:
 	// Parallel to get_last_triangle_owners(): one float per triangle = owner cell size (lattice
 	// units) — the LOD each triangle was meshed at, used by the dcinval diagnostic.
 	PackedFloat32Array get_last_triangle_owner_sizes() const { return _last_tri_owner_sizes; }
+	// Parallel to get_last_triangle_owners(): owner leaf's geometric error `we` (QEF residual, lattice
+	// units). dcinval projects it (we * proj / dist) vs eps to flag genuinely under/over-resolved triangles.
+	PackedFloat32Array get_last_triangle_owner_errors() const { return _last_tri_owner_errors; }
 
 protected:
 	static void _bind_methods();

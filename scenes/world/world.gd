@@ -7,12 +7,12 @@ var _inval_overlay: Node3D
 var _world_preview: DcWorldPreview
 var _dc_collision: DCCollisionManager
 var _awake_overlay: AwakeOverlay
-var _pbd_structure: PbdStructure
 var _mpm_structure: MpmStructure
 var _detachment_scout: DetachmentScout
 var _edit_store: EditStoreManager
 var _part_index: PartIndex
 var _console: ConsoleCommands
+var _debug_server: DebugServer
 
 # World-ready gate: gameplay + physics systems start inactive and resume on a
 # WorldReadyEvent. With the store-backed field resident from frame one there's nothing to
@@ -45,6 +45,12 @@ func _ready() -> void:
     _world_preview.setup(_player, _edit_store.store)       # doc 16/17: world-fixed incremental octree
     _world_preview.set_diagnostic_overlay(_inval_overlay)  # `dcinval` highlights its off-target LOD triangles
     _world_preview.set_enabled(true)                       # THE terrain render (doc 17 P3); `dcworld` toggles it
+    _player.world_preview = _world_preview                 # key I toggles its incremental-edit path (doc 20 E)
+    Perf.set_shown(true)                                   # perf overlay on by default during co-dev; `perf` toggles it
+    if OS.is_debug_build():                                # localhost telemetry/command endpoint (never shipped)
+        _debug_server = DebugServer.new()
+        add_child(_debug_server)
+        _debug_server.setup(_world_preview)
     # Body-driven JIT terrain collision from our DC mesher, sourced from the EditStore
     # (generator + edits) — godot_voxel collision is off (world.tscn generate_collisions
     # = false), so this is the only terrain body.
@@ -63,17 +69,10 @@ func _ready() -> void:
     # spawns under the cursor.
     _grab_os_focus.call_deferred()
 
-# The two structural sims. PB-MPM (doc 12) is the default substrate; PBD is created alongside but
-# stood down (StructuralIntegrity.mpm_mode defaults true), re-enabled by `physics_mode pbd`. The
-# full Replace-PBD (delete PBD / VoxelChunkBody / the falling-body classifier) is increment C.
+# PB-MPM (doc 12) is the structural substrate. (PBD was removed — increment C — once MPM became
+# the default; the old mass-spring sim, VoxelChunkBody debris, and the falling-body classifier are
+# gone.)
 func _wire_structural_sims() -> void:
-    _pbd_structure = PbdStructure.new()
-    _pbd_structure.name = "PbdStructure"   # ActionFactories resolves the probe target by this name
-    add_child(_pbd_structure)
-    _pbd_structure.setup(_integrity)
-    _integrity.pbd = _pbd_structure
-    _pbd_structure.set_enabled(not _integrity.mpm_mode)   # MPM default → PBD idle
-
     _mpm_structure = MpmStructure.new()
     _mpm_structure.name = "MpmStructure"
     add_child(_mpm_structure)
@@ -91,7 +90,6 @@ func _wire_console() -> void:
     _console.host          = self
     _console.inval_overlay = _inval_overlay
     _console.world_preview = _world_preview
-    _console.pbd_structure     = _pbd_structure
     _console.integrity         = _integrity
     _console.player            = _player
     _console.awake_overlay     = _awake_overlay
@@ -125,7 +123,7 @@ func _exit_tree() -> void:
 func _process(_delta: float) -> void:
     # The EditStore + analytic generator are resident from frame one — there's no streaming
     # to wait for (the old godot_voxel gate is gone). Fire world_ready on the first frame, so
-    # gravity/edits/PBD start against a field that's already trustworthy.
+    # gravity/edits/structural sim start against a field that's already trustworthy.
     if _world_ready:
         return
     _world_ready = true

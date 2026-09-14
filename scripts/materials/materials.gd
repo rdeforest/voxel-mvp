@@ -16,12 +16,13 @@ extends Resource
 @export var angle_of_repose: float  = -1.0  # degrees, -1 for rigid materials
 @export var failure_mode:    String = "fracture"  # "crumble", "fracture", "snap", "bend"
 
-# --- PBD structural properties (consumed by PbdNetworkBuilder) ---
-# Defaults are neutral (match the builder's original constants) so a cell with no
-# material behaves as before. Per-material values live in the .tres files.
+# --- Material structural properties ---
+# Per-material density / strength / stiffness / brittleness. No live consumer right now
+# (the PBD network builder that read these was removed with PBD); kept as tuned data for
+# the MPM material model (FEAT042). Per-material values live in the .tres files.
 @export var density:         float  = 1.0      # mass per cell — heavier loads its supports more
-@export var tension:         float  = 200.0    # max tensile force a member can carry
-@export var compression:     float  = 200.0    # max compressive force
+@export var tension:         float  = 200.0    # max tensile force before failure
+@export var compression:     float  = 200.0    # max compressive force before failure
 @export var compliance:      float  = 1.0e-7   # inverse stiffness (smaller = more rigid)
 @export var fatigue_seconds: float  = 1.25     # seconds-to-break at 2× load (creep; smaller = more brittle)
 

@@ -71,3 +71,8 @@ or condensed.
   make the generator a true volumetric, stratified field (overhangs, caves,
   layered geology); separates the pure structural levers from the global-flow
   erosion that stays deferred.
+- [`20-continuous-incremental-mesh.md`](20-continuous-incremental-mesh.md) — the
+  world-octree successor to doc 13: make meshing fully incremental and continuous
+  — per-cell solve caching (shipped), incremental edits (reconcile the edit box,
+  not full-rebuild), per-frame budgeted refinement, priority-by-error ordering,
+  and a measure-gated persistent GPU buffer. End state: lag only on a re-root.

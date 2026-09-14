@@ -3,8 +3,8 @@ extends RefCounted
 
 # Identity sidecar (manifesto #7): the voxel field carries only SDF + material; this index
 # carries part identity — who placed what, its live cells, and ancestry — so queries like
-# "every part derived from ancestor X" work without polluting the field. The mesher and PBD
-# never see it. Built at imprint (PartPlacedEvent) and kept consistent as cells are carved
+# "every part derived from ancestor X" work without polluting the field. The mesher and the
+# structural sim never see it. Built at imprint (PartPlacedEvent) and kept consistent as cells are carved
 # (VoxelRemovedEvent). A later refinement uses _cell_to_part so a new part placed over an
 # existing one keeps the older part's material on the cells it still owns.
 

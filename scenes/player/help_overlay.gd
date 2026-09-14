@@ -39,11 +39,10 @@ const ROWS := [
     ["Shift+W/A/E + wheel", "Move the probe target off the surface"],
 
     ["View / Debug"],
-    ["V",                 "Toggle PBD stress lines"],
     ["G",                 "Toggle voxel grid overlay"],
     ["F",                 "Toggle scene wireframe"],
     ["Ctrl+E",            "Toggle examine mode (freeze + noclip + magenta backfaces)"],
-    ["`",                 "Console (commands: settle, physics_active, perf, reset, …)"],
+    ["`",                 "Console (commands: settle, mpmthaw, perf, reset, …)"],
     ["?",                 "This help"],
 
     ["System"],

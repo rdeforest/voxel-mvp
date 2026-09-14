@@ -8,9 +8,8 @@ var _integrity:   StructuralIntegrity
 var _camera:      Camera3D
 var _build_state: BuildState
 var _csg_state:   CsgState
-var _pbd:         PbdStructure    # resolved lazily — created by world after the player
 var _store_ref:   EditStore       # resolved lazily — created by world after the player
-var _ctx_ref:     ActionContext   # built lazily; valid once both _store_ref and _pbd resolve
+var _ctx_ref:     ActionContext   # built lazily; valid once _store_ref resolves
 
 
 func _init(
@@ -27,24 +26,18 @@ func _init(
     _csg_state   = csg_state
 
 
-# The EditStore and PbdStructure are created in world._ready, after the player's
-# _ready, so they can't be captured at construction — resolve on first use and
-# cache. _action_ctx() builds the ActionContext once both are available.
+# The EditStore is created in world._ready, after the player's _ready, so it can't be
+# captured at construction — resolve on first use and cache. _action_ctx() builds the
+# ActionContext once the store is available.
 func _store() -> EditStore:
     if _store_ref == null:
         _store_ref = _player.get_parent().edit_store_ref()
         _ctx_ref   = null   # invalidate so _action_ctx() rebuilds with the real store
     return _store_ref
 
-func _pbd_structure() -> PbdStructure:
-    if _pbd == null:
-        _pbd     = _player.get_parent().get_node_or_null(^"PbdStructure")
-        _ctx_ref = null   # invalidate so _action_ctx() rebuilds with the real pbd
-    return _pbd
-
 func _action_ctx() -> ActionContext:
     if _ctx_ref == null:
-        _ctx_ref = ActionContext.new(_store(), _player, _integrity, _pbd_structure())
+        _ctx_ref = ActionContext.new(_store(), _player, _integrity)
     return _ctx_ref
 
 

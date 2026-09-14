@@ -12,6 +12,7 @@ var action_factories:  ActionFactories
 var tool_catalog:      ToolCatalog
 var _grid_overlay:     Node3D
 var _preview_renderer: Node3D
+var world_preview:     DcWorldPreview   # set by world.gd; key I toggles its incremental-edit path (debug)
 var _help_overlay:     HelpOverlay
 var _probe_hud:        ToolWindow
 
@@ -122,7 +123,6 @@ func _build_input_map() -> void:
         KEY_Q:            _quit_game,
         KEY_F:            _toggle_wireframe,
         KEY_X:            _toggle_fly,
-        KEY_V:            _toggle_stress_viz,
         KEY_M:            _route_edit.bind(&"cycle_material"),
         KEY_R:            _route_edit.bind(&"rotate_y"),
         KEY_T:            _route_edit.bind(&"rotate_x"),
@@ -132,6 +132,7 @@ func _build_input_map() -> void:
         KEY_BRACKETLEFT:  build_state.prev_part,
         KEY_BRACKETRIGHT: build_state.next_part,
         KEY_G:            _toggle_grid_overlay,
+        KEY_I:            _toggle_incremental_edits,
         KEY_F5:           _save_game,
         KEY_F9:           _load_game,
         KEY_1:            _select_activity.bind(0),
@@ -378,12 +379,14 @@ func _update_mode_label() -> void:
 
 # --- Other toggles ---
 
-func _toggle_stress_viz() -> void:
-    if integrity.pbd != null:
-        integrity.pbd.toggle_viz()
-
 func _toggle_grid_overlay() -> void:
     _grid_overlay.toggle()
+
+func _toggle_incremental_edits() -> void:
+    if world_preview == null:
+        return
+    var on := world_preview.toggle_incremental_edits()
+    Toast.show_message("Incremental edits %s" % ("ON (edit_world)" if on else "OFF (full rebuild)"), Color.AQUA if on else Color.GRAY)
 
 func _toggle_fly() -> void:
     _movement.fly_enabled = not _movement.fly_enabled

@@ -23,3 +23,11 @@ contains.
   epistemic, no resented manipulation, comprehension over conquest, etc.);
   the cross-check for any feature, paralleling design/01's architectural
   principles.
+- [`06-what-the-game-is.md`](06-what-the-game-is.md) — the plain-language
+  answer to "what's the game?": the four challenges, why a player wants
+  them, and the legibility precondition that makes a comprehension-driven
+  game playable at all. Where 01 pitches the engine and 05 states refusals,
+  this states the offer.
+
+
+---

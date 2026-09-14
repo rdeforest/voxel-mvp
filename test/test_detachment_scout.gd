@@ -31,7 +31,6 @@ func _rig() -> Dictionary:
     add_child(ms)
     ms.setup(es)
     si.mpm = ms
-    si.mpm_mode = true
 
     var scout: DetachmentScout = autofree(DetachmentScout.new())
     add_child(scout)

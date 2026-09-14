@@ -13,12 +13,28 @@
 
 namespace voxel_dc {
 
+// Compact float vector for the QEF's small-magnitude fields + the solve-result caches (vertex positions /
+// normals / errors, which are consumed as float on the GPU anyway). Halves their storage vs the
+// precision=double Vector3 (3x double). NOT for the precision-critical accumulators atb/mass/btb — those stay
+// double, since the crossing points are in lattice coords (magnitudes to ~2048+), so btb=Σd² reaches ~1e8 and
+// the residual (the LOD signal) is a difference of large numbers that float would lose to cancellation.
+struct F3 {
+	float x = 0, y = 0, z = 0;
+	F3() {}
+	F3(const Vector3 &v) : x(float(v.x)), y(float(v.y)), z(float(v.z)) {}
+	operator Vector3() const { return Vector3(x, y, z); }
+	void operator+=(const Vector3 &v) { x += float(v.x); y += float(v.y); z += float(v.z); }
+	void operator+=(const F3 &o) { x += o.x; y += o.y; z += o.z; }
+	double length_squared() const { return double(x) * x + double(y) * y + double(z) * z; }
+};
+
 struct Qef {
-	double a00 = 0, a01 = 0, a02 = 0, a11 = 0, a12 = 0, a22 = 0;
-	Vector3 atb;
-	Vector3 mass;
-	Vector3 nsum;  // sum of plane normals — the vertex's surface normal
-	double btb = 0; // sum of d^2; lets us evaluate the residual at the solved vertex
+	double a00 = 0, a01 = 0, a02 = 0, a11 = 0, a12 = 0, a22 = 0; // ATA: keep double — the eigen-solve amplifies any
+	                                                             // perturbation, and float made the vertex path-dependent
+	Vector3 atb;   // Σ n·d — d at lattice scale → keep double (feeds the residual's differencing)
+	Vector3 mass;  // Σ p — lattice-coord centroid for the solve bias → keep double
+	F3 nsum;       // Σ plane normals (the vertex normal, not its position) — small magnitude → float
+	double btb = 0; // Σ d² — reaches ~1e8 → keep double (residual = ... + btb cancels against the rest)
 	int count = 0;
 
 	void add_plane(const Vector3 &p, const Vector3 &n_in) {

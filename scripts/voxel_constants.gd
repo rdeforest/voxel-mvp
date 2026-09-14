@@ -23,7 +23,7 @@ const GRID_ID := 0
 # How finely the render/edit/collision layer subdivides each gameplay cell, as a power-of-two
 # exponent — the one knob. 2 → 0.25m; 3 → 0.125m; 4 → 0.0625m (×8 / ×64 the render cells, the
 # 1m gameplay/structural grid unchanged).
-const RENDER_SUBDIV_LOG2 := 2
+const RENDER_SUBDIV_LOG2 := 0
 const RENDER_SUBDIV      := 1 << RENDER_SUBDIV_LOG2           # render cells per axis per gameplay cell
 const RENDER_BASE_CELL   := VOXEL_SIZE / float(RENDER_SUBDIV) # metres per render cell (0.25 at LOG2 = 2)
 

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(deep-research)",
+      "Workflow(deep-research)",
+      "WebFetch(*)",
+      "Bash(*)"
+    ],
+    "additionalDirectories": [
+      "/tmp",
+      "/home/robert/.config/Code/User"
+    ]
+  }
+}

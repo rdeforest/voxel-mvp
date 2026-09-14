@@ -10,20 +10,21 @@ extends RefCounted
 # command's bare name because it collides with an Object built-in (`set`, `get`) — they
 # are set_uniform / get_uniform; the command STRING the player types is still set/get.
 # `host` is the World node, needed for get_tree() (reset/quit) and parenting the spawned
-# PBD demo (this is RefCounted, so it can't add_child itself). The other collaborators
+# demos (this is RefCounted, so it can't add_child itself). The other collaborators
 # are the subsystems World owns; assign them before register_all().
 
 var host:          Node
 var inval_overlay: Node3D
 var world_preview: DcWorldPreview
-var pbd_structure:     PbdStructure
+var _dcverify_on := false   # debug: post-emit dangling-slot self-check (dcverify command)
+var _dcroot_on := false      # debug: octree root-relative readout (dcroot command)
+var _dcdrop_on := false      # debug: incremental-vs-full emit drop catcher (dcdrop command)
 var integrity:         StructuralIntegrity
 var player:            CharacterBody3D
 var awake_overlay:     AwakeOverlay
 var edit_store:        EditStoreManager
 var part_index:        PartIndex
 
-var _pbd_demo: PbdDemo   # lazily spawned by `pbddemo`
 var _mpm_demo: MpmDemo   # lazily spawned by `mpmdemo`
 var _flood_viz: FloodViz   # lazily spawned by `floodviz`
 
@@ -51,26 +52,28 @@ func _table() -> Array:
         [savestyle,       "savestyle", "Save the current watercolour/terrain shader settings as a named preset. Usage: savestyle <name>"],
         [loadstyle,       "loadstyle", "Load a saved shader-settings preset. Usage: loadstyle <name>"],
         [liststyles,      "liststyles","List saved shader-settings presets."],
-        [dcinval,         "dcinval",   "Toggle the invalidation overlay: red=triangle too big on screen, yellow=too small; fading. Shows what each edit/move redoes."],
+        [dcinval,         "dcinval",   "Toggle the LOD overlay: red = refinement backlog (leaves still coarser than their detail warrants — what the worst-on-screen refiner sharpens next). Clears as the bloom resolves."],
         [fov,             "fov",       "Set the camera field-of-view in degrees (low = telescope/zoom → distant terrain refines under screen-error LOD). Usage: fov <degrees>"],
         [examine,         "examine",   "Examine mode: freeze DC re-meshing + noclip free-flight (tell a backwards triangle from a hole). Also Ctrl+E. Usage: examine [on|off]"],
-        [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + mesh-lag."],
-        [meshlag,         "meshlag",   "Max mesh lag (ms) the budget controller keeps the worker re-mesh under — higher = more terrain detail, slower re-mesh on a move. Usage: meshlag [ms] (default 500)"],
+        [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + job ms."],
+        [dcrefine,        "dcrefine",  "doc 20 C/P: wall-clock cap (ms) on refine work per grow while the world blooms in — do as much as fits in X ms, worst-on-screen first. Higher = faster bloom, longer per-job latency. Usage: dcrefine [ms] (default 8)"],
+        [dcretain,        "dcretain",  "doc 20 M: metres kept resident BEYOND the visible window — a turn or backtrack within it re-samples nothing (no re-bloom), and the edge ahead is pre-baked. Higher = more retention + cost. Usage: dcretain [m] (default 128)"],
+        [dcmaxcells,      "dcmaxcells", "Memory budget: stop refining past this many octree cells (~350 B each). At LOG2=4 max-detail the arena would otherwise exhaust RAM. Usage: dcmaxcells [millions] (default 80)"],
         [dcframebudget,   "dcframebudget", "Per-frame render budget (ms) the controller refines toward — refines while render cost < half this, backs off above it. Higher = more detail, lower fps. Usage: dcframebudget [ms] (default 16)"],
         [dcthreads,       "dcthreads", "Parallel accel-bake workers: `dcthreads <n>` sets the thread count; no args prints the phase timing (accel + build + collapse ms). Usage: dcthreads [n]"],
+        [dcverify,        "dcverify",  "Debug: toggle the post-emit self-check for dangling-slot triangles (the 'unrelated vertices' bug). When on, a Toast fires the moment an emit produces a bad triangle, naming the op + location. Costs an O(tris) scan per emit. Usage: dcverify [on|off]"],
+        [dcroot,          "dcroot",    "Debug: toggle a perf-overlay readout of your distance to the nearest octree root face + a Toast on re-root (the full-rebuild that heals the incremental-emit drop). Usage: dcroot [on|off]"],
+        [dcdrop,          "dcdrop",    "Debug: THE drop catcher. After each incremental drain it full-emits the same tree and reports triangles the incremental DROPPED (= holes) via /stats. Masks the bug on screen (always shows the full emit) but localizes it. Costs a full emit per drain. Usage: dcdrop [on|off]"],
         [remesh,          "remesh",    "Force a full dcworld rebuild now (re-bake + build + collapse) — trigger a remesh without walking, then read `dcthreads` for the timing."],
         [editstore,       "editstore", "Print the EditStore's edited-leaf count + its SDF at your position."],
-        [pbddemo,         "pbddemo",   "PBD demo: spawn a live mass-spring structure (stress-coloured) to watch sag/fail. Usage: pbddemo [cantilever|bridge|tower] [size]"],
         [mpmdemo,         "mpmdemo",   "PB-MPM demo: spawn a live block of continuum material that falls and rests ON the terrain. Usage: mpmdemo [size]"],
         [mpmthaw,         "mpmthaw",   "Thaw the REAL terrain at your aim into MPM: it carves out, falls/deforms, and freezes back when settled. Usage: mpmthaw [radius]"],
-        [physics_mode,    "physics_mode", "Switch the structural sim: 'pbd' (mass-spring, default) or 'mpm' (PB-MPM continuum — unsupported terrain thaws/falls/freezes). Usage: physics_mode [pbd|mpm]"],
         [floodviz,        "floodviz",  "Debug: flood connected solid terrain from your aim (biased down), colouring reached surface cells green. Non-blocking. Usage: floodviz [cells_per_frame]"],
-        [physics_active,  "physics_active", "Toggle the structural physics simulation on your real structures (sag + collapse under load). Usage: physics_active [on|off]"],
         [perf,            "perf",      "Toggle the performance overlay (FPS + per-subsystem ms, bottom-right). Usage: perf [on|off]"],
         [awake,           "awake",     "Highlight awake physics bodies (debris / collapsed parts) with a box. Usage: awake [on|off]"],
         [reset,           "reset",     "Delete the save (EditStore blob + snapshot) and reload to a fresh world."],
         [quiescent,       "quiescent", "Print whether the world is quiescent (save-ready)."],
-        [settle,          "settle",    "Force the world to rest so a save is never blocked (drains support, sleeps PBD + falling bodies)."],
+        [settle,          "settle",    "Force the world to rest so a save is never blocked (drains the support fixpoint)."],
         [parts,           "parts",     "Print the number of tracked parts."],
         [voxels,          "voxels",    "Print the number of tracked terrain voxels."],
         [tp,              "tp",        "Teleport the player. Usage: tp <x> <y> <z>"],
@@ -196,7 +199,7 @@ func dcinval(_state := "") -> void:
     var on: bool = inval_overlay.toggle()
     if on:
         world_preview.refresh_diagnostic()   # show the LOD diagnostic from the current mesh now
-    LimboConsole.info("dcinval: %s — red=triangle too big on screen, yellow=too small" % ("on" if on else "off"))
+    LimboConsole.info("dcinval: %s — red = refinement backlog (leaves still coarser than their detail warrants)" % ("on" if on else "off"))
 
 func fov(degrees: float) -> void:
     var cam := host.get_viewport().get_camera_3d()
@@ -214,8 +217,8 @@ func examine(state := "") -> void:
     LimboConsole.info("examine: %s — re-mesh %s, noclip fly %s" % [
         ("ON" if on else "off"), ("FROZEN" if on else "live"), ("on" if on else "off")])
 
-# `dcworld` is THE terrain render (doc 17 P3): the world-fixed octree, 0.25 m, graded by the screen-error
-# budget controller (eps_px self-tunes against frame time + mesh lag, ~100 ms target / 500 ms ceiling).
+# `dcworld` is THE terrain render (doc 17 P3): the world-fixed octree, graded by the screen-error budget
+# controller (eps_px self-tunes against render frame time; the refine rate self-tunes against the dcrefine ms cap).
 func dcworld(arg := "") -> void:
     if arg.is_valid_float():                       # `dcworld 256` → set coverage radius AND turn on
         world_preview.set_radius(arg.to_float())
@@ -224,7 +227,7 @@ func dcworld(arg := "") -> void:
             world_preview.win_radius_m, world_preview.base_cell])
         return
     if arg == "" and world_preview.is_enabled():   # `dcworld` (no args) → print live stats
-        LimboConsole.info("dcworld: on, %.0fm coverage, eps_px=%.1f, last mesh-lag=%.0fms" % [
+        LimboConsole.info("dcworld: on, %.0fm coverage, eps_px=%.1f, last job=%.0fms" % [
             world_preview.win_radius_m, world_preview._eps_px, world_preview._job_work_ms])
         return
     var on := _parse_toggle(arg, world_preview.is_enabled())   # `dcworld on|off` (empty → toggle)
@@ -245,12 +248,58 @@ func remesh() -> void:
     world_preview.force_rebuild()
     LimboConsole.info("remesh: full dcworld rebuild queued — read `dcthreads` for the phase timing")
 
-# Set the mesh-lag ceiling (ms) the dcworld budget controller keeps the worker re-mesh under.
-func meshlag(ms := 0.0) -> void:
+# Per-grow refine budget (ms). With the incremental emit a grow is O(refined), so this is a latency target:
+# higher = bigger, less frequent mesh updates; lower = smaller, smoother. Default 8.
+func dcrefine(ms := 0.0) -> void:
     if ms > 0.0:
-        world_preview.set_max_lag(ms)
-    LimboConsole.info("meshlag: ceiling %.0f ms (refine target %.0f ms) — higher = more detail, slower re-mesh" % [
-        world_preview.mesh_ceil, world_preview.mesh_target])
+        world_preview.refine_us = int(ms * 1000.0)
+    LimboConsole.info("dcrefine: %.1f ms refine budget per grow" % (world_preview.refine_us / 1000.0))
+
+
+func dcmaxcells(millions := 0.0) -> void:
+    if millions > 0.0:
+        world_preview.max_cells = int(millions * 1_000_000.0)
+    LimboConsole.info("dcmaxcells: %.0fM cell budget (now %.1fM live) — refinement holds past this to spare RAM" % [
+        world_preview.max_cells / 1_000_000.0, world_preview._mesher.get_octree_cell_count() / 1_000_000.0])
+
+
+func dcretain(m := -1.0) -> void:
+    if m >= 0.0:
+        world_preview.retain_margin_m = m
+    LimboConsole.info("dcretain: %.0f m kept resident beyond the visible window (M) — turn/backtrack within it doesn't re-bloom" % world_preview.retain_margin_m)
+
+
+func dcverify(arg := "") -> void:
+    if arg == "on":
+        _dcverify_on = true
+    elif arg == "off":
+        _dcverify_on = false
+    else:
+        _dcverify_on = not _dcverify_on
+    world_preview._mesher.set_verify_emit(_dcverify_on)
+    LimboConsole.info("dcverify: %s — post-emit dangling-slot self-check (Toast fires on a bad triangle)" % ("ON" if _dcverify_on else "OFF"))
+
+
+func dcdrop(arg := "") -> void:
+    if arg == "on":
+        _dcdrop_on = true
+    elif arg == "off":
+        _dcdrop_on = false
+    else:
+        _dcdrop_on = not _dcdrop_on
+    world_preview._mesher.set_emit_diff(_dcdrop_on)
+    LimboConsole.info("dcdrop: %s — after each drain, full-emit + report dropped triangles via /stats (masks the bug on screen; costs a full emit per drain)" % ("ON" if _dcdrop_on else "OFF"))
+
+
+func dcroot(arg := "") -> void:
+    if arg == "on":
+        _dcroot_on = true
+    elif arg == "off":
+        _dcroot_on = false
+    else:
+        _dcroot_on = not _dcroot_on
+    world_preview.set_root_viz(_dcroot_on)
+    LimboConsole.info("dcroot: %s — x-ray wireframe of the octree root box (jumps on re-root)" % ("ON" if _dcroot_on else "OFF"))
 
 
 func dcframebudget(ms := 0.0) -> void:
@@ -259,28 +308,11 @@ func dcframebudget(ms := 0.0) -> void:
     LimboConsole.info("dcframebudget: %.1f ms render budget (refines while < %.1f ms) — higher = more detail, lower fps" % [
         world_preview.frame_budget, world_preview.frame_budget * 0.5])
 
-# Spawn a live PBD structural-physics demo in front of the player (stress-coloured
-# lines; watch it sag and snap). Re-run to reset.
 # How many edited leaves the store holds + its SDF at your position.
 func editstore() -> void:
     var here := player.global_position
     LimboConsole.info("editstore: %d edited leaves; at you store=%.2f" % [
         edit_store.store.leaf_count(), edit_store.store.sample(here)])
-
-
-func pbddemo(kind := "cantilever", size := 12) -> void:
-    var fwd := -player.global_transform.basis.z
-    var base := Vector3i((player.global_position + fwd * 6.0 + Vector3.UP * 4.0).round())
-    var sim: PbdSim
-    match kind:
-        "bridge": sim = PbdDemo.bridge(base, size)
-        "tower":  sim = PbdDemo.tower(base, size)
-        _:        sim = PbdDemo.cantilever(base, size)
-    if _pbd_demo == null:
-        _pbd_demo = PbdDemo.new()
-        host.add_child(_pbd_demo)
-    _pbd_demo.set_sim(sim)
-    LimboConsole.info("pbddemo: %s size %d (%d members)" % [kind, size, sim.member_count()])
 
 # Spawn a live PB-MPM block of elastic material in front of the player; it falls and rests on the
 # real terrain (the EditStore SDF is its collider). Re-run to respawn.
@@ -300,7 +332,7 @@ func mpmthaw(radius := 3.0) -> void:
     if rc == null or not rc.is_colliding():
         LimboConsole.error("mpmthaw: aim at terrain first")
         return
-    # Thaw into the world's wired MpmStructure (the same one save-gating + physics_mode see), not a
+    # Thaw into the world's wired MpmStructure (the same one save-gating + DetachmentScout see), not a
     # private console instance — otherwise the in-flight material is invisible to is_quiescent.
     var n := integrity.mpm.thaw_sphere(rc.get_collision_point(), radius)
     LimboConsole.info("mpmthaw: thawed %d cells (r=%.1f) into MPM" % [n, radius])
@@ -321,27 +353,6 @@ func floodviz(budget := 200) -> void:
     _flood_viz.start(cell, budget)
     LimboConsole.info("floodviz: flooding from %s at %d cells/frame (green = reached surface)" % [cell, budget])
 
-
-# Switch the authoritative structural sim. `mpm` disables PBD and routes loss-of-support cells
-# into the PB-MPM substrate (thaw → fall → freeze); `pbd` restores the mass-spring sim.
-func physics_mode(mode := "") -> void:
-    if mode == "mpm":
-        integrity.mpm_mode = true
-        pbd_structure.set_enabled(false)
-        LimboConsole.info("physics_mode: MPM (PB-MPM continuum) — PBD disabled")
-    elif mode == "pbd":
-        integrity.mpm_mode = false
-        if integrity.mpm != null:
-            integrity.mpm.reset()   # drop any in-flight MPM material so it stops being stepped
-        pbd_structure.set_enabled(true)
-        LimboConsole.info("physics_mode: PBD (mass-spring)")
-    else:
-        LimboConsole.info("physics_mode: %s" % ("mpm" if integrity.mpm_mode else "pbd"))
-
-func physics_active(state := "") -> void:
-    var on := _parse_toggle(state, pbd_structure.is_enabled())
-    pbd_structure.set_enabled(on)
-    LimboConsole.info("physics_active: %s" % ("on" if on else "off"))
 
 func perf(state := "") -> void:
     var on := _parse_toggle(state, Perf.is_shown())

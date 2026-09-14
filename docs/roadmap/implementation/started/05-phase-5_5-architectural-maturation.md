@@ -16,10 +16,12 @@ The temptation to skip them in favor of "real gameplay" is real, and
 is wrong. The architecture decisions made here govern what v0.2 and
 v0.9 can be.
 
-## Status reconcile (2026-06-15)
+## Status reconcile (2026-06-18)
 
 This is no longer an active "finish me" doc — it's the v0.1 backlog, and the
-destruction half has moved under the MPM pivot. Where each sub-phase stands:
+destruction half has moved under the MPM pivot. **PB-MPM (doc 12) is now the
+default structural substrate; PBD is being removed** (it had been kept idle
+alongside MPM behind `physics_mode pbd`). Where each sub-phase stands:
 
 | Sub-phase | State |
 |-----------|-------|
@@ -194,6 +196,15 @@ finishes the job: parts attach to each other properly, snap behaviour
 exists for those who want it, and you can author assemblies bigger
 than one part at a time.
 
+**Blocker first — parts must look like parts.** The snap/resize/assembly
+work below isn't worth doing while a placed part reads as a raw voxel box.
+FEAT089 comes before all of it.
+
+- **FEAT089**: Parts look like parts — make a placed wooden beam read as a
+  *log* (and each part type look like its material/shape), not a voxel-aligned
+  box. Parts are imprinted voxels (parts-as-voxels), so this is a
+  render/material concern on the part's cells, not a separate part-mesh
+  system. Prerequisite for the rest of 5.5g.
 - **FEAT030**: Welding / joining — intersecting parts (cross beams)
   mutually support. Closes the known "vertical beam on cantilever
   isn't supported" limit. **Note (MPM):** parts are imprinted voxels and
@@ -246,14 +257,15 @@ than one part at a time.
 Bugs to close in v0.1:
 
 - **FEAT046**: Vertical-on-horizontal beam support — coordinate-snap
-  edge in `_direct_part_supporter`. **MPM-mooted:** `_direct_part_supporter`
-  is the PBD-era part-support spine; MPM gives support emergently, so
-  this bug dies with that code path (verify under MPM, don't fix the old
-  path).
+  edge in `_direct_part_supporter`. **DONE.** Mooted not by MPM but by
+  **parts-as-voxels**: a placed part is now imprinted voxels, not a tracked
+  mesh with its own support spine, so `_direct_part_supporter` and the
+  coordinate-snap edge are gone. Support across an intersection is ordinary
+  voxel adjacency.
 - **FEAT047**: Spinning-beam physics quirk — the gyroscope behaviour was
-  a freed-rigid-body artifact. **MPM-mooted:** continuum material doesn't
-  fly off as a spinning rigid body, so this class can't arise under MPM
-  (the doc-12 reason for the pivot). Verify, then close.
+  a freed-rigid-body artifact. **DONE.** Mooted by **parts-as-voxels**: a
+  part is no longer a freed `RigidBody3D` that can spin off as a gyroscope;
+  it's voxels in the field. The freed-rigid-body class can't arise.
 
 ## v0.1 checkpoint
 

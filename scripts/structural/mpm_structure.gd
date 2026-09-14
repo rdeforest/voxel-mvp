@@ -2,13 +2,13 @@ class_name MpmStructure
 extends Node3D
 
 # World MPM structural manager (PB-MPM) — the doc-12 thaw → simulate → freeze
-# loop on REAL terrain, the replacement for PbdStructure. Loose material is
-# MPM particles; the static terrain (the EditStore SDF) is the collider. Cells
-# thaw into particles (carved from the store, so a hole appears and the DC
-# mesher re-meshes), fall/deform/settle against the terrain, then freeze back
-# into the store when at rest (rasterised to SDF + material). Active particles
-# render as a MultiMesh of cubes. Standalone for now (driven by `mpmthaw`);
-# the support-loss auto-trigger and retiring PBD come next.
+# loop on REAL terrain, the structural substrate (it replaced the old mass-spring
+# sim). Loose material is MPM particles; the static terrain (the EditStore SDF) is
+# the collider. Cells thaw into particles (carved from the store, so a hole appears
+# and the DC mesher re-meshes), fall/deform/settle against the terrain, then freeze
+# back into the store when at rest (rasterised to SDF + material). Active particles
+# render as a MultiMesh of cubes. Manual thaw (`mpmthaw`) plus the loss-of-support
+# auto-trigger (DetachmentScout); the auto-trigger's flood-to-ground is being hardened.
 
 const DEBUG_CUBE_SIZE  := 0.45
 const RHO              := 400.0

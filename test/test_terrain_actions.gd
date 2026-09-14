@@ -27,7 +27,7 @@ func _store() -> EditStore:
     return store
 
 func _ctx(store: EditStore, player: CharacterBody3D = null) -> ActionContext:
-    return ActionContext.new(store, player, null, null)
+    return ActionContext.new(store, player, null)
 
 
 func test_dig_carves_solid_to_air() -> void:
