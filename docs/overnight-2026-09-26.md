@@ -147,14 +147,12 @@ pushed (see "Environment").*
 
 ### Decided without you — overrule freely
 
-- **EditStore save format (I1, superseded by J1 below):** the old `has_corners` byte now holds a four-state `FieldState`
-  (0 and 1 mean what they did), and `SAVE_VERSION` is **not** bumped, because a bump would refuse
-  every existing save. Old saves load unchanged; an old build reading a new save gets the old
-  rounding behaviour, not garbage. `deserialize` now returns success, and a failed load keeps the
-  previous tree.
-- **EditStore `SAVE_VERSION` is now 2 (J1):** this build reads v1 and v2 (v1 only ever holds states
-  0/1, which mean the same), so existing saves still load; a pre-J1 build refuses a v2 save with its
-  version message instead of reading inherited leaves as own-field leaves.
+- **EditStore save format (I1, J1):** the old `has_corners` byte now holds a four-state `FieldState`,
+  and `SAVE_VERSION` is 2. This build reads v1 and v2 (v1 only ever holds states 0/1, which mean the
+  same), so existing saves load; a pre-J1 build refuses a v2 save instead of misreading it. A
+  corrupt or truncated terrain blob used to crash the load (SIGSEGV or a FATAL index error, shown on
+  the old build); it's now refused with the store untouched, and the save pair isn't applied or
+  overwritten.
 
 - **Fixed-bug convention:** I followed `00_INDEX.md`'s preamble. A fixed bug's file is deleted, and
   `closed/` is only for not-a-bug and obsolete verdicts. Track A had archived three fixed bugs; the
@@ -162,7 +160,8 @@ pushed (see "Environment").*
   table is kept below.
 - **Scope grew past the plan.** Once A and B landed early, I ran follow-ups: every per-frame and
   per-click GDScript lattice loop moved to C++ (A4, C1, C2, G1, G2), plus backlog bugs with clear
-  fixes (D1, E1, F1–F3, H1, I1). Each got the same author → two reviewers → fixer loop.
+  fixes (D1, E1, F1–F3, H1, I1). A last whole-night review of the EditStore changes found the
+  load crash that J1 fixed. Each got the same author → two reviewers → fixer loop.
 - **Asked-then-answered overnight:** agents asked whether to port the construction attach scan, the
   per-click material paint and the thaw's measurement to C++. The manifesto answers that, so I did
   (C1, G1, G2). Flatten's work generation and the safety scan went too (A1b), because the plan's
@@ -214,7 +213,7 @@ Preview per call, radius 3, real terrain (A1b; "Before" is pre-`f11d284`):
 Per click, `execute()`: beam placement 6.3 → 0.70 ms, CSG ~6.5 → 0.70 ms, fill r2 1.33 → 0.16 ms
 (G1, G2). 729-cell MPM thaw 9.4 → 6.0 ms (D1, G2). Buried refused CSG preview 0.68 → 0.34 ms (A4).
 
-GUT: 192 tests / 190 passing / 2 pending at the start → **295 / 291 / 4** at the end, 0 failing
+GUT: 192 tests / 190 passing / 2 pending at the start → **318 / 314 / 4** at the end, 0 failing
 throughout. New pending tests are gates for filed bugs (`mpm-svd-ill-conditioned-u`,
 `dc-incremental-emit-ring-insufficient`).
 

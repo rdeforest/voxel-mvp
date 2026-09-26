@@ -27,13 +27,13 @@ What changed, in one breath:
   Previews are back under their pre-`f11d284` times; a placement click costs ~0.7 ms, down from ~6.3.
 - Safety, events and part records come from the field each action writes: EmptyVoxel/Fill safety,
   PartIndex registration and the MPM thaw's events and particles.
-- Also fixed: event-bus re-entrancy, honest save failures, the mmap-arena crash fallback and the
+- Also fixed: event-bus re-entrancy, honest save failures (a corrupt save is refused, not crashed on), the mmap-arena crash fallback and the
   DC mesher's argument traps. The SVD sign convention is pinned by tests.
 
 **Run `tools/build` after pulling** (engine changes), then the class-cache pass
 (`bin/godot --path . --headless --editor --quit`); new `class_name`s landed.
 
-GUT: **295 tests, 291 passing, 4 pending**, 0 failing. The 4 pending tests are known gates (see `docs/bugs/00_INDEX.md`).
+GUT: **318 tests, 314 passing, 4 pending**, 0 failing. The 4 pending tests are known gates (see `docs/bugs/00_INDEX.md`).
 
 The per-change loop that ran all night: an Opus author, an Opus correctness reviewer and a Sonnet
 completeness reviewer (a different model family on purpose), then an Opus fixer. A Fable tiebreak
