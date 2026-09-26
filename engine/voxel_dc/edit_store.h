@@ -15,6 +15,7 @@
 // stream. C++ so render/collision can sample it on a worker thread.
 
 #include "core/io/stream_peer.h"
+#include "core/math/aabb.h"
 #include "core/math/transform_3d.h"
 #include "core/object/ref_counted.h"
 #include "core/templates/local_vector.h"
@@ -43,18 +44,28 @@ public:
 	// the rest sparse. `indices` may be empty (material 0).
 	void write_region(const PackedFloat32Array &sdf, const PackedByteArray &indices, int dim, Vector3 origin, double cell);
 
-	// The field an edit WOULD write and the cells it would flip, without writing — the three
-	// GDScript SdfLattice builders (SdfLattice.sphere_stamp, VoxelImprint.lattice,
-	// StoreWrite.lattice) and SdfLattice.flips, reproduced bit for bit so a preview can run
-	// them every frame. Each returns { origin, cell, dim, sdf, region_lo, region_hi, writes,
-	// solid, air }. `shape` is a CsgSdf.Shape with `dims` = box [x, y, z], cylinder
-	// [radius, height], sphere [radius]. `cell` / `min_leaf` are the callers' own (VoxelImprint
-	// passes RENDER_BASE_CELL), so only the values the callers pass are gated. An empty Dictionary
-	// is a refusal (bad arguments, or a cell size that does not tile the unit grid).
-	// See edit_store_predict.cpp.
+	// The field an edit WOULD write, without writing: the lattice every SdfLattice builder hands
+	// write_region (SdfLattice.sphere_stamp, VoxelImprint.lattice, StoreWrite.lattice, and the work
+	// sets BellSculptAction / FlattenAction generate), bit for bit — test_edit_store_predict gates it
+	// against the GDScript originals kept in test/support/lattice_oracle.gd. Each returns
+	// { origin, cell, dim, sdf, writes } (what SdfLattice.predicted reads); an empty Dictionary is a
+	// refusal (bad arguments) or, for bell / flatten, a reshape that writes no point. `shape` is a
+	// CsgSdf.Shape with `dims` = box [x, y, z], cylinder [radius, height], sphere [radius]; `peak`
+	// is the SDF the bell adds at its centre column (negative raises the surface).
+	// See edit_store_predict.cpp / edit_store_predict_work.cpp.
 	Dictionary predict_sphere_stamp(Vector3 center, double radius, int op, double min_leaf) const;
 	Dictionary predict_imprint(int shape, const PackedFloat64Array &dims, Transform3D xform, int op, double cell) const;
 	Dictionary predict_work(const TypedArray<Vector3i> &points, const PackedFloat64Array &sdfs) const;
+	Dictionary predict_bell(Vector3 center, double radius, double peak) const;
+	Dictionary predict_flatten(Vector3 plane_point, Vector3 normal, double radius) const;
+
+	// Questions asked of a predicted lattice (the write_region arguments: dim^3 values, x fastest)
+	// against the store as it is now. lattice_flips = SdfLattice.flips: { solid, air }, the cells
+	// whose sample point the write turns solid / air (empty Dictionary if the cell size does not
+	// tile the unit grid). lattice_turns_in = SdfLattice.solidifies_in / empties_in: whether the
+	// write turns any point of `box` solid (to_solid) or air that the store holds otherwise now.
+	Dictionary lattice_flips(const PackedFloat32Array &sdf, int dim, Vector3 origin, double cell) const;
+	bool lattice_turns_in(const PackedFloat32Array &sdf, int dim, Vector3 origin, double cell, AABB box, bool to_solid) const;
 
 	double sample(Vector3 p) const;  // stored edit if any, else the generator
 	bool has_edit(Vector3 p) const;  // true where the player has edited (stored), false = generator

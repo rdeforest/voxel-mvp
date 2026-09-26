@@ -53,9 +53,9 @@ and the desaturated ghost makes refusal easy to see. Single-voxel edits didn't
 do what he expected; that's filed as a known unknown,
 [`single-voxel-edits-unexpected`](bugs/single-voxel-edits-unexpected.md).
 
-**Next: [`actions-preview-gdscript-slow`](bugs/actions-preview-gdscript-slow.md).**
-The exact prediction made previews 5–10× slower (CSG 2.5 ms per frame). The fix
-is to build the lattice in C++; caching was rejected. Then comes **FEAT089,
+**Fixed on `perf/preview-lattice-cpp`: [`actions-preview-gdscript-slow`](bugs/closed/actions-preview-gdscript-slow.md).**
+The exact prediction had made previews 5–10× slower; the lattice is now built in
+C++ and previews are back under their pre-regression times. Next is **FEAT089,
 parts look like parts**, which blocks the rest of 5.5g. Volumetric worldgen
 tier 1 (`planned/18`) is independent and can run alongside.
 

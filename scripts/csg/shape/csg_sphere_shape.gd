@@ -23,6 +23,12 @@ func sdf(local_point: Vector3) -> float:
 func local_aabb() -> AABB:
     return AABB(-Vector3.ONE * radius, Vector3.ONE * radius * 2.0)
 
+func sdf_kind() -> int:
+    return CsgSdf.Shape.SPHERE
+
+func sdf_dims() -> PackedFloat64Array:
+    return PackedFloat64Array([radius])
+
 func axis_label(_axis: int) -> String:
     return "radius"
 

@@ -2,8 +2,8 @@ class_name LatticeEdit
 extends RefCounted
 
 # One entry of a StoreWrite: a new SDF value at a store LATTICE point (a leaf corner, not a cell),
-# and optionally the material of the leaf whose origin is that point. The typed currency every
-# lattice writer (Bell, Flatten, FillVoxel, EmptyVoxel, MPM carve) hands StoreWrite, which turns a
+# and optionally the material of the leaf whose origin is that point. The typed currency the
+# GDScript work-set writers (FillVoxel, EmptyVoxel, MPM carve) hand StoreWrite, which turns a
 # set of these into the SdfLattice that is both written and flip-tested — so an action's preview,
 # refusal and events all derive from this one work set. What it does to CELLS is
 # StoreWrite.lattice(store, work).flips(store) (a CellFlips).

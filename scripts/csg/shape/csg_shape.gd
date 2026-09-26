@@ -15,6 +15,8 @@ func mesh() -> Mesh:                      return null         # preview ghost me
 func bounding_extent() -> float:          return 1.0          # largest world dimension
 func sdf(_local_point: Vector3) -> float: return 1.0          # signed distance, local frame
 func local_aabb() -> AABB:                return AABB()       # local bounds, centred at origin
+func sdf_kind() -> int:                   return -1           # sdf() as CsgSdf.Shape + its dims, which
+func sdf_dims() -> PackedFloat64Array:    return []           # EditStore.predict_imprint evaluates in C++
 func axis_count() -> int:                 return 1            # resizable axes (the wheel cycles these)
 func axis_label(_axis: int) -> String:    return ""
 func axis_dir(_axis: int) -> Vector3:     return Vector3.ZERO # local arrow direction; ZERO hides it

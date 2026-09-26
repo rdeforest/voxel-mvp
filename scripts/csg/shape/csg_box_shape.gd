@@ -20,6 +20,12 @@ func sdf(local_point: Vector3) -> float:
 func local_aabb() -> AABB:
     return AABB(-size * 0.5, size)
 
+func sdf_kind() -> int:
+    return CsgSdf.Shape.BOX
+
+func sdf_dims() -> PackedFloat64Array:
+    return PackedFloat64Array([size.x, size.y, size.z])
+
 func axis_count() -> int:
     return 3
 

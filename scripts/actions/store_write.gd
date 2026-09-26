@@ -20,14 +20,8 @@ static func cells(store: EditStore, work: Array[LatticeEdit]) -> AABB:
     if work.is_empty():
         return AABB()
     var lat := lattice(store, work)
+    var indices := _current_materials(store, lat)
     var lo_cell := Vector3i(lat.origin)
-    var indices := PackedByteArray()
-    indices.resize(lat.dim * lat.dim * lat.dim)
-    for z in lat.dim:
-        for y in lat.dim:
-            for x in lat.dim:
-                var i := Vector3i(x, y, z)
-                indices[lat.index(i)] = store.material_at(lat.point(i))
     for edit in work:
         if edit.material >= 0:
             indices[lat.index(edit.point - lo_cell)] = edit.material
@@ -35,24 +29,33 @@ static func cells(store: EditStore, work: Array[LatticeEdit]) -> AABB:
     return AABB(lat.region_lo, lat.region_hi - lat.region_lo)
 
 
-# The field cells() will write for `work`: the current field over the work's box (plus the
-# 1-cell margin), with the edited points overwritten.
-static func lattice(store: EditStore, work: Array[LatticeEdit]) -> SdfLattice:
-    var lo_cell := _lo(work) - Vector3i.ONE
-    var span    := _span(work)
-    var dim     := maxi(span.x, maxi(span.y, span.z)) + 1
-    var lat := SdfLattice.new(Vector3(lo_cell), 1.0, dim,
-        Vector3(lo_cell), Vector3(lo_cell) + Vector3.ONE * float(dim - 1))
-    for z in dim:
-        for y in dim:
-            for x in dim:
+# Write a work lattice (a work set's field, as lattice() or EditStore.predict_bell / predict_flatten
+# build it) keeping every leaf's current material. Returns the rewritten box, as cells() does.
+static func reshape(store: EditStore, lat: SdfLattice) -> AABB:
+    lat.write(store, _current_materials(store, lat))
+    return AABB(lat.region_lo, lat.region_hi - lat.region_lo)
+
+
+static func _current_materials(store: EditStore, lat: SdfLattice) -> PackedByteArray:
+    var indices := PackedByteArray()
+    indices.resize(lat.dim * lat.dim * lat.dim)
+    for z in lat.dim:
+        for y in lat.dim:
+            for x in lat.dim:
                 var i := Vector3i(x, y, z)
-                lat.sdf[lat.index(i)] = store.sample(lat.point(i))
+                indices[lat.index(i)] = store.material_at(lat.point(i))
+    return indices
+
+
+# The field cells() will write for `work`: the current field over the work's box (plus the
+# 1-cell margin), with the edited points overwritten. Built by EditStore.predict_work.
+static func lattice(store: EditStore, work: Array[LatticeEdit]) -> SdfLattice:
+    var points: Array[Vector3i] = []
+    var sdfs := PackedFloat64Array()
     for edit in work:
-        var i := lat.index(edit.point - lo_cell)
-        lat.writes = lat.writes or lat.sdf[i] != edit.sdf
-        lat.sdf[i] = edit.sdf
-    return lat
+        points.append(edit.point)
+        sdfs.append(edit.sdf)
+    return SdfLattice.predicted(store.predict_work(points, sdfs))
 
 
 # Work that flips exactly one cell and no other, or [] when no write of its 8 lattice corners
@@ -111,17 +114,3 @@ static func one_cell(store: EditStore, cell: Vector3i, solid: bool, material: in
         work.append(LatticeEdit.new(point, base.sdf[base.index(point - lo)] + y[k] - y[8],
             material if point == cell else -1))
     return work
-
-
-static func _lo(work: Array[LatticeEdit]) -> Vector3i:
-    var lo := work[0].point
-    for edit in work:
-        lo = lo.min(edit.point)
-    return lo
-
-# Extent of the work's box including the 1-cell margin on both sides.
-static func _span(work: Array[LatticeEdit]) -> Vector3i:
-    var hi := work[0].point
-    for edit in work:
-        hi = hi.max(edit.point)
-    return hi - _lo(work) + Vector3i.ONE * 2

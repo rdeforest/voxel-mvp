@@ -26,6 +26,12 @@ func sdf(local_point: Vector3) -> float:
 func local_aabb() -> AABB:
     return AABB(Vector3(-radius, -height * 0.5, -radius), Vector3(radius * 2.0, height, radius * 2.0))
 
+func sdf_kind() -> int:
+    return CsgSdf.Shape.CYLINDER
+
+func sdf_dims() -> PackedFloat64Array:
+    return PackedFloat64Array([radius, height])
+
 func axis_count() -> int:
     return 2
 

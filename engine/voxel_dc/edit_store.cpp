@@ -386,6 +386,10 @@ void EditStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("predict_sphere_stamp", "center", "radius", "op", "min_leaf"), &EditStore::predict_sphere_stamp);
 	ClassDB::bind_method(D_METHOD("predict_imprint", "shape", "dims", "xform", "op", "cell"), &EditStore::predict_imprint);
 	ClassDB::bind_method(D_METHOD("predict_work", "points", "sdfs"), &EditStore::predict_work);
+	ClassDB::bind_method(D_METHOD("predict_bell", "center", "radius", "peak"), &EditStore::predict_bell);
+	ClassDB::bind_method(D_METHOD("predict_flatten", "plane_point", "normal", "radius"), &EditStore::predict_flatten);
+	ClassDB::bind_method(D_METHOD("lattice_flips", "sdf", "dim", "origin", "cell"), &EditStore::lattice_flips);
+	ClassDB::bind_method(D_METHOD("lattice_turns_in", "sdf", "dim", "origin", "cell", "box", "to_solid"), &EditStore::lattice_turns_in);
 	ClassDB::bind_method(D_METHOD("sample", "p"), &EditStore::sample);
 	ClassDB::bind_method(D_METHOD("has_edit", "p"), &EditStore::has_edit);
 	ClassDB::bind_method(D_METHOD("material_at", "p"), &EditStore::material_at);
