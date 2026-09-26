@@ -21,6 +21,11 @@ const CHUNK            := 12     # freeze region is re-meshed in CHUNK³ boxes (
 const CHUNKS_PER_FRAME := 2      # bounded work/frame — the closest chunks re-mesh first
 const SINGLE_EMIT_MAX  := 24     # a settled clump this small re-meshes in ONE watertight box (no chunk seams)
 
+const _UNIT_CUBE: Array[Vector3i] = [
+    Vector3i(0, 0, 0), Vector3i(0, 0, 1), Vector3i(0, 1, 0), Vector3i(0, 1, 1),
+    Vector3i(1, 0, 0), Vector3i(1, 0, 1), Vector3i(1, 1, 0), Vector3i(1, 1, 1),
+]
+
 var _sim:   MpmSim
 var _store: EditStore
 var _mm:    MultiMesh
@@ -78,9 +83,10 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
     if work.is_empty():
         return 0
 
-    var before    := CellFlips.snapshot(_store, StoreWrite.lattice(_store, work).cells())
+    var lat       := StoreWrite.lattice(_store, work)
+    var before    := CellFlips.snapshot(_store, lat.cells())
     var materials := _solid_materials(before)
-    var region    := StoreWrite.cells(_store, work)
+    var region    := StoreWrite.write(_store, lat, work)
     var flips     := CellFlips.since(_store, before)
 
     # Particles go in before any event: DetachmentScout ignores edits made while MPM is active,
@@ -156,37 +162,37 @@ func _seed_particles(emptied: Array[Vector3i], materials: Dictionary) -> void:
 func _carve_corners(planned: Dictionary) -> Array[LatticeEdit]:
     var corner_work: Array[LatticeEdit] = []
     var seen := {}
+    var kept := {}   # unplanned cell -> kept solid; each is probed once, not once per corner
 
-    for cell in planned:
-        for cx in [0, 1]:
-            for cy in [0, 1]:
-                for cz in [0, 1]:
-                    var corner: Vector3i = cell + Vector3i(cx, cy, cz)
+    for cell: Vector3i in planned:
+        for offset in _UNIT_CUBE:
+            var corner := cell + offset
 
-                    if seen.has(corner):
-                        continue
+            if seen.has(corner):
+                continue
 
-                    seen[corner] = true
+            seen[corner] = true
 
-                    if _corner_clears(corner, planned):
-                        corner_work.append(LatticeEdit.new(corner, VoxelConstants.SDF_AIR))
+            if _corner_clears(corner, planned, kept):
+                corner_work.append(LatticeEdit.new(corner, VoxelConstants.SDF_AIR))
 
     return corner_work
 
 
 # The 8 cells touching grid corner C have base corners C-{0,1}³. The corner can go air unless one
 # of them is kept solid (not thawed, and its centre samples solid).
-func _corner_clears(corner: Vector3i, planned: Dictionary) -> bool:
-    for dx in [0, 1]:
-        for dy in [0, 1]:
-            for dz in [0, 1]:
-                var nc: Vector3i = corner - Vector3i(dx, dy, dz)
+func _corner_clears(corner: Vector3i, planned: Dictionary, kept: Dictionary) -> bool:
+    for offset in _UNIT_CUBE:
+        var nc := corner - offset
 
-                if planned.has(nc):
-                    continue
+        if planned.has(nc):
+            continue
 
-                if TerrainProbe.is_solid(_store, nc):
-                    return false   # a kept-solid neighbour needs this corner
+        if not kept.has(nc):
+            kept[nc] = TerrainProbe.is_solid(_store, nc)
+
+        if kept[nc]:
+            return false   # a kept-solid neighbour needs this corner
 
     return true
 

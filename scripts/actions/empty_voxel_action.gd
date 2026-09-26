@@ -28,8 +28,9 @@ func validate() -> bool:
 func execute() -> void:
     if _work().is_empty():
         return
-    var before := CellFlips.snapshot(store, StoreWrite.lattice(store, _work()).cells())
-    var box    := StoreWrite.cells(store, _work())
+    var lat    := StoreWrite.lattice(store, _work())
+    var before := CellFlips.snapshot(store, lat.cells())
+    var box    := StoreWrite.write(store, lat, _work())
     CellFlips.since(store, before).emit(store)
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
