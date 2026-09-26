@@ -11,7 +11,7 @@ or move to `docs/completed/` when the session is closed out.*
 - [x] Track B1 — characterize `single-voxel-edits-unexpected`
 - [x] Track B2 — `empty-voxel-no-player-safety` (Dig: empty-carve refusal only; its player-safety guard needs `preview()`, specified in its bug file)
 - [x] Track B3 — `part-index-footprint-cells-never-released` (sub-cell parts now get no record; filed `part-index-sub-cell-parts-untracked`)
-- [ ] Track B4 — `mpm-thaw-events-unmeasured`
+- [x] Track B4 — `mpm-thaw-events-unmeasured` (particles now follow the measured flips too; filed `mpm-thaw-carve-leaves-planned-cells`)
 - [ ] Track B5 — MPM SVD regression test (if time)
 - [ ] Morning brief + play-test list at the bottom of this doc
 
@@ -121,3 +121,14 @@ Items recorded during the session (to fold into the brief):
 - **Convention conflict:** `docs/bugs/00_INDEX.md` says a fixed bug's file is
   deleted and `closed/` is for not-a-bug/obsolete. Track B follows that; Track A
   archived fixed bugs to `closed/` with "fixed" verdicts. Pick one.
+- **Behaviour change (B4):** an MPM thaw now seeds particles only for cells the carve actually
+  emptied, not every planned cell. Before, planned cells the carve couldn't empty were in the store
+  and in the sim at once (a terrain `mpmthaw` r=5: 176 planned, 143 emptied, 33 duplicated). The
+  thaw is about 30 % slower (729-cell floating block: 8.8 -> 11.1 ms, once per thaw) because it
+  builds the StoreWrite lattice twice; `StoreWrite.cells` taking a prebuilt lattice would remove
+  that, but `store_write.gd` is Track A's file tonight. Cells the box rewrite empties outside the
+  plan also become particles now, so a thaw can drop debris a few metres from where it was aimed
+  (seen: 3 m outside a r=1.4 sphere).
+- **Question (B4):** a thaw plan the 1 m corner carve can't realize (a lone buried cell, the shell
+  of a sphere in solid ground): refuse it, reshape it, or solve for corners that carve it exactly?
+  Evidence in `docs/bugs/mpm-thaw-carve-leaves-planned-cells.md`.
