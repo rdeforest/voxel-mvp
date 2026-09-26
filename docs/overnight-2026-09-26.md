@@ -8,7 +8,7 @@ or move to `docs/completed/` when the session is closed out.*
 - [ ] Track A1 — preview lattice in C++ (`actions-preview-gdscript-slow`)
 - [ ] Track A2 — `sdf-lattice-writes-false-change-at-max-faces`
 - [ ] Track A3 — `mmap-arena-no-mmap-fallback` (if time)
-- [ ] Track B1 — characterize `single-voxel-edits-unexpected`
+- [x] Track B1 — characterize `single-voxel-edits-unexpected`
 - [ ] Track B2 — `empty-voxel-no-player-safety`
 - [ ] Track B3 — `part-index-footprint-cells-never-released`
 - [ ] Track B4 — `mpm-thaw-events-unmeasured`

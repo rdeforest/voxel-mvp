@@ -14,7 +14,7 @@ When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a 
 | Bug | Area | Severity | Notes |
 |-----|------|----------|-------|
 | [actions-preview-gdscript-slow](actions-preview-gdscript-slow.md) | actions (preview perf) | **med (regression, next up)** | Exact field prediction runs in GDScript every frame; previews 5–10× slower (CSG 2.5 ms). Fix: build the lattice in C++. |
-| [single-voxel-edits-unexpected](single-voxel-edits-unexpected.md) | actions (FillVoxel/EmptyVoxel) | **known unknown** | Robert saw unexpected single-voxel results in play. Not yet characterized; hypotheses in file. |
+| [single-voxel-edits-unexpected](single-voxel-edits-unexpected.md) | actions (FillVoxel/EmptyVoxel) | **characterized** | Fill makes a ~2.5 m³ smooth mound (target ~half full, paint off-centre), Empty refuses 48 % of clicks and can't dig down; questions for Robert in file. |
 | [empty-voxel-no-player-safety](empty-voxel-no-player-safety.md) | actions (EmptyVoxel, Fill) | low-med | EmptyVoxel can empty the player's support cell; Fill uses its own distance check instead of `endangered_by`. |
 | [part-index-footprint-cells-never-released](part-index-footprint-cells-never-released.md) | structural (PartIndex) | low-med | Parts are registered under the AABB footprint, not the imprint's flips; cells never solid are never released. |
 | [sdf-lattice-writes-false-change-at-max-faces](sdf-lattice-writes-false-change-at-max-faces.md) | actions (CSG no-op refusal) | low | "Writes anything" samples the neighbour leaf at the upper faces; an identical CSG re-stamp into air is never refused. |
