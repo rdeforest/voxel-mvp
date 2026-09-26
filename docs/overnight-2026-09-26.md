@@ -16,6 +16,7 @@ or move to `docs/completed/` when the session is closed out.*
 - [x] Track B5 — MPM SVD regression test (all four rows pinned; filed `mpm-svd-ill-conditioned-u`)
 - [x] Track D1 (follow-up) — MPM thaw builds its StoreWrite lattice once (`StoreWrite.write` takes the measured lattice; FillVoxel/EmptyVoxel too) — 729-cell block thaw 9.4 → 7.4 ms median, pre-B4 `mpm_structure.gd` on the pre-D1 `StoreWrite` 7.85 ms, on D1's `StoreWrite` 7.6–8.0 ms (same harness, same engine)
 - [x] Track E1 (follow-up) — `SdfLattice.materials()` reads "before" from the owner leaf, like the C++ builders — one `SdfLattice.owner_centre` shared with the test oracle; a max-face seam no longer repaints the leaves below it (fill and imprint pinned in `test_lattice_materials`; filed `edit-store-stamp-union-repaints-terrain`)
+- [x] Track F1 (follow-up) — `event-bus-reentrancy` — emit snapshots the channel-wide list and every matched cell list before any handler runs, dispatches from the snapshots and prunes the live lists after; unsubscribe cancels a subscription in flight; nested emits stay synchronous. Twelve reentrancy tests, nine fail on the old bus; bug closed
 - [ ] Morning brief + play-test list at the bottom of this doc
 
 ## The constraint that shapes everything

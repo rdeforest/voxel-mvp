@@ -21,30 +21,39 @@ extends Node
 # Caveat: subscribe with a bound method (`self.my_method`), not an anonymous
 # lambda. Lambdas have no Object to weakref and would persist until
 # explicitly removed.
+#
+# Re-entrancy: handlers may emit, subscribe and unsubscribe mid-dispatch, on
+# any channel. Semantics in docs/roadmap/design/04-event-bus.md.
 
 class Subscription:
     extends RefCounted
 
     var weak_owner: WeakRef
     var method:     StringName
+    var cancelled:  bool = false
 
     func _init(callback: Callable) -> void:
         weak_owner = weakref(callback.get_object())
         method     = callback.get_method()
 
+    func target() -> Object:
+        if cancelled:
+            return null
+        return weak_owner.get_ref()
+
     func invoke(event: VoxelEvent) -> bool:
-        var obj = weak_owner.get_ref()
+        var obj := target()
         if obj == null:
             return false
         obj.call(method, event)
         return true
 
     func matches(callback: Callable) -> bool:
-        return weak_owner.get_ref() == callback.get_object() \
+        return target() == callback.get_object() \
            and method == callback.get_method()
 
     func dedup_key() -> String:
-        var obj = weak_owner.get_ref()
+        var obj := target()
         if obj == null:
             return ""
         return "%d:%s" % [obj.get_instance_id(), method]
@@ -85,52 +94,91 @@ func unsubscribe(channel: StringName, callback: Callable) -> void:
         return
     _remove_matching(_subs_channel[channel], callback)
 
+# Every list the event can reach is snapshotted before any handler runs, so
+# nothing a handler subscribes mid-dispatch hears the event in flight.
 func emit(channel: StringName, event: VoxelEvent) -> void:
-    var seen: Dictionary = {}
-    _dispatch_channel(channel, event, seen)
-    _dispatch_cell(channel, event, seen)
+    var channel_subs := _snapshot_channel(channel)
+    var cell_subs    := _snapshot_cells(channel, event)
+    var seen:        Dictionary = {}
 
-func _dispatch_channel(channel: StringName, event: VoxelEvent, seen: Dictionary) -> void:
+    _dispatch_channel(channel, channel_subs, event, seen)
+    _dispatch_cell(channel, cell_subs, event, seen)
+
+func _snapshot_channel(channel: StringName) -> Array:
     if not _subs_channel.has(channel):
-        return
-    var subs: Array        = _subs_channel[channel]
-    var dead: Array        = []
+        return []
+    return _subs_channel[channel].duplicate()
+
+# cell -> Array[Subscription], in event.cells order.
+func _snapshot_cells(channel: StringName, event: VoxelEvent) -> Dictionary:
+    var snapshot: Dictionary = {}
+    if not _subs_cell.has(channel):
+        return snapshot
+
+    var per_cell: Dictionary = _subs_cell[channel]
+    for cell in event.cells:
+        if per_cell.has(cell) and not snapshot.has(cell):
+            snapshot[cell] = per_cell[cell].duplicate()
+
+    return snapshot
+
+func _dispatch_channel(channel: StringName, subs: Array, event: VoxelEvent,
+        seen: Dictionary) -> void:
+    var dead: Array = []
     for sub: Subscription in subs:
         var key := sub.dedup_key()
         if key == "":
             dead.append(sub)
             continue
+
         seen[key] = true
         if not sub.invoke(event):
             dead.append(sub)
+
+    if not dead.is_empty():
+        _prune(_subs_channel[channel], dead)
+
+func _dispatch_cell(channel: StringName, snapshot: Dictionary, event: VoxelEvent,
+        seen: Dictionary) -> void:
+    for cell in snapshot:
+        var dead: Array = []
+        for sub: Subscription in snapshot[cell]:
+            if not _deliver_once(sub, event, seen):
+                dead.append(sub)
+
+        _prune_cell(channel, cell, dead)
+
+# Looks the list up again: a handler's nested emit or unsubscribe may already
+# have emptied this cell's list and dropped it.
+func _prune_cell(channel: StringName, cell: Vector3i, dead: Array) -> void:
+    var per_cell: Dictionary = _subs_cell[channel]
+    if not per_cell.has(cell):
+        return
+
+    _prune(per_cell[cell], dead)
+    if per_cell[cell].is_empty():
+        per_cell.erase(cell)
+
+# False when the subscription is dead and should be pruned.
+func _deliver_once(sub: Subscription, event: VoxelEvent, seen: Dictionary) -> bool:
+    var key := sub.dedup_key()
+    if key == "":
+        return false
+
+    if seen.has(key):
+        return true
+
+    seen[key] = true
+    return sub.invoke(event)
+
+func _prune(subs: Array, dead: Array) -> void:
     for sub in dead:
         subs.erase(sub)
 
-func _dispatch_cell(channel: StringName, event: VoxelEvent, seen: Dictionary) -> void:
-    if not _subs_cell.has(channel):
-        return
-    var per_cell: Dictionary = _subs_cell[channel]
-    var dead:     Array      = []
-    for cell in event.cells:
-        if not per_cell.has(cell):
-            continue
-        for sub: Subscription in per_cell[cell]:
-            var key := sub.dedup_key()
-            if key == "":
-                dead.append([cell, sub])
-                continue
-            if seen.has(key):
-                continue
-            seen[key] = true
-            if not sub.invoke(event):
-                dead.append([cell, sub])
-    for entry in dead:
-        per_cell[entry[0]].erase(entry[1])
-        if per_cell[entry[0]].is_empty():
-            per_cell.erase(entry[0])
-
 func _remove_matching(subs: Array, callback: Callable) -> void:
     for idx in subs.size():
-        if (subs[idx] as Subscription).matches(callback):
+        var sub := subs[idx] as Subscription
+        if sub.matches(callback):
+            sub.cancelled = true
             subs.remove_at(idx)
             return
