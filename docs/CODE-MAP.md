@@ -380,11 +380,22 @@ names.
 - **A cell is read at its centre.** `VoxelUtils.sample_point(cell)` is the one cell → point
   mapping; `TerrainProbe.sdf/is_solid/material` read there. `Vector3(cell)` is the cell's min
   corner — a store lattice point, which only writers of lattice values (`StoreWrite`, `SdfLattice`)
-  and DC diagnostics use. An edit's preview, player-safety refusal and voxel events all come
-  from one `CellFlips`: predicted by `SdfLattice.flips()` from the field the edit writes
-  (dig/fill `SdfLattice.sphere_stamp` + `write()`, `StoreWrite`, `VoxelImprint` — all through
+  and DC diagnostics use. An edit's preview and voxel events come from one `CellFlips`:
+  predicted by `SdfLattice.flips()` from the field the edit writes (dig/fill
+  `SdfLattice.sphere_stamp` + `write()`, `StoreWrite`, `VoxelImprint` — all through
   `EditStore.write_region`, so the prediction IS the write), measured with
   `CellFlips.snapshot/since` for events. Event materials are read back from the store.
+  Construction's ghost (`part`) is its imprint's flips too (its AABB footprint only when the
+  part flips no cell centre, and for the `PartPlaced` sidecar).
+- **Player safety reads the written field, not cell flips.** `PlayerSafeAction.endangered_by`
+  asks the edit's `SdfLattice` whether it turns any point of the capsule solid or of the
+  support box air (`solidifies_in` / `empties_in`) — so a part or brush thinner than a cell,
+  which can write real geometry without flipping a cell centre, is still refused.
+  Construction's attach test likewise measures against the rotated brush at the imprint's
+  lattice points, not the footprint.
+- **Lattice writes are typed.** `StoreWrite` takes `Array[LatticeEdit]` (lattice point, new
+  SDF, leaf material or -1 to keep) — Bell, Flatten, FillVoxel, EmptyVoxel and the MPM carve
+  all hand it that; `StoreWrite.lattice(store, work).flips(store)` is what the work does to cells.
 - **Single-cell edits flip one cell or refuse.** `StoreWrite.one_cell` solves a small LP
   (`scripts/simplex.gd`) for the cell's 8 corner values so its centre crosses zero and none of its
   26 neighbours' centres do.

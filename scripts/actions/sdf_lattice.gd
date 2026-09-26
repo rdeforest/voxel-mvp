@@ -50,20 +50,79 @@ func _rewrites_1d(v: float, axis: int) -> bool:
 # Post-write SDF at `p` (inside a rewritten leaf): the lattice trilerped, as the leaf will be.
 func value_at(p: Vector3) -> float:
     var l  := (p - origin) / cell
-    var x0 := floori(l.x)
-    var y0 := floori(l.y)
-    var z0 := floori(l.z)
-    var fx := l.x - x0
-    var fy := l.y - y0
-    var fz := l.z - z0
+    var i0 := Vector3i(floori(l.x), floori(l.y), floori(l.z))
+    return _trilerp(i0, l - Vector3(i0))
+
+# The leaf with lattice corner `i0`, trilerped at fractions `f` (each in [0, 1]) across it.
+func _trilerp(i0: Vector3i, f: Vector3) -> float:
     var sy := dim
     var sz := dim * dim
-    var i  := x0 + sy * y0 + sz * z0
-    var c00 := lerpf(sdf[i],           sdf[i + 1],           fx)
-    var c10 := lerpf(sdf[i + sy],      sdf[i + sy + 1],      fx)
-    var c01 := lerpf(sdf[i + sz],      sdf[i + sz + 1],      fx)
-    var c11 := lerpf(sdf[i + sy + sz], sdf[i + sy + sz + 1], fx)
-    return lerpf(lerpf(c00, c10, fy), lerpf(c01, c11, fy), fz)
+    var i  := index(i0)
+    var c00 := lerpf(sdf[i],           sdf[i + 1],           f.x)
+    var c10 := lerpf(sdf[i + sy],      sdf[i + sy + 1],      f.x)
+    var c01 := lerpf(sdf[i + sz],      sdf[i + sz + 1],      f.x)
+    var c11 := lerpf(sdf[i + sy + sz], sdf[i + sy + sz + 1], f.x)
+    return lerpf(lerpf(c00, c10, f.y), lerpf(c01, c11, f.y), f.z)
+
+
+# Whether the write turns some point of `box` solid that the store holds as air now
+# (solidifies_in) / air that it holds as solid now (empties_in) — the player-safety question,
+# asked of the FIELD the write lays down, not of cell centres: a part or brush thinner than a
+# cell can put real geometry in a box without flipping any cell's sample point.
+#
+# Over each rewritten leaf the written field is one trilerp, so over the leaf's intersection
+# with `box` its minimum and maximum lie at that sub-box's corners: testing those corners finds
+# every piece of `box` the write makes solid (air). The "before" side is read at the same points,
+# plus every cell sample point inside the sub-box — so a flipped cell inside `box` is always seen
+# (this subsumes the cell-flip test) and so is any sub-cell solid the write puts there.
+func solidifies_in(store: EditStore, box: AABB) -> bool:
+    return _turns_in(store, box, true)
+
+func empties_in(store: EditStore, box: AABB) -> bool:
+    return _turns_in(store, box, false)
+
+
+func _turns_in(store: EditStore, box: AABB, to_solid: bool) -> bool:
+    var pieces: Array = [_pieces_1d(box, 0), _pieces_1d(box, 1), _pieces_1d(box, 2)]
+    var t := VoxelConstants.SDF_SOLID_THRESHOLD
+    for pz: Array in pieces[2]:
+        for py: Array in pieces[1]:
+            for px: Array in pieces[0]:
+                var i0 := Vector3i(px[0], py[0], pz[0])
+                for fz: float in pz[1]:
+                    for fy: float in py[1]:
+                        for fx: float in px[1]:
+                            var f   := Vector3(fx, fy, fz)
+                            var now := _trilerp(i0, f)
+                            if (now < t) != to_solid:
+                                continue
+                            var was := store.sample(origin + (Vector3(i0) + f) * cell)
+                            if (was < t) != to_solid:
+                                return true
+    return false
+
+
+# Along `axis`: for each rewritten leaf the box overlaps, [lattice index of the leaf's low corner,
+# the fractions across that leaf to test — the overlap's two ends and any cell sample point
+# between them].
+func _pieces_1d(box: AABB, axis: int) -> Array:
+    var lo: float = box.position[axis]
+    var hi: float = lo + box.size[axis]
+    var off: float = VoxelConstants.VOXEL_CENTER_OFFSET[axis]
+    var out: Array = []
+    for k in range(maxi(floori((lo - origin[axis]) / cell), 0), mini(ceili((hi - origin[axis]) / cell), dim - 1)):
+        var leaf_lo: float = origin[axis] + float(k) * cell
+        if not _rewrites_1d(leaf_lo + cell * 0.5, axis):
+            continue
+        var a := maxf(lo, leaf_lo)
+        var b := minf(hi, leaf_lo + cell)
+        var fracs: Array[float] = [(a - leaf_lo) / cell, (b - leaf_lo) / cell]
+        for c in range(floori(a - off), ceili(b - off) + 1):
+            var sp := float(c) + off
+            if sp > a and sp < b:
+                fracs.append((sp - leaf_lo) / cell)
+        out.append([k, fracs])
+    return out
 
 
 # Every cell whose sample point sits in a rewritten leaf — the only cells the write can change.

@@ -4,7 +4,7 @@ extends Action
 # Common parent for terrain edits near the player. A player edit must never bury them
 # (push solid into their body) nor drop them out of the world (carve the ground from
 # under their feet). This is the single source of truth for those two danger volumes;
-# subclasses test cells against `buries()` / `drops()` rather than re-deriving boxes.
+# subclasses ask `endangered_by()` of the field they write rather than re-deriving boxes.
 
 var player: CharacterBody3D
 
@@ -23,26 +23,13 @@ static func support_box(player_pos: Vector3) -> AABB:
     return AABB(player_pos + _SUPPORT_MIN, _SUPPORT_SIZE)
 
 
-# A cell that becomes SOLID inside the capsule would bury the player.
-func buries(cell: Vector3i) -> bool:
-    return player != null \
-        and capsule_box(player.global_position).has_point(VoxelUtils.sample_point(cell))
-
-# A cell that becomes AIR inside the support box would drop the player.
-func drops(cell: Vector3i) -> bool:
-    return player != null \
-        and support_box(player.global_position).has_point(VoxelUtils.sample_point(cell))
-
-# The one refusal test over an edit's flips: a new-solid cell that buries the player, or a
-# new-air cell that drops them. Every player-safe verb asks this of the same CellFlips its
-# preview draws, so the ghost and the refusal can't disagree about which cells change.
-func endangered_by(flips: CellFlips) -> bool:
-    if player == null:
+# The one refusal test, asked of the field an edit writes (its SdfLattice, the array handed to
+# EditStore.write_region): does it turn any point of the capsule solid (bury the player) or any
+# point of the support box air (drop them)? Read from the written field, not from which cell
+# centres flip, so a part or brush thinner than a cell cannot slip past it. A null lattice (an
+# edit that writes nothing) endangers no one.
+func endangered_by(lattice: SdfLattice, store: EditStore) -> bool:
+    if player == null or lattice == null or store == null:
         return false
-    for cell in flips.solid:
-        if buries(cell):
-            return true
-    for cell in flips.air:
-        if drops(cell):
-            return true
-    return false
+    var at := player.global_position
+    return lattice.solidifies_in(store, capsule_box(at)) or lattice.empties_in(store, support_box(at))

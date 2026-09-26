@@ -6,7 +6,7 @@ extends Action
 var cell:  Vector3i
 var store: EditStore
 
-var _work_cache: Array = []
+var _work_cache: Array[LatticeEdit] = []
 var _work_computed := false
 
 func _init(p_cell: Vector3i, p_ctx: ActionContext) -> void:
@@ -24,7 +24,7 @@ func execute() -> void:
     if _work().is_empty():
         return
     var before := CellFlips.snapshot(store, StoreWrite.lattice(store, _work()).cells())
-    var box    := StoreWrite.cells(store, _work(), func(_entry): return -1)
+    var box    := StoreWrite.cells(store, _work())
     CellFlips.since(store, before).emit(store)
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
@@ -40,7 +40,7 @@ func preview() -> ActionPreview:
     return p
 
 
-func _work() -> Array:
+func _work() -> Array[LatticeEdit]:
     if not _work_computed and store != null:
         _work_cache    = StoreWrite.one_cell(store, cell, false)
         _work_computed = true

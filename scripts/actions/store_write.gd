@@ -9,16 +9,14 @@ extends RefCounted
 # overwrite the edited points, then write_region once. A 1-cell margin guarantees every edited
 # leaf's 8 corners fall inside the written box.
 #
-# `work` is the actions' shared shape: an Array of entries whose [0] is the Vector3i lattice
-# point and [1] is the new SDF. `material_of(entry) -> int` returns the material id for the leaf
-# whose origin is that point, or < 0 to keep its current material (carves, or ops that don't
-# repaint).
+# `work` is the lattice writers' shared currency: LatticeEdit records (point, new SDF, and the
+# material of the leaf whose origin is that point, < 0 to keep its current one).
 # Returns the world-space box whose leaves were rewritten (for the terrain_sdf_changed event).
 #
 # The grid points here are store LATTICE points (a leaf's corners), not cells: a cell's
 # solidity is read at its sample point (VoxelUtils.sample_point), which a write moves through
 # the trilerp of its 8 corners. lattice(work).flips(store) is what a work set does to cells.
-static func cells(store: EditStore, work: Array, material_of: Callable) -> AABB:
+static func cells(store: EditStore, work: Array[LatticeEdit]) -> AABB:
     if work.is_empty():
         return AABB()
     var lat := lattice(store, work)
@@ -30,17 +28,16 @@ static func cells(store: EditStore, work: Array, material_of: Callable) -> AABB:
             for x in lat.dim:
                 var i := Vector3i(x, y, z)
                 indices[lat.index(i)] = store.material_at(lat.point(i))
-    for entry in work:
-        var material: int = material_of.call(entry)
-        if material >= 0:
-            indices[lat.index(entry[0] - lo_cell)] = material
+    for edit in work:
+        if edit.material >= 0:
+            indices[lat.index(edit.point - lo_cell)] = edit.material
     lat.write(store, indices)
     return AABB(lat.region_lo, lat.region_hi - lat.region_lo)
 
 
 # The field cells() will write for `work`: the current field over the work's box (plus the
 # 1-cell margin), with the edited points overwritten.
-static func lattice(store: EditStore, work: Array) -> SdfLattice:
+static func lattice(store: EditStore, work: Array[LatticeEdit]) -> SdfLattice:
     var lo_cell := _lo(work) - Vector3i.ONE
     var span    := _span(work)
     var dim     := maxi(span.x, maxi(span.y, span.z)) + 1
@@ -51,15 +48,16 @@ static func lattice(store: EditStore, work: Array) -> SdfLattice:
             for x in dim:
                 var i := Vector3i(x, y, z)
                 lat.sdf[lat.index(i)] = store.sample(lat.point(i))
-    for entry in work:
-        var i: int = lat.index(entry[0] - lo_cell)
-        lat.writes = lat.writes or lat.sdf[i] != float(entry[1])
-        lat.sdf[i] = entry[1]
+    for edit in work:
+        var i := lat.index(edit.point - lo_cell)
+        lat.writes = lat.writes or lat.sdf[i] != edit.sdf
+        lat.sdf[i] = edit.sdf
     return lat
 
 
 # Work that flips exactly one cell and no other, or [] when no write of its 8 lattice corners
-# can (refuse, don't deform). The 1 m write rewrites the cell and its 26 neighbours, and each of
+# can (refuse, don't deform). The target leaf takes `material` (< 0 keeps its current one).
+# The 1 m write rewrites the cell and its 26 neighbours, and each of
 # those reads back the mean of its 8 corners (its centre, VoxelUtils.sample_point, trilerped) —
 # of which it shares 4 / 2 / 1 with the target across a face / edge / vertex. So pushing the
 # target's corners moves its neighbours too, and near the surface (where FillVoxel / EmptyVoxel
@@ -67,11 +65,11 @@ static func lattice(store: EditStore, work: Array) -> SdfLattice:
 # z minimal, such that the target's mean lands CELL_EDIT_SDF past zero toward `solid` and every
 # neighbour's post-write mean stays on its CURRENT side by CELL_KEEP_SDF (which also repairs a
 # neighbour the rewrite alone would flip, where the corners allow).
-static func one_cell(store: EditStore, cell: Vector3i, solid: bool) -> Array:
-    var unchanged: Array = []
+static func one_cell(store: EditStore, cell: Vector3i, solid: bool, material: int = -1) -> Array[LatticeEdit]:
+    var unchanged: Array[LatticeEdit] = []
     for k in 8:
         var point := cell + Vector3i(CubeGeometry.corner(k))
-        unchanged.append([point, store.sample(Vector3(point))])
+        unchanged.append(LatticeEdit.new(point, store.sample(Vector3(point))))
     var base := lattice(store, unchanged)   # the field the rewrite alone leaves
     var lo   := cell - Vector3i.ONE
     var a: Array[PackedFloat64Array] = []
@@ -105,24 +103,25 @@ static func one_cell(store: EditStore, cell: Vector3i, solid: bool) -> Array:
     cost.resize(9)
     cost[8] = 1.0
     var y := Simplex.minimize(cost, a, b)
+    var work: Array[LatticeEdit] = []
     if y.is_empty():
-        return []
-    var work: Array = []
+        return work
     for k in 8:
         var point := cell + Vector3i(CubeGeometry.corner(k))
-        work.append([point, base.sdf[base.index(point - lo)] + y[k] - y[8]])
+        work.append(LatticeEdit.new(point, base.sdf[base.index(point - lo)] + y[k] - y[8],
+            material if point == cell else -1))
     return work
 
 
-static func _lo(work: Array) -> Vector3i:
-    var lo: Vector3i = work[0][0]
-    for entry in work:
-        lo = lo.min(entry[0])
+static func _lo(work: Array[LatticeEdit]) -> Vector3i:
+    var lo := work[0].point
+    for edit in work:
+        lo = lo.min(edit.point)
     return lo
 
 # Extent of the work's box including the 1-cell margin on both sides.
-static func _span(work: Array) -> Vector3i:
-    var hi: Vector3i = work[0][0]
-    for entry in work:
-        hi = hi.max(entry[0])
+static func _span(work: Array[LatticeEdit]) -> Vector3i:
+    var hi := work[0].point
+    for edit in work:
+        hi = hi.max(edit.point)
     return hi - _lo(work) + Vector3i.ONE * 2

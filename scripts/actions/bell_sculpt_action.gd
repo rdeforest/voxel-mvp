@@ -14,8 +14,9 @@ var radius:   float
 var store:    EditStore
 var _sign:    float
 
-var _work: Array         = []   # [[Vector3i lattice point, float new_sdf], ...]
-var _flips: CellFlips    = CellFlips.new()   # what _work does to cells (preview + safety)
+var _work: Array[LatticeEdit] = []   # the lattice points written (material kept)
+var _lattice: SdfLattice = null      # the field _work writes (player safety)
+var _flips: CellFlips    = CellFlips.new()   # what that does to cells (the ghost)
 var _work_computed: bool = false
 
 
@@ -29,14 +30,14 @@ func _init(p_position: Vector3, p_radius: float, p_ctx: ActionContext, p_sign: f
 
 func validate() -> bool:
     _ensure_work()
-    return not _work.is_empty() and not endangered_by(_flips)
+    return not _work.is_empty() and not endangered_by(_lattice, store)
 
 func execute() -> void:
     if store == null:
         push_error("BellSculptAction.execute(): no store")
         return
     _ensure_work()
-    var box := StoreWrite.cells(store, _work, func(_entry): return -1)   # reshape keeps each cell's material
+    var box := StoreWrite.cells(store, _work)   # reshape keeps each leaf's material
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
         TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box.position, box.size))
@@ -44,7 +45,7 @@ func execute() -> void:
 func preview() -> ActionPreview:
     _ensure_work()
     var p := ActionPreview.new()
-    p.refused = _work.is_empty() or endangered_by(_flips)
+    p.refused = _work.is_empty() or endangered_by(_lattice, store)
     _flips.add_to(p)
     return p
 
@@ -55,15 +56,16 @@ func _ensure_work() -> void:
     if _work_computed or store == null:
         return
     _work          = _compute_work()
-    _flips         = StoreWrite.lattice(store, _work).flips(store) if not _work.is_empty() else CellFlips.new()
+    _lattice       = StoreWrite.lattice(store, _work) if not _work.is_empty() else null
+    _flips         = _lattice.flips(store) if _lattice != null else CellFlips.new()
     _work_computed = true
 
-func _compute_work() -> Array:
+func _compute_work() -> Array[LatticeEdit]:
     var amplitude := radius * AMPLITUDE_RATIO
     var origin    := position - Vector3.ONE * radius
     var dims      := Vector3.ONE * (radius * 2.0)
     var r2        := radius * radius
-    var out: Array = []
+    var out: Array[LatticeEdit] = []
 
     # Walks store lattice points (StoreWrite writes corners), so the bell is evaluated at the
     # point it writes — not half a cell away at a cell centre.
@@ -76,6 +78,6 @@ func _compute_work() -> Array:
         var t       := d2 / r2
         var falloff := (1.0 - t) * (1.0 - t)   # quartic
         var bell    := amplitude * falloff
-        out.append([point, store.sample(Vector3(point)) + _sign * bell])
+        out.append(LatticeEdit.new(point, store.sample(Vector3(point)) + _sign * bell))
     )
     return out

@@ -13,9 +13,7 @@ When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a 
 
 | Bug | Area | Severity | Notes |
 |-----|------|----------|-------|
-| [actions-untyped-work-tuple](actions-untyped-work-tuple.md) | actions | med (structural) | Untyped positional work-array. Preview/safety/events now share one `CellFlips` (2026-09-25); tuples stay untyped, Construction ghost still the coarse footprint. |
 | [event-bus-reentrancy](event-bus-reentrancy.md) | event bus | med (latent) | No reentrancy guard; prunes dead subs mid-iteration. Reachable by design; no channel self-chains *yet*. |
-| [construction-bury-check-single-point](construction-bury-check-single-point.md) | actions (construction) | med | Bury check tests body origin only, not the capsule; a part across head/feet validates as safe. |
 | [dig-action-no-validate-no-safety](dig-action-no-validate-no-safety.md) | actions (dig) | low-med | `validate()` always true (ghost disagrees); no player-safety guard unlike siblings. Confirm intent. |
 | [mmap-arena-no-mmap-fallback](mmap-arena-no-mmap-fallback.md) | EditStore (mmap arena) | low-med | Crashes on `mmap` failure of a valid fd instead of using the anon fallback. Env-dependent. |
 | [dc-incremental-emit-ring-insufficient](dc-incremental-emit-ring-insufficient.md) | DC world-octree emit | med (live edge) | One-ring re-emit expansion isn't provably complete; the active dropped-triangle work. |

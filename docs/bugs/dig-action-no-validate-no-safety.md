@@ -11,7 +11,7 @@
 `scripts/actions/dig_action.gd:25` — `validate()` returns `true` unconditionally, while `preview()` sets
 `p.refused = p.is_empty()` (`:44`). The ghost computes refusal; the action ignores it.
 
-Separately, Dig has **no** `PlayerSafeAction` check. Bell, Flatten, and CSG all call `buries()`/`drops()`
+Separately, Dig has **no** `PlayerSafeAction` check. Bell, Flatten, and CSG all call `endangered_by()`
 before mutating; Dig does not. So the refuse-don't-deform contract is only half-applied here.
 
 ## Proposed fix

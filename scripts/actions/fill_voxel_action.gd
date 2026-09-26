@@ -7,7 +7,7 @@ extends AdditiveAction
 var cell:    Vector3i
 var store:   EditStore
 
-var _work_cache: Array = []
+var _work_cache: Array[LatticeEdit] = []
 var _work_computed := false
 
 
@@ -25,7 +25,7 @@ func validate() -> bool:
         return false   # already solid — nothing to do
     if _work().is_empty():
         return false   # no corner write flips this cell without flipping a neighbour
-    if endangered_by(_lattice().flips(store)):
+    if endangered_by(_lattice(), store):
         return false   # would fill into the player's body
     return true
 
@@ -35,9 +35,8 @@ func execute() -> void:
         return
     if _work().is_empty():
         return
-    var mat    := MaterialPalette.index_of(material_name)
     var before := CellFlips.snapshot(store, _lattice().cells())
-    var box    := StoreWrite.cells(store, _work(), func(entry): return mat if entry[0] == cell else -1)
+    var box    := StoreWrite.cells(store, _work())
     CellFlips.since(store, before).emit(store)
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
@@ -53,9 +52,9 @@ func preview() -> ActionPreview:
     return p
 
 
-func _work() -> Array:
+func _work() -> Array[LatticeEdit]:
     if not _work_computed and store != null:
-        _work_cache    = StoreWrite.one_cell(store, cell, true)
+        _work_cache    = StoreWrite.one_cell(store, cell, true, MaterialPalette.index_of(material_name))
         _work_computed = true
     return _work_cache
 

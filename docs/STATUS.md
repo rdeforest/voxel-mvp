@@ -45,17 +45,22 @@ feature sits on top of them:
    [CODE-MAP §SDF conventions](CODE-MAP.md). It changed the engine
    (`EditStore` writes now land on leaves finer than the write), so run
    `tools/build` after pulling.
-2. [`actions-untyped-work-tuple`](bugs/actions-untyped-work-tuple.md): add
-   the typed `EditEntry` record and give preview, events, safety and the
-   write one shared cell set.
+2. `actions-untyped-work-tuple` (fixed; file removed): lattice writers pass
+   typed `LatticeEdit` records to `StoreWrite`; every action's ghost and
+   events are the `CellFlips` of the field it writes, and its player-safety
+   refusal reads that field itself (`SdfLattice.solidifies_in/empties_in`), so
+   a sub-cell part or brush can't slip past it. Construction included: its
+   ghost was the coarse footprint, its bury check one point, its attach test
+   the footprint — `construction-bury-check-single-point` fell with it (file
+   removed). *Item drafted by Claude.*
 
-Both are in flight (2026-09-25). After them comes **FEAT089, parts look like
+Both are fixed, uncommitted (2026-09-25). After them comes **FEAT089, parts look like
 parts**, the stated blocker for the rest of 5.5g (see the v0.1 backlog doc).
 Volumetric worldgen tier 1 (`planned/18`) is independent and can run
 alongside.
 
-Baseline before the bug fixes: GUT 173 tests, 171 passing, 2 pending, 0
-failing.
+GUT after both fixes: 192 tests, 190 passing, 2 pending, 0 failing
+(baseline before them: 173 / 171 / 2).
 
 
 ## Paused: full-project code review, pass 2

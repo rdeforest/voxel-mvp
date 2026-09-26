@@ -2,12 +2,13 @@ class_name CellFlips
 extends RefCounted
 
 # The cells an edit flips between solid and air, judged at each cell's sample point
-# (VoxelUtils.sample_point). One answer shared by an action's preview ghost, its player-safety
-# refusal, and its voxel_added / voxel_removed events, so all three describe the cells the SDF
-# write actually changed — not a parallel guess at them.
+# (VoxelUtils.sample_point). One answer shared by an action's preview ghost and its
+# voxel_added / voxel_removed events, so both describe the cells the SDF write actually changed —
+# not a parallel guess at them. (Player safety asks the written field directly —
+# PlayerSafeAction.endangered_by — since sub-cell geometry can flip no cell at all.)
 #
 # Two ways to get one: SdfLattice.flips() PREDICTS it from the field an edit will write (for
-# previews and refusals, before anything is written); snapshot() + since() MEASURES it across
+# previews, before anything is written); snapshot() + since() MEASURES it across
 # the real write (for events — the ground truth the structural sim tracks).
 
 var solid: Array[Vector3i] = []   # was air, now solid

@@ -95,7 +95,7 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
     if carved.is_empty():
         return 0
 
-    StoreWrite.cells(_store, _carve_corners(carved), func(_e): return -1) # carve the corner field to air
+    StoreWrite.cells(_store, _carve_corners(carved)) # carve the corner field to air
     VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL, TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box_lo, box_hi - box_lo))
     _settled_frames = 0
     _mm.instance_count = _sim.particle_count()
@@ -109,8 +109,8 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
 # Instead: raise a grid corner to air UNLESS a kept-solid cell still needs it — a corner clears iff
 # none of its 8 surrounding cells is solid-and-not-thawed. Interior corners (all neighbours thawed)
 # clear; corners against the kept terrain stay, so the carve leaves a clean wall, not a crust.
-func _carve_corners(carved: Dictionary) -> Array:
-    var corner_work: Array = []
+func _carve_corners(carved: Dictionary) -> Array[LatticeEdit]:
+    var corner_work: Array[LatticeEdit] = []
     var seen := {}
 
     for cell in carved:
@@ -125,7 +125,7 @@ func _carve_corners(carved: Dictionary) -> Array:
                     seen[corner] = true
 
                     if _corner_clears(corner, carved):
-                        corner_work.append([corner, VoxelConstants.SDF_AIR])
+                        corner_work.append(LatticeEdit.new(corner, VoxelConstants.SDF_AIR))
 
     return corner_work
 

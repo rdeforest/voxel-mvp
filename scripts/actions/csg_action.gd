@@ -17,9 +17,11 @@ var op:       int           # CsgState.Op
 var store:    EditStore
 
 # Cached prediction from the field the stamp writes (VoxelImprint.lattice): whether it changes
-# the store at all (nothing = refuse), and which cells it flips (the ghost + player safety). A
-# brush thinner than a cell can write real geometry that flips no cell centre; that is placed.
+# the store at all (nothing = refuse), which cells it flips (the ghost), and the field itself (the
+# player-safety test). A brush thinner than a cell can write real geometry that flips no cell
+# centre; that is placed — unless that geometry lands in the player.
 var _writes: bool        = false
+var _lattice: SdfLattice = null            # the field the stamp writes (player safety)
 var _work: CellFlips     = CellFlips.new()
 var _work_computed: bool = false
 
@@ -43,14 +45,14 @@ func validate() -> bool:
     _ensure_work()
     if not _writes:
         return false
-    return not endangered_by(_work)
+    return not endangered_by(_lattice, store)
 
 
 func preview() -> ActionPreview:
     var p := ActionPreview.new()
     _ensure_work()
     _work.add_to(p)
-    p.refused = not _writes or endangered_by(_work)
+    p.refused = not _writes or endangered_by(_lattice, store)
     return p
 
 
@@ -73,9 +75,9 @@ func _world_box() -> AABB:
 func _ensure_work() -> void:
     if _work_computed or store == null:
         return
-    var lat := VoxelImprint.lattice(store, shape, xform, op)
-    _writes        = lat.writes
-    _work          = lat.flips(store)
+    _lattice       = VoxelImprint.lattice(store, shape, xform, op)
+    _writes        = _lattice.writes
+    _work          = _lattice.flips(store)
     _work_computed = true
 
 
