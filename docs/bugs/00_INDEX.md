@@ -13,6 +13,8 @@ When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a 
 
 | Bug | Area | Severity | Notes |
 |-----|------|----------|-------|
+| [actions-reshape-no-voxel-events](actions-reshape-no-voxel-events.md) | actions (raise/lower/flatten events) | low-med (needs a call) | Terraform writes emit only `terrain_sdf_changed`; PartIndex never releases cells they carve. Fix is ready (write returns flips); intent isn't. |
+| [edit-store-subdivide-float32-neighbours](edit-store-subdivide-float32-neighbours.md) | EditStore (write_region) | low (latent) | Subdividing a straddling coarse leaf re-stores outside children at float32 (±1.2e-7); a no-op write reports `changed`. No flip seen. |
 | [csg-restamp-material-only-refused](csg-restamp-material-only-refused.md) | actions (CSG no-op refusal) | low (needs a call) | `writes` is SDF-only, so re-stamping the same shape in a new material is refused as a no-op. Was allowed by accident in high air before the max-face fix. |
 | [edit-store-stamp-union-repaints-terrain](edit-store-stamp-union-repaints-terrain.md) | EditStore (C++ stamp paint) | low (latent, needs a call) | UNION `stamp_sphere`/`stamp_box` paint every leaf left with a solid corner, terrain included; `SdfLattice.materials()` keeps terrain's material. Only tests and dev harnesses call them. |
 | [actions-lattice-dry-run-double-generator](actions-lattice-dry-run-double-generator.md) | actions (preview perf) | low (needs a call) | A no-op-looking preview reads the generator at each lattice point in the build, then again in the `lattice_writes` dry run: ~0.045 ms of the buried refused preview's 0.34 ms. |
