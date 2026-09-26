@@ -32,7 +32,7 @@ func _read() -> SavedWorld:
 
 func test_readable_pair_has_no_refusal() -> void:
     _write_snapshot(WorldSnapshot.VERSION)
-    _write_blob_header(EditStoreManager.SAVE_MAGIC, EditStoreManager.SAVE_VERSION)
+    assert_eq(_edited_manager().save_to(EDITSTORE), OK)
     var saved := _read()
 
     assert_eq(saved.refusal, "", "a current-format pair loads")
@@ -123,3 +123,18 @@ func test_readable_pair_applies_both_halves() -> void:
     assert_true(support.voxel_data.has(voxel), "the snapshot's tracked voxel is restored")
     assert_almost_eq(support.voxel_data[voxel].support, 0.75, 1e-6, "with its saved support")
     assert_true(reloaded.store.has_edit(_dig_center()), "the blob's edit is loaded")
+
+
+# (Drafted by Claude, overnight 2026-09-26.) A blob with a good header but a body deserialize would
+# refuse (truncated by a crash mid-save, say) refuses the pair at read time, like a version bump:
+# before, the snapshot half applied over fresh terrain, and F5 then overwrote the damaged blob.
+func test_damaged_blob_refuses_the_whole_pair() -> void:
+    _write_snapshot(WorldSnapshot.VERSION)
+    _write_blob_header(EditStoreManager.SAVE_MAGIC, EditStoreManager.SAVE_VERSION)
+    var blob_before := FileAccess.get_file_as_bytes(EDITSTORE)
+    var saved       := _read()
+
+    assert_string_contains(saved.refusal, "terrain save is damaged")
+    assert_true(saved.snapshot.is_empty(), "the snapshot half isn't applied over fresh terrain")
+    assert_string_contains(saved.save(null, null), "not overwriting")
+    assert_eq(FileAccess.get_file_as_bytes(EDITSTORE), blob_before, "the damaged save is kept")

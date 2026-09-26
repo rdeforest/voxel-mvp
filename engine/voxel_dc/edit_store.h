@@ -113,7 +113,8 @@ public:
 	static double terrain_surface(double x, double z, double base, double amp, double period, int octaves, int seed);
 
 	PackedByteArray serialize() const;     // the sparse edited tree + root + generator params
-	bool deserialize(const PackedByteArray &bytes);
+	bool deserialize(const PackedByteArray &bytes); // false, the store untouched, on a blob it refuses
+	static String blob_problem(const PackedByteArray &bytes); // why deserialize would refuse it; "" if not
 
 protected:
 	static void _bind_methods();
@@ -125,7 +126,8 @@ private:
 	// INHERITED leaves of that FIELD_SOURCE (`Node::source`). An inherited leaf also holds that field
 	// at its corners, rounded to float32 (what a write or stamp compares or combines with).
 	// Serialized as the byte that was `has_corners` (0 / 1), so older blobs read unchanged; `source`
-	// is not serialized but relinked on load (_link_sources) from the FIELD_SOURCE ancestors.
+	// is not serialized but relinked on load (_link_sources) from the FIELD_SOURCE ancestors. The
+	// states 2 / 3 make it SAVE_VERSION 2 (EditStoreManager); v1 blobs hold only 0 / 1.
 	enum FieldState : uint8_t {
 		NO_FIELD,        // internal, or an unedited leaf (-> generator)
 		OWN_FIELD,       // an edited leaf: its corners over its cube
@@ -175,8 +177,13 @@ private:
 	int _leaf_at(const Vector3 &p) const;
 	int _leaf_toward(const Vector3 &p, const Vector3 &toward) const;
 	int _leaf_field(int leaf) const;
-	static bool _read_node(StreamPeerBuffer &b, int index, Node &n);
-	bool _link_sources(int idx, int source);
+	struct Blob; // a blob read for deserialize, vetted before it replaces the store (edit_store_serialize.cpp)
+	static String _parse(const PackedByteArray &bytes, Blob &blob);
+	static String _check_generator(const Blob &blob);
+	static String _read_node(StreamPeerBuffer &b, int index, Node &n);
+	static String _check_tree(Blob &blob);
+	static String _check_children(Blob &blob, int i);
+	static String _link_sources(Blob &blob);
 	double _field_value(int field, const Vector3 &p) const;
 	float _held_corner(int field, const Vector3 &o, double s, int i) const;
 	bool _inside_root(const Vector3 &p) const;
