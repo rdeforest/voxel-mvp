@@ -210,10 +210,10 @@ Each phase is gated by GUT and ships on its own.
 
 ## Dependencies this introduces
 
-| Dependency | Why | When |
-|---|---|---|
-| Node (latest) | runs the CoffeeScript authoring tools | phase 1 or 3, with the first tool |
-| CoffeeScript 2.7 | authoring surface (the project's preferred tooling language) | as above |
+| Dependency                          | Why                                                                | When                               |
+|-------------------------------------|--------------------------------------------------------------------|------------------------------------|
+| Node (latest)                       | runs the CoffeeScript authoring tools                              | phase 1 or 3, with the first tool  |
+| CoffeeScript 2.7                    | authoring surface (the project's preferred tooling language)       | as above                           |
 | Blender from blender.org (optional) | bundles the `openvdb` Python module that `capture_to_vdb.py` needs | phase 2, for viewing captures only |
 
 The project has no dependency list yet. The first of these to land should create one, recording
@@ -224,12 +224,48 @@ each dependency and why it exists.
 - **Battlement wording:** does "crenels 1 m at the lows and 2 m at the highs, 0.5 m gaps" mean parapet
   1 m and merlons 2 m tall, with 0.5 m crenels? And does the 3 m platform overhang the 2 m wall
   equally on both sides?
+
+I was only using that as an example of the kind of things I want to be able to
+do: to combine components and have parameters like locations and dimensions be
+applied to either or both as appropriate. In practice I'd probably look up
+what is normal and do that. And yes to the terminology, I looked up
+battlements on Wikipedia and got the terminology wrong.
+
 - **Imprint order** for unions versus cuts (a gate carved through a wall) is part of the format's
   meaning and must be specified: unions, then cuts, then children?
+
+I don't understand the question. I think I need a more verbose example?
+
 - **Units in JSON:** plain numbers in metres and degrees, with units only in the CoffeeScript surface?
+
+Is there a cost to keeping the user's unit information in the JSON? It seems
+like preserving it would help other projects where those matter, such as
+something built with mixed imperial/metric units on purpose: American houses
+built with imperial units, European with metric, side-by-side for some reason.
+I realize we can convert everything to metric with no impact on the output,
+but I'm imagining the JSON as preserving some of the intent expressed by the
+CoffeeScript which generated it.
+
+This is YAGNI territory, but since we're designing a protocol it seems like
+extra discussion and consideration might be good to make sure what we make
+lasts through the ages.
+
 - **Do instrument writes bypass player safety?** I'd say yes, since a test tool should be able to do
   anything; they still emit true events.
+
+Yes, and we need to make player avatar behavior account for this. Activity
+which leads to falling through the map or getting stuck should cause it to get
+out of the way or pop up or whatever makes the most sense. It's not a problem
+if the tester is in fly mode, so maybe the simplest thing is to put people in
+fly mode whenever this kind of activity would bury or drop them?
+
 - **Hand-written tests:** a GDScript builder that reads and writes the same JSON, or JSON files only?
   I'd do both, with JSON as the source of truth.
+
+Por que no los dos, eh? I agree that both makes sense.
+
 - **Where the CoffeeScript tools live** (`tools/`, with a `package.json` at the root?), and how
   they're run from `tools/build`-style scripts.
+
+Yes to tools/ and tools/package.json. The scripts can be +x and have
+`#!/usr/bin/env coffee` at the top.
