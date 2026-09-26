@@ -430,6 +430,7 @@ func _finish() -> void:
 # M2: the cell arena initialises lazily on the first build. If it couldn't create a disk-backed temp file (no
 # writable ./tmp or $DC_ARENA_DIR, or only tmpfs available) it falls back to anonymous RAM and the OOM-killer is
 # back in play at high detail. That must never be a silent surprise, so pop a modal the moment we detect it.
+# DC_ARENA_FAIL_DISK_MMAP (a test knob, live in every build) forces the same fallback on purpose.
 func _check_arena_backing() -> void:
     if _arena_checked:
         return

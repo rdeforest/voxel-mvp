@@ -14,10 +14,9 @@ var radius:   float
 var store:    EditStore
 var _sign:    float
 
-var _work: Array[LatticeEdit] = []   # the lattice points written (material kept)
-var _lattice: SdfLattice = null      # the field _work writes (player safety)
-var _flips: CellFlips    = CellFlips.new()   # what that does to cells (the ghost)
-var _work_computed: bool = false
+var _lattice:  SdfLattice = null              # the field the reshape writes; null = it writes no point
+var _flips:    CellFlips  = CellFlips.new()   # what that does to cells (the ghost)
+var _computed: bool       = false
 
 
 func _init(p_position: Vector3, p_radius: float, p_ctx: ActionContext, p_sign: float) -> void:
@@ -29,55 +28,39 @@ func _init(p_position: Vector3, p_radius: float, p_ctx: ActionContext, p_sign: f
 
 
 func validate() -> bool:
-    _ensure_work()
-    return not _work.is_empty() and not endangered_by(_lattice, store)
+    _ensure_lattice()
+    return _lattice != null and not endangered_by(_lattice, store)
 
 func execute() -> void:
     if store == null:
         push_error("BellSculptAction.execute(): no store")
         return
-    _ensure_work()
-    var box := StoreWrite.cells(store, _work)   # reshape keeps each leaf's material
+    _ensure_lattice()
+    if _lattice == null:
+        return
+    var box := StoreWrite.reshape(store, _lattice)
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
         TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box.position, box.size))
 
 func preview() -> ActionPreview:
-    _ensure_work()
+    _ensure_lattice()
     var p := ActionPreview.new()
-    p.refused = _work.is_empty() or endangered_by(_lattice, store)
+    p.refused = _lattice == null or endangered_by(_lattice, store)
     _flips.add_to(p)
     return p
 
 
 # --- Internals ---
 
-func _ensure_work() -> void:
-    if _work_computed or store == null:
+# The bell is evaluated at the store lattice points the write sets (their corners), not half a
+# cell away at cell centres; which cells that flips is _flips.
+# execute() writes this whole cached cube back, not just the bell's points, so an instance is
+# single-use: one that outlived another store write would revert it inside the cube. player.gd
+# builds a fresh action per click.
+func _ensure_lattice() -> void:
+    if _computed or store == null:
         return
-    _work          = _compute_work()
-    _lattice       = StoreWrite.lattice(store, _work) if not _work.is_empty() else null
-    _flips         = _lattice.flips(store) if _lattice != null else CellFlips.new()
-    _work_computed = true
-
-func _compute_work() -> Array[LatticeEdit]:
-    var amplitude := radius * AMPLITUDE_RATIO
-    var origin    := position - Vector3.ONE * radius
-    var dims      := Vector3.ONE * (radius * 2.0)
-    var r2        := radius * radius
-    var out: Array[LatticeEdit] = []
-
-    # Walks store lattice points (StoreWrite writes corners), so the bell is evaluated at the
-    # point it writes — not half a cell away at a cell centre.
-    VoxelUtils.for_each_in_bounding_box(origin, dims, func(point: Vector3i) -> void:
-        var dx := float(point.x) - position.x
-        var dz := float(point.z) - position.z
-        var d2 := dx * dx + dz * dz
-        if d2 >= r2:
-            return
-        var t       := d2 / r2
-        var falloff := (1.0 - t) * (1.0 - t)   # quartic
-        var bell    := amplitude * falloff
-        out.append(LatticeEdit.new(point, store.sample(Vector3(point)) + _sign * bell))
-    )
-    return out
+    _lattice  = SdfLattice.predicted(store.predict_bell(position, radius, _sign * radius * AMPLITUDE_RATIO))
+    _flips    = _lattice.flips(store) if _lattice != null else CellFlips.new()
+    _computed = true

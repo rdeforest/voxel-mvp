@@ -1,9 +1,21 @@
 #include "edit_store.h"
 
+#include "edit_store_lattice.h"
 #include "octree_geometry.h"
 #include "sdf_field.h"
 
 using namespace voxel_dc;
+using edit_store_lattice::is_write_leaf;
+using edit_store_lattice::overlaps;
+
+namespace {
+
+// Whether coordinate `v` descends into the upper child at `mid`; on the mid-plane, `toward` decides.
+bool upper_side(double v, double toward, double mid) {
+	return v > mid || (v == mid && toward >= mid);
+}
+
+} // namespace
 
 int EditStore::_new_node(const Vector3 &o, double s) {
 	Node n;
@@ -52,14 +64,13 @@ void EditStore::_stamp(const voxel_dc::Field &brush, const Vector3 &rmin, const 
 void EditStore::_stamp_region(int idx, const voxel_dc::Field &brush, const Vector3 &rmin, const Vector3 &rmax, int op, int material, double min_leaf) {
 	const Vector3 o = nodes[idx].origin;
 	const double s = nodes[idx].size;
-	if (o.x + s <= rmin.x || o.y + s <= rmin.y || o.z + s <= rmin.z ||
-			o.x >= rmax.x || o.y >= rmax.y || o.z >= rmax.z) {
-		return; // doesn't overlap the brush — leave it sparse (generator)
+	if (!overlaps(o, s, rmin, rmax)) {
+		return; // leave it sparse (generator)
 	}
 	// Write at a leaf no coarser than min_leaf. A node that small which already has children
 	// (refined by an earlier, finer edit) is NOT a leaf — sample() reads its children, so the
 	// brush must land on them too, or the stamp would be a silent no-op there.
-	if (s <= min_leaf * 1.0000001 && nodes[idx].is_leaf()) {
+	if (is_write_leaf(s, min_leaf) && nodes[idx].is_leaf()) {
 		Node &n = nodes[idx];
 		const bool was_edited = n.has_corners;
 		bool any_solid = false;
@@ -106,15 +117,14 @@ void EditStore::_write_region(int idx, const voxel_dc::ArrayField &sdf, const Pa
 		int adim, const Vector3 &aorigin, double cell, const Vector3 &rmin, const Vector3 &rmax) {
 	const Vector3 o = nodes[idx].origin;
 	const double s = nodes[idx].size;
-	if (o.x + s <= rmin.x || o.y + s <= rmin.y || o.z + s <= rmin.z ||
-			o.x >= rmax.x || o.y >= rmax.y || o.z >= rmax.z) {
+	if (!overlaps(o, s, rmin, rmax)) {
 		return;
 	}
 	// Set the corners of every LEAF in the region no coarser than `cell`. Leaves finer than
 	// `cell` (refined by an earlier, finer edit) are written too, from the array's trilerp — which
 	// reproduces the coarse field exactly — so a coarse write over fine leaves lands instead of
 	// setting an internal node's corners that sample() never reads.
-	if (s <= cell * 1.0000001 && nodes[idx].is_leaf()) {
+	if (is_write_leaf(s, cell) && nodes[idx].is_leaf()) {
 		Node &n = nodes[idx];
 		for (int i = 0; i < 8; ++i) {
 			n.corners[i] = float(sdf.sample(corner(o, s, i)));
@@ -164,12 +174,7 @@ void EditStore::_subdivide(int idx) {
 			Node &c = nodes[ci];
 			c.has_corners = true;
 			c.material = mat;
-			for (int j = 0; j < 8; ++j) {
-				const double fx = (CB[i][0] + CB[j][0]) * 0.5;
-				const double fy = (CB[i][1] + CB[j][1]) * 0.5;
-				const double fz = (CB[i][2] + CB[j][2]) * 0.5;
-				c.corners[j] = float(trilerp(src, fx, fy, fz));
-			}
+			edit_store_lattice::child_corners(src, i, c.corners);
 		}
 		ch[i] = ci;
 	}
@@ -185,25 +190,32 @@ bool EditStore::_inside_root(const Vector3 &p) const {
 			p.x < _root_origin.x + _root_size && p.y < _root_origin.y + _root_size && p.z < _root_origin.z + _root_size;
 }
 
-int EditStore::_child_index(int idx, const Vector3 &p) const {
-	const Node &n = nodes[idx];
-	const Vector3 mid = n.origin + Vector3(1, 1, 1) * (n.size * 0.5);
-	return (p.x >= mid.x ? 1 : 0) | (p.y >= mid.y ? 2 : 0) | (p.z >= mid.z ? 4 : 0);
-}
-
-int EditStore::_leaf_at(const Vector3 &p) const {
+// The leaf holding `p`, taking the child on `toward`'s side where `p` lies on a node's mid-plane.
+int EditStore::_leaf_toward(const Vector3 &p, const Vector3 &toward) const {
 	int idx = 0;
 	while (!nodes[idx].is_leaf()) {
-		idx = nodes[idx].children[_child_index(idx, p)];
+		const Node &n = nodes[idx];
+		const Vector3 mid = n.origin + Vector3(1, 1, 1) * (n.size * 0.5);
+		const int child = (upper_side(p.x, toward.x, mid.x) ? 1 : 0) | (upper_side(p.y, toward.y, mid.y) ? 2 : 0) |
+				(upper_side(p.z, toward.z, mid.z) ? 4 : 0);
+		idx = n.children[child];
 	}
 	return idx;
 }
 
+int EditStore::_leaf_at(const Vector3 &p) const {
+	return _leaf_toward(p, p);
+}
+
 double EditStore::sample(Vector3 p) const {
+	return sample_toward(p, p);
+}
+
+double EditStore::sample_toward(Vector3 p, Vector3 toward) const {
 	if (nodes.is_empty() || !_inside_root(p)) {
 		return _gen.sample(p);
 	}
-	const int idx = _leaf_at(p);
+	const int idx = _leaf_toward(p, toward);
 	if (!nodes[idx].has_corners) {
 		return _gen.sample(p); // unedited -> defer to the generator
 	}
@@ -302,78 +314,6 @@ int EditStore::leaf_count() const {
 	return n;
 }
 
-PackedByteArray EditStore::serialize() const {
-	Ref<StreamPeerBuffer> b;
-	b.instantiate();
-	b->put_double(_root_origin.x);
-	b->put_double(_root_origin.y);
-	b->put_double(_root_origin.z);
-	b->put_double(_root_size);
-	b->put_double(_base);
-	b->put_double(_amp);
-	b->put_double(_period);
-	b->put_32(_octaves);
-	b->put_32(_seed);
-	b->put_32(int(nodes.size()));
-	for (uint32_t i = 0; i < nodes.size(); ++i) {
-		const Node &n = nodes[i];
-		b->put_double(n.origin.x);
-		b->put_double(n.origin.y);
-		b->put_double(n.origin.z);
-		b->put_double(n.size);
-		for (int j = 0; j < 8; ++j) {
-			b->put_32(n.children[j]);
-		}
-		for (int j = 0; j < 8; ++j) {
-			b->put_float(n.corners[j]);
-		}
-		b->put_u8(n.has_corners ? 1 : 0);
-		b->put_u8(n.material);
-	}
-	return b->get_data_array();
-}
-
-void EditStore::deserialize(const PackedByteArray &bytes) {
-	Ref<StreamPeerBuffer> b;
-	b.instantiate();
-	b->set_data_array(bytes);
-	b->seek(0);
-	// Read each component into a local before constructing the Vector3: C++ leaves the
-	// order of evaluation of function arguments unspecified, and GCC evaluates right-to-
-	// left, which would transpose X<->Z relative to serialize's sequential writes.
-	const double rox = b->get_double();
-	const double roy = b->get_double();
-	const double roz = b->get_double();
-	_root_origin = Vector3(rox, roy, roz);
-	_root_size = b->get_double();
-	_base = b->get_double();
-	_amp = b->get_double();
-	_period = b->get_double();
-	_octaves = b->get_32();
-	_seed = b->get_32();
-	_gen = voxel_dc::TerrainField(_base, _amp, _period, _octaves, _seed);
-	const int count = b->get_32();
-	nodes.clear();
-	nodes.reserve(count);
-	for (int i = 0; i < count; ++i) {
-		Node n;
-		const double nox = b->get_double();   // sequential reads — see _root_origin above
-		const double noy = b->get_double();
-		const double noz = b->get_double();
-		n.origin = Vector3(nox, noy, noz);
-		n.size = b->get_double();
-		for (int j = 0; j < 8; ++j) {
-			n.children[j] = b->get_32();
-		}
-		for (int j = 0; j < 8; ++j) {
-			n.corners[j] = b->get_float();
-		}
-		n.has_corners = b->get_u8() != 0;
-		n.material = b->get_u8();
-		nodes.push_back(n);
-	}
-}
-
 double EditStore::terrain_surface(double x, double z, double base, double amp, double period, int octaves, int seed) {
 	return voxel_dc::TerrainField(base, amp, period, octaves, seed).surface(x, z);
 }
@@ -383,7 +323,16 @@ void EditStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stamp_sphere", "center", "radius", "op", "material", "min_leaf"), &EditStore::stamp_sphere);
 	ClassDB::bind_method(D_METHOD("stamp_box", "center", "size", "op", "material", "min_leaf"), &EditStore::stamp_box);
 	ClassDB::bind_method(D_METHOD("write_region", "sdf", "indices", "dim", "origin", "cell"), &EditStore::write_region);
+	ClassDB::bind_method(D_METHOD("predict_sphere_stamp", "center", "radius", "op", "min_leaf"), &EditStore::predict_sphere_stamp);
+	ClassDB::bind_method(D_METHOD("predict_imprint", "shape", "dims", "xform", "op", "cell"), &EditStore::predict_imprint);
+	ClassDB::bind_method(D_METHOD("predict_work", "points", "sdfs"), &EditStore::predict_work);
+	ClassDB::bind_method(D_METHOD("predict_bell", "center", "radius", "peak"), &EditStore::predict_bell);
+	ClassDB::bind_method(D_METHOD("predict_flatten", "plane_point", "normal", "radius"), &EditStore::predict_flatten);
+	ClassDB::bind_method(D_METHOD("lattice_flips", "sdf", "dim", "origin", "cell"), &EditStore::lattice_flips);
+	ClassDB::bind_method(D_METHOD("lattice_turns_in", "sdf", "dim", "origin", "cell", "box", "to_solid"), &EditStore::lattice_turns_in);
+	ClassDB::bind_method(D_METHOD("lattice_writes", "sdf", "dim", "origin", "cell"), &EditStore::lattice_writes);
 	ClassDB::bind_method(D_METHOD("sample", "p"), &EditStore::sample);
+	ClassDB::bind_method(D_METHOD("sample_toward", "p", "toward"), &EditStore::sample_toward);
 	ClassDB::bind_method(D_METHOD("has_edit", "p"), &EditStore::has_edit);
 	ClassDB::bind_method(D_METHOD("material_at", "p"), &EditStore::material_at);
 	ClassDB::bind_method(D_METHOD("leaf_count"), &EditStore::leaf_count);

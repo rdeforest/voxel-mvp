@@ -38,24 +38,7 @@ static func apply(store: EditStore, material_name: StringName,
 
 # The field the imprint writes: the brush's analytic SDF combined with the store over a dense
 # RENDER_BASE_CELL lattice covering world_box — union = min(existing, d), subtract = max(existing, -d).
+# EditStore evaluates the brush from the shape's sdf_kind() / sdf_dims() (its mirror of CsgSdf).
 static func lattice(store: EditStore, shape: CsgShape, xform: Transform3D, op: int) -> SdfLattice:
-    var inverse := xform.affine_inverse()
-    var box := world_box(shape, xform)
-    var cell := VoxelConstants.RENDER_BASE_CELL
-    var lo := Vector3i((box.position / cell).floor()) - Vector3i.ONE
-    var hi := Vector3i(((box.position + box.size) / cell).ceil()) + Vector3i.ONE
-    var span := hi - lo
-    var dim := maxi(span.x, maxi(span.y, span.z)) + 1
-    var origin := Vector3(lo) * cell
-    var lat := SdfLattice.new(origin, cell, dim, origin, origin + Vector3.ONE * (float(dim - 1) * cell))
-    for z in dim:
-        for y in dim:
-            for x in dim:
-                var i := Vector3i(x, y, z)
-                var wp := lat.point(i)
-                var dist := clampf(shape.sdf(inverse * wp), VoxelConstants.SDF_SOLID, VoxelConstants.SDF_AIR)
-                var existing := store.sample(wp)
-                var combined := minf(existing, dist) if op == CsgState.Op.ADD else maxf(existing, -dist)
-                lat.sdf[lat.index(i)] = combined
-                lat.writes = lat.writes or combined != existing
-    return lat
+    return SdfLattice.predicted(store.predict_imprint(shape.sdf_kind(), shape.sdf_dims(), xform, op,
+        VoxelConstants.RENDER_BASE_CELL))

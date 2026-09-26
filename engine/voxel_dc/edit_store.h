@@ -15,10 +15,15 @@
 // stream. C++ so render/collision can sample it on a worker thread.
 
 #include "core/io/stream_peer.h"
+#include "core/math/aabb.h"
+#include "core/math/transform_3d.h"
 #include "core/object/ref_counted.h"
 #include "core/templates/local_vector.h"
 #include "core/variant/array.h"
+#include "core/variant/dictionary.h"
+#include "core/variant/typed_array.h"
 
+#include "sdf_field.h"
 #include "terrain_field.h"
 
 class EditStore : public RefCounted {
@@ -40,7 +45,37 @@ public:
 	// the rest sparse. `indices` may be empty (material 0).
 	void write_region(const PackedFloat32Array &sdf, const PackedByteArray &indices, int dim, Vector3 origin, double cell);
 
+	// The field an edit WOULD write, without writing: the lattice every SdfLattice builder hands
+	// write_region (SdfLattice.sphere_stamp, VoxelImprint.lattice, StoreWrite.lattice, and the work
+	// sets BellSculptAction / FlattenAction generate), bit for bit — test_edit_store_predict gates it
+	// against the GDScript originals kept in test/support/lattice_oracle.gd. Each returns
+	// { origin, cell, dim, sdf, writes } (what SdfLattice.predicted reads); an empty Dictionary is a
+	// refusal (bad arguments) or, for bell / flatten, a reshape that writes no point. `shape` is a
+	// CsgSdf.Shape with `dims` = box [x, y, z], cylinder [radius, height], sphere [radius]; `peak`
+	// is the SDF the bell adds at its centre column (negative raises the surface).
+	// See edit_store_predict.cpp / edit_store_predict_work.cpp.
+	Dictionary predict_sphere_stamp(Vector3 center, double radius, int op, double min_leaf) const;
+	Dictionary predict_imprint(int shape, const PackedFloat64Array &dims, Transform3D xform, int op, double cell) const;
+	Dictionary predict_work(const TypedArray<Vector3i> &points, const PackedFloat64Array &sdfs) const;
+	Dictionary predict_bell(Vector3 center, double radius, double peak) const;
+	Dictionary predict_flatten(Vector3 plane_point, Vector3 normal, double radius) const;
+
+	// Questions asked of a predicted lattice (the write_region arguments: dim^3 values, x fastest)
+	// against the store as it is now. lattice_flips = SdfLattice.flips: { solid, air }, the cells
+	// whose sample point the write turns solid / air (empty Dictionary if the cell size does not
+	// tile the unit grid). lattice_turns_in = SdfLattice.solidifies_in / empties_in: whether the
+	// write turns any point of `box` solid (to_solid) or air that the store holds otherwise now.
+	// lattice_writes: whether write_region would change any stored corner — every corner of every
+	// leaf it rewrites, compared at float32 against what that leaf holds now (the generator's value
+	// for an unedited leaf); material is not considered.
+	Dictionary lattice_flips(const PackedFloat32Array &sdf, int dim, Vector3 origin, double cell) const;
+	bool lattice_turns_in(const PackedFloat32Array &sdf, int dim, Vector3 origin, double cell, AABB box, bool to_solid) const;
+	bool lattice_writes(const PackedFloat32Array &sdf, int dim, Vector3 origin, double cell) const;
+
 	double sample(Vector3 p) const;  // stored edit if any, else the generator
+	// sample() read from the leaf on `toward`'s side of every leaf boundary `p` lies on (sample()
+	// takes the upper side), so a point on a region's max face can be read from inside the region.
+	double sample_toward(Vector3 p, Vector3 toward) const;
 	bool has_edit(Vector3 p) const;  // true where the player has edited (stored), false = generator
 	Ref<EditStore> duplicate() const; // immutable snapshot for a worker thread (the store is sparse, so cheap)
 
@@ -94,14 +129,24 @@ private:
 	int _seed = 0;
 	voxel_dc::TerrainField _gen;
 
+	// A write_region call as the dry run in lattice_writes walks it.
+	struct RegionWrite {
+		voxel_dc::ArrayField field;
+		double cell;
+		Vector3 rmin;
+		Vector3 rmax;
+	};
+
 	int _new_node(const Vector3 &o, double s);
 	void _stamp(const voxel_dc::Field &brush, const Vector3 &rmin, const Vector3 &rmax, int op, int material, double min_leaf);
 	void _stamp_region(int idx, const voxel_dc::Field &brush, const Vector3 &rmin, const Vector3 &rmax, int op, int material, double min_leaf);
 	void _write_region(int idx, const voxel_dc::ArrayField &sdf, const PackedByteArray &indices,
 			int adim, const Vector3 &aorigin, double cell, const Vector3 &rmin, const Vector3 &rmax);
 	void _subdivide(int idx); // edited leaf -> inherit its field; unedited -> fresh (still generator)
+	bool _write_changes(int idx, const RegionWrite &write) const;
+	bool _leaf_write_changes(const Vector3 &o, double s, const float *corners, const RegionWrite &write) const;
 	int _leaf_at(const Vector3 &p) const;
-	int _child_index(int idx, const Vector3 &p) const;
+	int _leaf_toward(const Vector3 &p, const Vector3 &toward) const;
 	bool _inside_root(const Vector3 &p) const;
 };
 

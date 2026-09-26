@@ -393,9 +393,23 @@ names.
   which can write real geometry without flipping a cell centre, is still refused.
   Construction's attach test likewise measures against the rotated brush at the imprint's
   lattice points, not the footprint.
+- **Lattices are built and queried in C++.** Previews run every frame, so every `SdfLattice`
+  builder (`sphere_stamp`, `VoxelImprint.lattice`, `StoreWrite.lattice`, the raise / lower /
+  flatten reshapes) is `EditStore.predict_*`, and `flips` / `solidifies_in` / `empties_in` are
+  `EditStore.lattice_flips` / `lattice_turns_in` (`engine/voxel_dc/edit_store_predict*.cpp`).
+  Preview and write build the lattice through the same call. `test_edit_store_predict` gates them
+  bit for bit against the GDScript originals, kept as the oracle in
+  `test/support/lattice_oracle.gd`; a change to one needs the same change in the other.
+- **A lattice's "before" is the rewritten leaf's own value.** Builders read each point with
+  `EditStore.sample_toward`, so a point on the region's max faces is read from the leaf the write
+  replaces, not the untouched neighbour `sample` would pick. `SdfLattice.writes` (CSG refuses on
+  it) is exact: a point whose float32 changes, else `EditStore.lattice_writes`, a dry run of
+  `write_region` over every corner of every leaf it would rewrite. Material is not part of it.
 - **Lattice writes are typed.** `StoreWrite` takes `Array[LatticeEdit]` (lattice point, new
-  SDF, leaf material or -1 to keep) — Bell, Flatten, FillVoxel, EmptyVoxel and the MPM carve
-  all hand it that; `StoreWrite.lattice(store, work).flips(store)` is what the work does to cells.
+  SDF, leaf material or -1 to keep) — FillVoxel, EmptyVoxel and the MPM carve all hand it that;
+  `StoreWrite.lattice(store, work).flips(store)` is what the work does to cells. Bell and Flatten
+  generate their work in C++ (`predict_bell` / `predict_flatten`) and write the lattice with
+  `StoreWrite.reshape`, keeping each leaf's material.
 - **Single-cell edits flip one cell or refuse.** `StoreWrite.one_cell` solves a small LP
   (`scripts/simplex.gd`) for the cell's 8 corner values so its centre crosses zero and none of its
   26 neighbours' centres do.

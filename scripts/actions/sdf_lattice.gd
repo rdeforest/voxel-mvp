@@ -11,6 +11,9 @@ extends RefCounted
 # float32 rounding), whatever the store held before, and flips() is the brush TEST that matches
 # the brush WRITE. The "before" side of flips() is the store's own sample, read before the write.
 #
+# The builders and the flips / safety queries run in EditStore (C++, predict_* and lattice_*),
+# because a preview asks them every frame; this class carries the result.
+#
 # (At the current RENDER_SUBDIV_LOG2 = 0 every writer lands on 1 m leaves: brush stamps and
 # imprints at RENDER_BASE_CELL = 1 m, StoreWrite at 1 m. Nothing here depends on that.)
 
@@ -19,18 +22,28 @@ var cell:      float                 # lattice spacing = the leaf size the write
 var dim:       int                   # points per axis (a cube)
 var sdf:       PackedFloat32Array    # dim^3 values, x fastest (write_region's layout)
 var region_lo: Vector3               # leaves overlapping the open box (region_lo, region_hi)
-var region_hi: Vector3               # are the ones the write rewrites
-var writes:    bool = false          # some point differs from the store's current value there
-                                     # (set by the builder, which reads both)
+var region_hi: Vector3               # are the ones the write rewrites: the whole cube
+var writes:    bool = false          # the write changes some stored leaf corner's SDF (set by
+                                     # the builder: EditStore.predict_*; material not considered)
 
 
-func _init(p_origin: Vector3, p_cell: float, p_dim: int, p_lo: Vector3, p_hi: Vector3) -> void:
+func _init(p_origin: Vector3, p_cell: float, p_dim: int) -> void:
     origin    = p_origin
     cell      = p_cell
     dim       = p_dim
-    region_lo = p_lo
-    region_hi = p_hi
+    region_lo = origin
+    region_hi = origin + Vector3.ONE * (float(dim - 1) * cell)
     sdf.resize(dim * dim * dim)
+
+
+# The lattice an EditStore.predict_* call returns, or null for its refusal (an empty Dictionary).
+static func predicted(d: Dictionary) -> SdfLattice:
+    if d.is_empty():
+        return null
+    var lat := SdfLattice.new(d.origin, d.cell, d.dim)
+    lat.sdf    = d.sdf
+    lat.writes = d.writes
+    return lat
 
 
 func index(i: Vector3i) -> int:
@@ -51,13 +64,10 @@ func _rewrites_1d(v: float, axis: int) -> bool:
 func value_at(p: Vector3) -> float:
     var l  := (p - origin) / cell
     var i0 := Vector3i(floori(l.x), floori(l.y), floori(l.z))
-    return _trilerp(i0, l - Vector3(i0))
-
-# The leaf with lattice corner `i0`, trilerped at fractions `f` (each in [0, 1]) across it.
-func _trilerp(i0: Vector3i, f: Vector3) -> float:
+    var f  := l - Vector3(i0)
+    var i  := index(i0)
     var sy := dim
     var sz := dim * dim
-    var i  := index(i0)
     var c00 := lerpf(sdf[i],           sdf[i + 1],           f.x)
     var c10 := lerpf(sdf[i + sy],      sdf[i + sy + 1],      f.x)
     var c01 := lerpf(sdf[i + sz],      sdf[i + sz + 1],      f.x)
@@ -68,61 +78,15 @@ func _trilerp(i0: Vector3i, f: Vector3) -> float:
 # Whether the write turns some point of `box` solid that the store holds as air now
 # (solidifies_in) / air that it holds as solid now (empties_in) — the player-safety question,
 # asked of the FIELD the write lays down, not of cell centres: a part or brush thinner than a
-# cell can put real geometry in a box without flipping any cell's sample point.
-#
-# Over each rewritten leaf the written field is one trilerp, so over the leaf's intersection
-# with `box` its minimum and maximum lie at that sub-box's corners: testing those corners finds
-# every piece of `box` the write makes solid (air). The "before" side is read at the same points,
-# plus every cell sample point inside the sub-box — so a flipped cell inside `box` is always seen
-# (this subsumes the cell-flip test) and so is any sub-cell solid the write puts there.
+# cell can put real geometry in a box without flipping any cell's sample point. Over each
+# rewritten leaf the written field is one trilerp, so its extremes over the leaf's piece of `box`
+# lie at the piece's corners; EditStore.lattice_turns_in tests those, plus every cell sample point
+# inside the piece (so a flipped cell inside `box` is always seen).
 func solidifies_in(store: EditStore, box: AABB) -> bool:
-    return _turns_in(store, box, true)
+    return store.lattice_turns_in(sdf, dim, origin, cell, box, true)
 
 func empties_in(store: EditStore, box: AABB) -> bool:
-    return _turns_in(store, box, false)
-
-
-func _turns_in(store: EditStore, box: AABB, to_solid: bool) -> bool:
-    var pieces: Array = [_pieces_1d(box, 0), _pieces_1d(box, 1), _pieces_1d(box, 2)]
-    var t := VoxelConstants.SDF_SOLID_THRESHOLD
-    for pz: Array in pieces[2]:
-        for py: Array in pieces[1]:
-            for px: Array in pieces[0]:
-                var i0 := Vector3i(px[0], py[0], pz[0])
-                for fz: float in pz[1]:
-                    for fy: float in py[1]:
-                        for fx: float in px[1]:
-                            var f   := Vector3(fx, fy, fz)
-                            var now := _trilerp(i0, f)
-                            if (now < t) != to_solid:
-                                continue
-                            var was := store.sample(origin + (Vector3(i0) + f) * cell)
-                            if (was < t) != to_solid:
-                                return true
-    return false
-
-
-# Along `axis`: for each rewritten leaf the box overlaps, [lattice index of the leaf's low corner,
-# the fractions across that leaf to test — the overlap's two ends and any cell sample point
-# between them].
-func _pieces_1d(box: AABB, axis: int) -> Array:
-    var lo: float = box.position[axis]
-    var hi: float = lo + box.size[axis]
-    var off: float = VoxelConstants.VOXEL_CENTER_OFFSET[axis]
-    var out: Array = []
-    for k in range(maxi(floori((lo - origin[axis]) / cell), 0), mini(ceili((hi - origin[axis]) / cell), dim - 1)):
-        var leaf_lo: float = origin[axis] + float(k) * cell
-        if not _rewrites_1d(leaf_lo + cell * 0.5, axis):
-            continue
-        var a := maxf(lo, leaf_lo)
-        var b := minf(hi, leaf_lo + cell)
-        var fracs: Array[float] = [(a - leaf_lo) / cell, (b - leaf_lo) / cell]
-        for c in range(floori(a - off), ceili(b - off) + 1):
-            var sp := float(c) + off
-            if sp > a and sp < b:
-                fracs.append((sp - leaf_lo) / cell)
-        out.append([k, fracs])
-    return out
+    return store.lattice_turns_in(sdf, dim, origin, cell, box, false)
 
 
 # Every cell whose sample point sits in a rewritten leaf — the only cells the write can change.
@@ -143,10 +107,10 @@ func cells() -> Array[Vector3i]:
 
 # The cells this write will flip, predicted against the store's current field.
 func flips(store: EditStore) -> CellFlips:
+    var d   := store.lattice_flips(sdf, dim, origin, cell)
     var out := CellFlips.new()
-    for c in cells():
-        var p := VoxelUtils.sample_point(c)
-        out._add(c, store.sample(p), value_at(p))
+    out.solid = d.solid
+    out.air   = d.air
     return out
 
 
@@ -199,20 +163,4 @@ func materials(store: EditStore, material: int, brush_solid: Callable, air_keeps
 # with the sphere SDF — min (UNION) / max(-) (SUBTRACT). The region is the whole lattice cube, so
 # write() rewrites exactly the leaves cells() and flips() range over.
 static func sphere_stamp(store: EditStore, center: Vector3, radius: float, op: int, min_leaf: float) -> SdfLattice:
-    var pad := Vector3.ONE * (radius + min_leaf)
-    var first := ((center - pad) / min_leaf).floor()
-    var span  := ((center + pad) / min_leaf).ceil() - first
-    var dim   := int(maxf(span.x, maxf(span.y, span.z))) + 1
-    var lo    := first * min_leaf
-    var lat := SdfLattice.new(lo, min_leaf, dim, lo, lo + Vector3.ONE * (float(dim - 1) * min_leaf))
-    for z in lat.dim:
-        for y in lat.dim:
-            for x in lat.dim:
-                var i := Vector3i(x, y, z)
-                var p := lat.point(i)
-                var before := store.sample(p)
-                var brush  := p.distance_to(center) - radius
-                var after  := minf(before, brush) if op == VoxelConstants.STORE_OP_UNION else maxf(before, -brush)
-                lat.sdf[lat.index(i)] = after
-                lat.writes = lat.writes or after != before
-    return lat
+    return predicted(store.predict_sphere_stamp(center, radius, op, min_leaf))

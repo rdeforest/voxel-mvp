@@ -13,15 +13,14 @@ When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a 
 
 | Bug | Area | Severity | Notes |
 |-----|------|----------|-------|
-| [actions-preview-gdscript-slow](actions-preview-gdscript-slow.md) | actions (preview perf) | **med (regression, next up)** | Exact field prediction runs in GDScript every frame; previews 5–10× slower (CSG 2.5 ms). Fix: build the lattice in C++. |
+| [csg-restamp-material-only-refused](csg-restamp-material-only-refused.md) | actions (CSG no-op refusal) | low (needs a call) | `writes` is SDF-only, so re-stamping the same shape in a new material is refused as a no-op. Was allowed by accident in high air before the max-face fix. |
 | [single-voxel-edits-unexpected](single-voxel-edits-unexpected.md) | actions (FillVoxel/EmptyVoxel) | **known unknown** | Robert saw unexpected single-voxel results in play. Not yet characterized; hypotheses in file. |
 | [empty-voxel-no-player-safety](empty-voxel-no-player-safety.md) | actions (EmptyVoxel, Fill) | low-med | EmptyVoxel can empty the player's support cell; Fill uses its own distance check instead of `endangered_by`. |
 | [part-index-footprint-cells-never-released](part-index-footprint-cells-never-released.md) | structural (PartIndex) | low-med | Parts are registered under the AABB footprint, not the imprint's flips; cells never solid are never released. |
-| [sdf-lattice-writes-false-change-at-max-faces](sdf-lattice-writes-false-change-at-max-faces.md) | actions (CSG no-op refusal) | low | "Writes anything" samples the neighbour leaf at the upper faces; an identical CSG re-stamp into air is never refused. |
 | [mpm-thaw-events-unmeasured](mpm-thaw-events-unmeasured.md) | MPM thaw | low | Emits `voxel_removed` from its plan, not measured flips; neighbour flips go unreported. |
 | [event-bus-reentrancy](event-bus-reentrancy.md) | event bus | med (latent) | No reentrancy guard; prunes dead subs mid-iteration. Reachable by design; no channel self-chains *yet*. |
 | [dig-action-no-validate-no-safety](dig-action-no-validate-no-safety.md) | actions (dig) | low-med | `validate()` always true (ghost disagrees); no player-safety guard unlike siblings. Confirm intent. |
-| [mmap-arena-no-mmap-fallback](mmap-arena-no-mmap-fallback.md) | EditStore (mmap arena) | low-med | Crashes on `mmap` failure of a valid fd instead of using the anon fallback. Env-dependent. |
+| [mmap-arena-disk-full-sigbus](mmap-arena-disk-full-sigbus.md) | DC cell arena (mmap) | low-med (needs a call) | A full disk SIGBUSes the sparse `MAP_SHARED` arena (worse on btrfs COW). Fix needs a disk-full policy: migrate to RAM or stop refining. |
 | [dc-incremental-emit-ring-insufficient](dc-incremental-emit-ring-insufficient.md) | DC world-octree emit | med (live edge) | One-ring re-emit expansion isn't provably complete; the active dropped-triangle work. |
 | [dc-budget-controller-coarsen-bias](dc-budget-controller-coarsen-bias.md) | DC render (eps controller) | low-med | Coarsen ratchet near cell ceiling; re-tunes only on job completion. Recovers — confirm intent. |
 | [save-honesty-gaps](save-honesty-gaps.md) | persistence | low | Silent non-quiescent save after 100k-iter guard; silent save-discard on version bump. Both fail quietly. |
@@ -42,5 +41,8 @@ and, where the report was wrong, why.
 
 | Bug | Area | Verdict | Notes |
 |-----|------|---------|-------|
+| [mmap-arena-no-mmap-fallback](closed/mmap-arena-no-mmap-fallback.md) | DC cell arena (mmap) | fixed (2026-09-26) | A refused disk mmap now closes its fd and tries the next temp dir, then anonymous memory, instead of `CRASH_COND`. `DC_ARENA_FAIL_DISK_MMAP` drives the test. SIGBUS note split out. |
+| [sdf-lattice-writes-false-change-at-max-faces](closed/sdf-lattice-writes-false-change-at-max-faces.md) | actions (CSG no-op refusal) | fixed (2026-09-26) | Builders read the rewritten leaf's own value (`sample_toward`), compare at float32, and settle a no-op-looking lattice with `EditStore.lattice_writes` (a dry run of the write). Also fixed: a union could raise a max-face value. |
+| [actions-preview-gdscript-slow](closed/actions-preview-gdscript-slow.md) | actions (preview perf) | fixed (2026-09-26) | Every preview and write builds its lattice in C++ (`EditStore.predict_*`, `lattice_flips`, `lattice_turns_in`); radius-3 previews 0.045–0.16 ms, under the pre-regression times. Kept for the before/after tables. |
 | [mpm-svd-reflection-sign](closed/mpm-svd-reflection-sign.md) | MPM (mat3 SVD) | not a bug (2026-09-25) | Reported double σ₂ flip is correct: a reflected F fires one `if`, not both; the both-fire case is `det F > 0`. Four-case table in the file. The *test* gap it found is real — assert `det_u`/`det_v`/`s2` before the fast-SVD rewrite. |
 | [edit-remesh-padding-gap](closed/edit-remesh-padding-gap.md) | edit re-mesh (clipmap) | obsolete (2026-09-25) | Filed against the clipmap render + godot_voxel notification; both deleted in `d58e8ce`, so the mechanism has no live code path. Live successor: [dc-incremental-emit-ring-insufficient](dc-incremental-emit-ring-insufficient.md). |

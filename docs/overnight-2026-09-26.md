@@ -5,9 +5,9 @@ or move to `docs/completed/` when the session is closed out.*
 
 ## Progress
 
-- [ ] Track A1 — preview lattice in C++ (`actions-preview-gdscript-slow`)
-- [ ] Track A2 — `sdf-lattice-writes-false-change-at-max-faces`
-- [ ] Track A3 — `mmap-arena-no-mmap-fallback` (if time)
+- [x] Track A1 — preview lattice in C++ (`actions-preview-gdscript-slow`) — A1a (C++ prediction + byte-identical gate) and A1b (callers switched, `_compute_work` + `_turns_in` ported, re-measured under "before"); bug closed
+- [x] Track A2 — `sdf-lattice-writes-false-change-at-max-faces` — flag now "changes a stored float32 corner": owner-leaf reads at max faces, float32 compare, and a dry run for seams/finer leaves; bug closed
+- [x] Track A3 — `mmap-arena-no-mmap-fallback` — disk mmap failure falls through to the next dir, then anon; fd closed; hook-driven test. SIGBUS-on-full-disk split to `mmap-arena-disk-full-sigbus` (needs a policy call)
 - [ ] Track B1 — characterize `single-voxel-edits-unexpected`
 - [ ] Track B2 — `empty-voxel-no-player-safety`
 - [ ] Track B3 — `part-index-footprint-cells-never-released`
