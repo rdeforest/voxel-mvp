@@ -300,5 +300,6 @@ void EditStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("fill_indices_region", "origin", "dim", "cell"), &EditStore::fill_indices_region);
 	ClassDB::bind_method(D_METHOD("serialize"), &EditStore::serialize);
 	ClassDB::bind_method(D_METHOD("deserialize", "bytes"), &EditStore::deserialize);
+	ClassDB::bind_static_method("EditStore", D_METHOD("blob_problem", "bytes"), &EditStore::blob_problem);
 	ClassDB::bind_static_method("EditStore", D_METHOD("terrain_surface", "x", "z", "base", "amp", "period", "octaves", "seed"), &EditStore::terrain_surface);
 }
