@@ -138,7 +138,7 @@ func test_buildbox_splice_reproduces_full_build_across_lod() -> void:
     var apron := Vector3i.ONE * 8        # ≥ the point-location stitch radius, so core cells' neighbours are full-res
 
     # C. The build-box splice: SAME frame as the full build, build only core+apron, emit only core.
-    var patch := mesher.mesh_clipmap(clip.data, DIM, clip.origins, clip.cells,
+    var patch := mesher.mesh_clipmap_splice(clip.data, DIM, clip.origins, clip.cells,
         CENTER, HALF0, DEPTH, CAM, PROJ, TOL, true, world_origin,
         [], PackedColorArray(), false, 0.0,
         core_min, core_max,                          # emit box: only the core triangles

@@ -70,6 +70,35 @@ class DCOctreeMesher : public RefCounted {
 	double _last_reconcile_ms = 0.0; // c4 diag: grow's reconcile (O(tree) walk) vs reaccum split
 	double _last_reaccum_ms   = 0.0;
 
+	struct LatticeBox {
+		Vector3i min;
+		Vector3i max;
+
+		bool has_extent() const { return min.x < max.x && min.y < max.y && min.z < max.z; }
+	};
+
+	// The one clipmap build behind mesh_clipmap (both boxes null → full build, retained) and
+	// mesh_clipmap_splice (both boxes set → transient). Box presence is the pointer, never the value.
+	Array _mesh_clipmap(
+			const TypedArray<PackedFloat32Array> &level_data,
+			int dim,
+			const PackedVector3Array &level_origins,
+			const PackedFloat32Array &level_cells,
+			Vector3 center,
+			double half0,
+			int depth,
+			Vector3 camera,
+			double proj,
+			double eps_px,
+			bool error_driven,
+			Vector3i lattice_world_origin,
+			const TypedArray<PackedByteArray> &level_indices,
+			const PackedColorArray &palette,
+			bool uniform_core,
+			double prune_safety,
+			const LatticeBox *emit_box,
+			const LatticeBox *build_box);
+
 public:
 	~DCOctreeMesher();
 
@@ -83,7 +112,8 @@ public:
 	// error_driven coarsens by screen-space error (eps_px); the data resolution is the floor. With
 	// level_indices + palette, each vertex carries an ARRAY_COLOR whose alpha picks material-colour
 	// (a=0) vs slope-shading (a=1, the default). Input layout, the LOD math, and the colour
-	// convention live in docs/roadmap/design/03-dc-qef-geometry.md.
+	// convention live in docs/roadmap/design/03-dc-qef-geometry.md. A full build: it is retained for
+	// remesh().
 	Array mesh_clipmap(
 			const TypedArray<PackedFloat32Array> &level_data,
 			int dim,
@@ -100,11 +130,34 @@ public:
 			const TypedArray<PackedByteArray> &level_indices = TypedArray<PackedByteArray>(),
 			const PackedColorArray &palette = PackedColorArray(),
 			bool uniform_core = false,
-			double prune_safety = 0.0,
-			Vector3i emit_min = Vector3i(),
-			Vector3i emit_max = Vector3i(),
-			Vector3i build_min = Vector3i(),
-			Vector3i build_max = Vector3i());
+			double prune_safety = 0.0);
+
+	// A splice of the same full-build frame: descend only cells overlapping [build_min, build_max) and
+	// emit only triangles owned by cells inside [emit_min, emit_max) (WORLD lattice, half-open). Built
+	// into a transient octree — the retained full build is left intact. Both boxes are required and must
+	// have positive extent on every axis; an empty or inverted box is refused (error + empty Array), since
+	// an empty build box would mesh the un-descended root cell rather than nothing.
+	Array mesh_clipmap_splice(
+			const TypedArray<PackedFloat32Array> &level_data,
+			int dim,
+			const PackedVector3Array &level_origins,
+			const PackedFloat32Array &level_cells,
+			Vector3 center,
+			double half0,
+			int depth,
+			Vector3 camera,
+			double proj,
+			double eps_px,
+			bool error_driven,
+			Vector3i lattice_world_origin,
+			const TypedArray<PackedByteArray> &level_indices,
+			const PackedColorArray &palette,
+			bool uniform_core,
+			double prune_safety,
+			Vector3i emit_min,
+			Vector3i emit_max,
+			Vector3i build_min,
+			Vector3i build_max);
 
 	// World-fixed octree (doc 16 THE GOAL, scaffold): build + mesh ONE octree over the world-aligned
 	// box [world_origin, world_origin + 2^depth) in lattice units (1 unit = base_cell metres), sampling
@@ -136,6 +189,10 @@ public:
 	// emit_min/max (M, doc 20): the VISIBLE window — only triangles owned by cells inside it are drawn, while
 	// [win_min, win_max) is the larger RESIDENCY box (kept + pre-baked, no re-sample on backtrack). Default
 	// (emit_min == emit_max) draws the whole residency box (pre-M behaviour).
+	// reuse_frontier (c1, doc 20): a pure drain — skip reconcile and keep popping the frontier the last
+	// rebuild grow collected (valid only while camera floor, eps and window are unchanged). A reuse grow
+	// always refines: refine_budget caps it as usual, -1 drains the whole retained frontier. A rebuild grow
+	// that is unbudgeted refines inline and leaves the frontier empty, so a reuse after it is a no-op.
 	Array grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max, int refine_budget = -1, Vector3i emit_min = Vector3i(), Vector3i emit_max = Vector3i(), bool reuse_frontier = false);
 
 	// True if the last grow_world left refinement deferred by its budget — drain by growing again (same eps).

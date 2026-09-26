@@ -1508,6 +1508,7 @@ struct Octree {
 	// O(tree)). A grow that CHANGED the window/eps rebuilds it (reconcile re-collects → make_heap). The key is
 	// `we` (geometric error, camera-independent — see doc 20 I), so the heap order survives camera moves.
 	// reuse=false: heapify the freshly-collected candidates. reuse=true: continue draining the retained heap.
+	// budget_us < 0 drains the whole heap (reached only by an unbudgeted reuse grow).
 	void refine_selected(int budget_us, bool reuse) {
 		auto worse = [](const RefineCand &a, const RefineCand &b) { return a.err < b.err; }; // max-heap on err
 		RefineCand *base = refine_cands.ptr();
@@ -1533,7 +1534,7 @@ struct Octree {
 			mark_path_dirty(x);                                  // mark x + ancestors: incremental reaccum re-sums
 			                                                     // the path, recollapse_dirty re-collapse-tests x
 
-			if (int64_t(OS::get_singleton()->get_ticks_usec() - t0) >= int64_t(budget_us)) {
+			if (budget_us >= 0 && int64_t(OS::get_singleton()->get_ticks_usec() - t0) >= int64_t(budget_us)) {
 				break;
 			}
 		}

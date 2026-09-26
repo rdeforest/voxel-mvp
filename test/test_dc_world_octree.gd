@@ -21,6 +21,7 @@ const DIM    := SIZE + 1
 const DEPTH  := 5
 const WALL_EPS := 2.0   # DC places a vertex INSIDE its cell, so a rim vertex sits up to ~1 unit off the
                         # wall — the boundary band must be ~2 units thick (matches test_dc_real_terrain)
+const MAX_ONE_SHOT_DROPS := 100  # measured 89 (dc-incremental-emit-ring-insufficient); a ratchet, not a target
 
 
 func _store() -> EditStore:
@@ -381,6 +382,97 @@ func test_grow_world_persistent_frontier_drains_with_reuse():
     # raw vertex/triangle counts differ from a dense full build — the RENDERED surface (non-degenerate tris) is
     # what must match. _tri_sigs skips degenerate triangles, so this is the real correctness gate.
     assert_eq(_tri_sigs(drained), _tri_sigs(full), "reuse-drained rendered surface == unbudgeted grow (incremental emit is correct)")
+
+
+# reuse_frontier with refine_budget -1 used to skip both the reconcile and the refine pass — a silent no-op
+# that still reported refine_pending false. An unbudgeted reuse grow drains the whole retained frontier,
+# so the tree lands on the unbudgeted grow's. The tree is compared through remesh() (a full re-emit): the
+# drain's own incremental emit drops triangles on a drain this large, which is
+# test_grow_world_one_shot_drain_incremental_emit_is_complete's subject, not this one's.
+func test_grow_world_reuse_unbudgeted_drains_whole_frontier():
+    var s := _store()
+    var origin := _region_origin(s)
+    var cam := Vector3(16, 16, 120)
+    var lo := origin
+    var hi := origin + WIN_FULL
+    const COARSE := 32.0
+    const FINE := 2.0
+
+    var rm := DCOctreeMesher.new()
+    rm.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, COARSE, true, PackedColorArray(), lo, hi)
+    var full: Array = rm.grow_world(cam, 500.0, FINE, lo, hi)
+
+    var bm := DCOctreeMesher.new()
+    bm.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, COARSE, true, PackedColorArray(), lo, hi)
+    bm.grow_world(cam, 500.0, FINE, lo, hi, 0, Vector3i(), Vector3i(), false)
+    assert_true(bm.get_refine_pending(), "a zero-budget rebuild leaves the frontier undrained (test isn't vacuous)")
+
+    bm.grow_world(cam, 500.0, FINE, lo, hi, -1, Vector3i(), Vector3i(), true)
+
+    assert_false(bm.get_refine_pending(), "nothing left to refine")
+    assert_eq(bm.get_last_refine_queue_size(), 0, "the retained frontier was drained, not reported stale")
+    assert_eq(_tri_sigs(bm.remesh(cam, 500.0, FINE)), _tri_sigs(full), "unbudgeted reuse drain refined the tree an unbudgeted grow does")
+
+
+# A drain that refines the whole frontier in ONE grow must emit incrementally what a full re-emit of the
+# same tree does. Budgeted drains of ~100 us converge (test_grow_world_persistent_frontier_drains_with_reuse);
+# a one-shot drain does not — docs/bugs/dc-incremental-emit-ring-insufficient.md.
+func test_grow_world_one_shot_drain_incremental_emit_is_complete():
+    var s := _store()
+    var origin := _region_origin(s)
+    var cam := Vector3(16, 16, 120)
+    var lo := origin
+    var hi := origin + WIN_FULL
+
+    var m := DCOctreeMesher.new()
+    m.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 32.0, true, PackedColorArray(), lo, hi)
+    m.grow_world(cam, 500.0, 2.0, lo, hi, 0, Vector3i(), Vector3i(), false)
+    var drained: Array = m.grow_world(cam, 500.0, 2.0, lo, hi, -1, Vector3i(), Vector3i(), true)
+    var reemitted: Array = m.remesh(cam, 500.0, 2.0)
+
+    var missing := _missing_sigs(_tri_sigs(reemitted), _tri_sigs(drained))
+    assert_lte(missing, MAX_ONE_SHOT_DROPS, "one-shot drain drops no more than the recorded 89 (ratchet)")
+    if missing > 0:
+        pending("one-shot drain's incremental emit drops triangles vs a full re-emit — docs/bugs/dc-incremental-emit-ring-insufficient.md")
+        return
+    assert_eq(_tri_sigs(drained), _tri_sigs(reemitted), "incremental emit == full re-emit of the same tree")
+
+
+func _missing_sigs(want: PackedStringArray, got: PackedStringArray) -> int:
+    var have := {}
+    for sig in got:
+        have[sig] = true
+
+    var missing := 0
+    for sig in want:
+        if not have.has(sig):
+            missing += 1
+
+    return missing
+
+
+# An unbudgeted REBUILD refines inline and never collects a frontier, so it must leave the frontier empty —
+# not the bound of an earlier budgeted grow over a cleared candidate list. A reuse drain after it is a no-op.
+func test_grow_world_unbudgeted_rebuild_empties_frontier():
+    var s := _store()
+    var origin := _region_origin(s)
+    var cam := Vector3(16, 16, 120)
+    var lo := origin
+    var hi := origin + WIN_FULL
+
+    var m := DCOctreeMesher.new()
+    m.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 32.0, true, PackedColorArray(), lo, hi)
+    m.grow_world(cam, 500.0, 2.0, lo, hi, 0, Vector3i(), Vector3i(), false)
+    assert_gt(m.get_last_refine_queue_size(), 0, "the budgeted grow left a frontier (test isn't vacuous)")
+
+    var full: Array = m.grow_world(cam, 500.0, 2.0, lo, hi)
+    assert_eq(m.get_last_refine_queue_size(), 0, "an unbudgeted rebuild leaves no frontier")
+    if m.get_last_refine_queue_size() != 0:
+        return # a stale bound would make the reuse grow below pop a cleared vector
+
+    var again: Array = m.grow_world(cam, 500.0, 2.0, lo, hi, 100, Vector3i(), Vector3i(), true)
+    assert_false(m.get_refine_pending(), "nothing pending after the no-op drain")
+    assert_eq(_tri_sigs(again), _tri_sigs(full), "a reuse drain over an empty frontier changes nothing")
 
 
 # Stage M (doc 20) — residency / visible split: the residency box (build_box) can be larger than the VISIBLE
