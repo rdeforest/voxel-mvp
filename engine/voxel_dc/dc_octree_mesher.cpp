@@ -87,11 +87,61 @@ Array DCOctreeMesher::mesh_clipmap(
 		const TypedArray<PackedByteArray> &level_indices,
 		const PackedColorArray &palette,
 		bool uniform_core,
+		double prune_safety) {
+	return _mesh_clipmap(level_data, dim, level_origins, level_cells, center, half0, depth, camera, proj, eps_px,
+			error_driven, lattice_world_origin, level_indices, palette, uniform_core, prune_safety, nullptr, nullptr);
+}
+
+Array DCOctreeMesher::mesh_clipmap_splice(
+		const TypedArray<PackedFloat32Array> &level_data,
+		int dim,
+		const PackedVector3Array &level_origins,
+		const PackedFloat32Array &level_cells,
+		Vector3 center,
+		double half0,
+		int depth,
+		Vector3 camera,
+		double proj,
+		double eps_px,
+		bool error_driven,
+		Vector3i lattice_world_origin,
+		const TypedArray<PackedByteArray> &level_indices,
+		const PackedColorArray &palette,
+		bool uniform_core,
 		double prune_safety,
 		Vector3i emit_min,
 		Vector3i emit_max,
 		Vector3i build_min,
 		Vector3i build_max) {
+	const LatticeBox emit_box{ emit_min, emit_max };
+	const LatticeBox build_box{ build_min, build_max };
+	ERR_FAIL_COND_V_MSG(!emit_box.has_extent(), Array(),
+			vformat("DCOctreeMesher.mesh_clipmap_splice: emit box %s..%s has no extent on some axis.", emit_min, emit_max));
+	ERR_FAIL_COND_V_MSG(!build_box.has_extent(), Array(),
+			vformat("DCOctreeMesher.mesh_clipmap_splice: build box %s..%s has no extent on some axis.", build_min, build_max));
+	return _mesh_clipmap(level_data, dim, level_origins, level_cells, center, half0, depth, camera, proj, eps_px,
+			error_driven, lattice_world_origin, level_indices, palette, uniform_core, prune_safety, &emit_box, &build_box);
+}
+
+Array DCOctreeMesher::_mesh_clipmap(
+		const TypedArray<PackedFloat32Array> &level_data,
+		int dim,
+		const PackedVector3Array &level_origins,
+		const PackedFloat32Array &level_cells,
+		Vector3 center,
+		double half0,
+		int depth,
+		Vector3 camera,
+		double proj,
+		double eps_px,
+		bool error_driven,
+		Vector3i lattice_world_origin,
+		const TypedArray<PackedByteArray> &level_indices,
+		const PackedColorArray &palette,
+		bool uniform_core,
+		double prune_safety,
+		const LatticeBox *emit_box,
+		const LatticeBox *build_box) {
 	Array out;
 	const int n = level_data.size();
 	if (n == 0 || dim < 2 || level_origins.size() != n || level_cells.size() != n || depth < 1) {
@@ -101,7 +151,7 @@ Array DCOctreeMesher::mesh_clipmap(
 
 	// Retain ONLY a full build (no emit/build box) so remesh() can re-walk it; a splice is restricted
 	// to a sub-box, so it builds into a transient octree and leaves the retained full build intact.
-	const bool retain = (emit_min == emit_max) && (build_min == build_max);
+	const bool retain = emit_box == nullptr && build_box == nullptr;
 	Octree transient_oct;
 	Clipmap transient_clip;
 	LocalVector<PackedFloat32Array> transient_held;
@@ -143,20 +193,18 @@ Array DCOctreeMesher::mesh_clipmap(
 	oct.eps_px = eps_px;
 	oct.error_driven = error_driven;
 	oct.world_origin = lattice_world_origin;
-	// Emit-box filter: when emit_min != emit_max (caller set them), restrict output to
-	// triangles owned by cells inside [emit_min, emit_max).
-	if (emit_min != emit_max) {
+	if (emit_box != nullptr) {
 		oct.emit_filter = true;
-		oct.emit_min = emit_min;
-		oct.emit_max = emit_max;
+		oct.emit_min = emit_box->min;
+		oct.emit_max = emit_box->max;
 	}
 	// Build-box restriction: a splice builds on the FULL frame (root_origin/_ROOT_DEPTH) but descends
-	// only cells overlapping [build_min, build_max) (the edit box + apron), so its cells land on the
-	// full build's lattice and neighbours — no offset sub-octree, no seam divergence.
-	if (build_min != build_max) {
+	// only cells overlapping the build box (the edit box + apron), so its cells land on the full
+	// build's lattice and neighbours — no offset sub-octree, no seam divergence.
+	if (build_box != nullptr) {
 		oct.build_box = true;
-		oct.build_min = build_min;
-		oct.build_max = build_max;
+		oct.build_min = build_box->min;
+		oct.build_max = build_box->max;
 	}
 	clip.center = center;
 	clip.half0 = half0;
@@ -348,12 +396,15 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 	// c1 (doc 20): reuse_frontier means a pure DRAIN grow — camera + eps + window unchanged, just keep refining
 	// the retained frontier heap. Skip reconcile (no graft/evict/re-collect) entirely — O(changed), not O(tree).
 	// Otherwise rebuild: reconcile re-collects candidates into a fresh frontier, refine_selected heapifies them.
+	// The heap bound is reset with the candidates: an unbudgeted rebuild refines inline and never reaches
+	// refine_selected, so a bound left from an earlier budgeted grow would index a cleared vector.
 	if (!reuse_frontier) {
 		oct.refine_cands.clear();
+		oct.refine_heap_end = 0;
 		oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge; collect refines
 	}
 	oct.last_reconcile_us = OS::get_singleton()->get_ticks_usec() - tb0; // c4: isolate the O(tree) walk cost
-	if (refine_budget >= 0) {
+	if (refine_budget >= 0 || reuse_frontier) {
 		oct.refine_selected(refine_budget, reuse_frontier); // worst-error first for up to refine_budget us; defer the rest
 	}
 	_last_refine_queue = oct.refine_heap_end; // remaining backlog after this grow's drain
@@ -533,11 +584,15 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("mesh_clipmap", "level_data", "dim", "level_origins", "level_cells", "center", "half0", "depth",
 					"camera", "proj", "eps_px", "error_driven", "lattice_world_origin", "level_indices", "palette",
-					"uniform_core", "prune_safety", "emit_min", "emit_max", "build_min", "build_max"),
+					"uniform_core", "prune_safety"),
 			&DCOctreeMesher::mesh_clipmap,
 			DEFVAL(Vector3()), DEFVAL(0.0), DEFVAL(0.0), DEFVAL(false), DEFVAL(Vector3i()),
-			DEFVAL(TypedArray<PackedByteArray>()), DEFVAL(PackedColorArray()), DEFVAL(false), DEFVAL(0.0),
-			DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(Vector3i()), DEFVAL(Vector3i()));
+			DEFVAL(TypedArray<PackedByteArray>()), DEFVAL(PackedColorArray()), DEFVAL(false), DEFVAL(0.0));
+	ClassDB::bind_method(
+			D_METHOD("mesh_clipmap_splice", "level_data", "dim", "level_origins", "level_cells", "center", "half0",
+					"depth", "camera", "proj", "eps_px", "error_driven", "lattice_world_origin", "level_indices",
+					"palette", "uniform_core", "prune_safety", "emit_min", "emit_max", "build_min", "build_max"),
+			&DCOctreeMesher::mesh_clipmap_splice);
 	ClassDB::bind_method(
 			D_METHOD("mesh_world", "store", "world_origin", "depth", "base_cell",
 					"camera", "proj", "eps_px", "error_driven", "palette", "win_min", "win_max", "max_cells"),
