@@ -14,6 +14,7 @@ or move to `docs/completed/` when the session is closed out.*
 - [x] Track B3 — `part-index-footprint-cells-never-released` (sub-cell parts now get no record; filed `part-index-sub-cell-parts-untracked`)
 - [x] Track B4 — `mpm-thaw-events-unmeasured` (particles now follow the measured flips too; filed `mpm-thaw-carve-leaves-planned-cells`)
 - [x] Track B5 — MPM SVD regression test (all four rows pinned; filed `mpm-svd-ill-conditioned-u`)
+- [x] Track E1 (follow-up) — `SdfLattice.materials()` reads "before" from the owner leaf, like the C++ builders — one `SdfLattice.owner_centre` shared with the test oracle; a max-face seam no longer repaints the leaves below it (fill and imprint pinned in `test_lattice_materials`; filed `edit-store-stamp-union-repaints-terrain`)
 - [ ] Morning brief + play-test list at the bottom of this doc
 
 ## The constraint that shapes everything

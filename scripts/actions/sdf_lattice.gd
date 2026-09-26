@@ -53,6 +53,14 @@ func point(i: Vector3i) -> Vector3:
     return origin + Vector3(i) * cell
 
 
+# The centre of the rewritten leaf a point's "before" value is read from (store.sample_toward): the
+# one above it on each axis, as store.sample reads, except on a max face, where the leaf above is
+# not rewritten. The C++ builders' Lattice::owner_centre (edit_store_lattice.h) is the same rule.
+func owner_centre(i: Vector3i) -> Vector3:
+    var top := dim - 2
+    return origin + (Vector3(mini(i.x, top), mini(i.y, top), mini(i.z, top)) + Vector3.ONE * 0.5) * cell
+
+
 # Whether the write rewrites the leaves over coordinate `v` on `axis` (EditStore's strict-overlap
 # test, which is separable per axis).
 func _rewrites_1d(v: float, axis: int) -> bool:
@@ -122,7 +130,9 @@ func write(store: EditStore, indices: PackedByteArray) -> void:
 
 # Per-leaf material for write(). A leaf holds solid iff one of its corners is solid (a trilerp's
 # extremes are at its corners), so a leaf takes `material` iff the edit made one of its corners
-# solid — the brush is solid there (`brush_solid(point)`), or the write turned an air point solid.
+# solid — the brush is solid there (`brush_solid(point)`), or the write turned an air point solid
+# (air as the owner leaf held it, the value the builders combined with; at a seam on a max face the
+# leaf beyond can disagree).
 # `material` < 0 never repaints (a carve). Existing terrain the brush didn't make keeps its
 # material, read at the leaf centre; a leaf left with no solid corner takes 0 unless `air_keeps`.
 func materials(store: EditStore, material: int, brush_solid: Callable, air_keeps: bool) -> PackedByteArray:
@@ -136,7 +146,7 @@ func materials(store: EditStore, material: int, brush_solid: Callable, air_keeps
                     var p := point(i)
                     var now := sdf[index(i)]
                     if now < VoxelConstants.SDF_SOLID_THRESHOLD and (brush_solid.call(p) \
-                            or store.sample(p) >= VoxelConstants.SDF_SOLID_THRESHOLD):
+                            or store.sample_toward(p, owner_centre(i)) >= VoxelConstants.SDF_SOLID_THRESHOLD):
                         made[index(i)] = 1
     var out := PackedByteArray()
     out.resize(dim * dim * dim)
