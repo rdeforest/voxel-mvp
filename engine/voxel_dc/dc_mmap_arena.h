@@ -6,7 +6,8 @@
 // while the hot working set stays in RAM. The octree's cell arena uses only operator[] / push_back /
 // resize_uninitialized / size, so this is a drop-in for LocalVector<Cell>. A huge sparse mapping is reserved
 // up front (virtual only until touched) so growth never remaps. Falls back to anonymous (swap-paged) mmap if
-// the temp file can't be created (e.g. tests on a read-only dir) — same interface, just not disk-paged.
+// no temp dir yields a mappable file (read-only or tmpfs-only dirs, or mmap refused) — same interface, just
+// not disk-paged.
 
 #include "core/error/error_macros.h"
 
@@ -45,6 +46,17 @@ inline bool dc_dir_is_ram_backed(const char *d) {
 #endif
 }
 
+// DC_ARENA_FAIL_DISK_MMAP refuses the disk mapping in one temp dir (value = that dir, exactly as tried) or in
+// every dir ("*"), so a test can drive the mmap-failure paths: no real failure of a valid fd can be induced
+// deterministically on demand.
+inline void *dc_arena_disk_mmap(const char *dir, int fd, int64_t bytes) {
+	const char *fail = getenv("DC_ARENA_FAIL_DISK_MMAP");
+	if (fail != nullptr && (strcmp(fail, "*") == 0 || strcmp(fail, dir) == 0)) {
+		return MAP_FAILED;
+	}
+	return mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+}
+
 template <typename T>
 struct MmapArena {
 	T *base = nullptr;
@@ -78,36 +90,41 @@ struct MmapArena {
 			_cap = cap_limit;
 		}
 		_bytes = _cap * int64_t(sizeof(T));
-		// Try real-disk temp dirs in order; first one that gives a non-tmpfs, writable, truncatable file wins.
-		const char *env = getenv("DC_ARENA_DIR");
-		const char *dirs[] = { env, "./tmp", "/var/tmp" };
+		// Try real-disk temp dirs in order; a dir whose file can't be mapped must not end the search.
+		const char *dirs[] = { getenv("DC_ARENA_DIR"), "./tmp", "/var/tmp" };
 		for (const char *d : dirs) {
-			if (d == nullptr || d[0] == '\0') {
-				continue;
-			}
-			if (dc_dir_is_ram_backed(d)) {
-				continue; // RAM-backed — would defeat disk paging
-			}
-			char tmpl[300];
-			snprintf(tmpl, sizeof(tmpl), "%s/dc_arena_XXXXXX", d);
-			fd = mkstemp(tmpl);
-			if (fd >= 0) {
-				unlink(tmpl); // the open fd keeps the inode for MAP_SHARED; auto-removed on close
-				if (ftruncate(fd, _bytes) == 0) {
-					strncpy(g_arena_dir, d, sizeof(g_arena_dir) - 1);
-					break;
-				}
-				close(fd);
-				fd = -1;
+			if (_map_disk(d)) {
+				return;
 			}
 		}
-		if (fd >= 0) {
-			base = (T *)mmap(nullptr, _bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-		} else {
-			g_arena_anon_fallback = true; // OOM-safety lost — the game pops a warning about this
-			base = (T *)mmap(nullptr, _bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-		}
+		g_arena_anon_fallback = true; // OOM-safety lost — the game pops a warning about this
+		base = (T *)mmap(nullptr, _bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 		CRASH_COND_MSG(base == MAP_FAILED, "MmapArena: mmap failed (out of address space?)");
+	}
+
+	// True once `base` maps a fresh temp file in `dir`. The file is unlinked at birth, so closing the fd on
+	// any later failure is the whole cleanup — nothing is left on disk.
+	bool _map_disk(const char *dir) {
+		if (dir == nullptr || dir[0] == '\0' || dc_dir_is_ram_backed(dir)) {
+			return false; // RAM-backed would defeat disk paging
+		}
+		char tmpl[300];
+		snprintf(tmpl, sizeof(tmpl), "%s/dc_arena_XXXXXX", dir);
+		const int file = mkstemp(tmpl);
+		if (file < 0) {
+			return false;
+		}
+		unlink(tmpl); // the open fd keeps the inode for MAP_SHARED; auto-removed on close
+
+		void *mapped = ftruncate(file, _bytes) == 0 ? dc_arena_disk_mmap(dir, file, _bytes) : MAP_FAILED;
+		if (mapped == MAP_FAILED) {
+			close(file);
+			return false;
+		}
+		fd = file;
+		base = (T *)mapped;
+		strncpy(g_arena_dir, dir, sizeof(g_arena_dir) - 1);
+		return true;
 	}
 
 	int64_t size() const { return _size; }
