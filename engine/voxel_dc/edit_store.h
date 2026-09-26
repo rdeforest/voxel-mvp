@@ -129,13 +129,7 @@ private:
 	int _seed = 0;
 	voxel_dc::TerrainField _gen;
 
-	// A write_region call as the dry run in lattice_writes walks it.
-	struct RegionWrite {
-		voxel_dc::ArrayField field;
-		double cell;
-		Vector3 rmin;
-		Vector3 rmax;
-	};
+	struct RegionWrite; // a write_region call as lattice_writes walks it (edit_store_dry_run.cpp)
 
 	int _new_node(const Vector3 &o, double s);
 	void _stamp(const voxel_dc::Field &brush, const Vector3 &rmin, const Vector3 &rmax, int op, int material, double min_leaf);
@@ -143,8 +137,9 @@ private:
 	void _write_region(int idx, const voxel_dc::ArrayField &sdf, const PackedByteArray &indices,
 			int adim, const Vector3 &aorigin, double cell, const Vector3 &rmin, const Vector3 &rmax);
 	void _subdivide(int idx); // edited leaf -> inherit its field; unedited -> fresh (still generator)
-	bool _write_changes(int idx, const RegionWrite &write) const;
-	bool _leaf_write_changes(const Vector3 &o, double s, const float *corners, const RegionWrite &write) const;
+	bool _write_changes(int idx, RegionWrite &write) const;
+	bool _leaf_write_changes(const Vector3 &o, double s, const float *corners, RegionWrite &write) const;
+	bool _corner_changes(const Vector3 &c, int slot, const float *held, RegionWrite &write) const;
 	int _leaf_at(const Vector3 &p) const;
 	int _leaf_toward(const Vector3 &p, const Vector3 &toward) const;
 	bool _inside_root(const Vector3 &p) const;
