@@ -107,7 +107,14 @@ checkout_ref() {
 		fi
 
 		# Fetch refs + tags so the pin is resolvable even if it's new.
-		git fetch --quiet --tags origin
+		# --force: upstream occasionally re-points a tag; without it git refuses
+		# ("would clobber existing tag") and exits 1. Mirror origin — a moved pin
+		# changes the resolved commit, which the build stamp then catches.
+		# A failed fetch is loud but not fatal: offline is fine if the pin
+		# already resolves locally.
+		if ! git fetch --quiet --tags --force origin; then
+			info "WARNING: ${name}: git fetch failed (see above); using local refs"
+		fi
 
 		# Resolve the pin to a concrete commit.
 		local target

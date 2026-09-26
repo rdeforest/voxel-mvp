@@ -12,8 +12,12 @@
 
 #include <fcntl.h>
 #include <sys/mman.h>
-#include <sys/statfs.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <sys/mount.h> // statfs lives here on macOS/BSD
+#else
+#include <sys/statfs.h>
+#endif
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +31,19 @@ namespace dc_mesh {
 inline bool g_arena_anon_fallback = false;
 inline char g_arena_dir[256] = { 0 }; // the disk dir an arena actually used (empty if fell back to anon)
 inline constexpr long DC_TMPFS_MAGIC = 0x01021994; // tmpfs is RAM-backed — skip it (would defeat disk paging)
+
+// True if `d` is on a RAM-backed filesystem. Linux reports tmpfs by magic number; macOS by type name.
+inline bool dc_dir_is_ram_backed(const char *d) {
+	struct statfs sfb;
+	if (statfs(d, &sfb) != 0) {
+		return false;
+	}
+#if defined(__APPLE__)
+	return strcmp(sfb.f_fstypename, "tmpfs") == 0;
+#else
+	return long(sfb.f_type) == DC_TMPFS_MAGIC;
+#endif
+}
 
 template <typename T>
 struct MmapArena {
@@ -68,8 +85,7 @@ struct MmapArena {
 			if (d == nullptr || d[0] == '\0') {
 				continue;
 			}
-			struct statfs sfb;
-			if (statfs(d, &sfb) == 0 && long(sfb.f_type) == DC_TMPFS_MAGIC) {
+			if (dc_dir_is_ram_backed(d)) {
 				continue; // RAM-backed — would defeat disk paging
 			}
 			char tmpl[300];
@@ -126,7 +142,11 @@ struct MmapArena {
 		const int64_t used = _size * int64_t(sizeof(T));
 		const int64_t total_pages = (used + pg - 1) / pg;
 		static const int64_t CHUNK = 1 << 20; // up to 1M pages (1 MiB vec) per mincore call
+#if defined(__APPLE__)
+		char *vec = (char *)malloc(CHUNK); // macOS mincore takes char *
+#else
 		unsigned char *vec = (unsigned char *)malloc(CHUNK);
+#endif
 		if (vec == nullptr) {
 			return 0;
 		}
