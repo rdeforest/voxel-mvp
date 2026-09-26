@@ -396,10 +396,13 @@ names.
 - **Lattices are built and queried in C++.** Previews run every frame, so every `SdfLattice`
   builder (`sphere_stamp`, `VoxelImprint.lattice`, `StoreWrite.lattice`, the raise / lower /
   flatten reshapes) is `EditStore.predict_*`, and `flips` / `solidifies_in` / `empties_in` are
-  `EditStore.lattice_flips` / `lattice_turns_in` (`engine/voxel_dc/edit_store_predict*.cpp`).
-  Preview and write build the lattice through the same call. `test_edit_store_predict` gates them
+  `EditStore.lattice_flips` / `lattice_turns_in` (`engine/voxel_dc/edit_store_predict*.cpp`);
+  Construction's attach test is `EditStore.imprint_near_solid`. Preview and write build the
+  lattice through the same call. `test_edit_store_predict` (lattices, flips, safety) and
+  `test_construction_attach_predict` (attach answers, bisected to the refusal boundary) gate them
   bit for bit against the GDScript originals, kept as the oracle in
-  `test/support/lattice_oracle.gd`; a change to one needs the same change in the other.
+  `test/support/lattice_oracle.gd`, on the store in `test/support/predict_store.gd`; a change to
+  one needs the same change in the other.
 - **A lattice's "before" is the rewritten leaf's own value.** Builders read each point with
   `EditStore.sample_toward`, so a point on the region's max faces is read from the leaf the write
   replaces, not the untouched neighbour `sample` would pick. `SdfLattice.writes` (CSG refuses on

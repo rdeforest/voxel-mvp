@@ -4,10 +4,9 @@ extends GutTest
 # a real surface point — the renderer's per-frame cost — for dig, fill, raise, flatten and CSG
 # sphere, against the same prediction done by the GDScript oracle (test/support/lattice_oracle.gd,
 # the code previews ran before EditStore took it over). Also a construction beam resting on the
-# surface and floating 3 m above it, where ConstructionAction._attached (a GDScript scan the oracle
-# column leaves out) finds nothing and runs in full. Two player cases: none (the bug file's table),
-# and one standing at the brush's edge, where the safety boxes overlap rewritten leaves but nothing
-# is endangered, so the safety scan runs in full.
+# surface and floating 3 m above it, where the attach scan finds nothing and runs in full. Two
+# player cases: none (the bug file's table), and one standing at the brush's edge, where the safety
+# boxes overlap rewritten leaves but nothing is endangered, so the safety scan runs in full.
 # Run (GUT, for the autoloads): bin/godot --path . --headless -s addons/gut/gut_cmdln.gd \
 #     -gtest=res://scripts/dev/bench_preview_predict.gd
 
@@ -56,7 +55,14 @@ func _rows(label: String, player: CharacterBody3D) -> void:
         var build := ConstructionAction.new(beam, _at + Vector3.UP * lift, Vector3.ZERO, &"Wood", ctx)
         _row("beam +%.0f m" % lift, func() -> void:
                 ConstructionAction.new(beam, _at + Vector3.UP * lift, Vector3.ZERO, &"Wood", ctx).preview(),
-            func() -> void: _oracle_safe(Oracle.imprint(_store, build._shape(), build._xform(), CsgState.Op.ADD), player))
+            func() -> void: _oracle_build(build, player))
+
+
+# A construction preview as the oracle asks it: the imprint, its flips and safety, and the attach scan.
+func _oracle_build(build: ConstructionAction, player: CharacterBody3D) -> void:
+    var lat := Oracle.imprint(_store, build._shape(), build._xform(), CsgState.Op.ADD)
+    _oracle_safe(lat, player)
+    var _attached := Oracle.attached(_store, lat, build._shape(), build._xform())
 
 
 # The oracle's flips plus, with a player, its safety scan: what a PlayerSafeAction preview asked.

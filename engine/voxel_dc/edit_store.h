@@ -59,6 +59,11 @@ public:
 	Dictionary predict_work(const TypedArray<Vector3i> &points, const PackedFloat64Array &sdfs) const;
 	Dictionary predict_bell(Vector3 center, double radius, double peak) const;
 	Dictionary predict_flatten(Vector3 plane_point, Vector3 normal, double radius) const;
+	// Whether the store holds solid at a point of predict_imprint's lattice (same shape / dims /
+	// xform / cell) that lies within `reach` of the brush, or at `below` from such a point. Gated
+	// against ConstructionAction's GDScript original (the oracle) by test_construction_attach_predict.
+	bool imprint_near_solid(int shape, const PackedFloat64Array &dims, Transform3D xform, double cell,
+			double reach, Vector3 below) const;
 
 	// Questions asked of a predicted lattice (the write_region arguments: dim^3 values, x fastest)
 	// against the store as it is now. lattice_flips = SdfLattice.flips: { solid, air }, the cells

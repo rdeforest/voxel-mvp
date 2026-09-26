@@ -142,6 +142,29 @@ int csg_dim_count(int shape) {
 	}
 }
 
+// Where the imprint's lattice sits (VoxelImprint.world_box inlined): points `cell` apart covering
+// the brush's world box, one point of slack beyond it on every side.
+struct LatticePlace {
+	Vector3 origin;
+	int dim = 0;
+};
+
+LatticePlace imprint_place(int shape, const double *dims, const Transform3D &xform, double cell) {
+	const AABB box = xform.xform(csg_local_aabb(shape, dims)).grow(IMPRINT_MARGIN);
+	const Vector3i lo = Vector3i((box.position / cell).floor()) - Vector3i(1, 1, 1);
+	const Vector3i hi = Vector3i(((box.position + box.size) / cell).ceil()) + Vector3i(1, 1, 1);
+	const Vector3i span = hi - lo;
+	return { Vector3(lo) * cell, MAX(span.x, MAX(span.y, span.z)) + 1 };
+}
+
+// The shape / dims / cell arguments predict_imprint and imprint_near_solid share.
+bool imprint_args_valid(int shape, const PackedFloat64Array &dims, double cell) {
+	ERR_FAIL_COND_V_MSG(csg_dim_count(shape) < 0, false, "Unknown CsgSdf.Shape.");
+	ERR_FAIL_COND_V_MSG(dims.size() != csg_dim_count(shape), false, "Wrong dims count for the shape.");
+	ERR_FAIL_COND_V_MSG(!(cell > 0.0), false, "cell must be positive.");
+	return true;
+}
+
 } // namespace
 
 // SdfLattice.sphere_stamp.
@@ -158,23 +181,47 @@ Dictionary EditStore::predict_sphere_stamp(Vector3 center, double radius, int op
 	return prediction(*this, lat);
 }
 
-// VoxelImprint.lattice (world_box inlined).
+// VoxelImprint.lattice.
 Dictionary EditStore::predict_imprint(int shape, const PackedFloat64Array &dims, Transform3D xform, int op, double cell) const {
-	ERR_FAIL_COND_V_MSG(csg_dim_count(shape) < 0, Dictionary(), "Unknown CsgSdf.Shape.");
-	ERR_FAIL_COND_V_MSG(dims.size() != csg_dim_count(shape), Dictionary(), "Wrong dims count for the shape.");
-	ERR_FAIL_COND_V_MSG(!(cell > 0.0), Dictionary(), "cell must be positive.");
+	if (!imprint_args_valid(shape, dims, cell)) {
+		return Dictionary();
+	}
 	const double *d = dims.ptr();
 	const Transform3D inverse = xform.affine_inverse();
-	const AABB box = xform.xform(csg_local_aabb(shape, d)).grow(IMPRINT_MARGIN);
-	const Vector3i lo = Vector3i((box.position / cell).floor()) - Vector3i(1, 1, 1);
-	const Vector3i hi = Vector3i(((box.position + box.size) / cell).ceil()) + Vector3i(1, 1, 1);
-	const Vector3i span = hi - lo;
-	Lattice lat(Vector3(lo) * cell, cell, MAX(span.x, MAX(span.y, span.z)) + 1);
+	const LatticePlace place = imprint_place(shape, d, xform, cell);
+	Lattice lat(place.origin, cell, place.dim);
 	fill(*this, lat, [&](const Vector3 &p, double existing) {
 		const double dist = CLAMP(csg_sdf(shape, d, inverse.xform(p)), -SDF_BAND, SDF_BAND);
 		return op == OP_UNION ? MIN(existing, dist) : MAX(existing, -dist);
 	});
 	return prediction(*this, lat);
+}
+
+// ConstructionAction's attach test, over the points of the lattice predict_imprint builds (its
+// field is not needed, so it is not built). The answer is a bool, so the scan order (z-y-x, as the
+// original) only decides how early it stops.
+bool EditStore::imprint_near_solid(int shape, const PackedFloat64Array &dims, Transform3D xform, double cell,
+		double reach, Vector3 below) const {
+	if (!imprint_args_valid(shape, dims, cell)) {
+		return false;
+	}
+	const double *d = dims.ptr();
+	const Transform3D inverse = xform.affine_inverse();
+	const LatticePlace place = imprint_place(shape, d, xform, cell);
+	for (int z = 0; z < place.dim; ++z) {
+		for (int y = 0; y < place.dim; ++y) {
+			for (int x = 0; x < place.dim; ++x) {
+				const Vector3 p = place.origin + Vector3(x, y, z) * cell;
+				if (csg_sdf(shape, d, inverse.xform(p)) > reach) {
+					continue;
+				}
+				if (sample(p) < SOLID_THRESHOLD || sample(p + below) < SOLID_THRESHOLD) {
+					return true;
+				}
+			}
+		}
+	}
+	return false;
 }
 
 // SdfLattice.value_at at every rewritten cell's sample point, then CellFlips._add, in z-y-x order.
