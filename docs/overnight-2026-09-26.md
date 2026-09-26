@@ -136,11 +136,21 @@ pushed (see "Environment").*
    detachment never react to them. This predates tonight. The fix is ready (writes now return
    measured flips); the intent isn't:
    [`actions-reshape-no-voxel-events`](bugs/actions-reshape-no-voxel-events.md).
-3. **Dig under your own feet:** guard it the way Lower is guarded, or keep Dig as "dig anywhere"?
+3. **Player safety misses sub-cell burials** (found tonight, med). A raise or carve that moves the
+   surface less than half a cell inside your capsule goes unrefused; a probe reproduces it. An exact
+   fix needs your call on how an unedited leaf's generator field is judged:
+   [`player-safety-misses-sub-cell-burial`](bugs/player-safety-misses-sub-cell-burial.md).
+4. **Dig under your own feet:** guard it the way Lower is guarded, or keep Dig as "dig anywhere"?
    The guard would refuse digs aimed within ~4.5 m of your feet:
    [`dig-action-no-validate-no-safety`](bugs/dig-action-no-validate-no-safety.md).
 
 ### Decided without you — overrule freely
+
+- **EditStore save format (I1):** the old `has_corners` byte now holds a four-state `FieldState`
+  (0 and 1 mean what they did), and `SAVE_VERSION` is **not** bumped, because a bump would refuse
+  every existing save. Old saves load unchanged; an old build reading a new save gets the old
+  rounding behaviour, not garbage. `deserialize` now returns success, and a failed load keeps the
+  previous tree.
 
 - **Fixed-bug convention:** I followed `00_INDEX.md`'s preamble. A fixed bug's file is deleted, and
   `closed/` is only for not-a-bug and obsolete verdicts. Track A had archived three fixed bugs; the
@@ -148,7 +158,7 @@ pushed (see "Environment").*
   table is kept below.
 - **Scope grew past the plan.** Once A and B landed early, I ran follow-ups: every per-frame and
   per-click GDScript lattice loop moved to C++ (A4, C1, C2, G1, G2), plus backlog bugs with clear
-  fixes (D1, E1, F1–F3, H1, I). Each got the same author → two reviewers → fixer loop.
+  fixes (D1, E1, F1–F3, H1, I1). Each got the same author → two reviewers → fixer loop.
 - **Asked-then-answered overnight:** agents asked whether to port the construction attach scan, the
   per-click material paint and the thaw's measurement to C++. The manifesto answers that, so I did
   (C1, G1, G2). Flatten's work generation and the safety scan went too (A1b), because the plan's
@@ -180,6 +190,7 @@ pushed (see "Environment").*
 | SVD ill-conditioning: interim fix now, or wait for the McAdams rewrite? Does the sim ever get there? | `mpm-svd-ill-conditioned-u` |
 | `edit_world` and a stale refine frontier: clear it, or refuse reuse after an edit? | `dc-edit-world-stale-refine-frontier` |
 | One-shot frontier drain drops 89 triangles in `emit_incremental` (pending gate test added). Does that match `dcdrop` in play, and change the priority? | `dc-incremental-emit-ring-insufficient` |
+| A write whose corners equal what a leaf holds still moves in-region samples by ~1e-8 and reports `changed`. Keep the leaf's field when the corners match? | `edit-store-noop-write-reports-changed` |
 | Should `TerrainSdfChanged` carry its source, so DetachmentScout can ignore MPM edits explicitly? | (B4 commit `7e6c225`) |
 | Close misc item 6 (player.gd input if-chains) as won't-fix? | `misc-low-severity` |
 | 04-event-bus.md "Lifetime & cleanup" predates WeakRef subscriptions: update, or keep as history? | `docs/roadmap/design/04-event-bus.md` |
@@ -199,13 +210,14 @@ Preview per call, radius 3, real terrain (A1b; "Before" is pre-`f11d284`):
 Per click, `execute()`: beam placement 6.3 → 0.70 ms, CSG ~6.5 → 0.70 ms, fill r2 1.33 → 0.16 ms
 (G1, G2). 729-cell MPM thaw 9.4 → 6.0 ms (D1, G2). Buried refused CSG preview 0.68 → 0.34 ms (A4).
 
-GUT: 192 tests / 190 passing / 2 pending at the start → **288 / 284 / 4** at the end, 0 failing
+GUT: 192 tests / 190 passing / 2 pending at the start → **295 / 291 / 4** at the end, 0 failing
 throughout. New pending tests are gates for filed bugs (`mpm-svd-ill-conditioned-u`,
 `dc-incremental-emit-ring-insufficient`).
 
 ### Not done, and why
 
-- **Dig's player-safety guard:** waits on question 3.
+- **Dig's player-safety guard:** waits on question 4.
+- **Exact player safety (I2):** the author failed the chunk rather than ship half a rule; see question 3.
 - **The DC mesher bugs** (`dc-inside-coverage-cracks` and the rest): design work that's yours;
   tonight only added evidence and a gate test.
 - **Nothing was checked on a GPU.** Everything here is headless. The render-visible changes (paint

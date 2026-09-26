@@ -33,7 +33,7 @@ What changed, in one breath:
 **Run `tools/build` after pulling** (engine changes), then the class-cache pass
 (`bin/godot --path . --headless --editor --quit`); new `class_name`s landed.
 
-GUT: **288 tests, 284 passing, 4 pending**, 0 failing. The 4 pending tests are known gates (see `docs/bugs/00_INDEX.md`).
+GUT: **295 tests, 291 passing, 4 pending**, 0 failing. The 4 pending tests are known gates (see `docs/bugs/00_INDEX.md`).
 
 The per-change loop that ran all night: an Opus author, an Opus correctness reviewer and a Sonnet
 completeness reviewer (a different model family on purpose), then an Opus fixer. A Fable tiebreak
@@ -43,8 +43,9 @@ researcher.
 
 ## The active thread: answers, then FEAT089
 
-1. **Answer the morning brief's three "needs you" questions**: single-voxel edits, whether
-   terraforming emits cell events, and Dig's safety guard. Each unblocks a ready fix.
+1. **Answer the morning brief's four "needs you" questions**: single-voxel edits, whether
+   terraforming emits cell events, how player safety judges generator ground (it misses sub-cell
+   burials today), and Dig's safety guard.
 2. **FEAT089, parts look like parts**, which blocks the rest of 5.5g. Volumetric worldgen tier 1
    (`planned/18`) is independent and can run alongside.
 
