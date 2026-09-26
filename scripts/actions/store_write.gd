@@ -19,8 +19,17 @@ extends RefCounted
 static func cells(store: EditStore, work: Array[LatticeEdit]) -> AABB:
     if work.is_empty():
         return AABB()
-    var lat := lattice(store, work)
+    return write(store, lattice(store, work), work)
+
+
+# Write `lat`, which must be lattice(store, work) built against the store as it is now, with the
+# work's materials. For a caller that measures or previews the field before writing it: handing
+# over the lattice it measured makes the write that field, not a rebuild of it.
+static func write(store: EditStore, lat: SdfLattice, work: Array[LatticeEdit]) -> AABB:
     var indices := _current_materials(store, lat)
+    if indices.is_empty():
+        return AABB()
+
     var lo_cell := Vector3i(lat.origin)
     for edit in work:
         if edit.material >= 0:
@@ -32,19 +41,27 @@ static func cells(store: EditStore, work: Array[LatticeEdit]) -> AABB:
 # Write a work lattice (a work set's field, as lattice() or EditStore.predict_bell / predict_flatten
 # build it) keeping every leaf's current material. Returns the rewritten box, as cells() does.
 static func reshape(store: EditStore, lat: SdfLattice) -> AABB:
-    lat.write(store, _current_materials(store, lat))
+    var indices := _current_materials(store, lat)
+    if indices.is_empty():
+        return AABB()
+
+    lat.write(store, indices)
     return AABB(lat.region_lo, lat.region_hi - lat.region_lo)
 
 
+# Every lattice point's current material, or empty (with an error) for a lattice whose origin is
+# not a whole number of cells. fill_indices_region reads (lo + i) * cell, which is lat.point(i)
+# only on that grid; every EditStore.predict_* lattice is on it (integer origin, 1 m cell). Off
+# it the bulk read would give the whole box its neighbours' materials, and an assert would not
+# stop that in a release build.
 static func _current_materials(store: EditStore, lat: SdfLattice) -> PackedByteArray:
-    var indices := PackedByteArray()
-    indices.resize(lat.dim * lat.dim * lat.dim)
-    for z in lat.dim:
-        for y in lat.dim:
-            for x in lat.dim:
-                var i := Vector3i(x, y, z)
-                indices[lat.index(i)] = store.material_at(lat.point(i))
-    return indices
+    var lo := Vector3i((lat.origin / lat.cell).round())
+    if Vector3(lo) * lat.cell != lat.origin:
+        push_error("StoreWrite: lattice origin %s is not a whole number of %s m cells; write refused"
+            % [lat.origin, lat.cell])
+        return PackedByteArray()
+
+    return store.fill_indices_region(lo, lat.dim, lat.cell)
 
 
 # The field cells() will write for `work`: the current field over the work's box (plus the

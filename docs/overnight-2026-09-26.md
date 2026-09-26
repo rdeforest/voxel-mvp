@@ -14,6 +14,7 @@ or move to `docs/completed/` when the session is closed out.*
 - [x] Track B3 — `part-index-footprint-cells-never-released` (sub-cell parts now get no record; filed `part-index-sub-cell-parts-untracked`)
 - [x] Track B4 — `mpm-thaw-events-unmeasured` (particles now follow the measured flips too; filed `mpm-thaw-carve-leaves-planned-cells`)
 - [x] Track B5 — MPM SVD regression test (all four rows pinned; filed `mpm-svd-ill-conditioned-u`)
+- [x] Track D1 (follow-up) — MPM thaw builds its StoreWrite lattice once (`StoreWrite.write` takes the measured lattice; FillVoxel/EmptyVoxel too) — 729-cell block thaw 9.4 → 7.4 ms median, pre-B4 `mpm_structure.gd` on the pre-D1 `StoreWrite` 7.85 ms, on D1's `StoreWrite` 7.6–8.0 ms (same harness, same engine)
 - [x] Track E1 (follow-up) — `SdfLattice.materials()` reads "before" from the owner leaf, like the C++ builders — one `SdfLattice.owner_centre` shared with the test oracle; a max-face seam no longer repaints the leaves below it (fill and imprint pinned in `test_lattice_materials`; filed `edit-store-stamp-union-repaints-terrain`)
 - [ ] Morning brief + play-test list at the bottom of this doc
 
@@ -131,6 +132,14 @@ Items recorded during the session (to fold into the brief):
   that, but `store_write.gd` is Track A's file tonight. Cells the box rewrite empties outside the
   plan also become particles now, so a thaw can drop debris a few metres from where it was aimed
   (seen: 3 m outside a r=1.4 sphere).
+- **Finding (D1):** the double lattice build was not most of B4's slowdown. Profiled on the 729-cell
+  block: the second `predict_work` cost ~0.25 ms of the ~1.5 ms; the rest is the measurement itself
+  (`lat.cells()` 0.1, `snapshot` 0.44, `since` 0.62 ms of per-cell `store.sample` calls). D1 builds
+  the lattice once, reads `StoreWrite`'s current materials with one `fill_indices_region` call
+  (0.49 → ~0.03 ms; identical on 270 lattices over a multi-level, multi-material field; `test_store_write.gd` pins it on work, bell and flatten lattices, and an off-grid lattice is refused with an error rather than asserted), and probes
+  each kept cell once in the thaw's corner carve (3.7 → 2.1 ms; identical work on 9 test plans).
+  Thaw: 9.4 → 7.4 ms (pre-B4: 7.85). The last two speed up code pre-B4 also ran, so the
+  measurement still costs ~1.2 ms over an unmeasured thaw; a C++ batch sample would remove it.
 - **Question (B4):** a thaw plan the 1 m corner carve can't realize (a lone buried cell, the shell
   of a sphere in solid ground): refuse it, reshape it, or solve for corners that carve it exactly?
   Evidence in `docs/bugs/mpm-thaw-carve-leaves-planned-cells.md`.
