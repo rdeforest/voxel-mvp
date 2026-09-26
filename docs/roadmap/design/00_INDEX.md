@@ -84,7 +84,7 @@ or condensed.
   pyrite from the hydrothermal zones. Includes the failure-legibility rule that
   applies to every ladder.
 - [`22-scenario-languages.md`](22-scenario-languages.md) — **draft for review.**
-  Splits test instruments from play verbs, and specifies three description formats that share
-  one expression language and generator registry: field captures (the bitmap), parametric
-  assemblies (the vector drawing) and HTN-style methods (the commands, also the recording
-  format). Also covers the record → GUT-test loop.
+  Splits test instruments from play verbs, and specifies two formats that share one expression
+  language (with units) and generator registry: field captures (the bitmap) and HTN-style methods
+  (the commands). An assembly is a method plus a product description, built by demonstration.
+  Also covers the record → GUT-test loop.
