@@ -10,7 +10,7 @@ or move to `docs/completed/` when the session is closed out.*
 - [ ] Track A3 — `mmap-arena-no-mmap-fallback` (if time)
 - [x] Track B1 — characterize `single-voxel-edits-unexpected`
 - [x] Track B2 — `empty-voxel-no-player-safety` (Dig: empty-carve refusal only; its player-safety guard needs `preview()`, specified in its bug file)
-- [ ] Track B3 — `part-index-footprint-cells-never-released`
+- [x] Track B3 — `part-index-footprint-cells-never-released` (sub-cell parts now get no record; filed `part-index-sub-cell-parts-untracked`)
 - [ ] Track B4 — `mpm-thaw-events-unmeasured`
 - [ ] Track B5 — MPM SVD regression test (if time)
 - [ ] Morning brief + play-test list at the bottom of this doc
@@ -110,3 +110,14 @@ available to unblock anything. Work the whole window; do not stop and wait.
 
 *Filled in at the end of the session: decisions made unilaterally, open
 questions, what got skipped and why, and a short play-test list.*
+
+Items recorded during the session (to fold into the brief):
+
+- **Behaviour change (B3):** a part that flips no cell centre (e.g. a 0.5 m log
+  lying between cell-centre planes) now gets no PartIndex record at all. Before,
+  it got an AABB-footprint record nothing could ever release. Only runtime
+  consumer is the console `parts` count. Open design question in
+  `docs/bugs/part-index-sub-cell-parts-untracked.md`.
+- **Convention conflict:** `docs/bugs/00_INDEX.md` says a fixed bug's file is
+  deleted and `closed/` is for not-a-bug/obsolete. Track B follows that; Track A
+  archived fixed bugs to `closed/` with "fixed" verdicts. Pick one.

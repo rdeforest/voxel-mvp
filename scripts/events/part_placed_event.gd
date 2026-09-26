@@ -2,9 +2,10 @@ class_name PartPlacedEvent
 extends VoxelEvent
 
 # Emitted when a part is imprinted (ConstructionAction). Carries the identity metadata the
-# field itself doesn't hold (manifesto #7 sidecar): the part's cells, material, dimensions,
-# and placed transform. PartIndex records it; the raw voxel_added events still drive the
-# structural/render systems. `ancestry` is the parent part's id, or -1 for a root placement.
+# field itself doesn't hold (manifesto #7 sidecar): the part's cells (the ones its imprint made
+# solid — its voxel_added set), material, dimensions, and placed transform. PartIndex records
+# it; the raw voxel_added events still drive the structural/render systems. `ancestry` is the
+# parent part's id, or -1 for a root placement.
 
 const CHANNEL := &"part_placed"
 

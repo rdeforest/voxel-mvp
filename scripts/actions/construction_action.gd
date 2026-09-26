@@ -71,12 +71,16 @@ func execute() -> void:
     if store == null:
         push_error("ConstructionAction.execute(): no store")
         return
-    var xform := _xform()
+    _ensure_flips()
+    var xform  := _xform()
+    var before := CellFlips.snapshot(store, _lattice.cells())
     VoxelImprint.apply(store, material_name, _shape(), xform, CsgState.Op.ADD)
-    # Record the placement's identity in the PartIndex sidecar (the field stays pure).
+    # PartIndex releases a cell only when a carve flips it back to air, so the part is registered
+    # under exactly the cells the write made solid (the voxel_added set), measured across it.
     VoxelEventBusSingleton.emit(
         PartPlacedEvent.CHANNEL,
-        PartPlacedEvent.new(VoxelConstants.GRID_ID, _part_cells(), material_name, part.dimensions, xform))
+        PartPlacedEvent.new(VoxelConstants.GRID_ID, CellFlips.since(store, before).solid,
+            material_name, part.dimensions, xform))
 
 
 # --- internals ---
@@ -119,11 +123,11 @@ func _xform() -> Transform3D:
     var centre := placed * Vector3(0.0, part.dimensions.y * 0.5, 0.0)
     return Transform3D(_basis(), centre)
 
-# The part's 1m footprint cells — for the PartPlaced sidecar and the ghost of a part that flips
-# no cell centre (NOT the safety or attach checks: those read the imprint's field). Uses the AABB
-# footprint (footprint_from_aabb collapses a sub-metre-thin dimension to the cell holding its
-# midpoint), so a sub-metre-thin part still has a non-empty 1m footprint. The actual geometry is
-# written sub-metre by VoxelImprint; this is the coarse tracking footprint.
+# The part's coarse 1m AABB footprint — only a proxy for the ghost of a part that flips no cell
+# centre, so it still shows where it goes. Nothing that tracks the part may use it: a rotated
+# part's footprint holds cells its imprint never fills (identity, events, safety and attachment
+# all read the imprint's field). footprint_from_aabb collapses a sub-metre-thin dimension to the
+# cell holding its midpoint, so a sub-metre-thin part still has a non-empty ghost.
 func _part_cells() -> Array[Vector3i]:
     if _cells_computed:
         return _cells
