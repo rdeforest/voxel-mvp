@@ -16,8 +16,11 @@ var op:       int           # CsgState.Op
 
 var store:    EditStore
 
-# Cached work: [[Vector3i cell, float new_sdf, bool was_solid, bool now_solid], ...]
-var _work: Array         = []
+# Cached prediction from the field the stamp writes (VoxelImprint.lattice): whether it changes
+# the store at all (nothing = refuse), and which cells it flips (the ghost + player safety). A
+# brush thinner than a cell can write real geometry that flips no cell centre; that is placed.
+var _writes: bool        = false
+var _work: CellFlips     = CellFlips.new()
 var _work_computed: bool = false
 
 
@@ -38,20 +41,16 @@ func _init(
 
 func validate() -> bool:
     _ensure_work()
-    if _work.is_empty():
+    if not _writes:
         return false
-    return not _endangers()
+    return not endangered_by(_work)
 
 
 func preview() -> ActionPreview:
     var p := ActionPreview.new()
     _ensure_work()
-    for entry in _work:
-        if entry[3]:                      # now solid
-            p.solid.append(entry[0])
-        elif entry[2]:                    # was solid, now air
-            p.air.append(entry[0])
-    p.refused = _work.is_empty() or _endangers()
+    _work.add_to(p)
+    p.refused = not _writes or endangered_by(_work)
     return p
 
 
@@ -62,7 +61,7 @@ func execute() -> void:
     _ensure_work()
     if op == CsgState.Op.ADD:
         _freeze_bodies_in_volume()
-    VoxelImprint.apply(store, _work, material_name, shape, xform, op)
+    VoxelImprint.apply(store, material_name, shape, xform, op)
 
 
 # --- Internals ---
@@ -74,21 +73,10 @@ func _world_box() -> AABB:
 func _ensure_work() -> void:
     if _work_computed or store == null:
         return
-    _work          = VoxelImprint.compute(store, shape, xform, op)
+    var lat := VoxelImprint.lattice(store, shape, xform, op)
+    _writes        = lat.writes
+    _work          = lat.flips(store)
     _work_computed = true
-
-
-# Refuse if the stamp would bury the player (new solid in their capsule) or cut the
-# ground out from under their feet (new air in the support box). Boxes: PlayerSafeAction.
-func _endangers() -> bool:
-    for entry in _work:
-        var was_solid: bool = entry[2]
-        var now_solid: bool = entry[3]
-        if now_solid and not was_solid and buries(entry[0]):
-            return true
-        if was_solid and not now_solid and drops(entry[0]):
-            return true
-    return false
 
 
 # Freeze any RigidBody3D inside the stamp volume before the SDF mutation lands,

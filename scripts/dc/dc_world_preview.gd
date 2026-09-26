@@ -10,9 +10,9 @@ extends MeshInstance3D
 # run on a WorkerThreadPool task (pure C++, no Node/RenderingServer); the ArrayMesh swap is
 # on the main thread. `dcworld` toggles it. Shown amber, overlaid for comparison.
 #
-# DENSITY: base_cell defaults to RENDER_BASE_CELL (0.25 m) so the preview matches the live
-# clipmap render's resolution. The build is DENSE to the floor, so 0.25 m costs 64× the cells
-# of 1 m for the same metric bubble — hence the modest radius. That cost is exactly what the
+# DENSITY: base_cell defaults to RENDER_BASE_CELL (1 m at the current RENDER_SUBDIV_LOG2 = 0;
+# 0.25 m at 2) so the preview matches the live clipmap render's resolution. The build is DENSE to
+# the floor, so 0.25 m would cost 64× the cells of 1 m for the same metric bubble — hence the modest radius. That cost is exactly what the
 # surface-sparse prune over direct sampling (doc 16 NEXT) removes; until then, coverage is a
 # small BUBBLE around you with a hard rim where terrain stops (the window edge — NOT a bug).
 

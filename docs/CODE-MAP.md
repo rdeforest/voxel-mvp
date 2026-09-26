@@ -377,6 +377,17 @@ names.
   pulls the surface back toward solid neighbours unless the value is large
   enough.
 - Use `SDF_SOLID_THRESHOLD = 0.0` to test solidity in queries.
+- **A cell is read at its centre.** `VoxelUtils.sample_point(cell)` is the one cell → point
+  mapping; `TerrainProbe.sdf/is_solid/material` read there. `Vector3(cell)` is the cell's min
+  corner — a store lattice point, which only writers of lattice values (`StoreWrite`, `SdfLattice`)
+  and DC diagnostics use. An edit's preview, player-safety refusal and voxel events all come
+  from one `CellFlips`: predicted by `SdfLattice.flips()` from the field the edit writes
+  (dig/fill `SdfLattice.sphere_stamp` + `write()`, `StoreWrite`, `VoxelImprint` — all through
+  `EditStore.write_region`, so the prediction IS the write), measured with
+  `CellFlips.snapshot/since` for events. Event materials are read back from the store.
+- **Single-cell edits flip one cell or refuse.** `StoreWrite.one_cell` solves a small LP
+  (`scripts/simplex.gd`) for the cell's 8 corner values so its centre crosses zero and none of its
+  26 neighbours' centres do.
 - All SDF and structural constants live in `VoxelConstants`
   (`scripts/voxel_constants.gd`).
 

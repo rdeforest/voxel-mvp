@@ -35,17 +35,7 @@ func preview() -> ActionPreview:
     p.refused = not validate()
     if store == null:
         return p
-    var origin     := position - Vector3.ONE *  radius
-    var dimensions :=            Vector3.ONE * (radius * 2.0)
-    VoxelUtils.for_each_in_bounding_box(
-        origin,
-        dimensions,
-        func(cell: Vector3i) -> void:
-            if not VoxelUtils.is_in_sphere(Vector3(cell), position, radius):
-                return
-            if store.sample(Vector3(cell)) >= VoxelConstants.SDF_SOLID_THRESHOLD:
-                p.solid.append(cell)
-    )
+    _stamp().flips(store).add_to(p)
     return p
 
 func execute() -> void:
@@ -58,25 +48,23 @@ func execute() -> void:
     # classifier integrates them into the SDF the moment they're fully covered.
     _freeze_bodies_in_volume()
 
-    store.stamp_sphere(position, radius, VoxelConstants.STORE_OP_UNION,
-        MaterialPalette.index_of(material_name), VoxelConstants.RENDER_BASE_CELL)
-
-    var origin     := position - Vector3.ONE *  radius
-    var dimensions :=            Vector3.ONE * (radius * 2.0)
-
-    var added: Array = []
-    VoxelUtils.for_each_in_bounding_box(
-        origin,
-        dimensions,
-        func(pos: Vector3i) -> void:
-            if VoxelUtils.is_in_sphere(Vector3(pos), position, radius):
-                added.append(pos)
-    )
-    emit_added(added)
+    # Write the very field the preview read; events are the cells whose sample point the write
+    # actually flipped, measured across it. What the sphere makes solid takes the fill material.
+    var lattice := _stamp()
+    var before  := CellFlips.snapshot(store, lattice.cells())
+    lattice.write(store, lattice.materials(store, MaterialPalette.index_of(material_name),
+        func(c: Vector3) -> bool: return c.distance_to(position) < radius, true))
+    CellFlips.since(store, before).emit(store)
 
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, origin, dimensions))
+        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, lattice.region_lo, lattice.region_hi - lattice.region_lo))
+
+
+# The field execute() writes — preview and events both read this brush.
+func _stamp() -> SdfLattice:
+    return SdfLattice.sphere_stamp(store, position, radius,
+        VoxelConstants.STORE_OP_UNION, VoxelConstants.RENDER_BASE_CELL)
 
 
 func _freeze_bodies_in_volume() -> void:

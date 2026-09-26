@@ -25,7 +25,7 @@ const GRID_ID := 0
 # 1m gameplay/structural grid unchanged).
 const RENDER_SUBDIV_LOG2 := 0
 const RENDER_SUBDIV      := 1 << RENDER_SUBDIV_LOG2           # render cells per axis per gameplay cell
-const RENDER_BASE_CELL   := VOXEL_SIZE / float(RENDER_SUBDIV) # metres per render cell (0.25 at LOG2 = 2)
+const RENDER_BASE_CELL   := VOXEL_SIZE / float(RENDER_SUBDIV) # metres per render cell (1.0 at the current LOG2 = 0)
 
 # Transparent editing overlays (cell ghost, grid, build preview) must draw ON TOP of the
 # full-screen watercolour post-process quad — which reads the opaque screen and repaints every
@@ -58,6 +58,13 @@ const SDF_AIR := 5.0
 
 # Strongly negative value used when forcing voxels solid. Symmetric to SDF_AIR.
 const SDF_SOLID := -5.0
+
+# How far past zero a single-cell edit (FillVoxel / EmptyVoxel) puts its target cell's value at
+# its sample point (VoxelUtils.sample_point), and the least margin by which each neighbour's value
+# must stay on its current side. StoreWrite.one_cell solves for the cell's 8 corner values under
+# both, so the edit flips exactly that cell or is refused — it never flips a neighbour.
+const CELL_EDIT_SDF := 0.01
+const CELL_KEEP_SDF := 0.0001
 
 # Threshold used to distinguish solid from air when querying terrain.
 # Strictly less-than-zero is solid; anything else is air.

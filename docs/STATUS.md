@@ -10,7 +10,7 @@
 
 # Resumption Brief
 
-*Last rewritten: 2026-09-24*
+*Last rewritten: 2026-09-25*
 
 
 ## Where things stand right now
@@ -26,13 +26,39 @@ The `dc_octree_mesher.cpp` header split (formerly
 `dc_octree.h` now hold the internals; the .cpp keeps `DCOctreePersist` and the
 `DCOctreeMesher::` methods. The brief is retired.
 
-**Immediate goal: demo-ready for Jamin and Cecilia.** The game must launch,
-generate, and let someone dig, build and watch a collapse without falling over.
-Robert is smoke-testing that now. Anything found goes to `docs/bugs/`, and
-demo-blockers jump the queue ahead of pass 2.
+**Demo check: done (2026-09-25).** Robert smoke-tested launch, generate,
+dig, build and collapse for Jamin and Cecilia; nothing blocking turned up.
+
+**Now: back to features.** Every change uses this loop: an Opus agent authors
+the change, two Fable agents adversarially review the diff (one for
+correctness, one for completeness), and an Opus agent applies the findings. GUT
+gates each step.
 
 
-## The active thread: full-project code review, pass 2
+## The active thread: clear the actions bugs, then construction (5.5g)
+
+Before construction work, two bugs get fixed, because every construction
+feature sits on top of them:
+
+1. `sdf-sample-corner-vs-center` (fixed; file removed): one cell→sample-point
+   convention and a shared sphere walk. The convention now lives in
+   [CODE-MAP §SDF conventions](CODE-MAP.md). It changed the engine
+   (`EditStore` writes now land on leaves finer than the write), so run
+   `tools/build` after pulling.
+2. [`actions-untyped-work-tuple`](bugs/actions-untyped-work-tuple.md): add
+   the typed `EditEntry` record and give preview, events, safety and the
+   write one shared cell set.
+
+Both are in flight (2026-09-25). After them comes **FEAT089, parts look like
+parts**, the stated blocker for the rest of 5.5g (see the v0.1 backlog doc).
+Volumetric worldgen tier 1 (`planned/18`) is independent and can run
+alongside.
+
+Baseline before the bug fixes: GUT 173 tests, 171 passing, 2 pending, 0
+failing.
+
+
+## Paused: full-project code review, pass 2
 
 **Pass 1** (Claude reviews and applies) is done and merged: `4e57cad`,
 `624e204`, `23403e4`. GUT green throughout.
@@ -53,8 +79,7 @@ Deferred `RdF:` items: un-pimpl (`DCOctreePersist` holds the `Clipmap` that
 `mesh_clipmap` needs) and `mesh_clipmap`'s 20 params (~17 positional call
 sites, GDScript-binding-constrained).
 
-**Queued:** `EditEntry` typed record (see bug `actions-untyped-work-tuple`),
-the `Brush` bundle, internal `TerrainParams` in C++, the name-and-comment
+**Queued:** the `Brush` bundle, internal `TerrainParams` in C++, the name-and-comment
 sweep, `mesh_world` `ViewParams`.
 
 ### Read progress
@@ -76,7 +101,7 @@ batch-skim the long tail, keep a review ledger.
 then back to `engine/voxel_dc/`.
 
 
-## Perf threads (queued behind the demo and pass 2)
+## Perf threads (queued)
 
 **Incremental accel bake** (impl doc 17, P1 nit). `grow_world` re-bakes the
 whole min/max prune accel every move — a fixed mesh-lag floor. Fix:
@@ -96,9 +121,8 @@ correctness. (`g_mesh_threads` now lives with `Octree` in `dc_octree.h`.)
 
 **Matter** = any solid the voxels describe, natural or built. **Terrain** =
 naturally generated ground only. **Material** = per-cell type. Judgment per
-site; fold into the name-and-comment sweep. Also replace bare
-`Vector3(0.5, 0.5, 0.5)` cell-centers with `VoxelConstants.VOXEL_CENTER_OFFSET`
-(~4 remain in `mpm_structure.gd`).
+site; fold into the name-and-comment sweep. (Cell centres are done: every
+cell→point read goes through `VoxelUtils.sample_point`.)
 
 
 ## Paused threads
@@ -118,9 +142,9 @@ recolours the overlap — use `PartIndex`.
 
 ## Immediate next actions
 
-1. Demo smoke test (Robert, in progress). File what breaks.
-2. Fix demo-blockers.
-3. Resume pass 2 with the line-count-sorted plan.
+1. Finish and review the two bug fixes above, then commit.
+2. FEAT089: parts look like parts.
+3. The rest of 5.5g, with worldgen tier 1 alongside.
 
 
 ---

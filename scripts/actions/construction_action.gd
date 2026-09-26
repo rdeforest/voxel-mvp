@@ -42,9 +42,9 @@ func validate() -> bool:
     # Attach if any part cell overlaps existing solid (intersection placement) or rests on
     # solid directly below — refuse a part floating in air.
     for cell in cells:
-        if store.sample(Vector3(cell)) < VoxelConstants.SDF_SOLID_THRESHOLD:
+        if TerrainProbe.is_solid(store, cell):
             return true
-        if store.sample(Vector3(cell + Vector3i.DOWN)) < VoxelConstants.SDF_SOLID_THRESHOLD:
+        if TerrainProbe.is_solid(store, cell + Vector3i.DOWN):
             return true
     return false
 
@@ -60,10 +60,8 @@ func execute() -> void:
     if store == null:
         push_error("ConstructionAction.execute(): no store")
         return
-    var shape := _shape()
     var xform := _xform()
-    var work  := VoxelImprint.compute(store, shape, xform, CsgState.Op.ADD)
-    VoxelImprint.apply(store, work, material_name, shape, xform, CsgState.Op.ADD)
+    VoxelImprint.apply(store, material_name, _shape(), xform, CsgState.Op.ADD)
     # Record the placement's identity in the PartIndex sidecar (the field stays pure).
     VoxelEventBusSingleton.emit(
         PartPlacedEvent.CHANNEL,

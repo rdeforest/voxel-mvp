@@ -16,81 +16,46 @@ static func world_box(shape: CsgShape, xform: Transform3D) -> AABB:
     return (xform * shape.local_aabb()).grow(MARGIN)
 
 
-# Per-cell change over the brush's world box, combining the brush's signed distance with the
-# store's current field: [[Vector3i cell, float new_sdf, bool was_solid, bool now_solid], ...]
-# op is CsgState.Op (ADD = union/min, SUBTRACT = difference/max). Only cells that actually
-# change are returned.
-static func compute(store: EditStore, shape: CsgShape, xform: Transform3D, op: int) -> Array:
-    var inverse := xform.affine_inverse()
-    var box := world_box(shape, xform)
-    var work: Array = []
-    VoxelUtils.for_each_in_bounding_box(
-        box.position,
-        box.size,
-        func(cell: Vector3i) -> void:
-            var distance := shape.sdf(inverse * Vector3(cell))
-            distance = clampf(distance, VoxelConstants.SDF_SOLID, VoxelConstants.SDF_AIR)
-            var existing := store.sample(Vector3(cell))
-            var combined := minf(existing, distance) if op == CsgState.Op.ADD else maxf(existing, -distance)
-            if is_equal_approx(combined, existing):
-                return
-            var was_solid := existing  < VoxelConstants.SDF_SOLID_THRESHOLD
-            var now_solid := combined  < VoxelConstants.SDF_SOLID_THRESHOLD
-            work.append([cell, combined, was_solid, now_solid])
-    )
-    return work
-
-
-# Imprint the brush into the store at the SUB-METRE leaf (so a sub-metre part is sub-metre solid),
-# then emit the structural events at 1m (from the 1m `work`, so the structural system isn't spammed
-# with 64x sub-metre events) + terrain_sdf_changed over `box` for the render/collision re-mesh.
-# `shape`/`xform`/`op` drive the fine geometry write; `work` (1m) drives the events.
-static func apply(store: EditStore, work: Array, material_name: StringName,
+# Imprint the brush into the store at RENDER_BASE_CELL leaves (sub-metre once RENDER_SUBDIV_LOG2 > 0;
+# 1 m at the current 0), then emit the structural events for the cells whose sample point the write
+# actually flipped (measured across it — the same lattice() field CsgAction predicts from), plus terrain_sdf_changed over
+# the rewritten box for the render/collision re-mesh. What the brush makes solid takes the part
+# material; existing terrain keeps its material; air is 0 (matches the freeze union rule).
+static func apply(store: EditStore, material_name: StringName,
         shape: CsgShape, xform: Transform3D, op: int) -> void:
-    var box := world_box(shape, xform)
-    _imprint_fine(store, shape, xform, op, material_name, box)
-    var material := Materials.from_name(material_name)
-    for entry in work:
-        var cell: Vector3i = entry[0]
-        if entry[3] and not entry[2]:
-            VoxelEventBusSingleton.emit(VoxelAddedEvent.CHANNEL,   VoxelAddedEvent.new(VoxelConstants.GRID_ID, cell, material))
-        elif entry[2] and not entry[3]:
-            VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))
+    var lat := lattice(store, shape, xform, op)
+    var inverse := xform.affine_inverse()
+    var part := MaterialPalette.index_of(material_name) if op == CsgState.Op.ADD else -1
+    var indices := lat.materials(store, part,
+        func(c: Vector3) -> bool: return shape.sdf(inverse * c) < VoxelConstants.SDF_SOLID_THRESHOLD, false)
+    var before := CellFlips.snapshot(store, lat.cells())
+    lat.write(store, indices)
+    CellFlips.since(store, before).emit(store)
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box.position, box.size))
+        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, lat.region_lo, lat.region_hi - lat.region_lo))
 
 
-# Combine the brush's analytic SDF with the store over a dense RENDER_BASE_CELL grid and
-# write_region it — the part/CSG geometry at the sub-metre leaf. The brush's own solid region takes
-# the part material; existing terrain keeps its material; air is 0 (matches the freeze union rule).
-static func _imprint_fine(store: EditStore, shape: CsgShape, xform: Transform3D, op: int,
-        material_name: StringName, box: AABB) -> void:
+# The field the imprint writes: the brush's analytic SDF combined with the store over a dense
+# RENDER_BASE_CELL lattice covering world_box — union = min(existing, d), subtract = max(existing, -d).
+static func lattice(store: EditStore, shape: CsgShape, xform: Transform3D, op: int) -> SdfLattice:
     var inverse := xform.affine_inverse()
-    var solid_index := MaterialPalette.index_of(material_name)
+    var box := world_box(shape, xform)
     var cell := VoxelConstants.RENDER_BASE_CELL
     var lo := Vector3i((box.position / cell).floor()) - Vector3i.ONE
     var hi := Vector3i(((box.position + box.size) / cell).ceil()) + Vector3i.ONE
     var span := hi - lo
     var dim := maxi(span.x, maxi(span.y, span.z)) + 1
-    var sdf := PackedFloat32Array()
-    var idx := PackedByteArray()
-    sdf.resize(dim * dim * dim)
-    idx.resize(dim * dim * dim)
-    var i := 0
+    var origin := Vector3(lo) * cell
+    var lat := SdfLattice.new(origin, cell, dim, origin, origin + Vector3.ONE * (float(dim - 1) * cell))
     for z in dim:
         for y in dim:
             for x in dim:
-                var wp := Vector3(lo + Vector3i(x, y, z)) * cell
+                var i := Vector3i(x, y, z)
+                var wp := lat.point(i)
                 var dist := clampf(shape.sdf(inverse * wp), VoxelConstants.SDF_SOLID, VoxelConstants.SDF_AIR)
                 var existing := store.sample(wp)
-                var combined: float = minf(existing, dist) if op == CsgState.Op.ADD else maxf(existing, -dist)
-                sdf[i] = combined
-                if op == CsgState.Op.ADD and dist < VoxelConstants.SDF_SOLID_THRESHOLD:
-                    idx[i] = solid_index                # the brush is solid here = the placed part
-                elif combined < VoxelConstants.SDF_SOLID_THRESHOLD:
-                    idx[i] = store.material_at(wp)       # existing terrain keeps its material
-                else:
-                    idx[i] = 0                           # air
-                i += 1
-    store.write_region(sdf, idx, dim, Vector3(lo) * cell, cell)
+                var combined := minf(existing, dist) if op == CsgState.Op.ADD else maxf(existing, -dist)
+                lat.sdf[lat.index(i)] = combined
+                lat.writes = lat.writes or combined != existing
+    return lat

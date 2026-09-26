@@ -1,10 +1,10 @@
 class_name VoxelUtils
 
 
-# Iterate over an axis-aligned bounding box, executing 'operation'.
-# `origin` is one corner, `dimensions` is the other. All axes of `origin` must
-# be less than or equal to the corresponding axes of `dimensions`, or nothing
-# will happen (the incorrect axis will have zero steps and will not iterate).
+# Visit every CELL whose unit box overlaps the half-open box [origin, origin + dimensions),
+# executing `operation(cell)`. `dimensions` is an extent (a size), not the far corner; a
+# non-positive axis visits nothing. This walks cells, not sample points: pair it with a
+# membership test at `sample_point(cell)` (see cells_in_sphere), never at `Vector3(cell)`.
 
 static func for_each_in_bounding_box(
     origin:         Vector3,
@@ -39,6 +39,29 @@ static func euler_basis(degrees: Vector3) -> Basis:
 
 static func is_in_sphere(pos: Vector3, center: Vector3, radius: float) -> bool:
     return pos.distance_to(center) <= radius
+
+
+# The ONE cell -> sample-point mapping: a cell is represented by its centre. Everything that
+# asks "is this cell solid / what material is it / is it in this volume" samples here, so every
+# subsystem classifies a boundary cell the same way (docs/CODE-MAP.md §SDF conventions).
+# Vector3(cell) is the cell's minimum CORNER — a store lattice point, not the cell.
+static func sample_point(cell: Vector3i) -> Vector3:
+    return Vector3(cell) + VoxelConstants.VOXEL_CENTER_OFFSET
+
+
+# Every cell whose sample point lies in the CLOSED ball. The walk box is derived from the
+# ball, and a sample point on the far (+) boundary sits half a cell inside the box's last
+# cell, so the inclusive test and the half-open cell walk agree on both sides.
+static func cells_in_sphere(center: Vector3, radius: float) -> Array[Vector3i]:
+    var out: Array[Vector3i] = []
+    for_each_in_bounding_box(
+        center - Vector3.ONE *  radius,
+                 Vector3.ONE * (radius * 2.0),
+        func(cell: Vector3i) -> void:
+            if is_in_sphere(sample_point(cell), center, radius):
+                out.append(cell)
+    )
+    return out
 
 
 static func neighbors(pos: Vector3i) -> Array[Vector3i]:

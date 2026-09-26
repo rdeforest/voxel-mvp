@@ -63,7 +63,7 @@ func _process(_dt: float) -> void:
     for idx in range(_prev_visited, keys.size()):
         var cell: Vector3i = keys[idx]
         if _reached < MAX_VISIBLE and _is_visible(cell):
-            _mm.set_instance_transform(_reached, Transform3D(Basis(), Vector3(cell) + VoxelConstants.VOXEL_CENTER_OFFSET))
+            _mm.set_instance_transform(_reached, Transform3D(Basis(), VoxelUtils.sample_point(cell)))
             _reached += 1
     _prev_visited = keys.size()
     _mm.visible_instance_count = _reached

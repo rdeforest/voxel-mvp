@@ -27,7 +27,7 @@ func _on_terrain_sdf_changed(event: TerrainSdfChangedEvent) -> void:
     if store == null:
         return
     for cell in event.cells:
-        var is_solid := store.sample(Vector3(cell)) < VoxelConstants.SDF_SOLID_THRESHOLD
+        var is_solid := TerrainProbe.is_solid(store, cell)
         if voxel_data.has(cell):
             # Tracked record exists. If the SDF has become air (e.g. via
             # LowerAction or any other path that didn't explicitly emit
@@ -49,7 +49,7 @@ func _on_terrain_sdf_changed(event: TerrainSdfChangedEvent) -> void:
         if not is_solid:
             continue
         for neighbor in VoxelUtils.neighbors(cell):
-            if store.sample(Vector3(neighbor)) >= VoxelConstants.SDF_SOLID_THRESHOLD:
+            if not TerrainProbe.is_solid(store, neighbor):
                 _register_voxel(cell, Materials.STONE)
                 break
 
@@ -174,4 +174,4 @@ func _is_bedrock(pos: Vector3i) -> bool:
 func _is_terrain_solid(pos: Vector3i) -> bool:
     if store == null:
         return false
-    return store.sample(Vector3(pos)) < VoxelConstants.SDF_SOLID_THRESHOLD
+    return TerrainProbe.is_solid(store, pos)

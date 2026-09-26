@@ -58,21 +58,7 @@ func setup(store: EditStore) -> void:
 
 # Thaw the solid terrain cells within `radius` of `center` (the `mpmthaw` console path).
 func thaw_sphere(center: Vector3, radius: float, material_index := 1) -> int:
-    var r2 := radius * radius
-    var lo := Vector3i((center - Vector3.ONE * radius).floor())
-    var hi := Vector3i((center + Vector3.ONE * radius).ceil())
-
-    var cells: Array[Vector3i] = []
-
-    for z in range(lo.z, hi.z + 1):
-        for y in range(lo.y, hi.y + 1):
-            for x in range(lo.x, hi.x + 1):
-                var cell := Vector3i(x, y, z)
-
-                if (Vector3(cell) + VoxelConstants.VOXEL_CENTER_OFFSET).distance_squared_to(center) <= r2:
-                    cells.append(cell)
-
-    return thaw_cells(cells, material_index)
+    return thaw_cells(VoxelUtils.cells_in_sphere(center, radius), material_index)
 
 
 # Thaw a set of (presumed solid) terrain cells into MPM particles: carve each from the store (a
@@ -91,12 +77,10 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
         if _sim.particle_count() >= MAX_PARTICLES:
             break # runaway-thaw guard: leave the rest as terrain rather than choke
 
-        var center := Vector3(cell) + VoxelConstants.VOXEL_CENTER_OFFSET
-
-        if _store.sample(center) >= VoxelConstants.SDF_SOLID_THRESHOLD:
+        if not TerrainProbe.is_solid(_store, cell):
             continue # already air
 
-        var mat := _store.material_at(center)
+        var mat := TerrainProbe.material(_store, cell)
 
         for ox in [0.25, 0.75]:
             for oy in [0.25, 0.75]:
@@ -157,7 +141,7 @@ func _corner_clears(corner: Vector3i, carved: Dictionary) -> bool:
                 if carved.has(nc):
                     continue
 
-                if _store.sample(Vector3(nc) + VoxelConstants.VOXEL_CENTER_OFFSET) < VoxelConstants.SDF_SOLID_THRESHOLD:
+                if TerrainProbe.is_solid(_store, nc):
                     return false   # a kept-solid neighbour needs this corner
 
     return true

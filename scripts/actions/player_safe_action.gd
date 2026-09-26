@@ -26,9 +26,23 @@ static func support_box(player_pos: Vector3) -> AABB:
 # A cell that becomes SOLID inside the capsule would bury the player.
 func buries(cell: Vector3i) -> bool:
     return player != null \
-        and capsule_box(player.global_position).has_point(Vector3(cell) + VoxelConstants.VOXEL_CENTER_OFFSET)
+        and capsule_box(player.global_position).has_point(VoxelUtils.sample_point(cell))
 
 # A cell that becomes AIR inside the support box would drop the player.
 func drops(cell: Vector3i) -> bool:
     return player != null \
-        and support_box(player.global_position).has_point(Vector3(cell) + VoxelConstants.VOXEL_CENTER_OFFSET)
+        and support_box(player.global_position).has_point(VoxelUtils.sample_point(cell))
+
+# The one refusal test over an edit's flips: a new-solid cell that buries the player, or a
+# new-air cell that drops them. Every player-safe verb asks this of the same CellFlips its
+# preview draws, so the ghost and the refusal can't disagree about which cells change.
+func endangered_by(flips: CellFlips) -> bool:
+    if player == null:
+        return false
+    for cell in flips.solid:
+        if buries(cell):
+            return true
+    for cell in flips.air:
+        if drops(cell):
+            return true
+    return false

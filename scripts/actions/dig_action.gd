@@ -30,17 +30,7 @@ func preview() -> ActionPreview:
     if store == null:
         p.refused = true
         return p
-    var origin     := position - Vector3.ONE *  radius
-    var dimensions :=            Vector3.ONE * (radius * 2.0)
-    VoxelUtils.for_each_in_bounding_box(
-        origin,
-        dimensions,
-        func(cell: Vector3i) -> void:
-            if not VoxelUtils.is_in_sphere(Vector3(cell), position, radius):
-                return
-            if store.sample(Vector3(cell)) < VoxelConstants.SDF_SOLID_THRESHOLD:
-                p.air.append(cell)
-    )
+    _stamp().flips(store).add_to(p)
     p.refused = p.is_empty()
     return p
 
@@ -49,20 +39,12 @@ func execute() -> void:
         push_error("DigAction.execute(): no store")
         return
 
-    store.stamp_sphere(position, radius, VoxelConstants.STORE_OP_SUBTRACT, 0, VoxelConstants.RENDER_BASE_CELL)
-
-    var origin     := position - Vector3.ONE *  radius
-    var dimensions :=            Vector3.ONE * (radius * 2.0)
-
-    VoxelUtils.for_each_in_bounding_box(
-        origin,
-        dimensions,
-        func(pos: Vector3i) -> void:
-            if VoxelUtils.is_in_sphere(Vector3(pos), position, radius):
-                VoxelEventBusSingleton.emit(
-                    VoxelRemovedEvent.CHANNEL,
-                    VoxelRemovedEvent.new(VoxelConstants.GRID_ID, pos))
-    )
+    # Write the very field the preview read; events are the cells whose sample point the write
+    # actually flipped, measured across it. A carve repaints nothing.
+    var lattice := _stamp()
+    var before  := CellFlips.snapshot(store, lattice.cells())
+    lattice.write(store, lattice.materials(store, -1, func(_c: Vector3) -> bool: return false, true))
+    CellFlips.since(store, before).emit(store)
 
     # Box one cell wider than the dig sphere so the boundary-cell scan in
     # TerrainSupport sees newly-exposed neighbours just outside the sphere.
@@ -71,3 +53,9 @@ func execute() -> void:
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
         TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, scan_origin, scan_size))
+
+
+# The field execute() writes — preview and events both read this brush.
+func _stamp() -> SdfLattice:
+    return SdfLattice.sphere_stamp(store, position, radius,
+        VoxelConstants.STORE_OP_SUBTRACT, VoxelConstants.RENDER_BASE_CELL)

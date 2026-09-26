@@ -57,10 +57,9 @@ func report() -> PackedStringArray:
     var cell := _target_cell()
     var out := PackedStringArray()
 
-    var center   := Vector3(cell) + Vector3(0.5, 0.5, 0.5)
-    var sdf      := store.sample(center)   # center: matches the thaw/collision solidity convention
+    var sdf      := TerrainProbe.sdf(store, cell)   # at the cell's sample point, like every solidity read
     var is_solid := sdf < VoxelConstants.SDF_SOLID_THRESHOLD
-    var mat_idx  := store.material_at(center)
+    var mat_idx  := TerrainProbe.material(store, cell)
     var corners  := _corner_solid_count(cell)
     var tracked  := integrity.terrain_support.voxel_data.has(cell)
 

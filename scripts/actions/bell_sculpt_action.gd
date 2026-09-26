@@ -14,7 +14,8 @@ var radius:   float
 var store:    EditStore
 var _sign:    float
 
-var _work: Array         = []   # [[Vector3i cell, float new_sdf, float old_sdf], ...]
+var _work: Array         = []   # [[Vector3i lattice point, float new_sdf], ...]
+var _flips: CellFlips    = CellFlips.new()   # what _work does to cells (preview + safety)
 var _work_computed: bool = false
 
 
@@ -28,32 +29,23 @@ func _init(p_position: Vector3, p_radius: float, p_ctx: ActionContext, p_sign: f
 
 func validate() -> bool:
     _ensure_work()
-    return not _work.is_empty() and not _endangers()
+    return not _work.is_empty() and not endangered_by(_flips)
 
 func execute() -> void:
     if store == null:
         push_error("BellSculptAction.execute(): no store")
         return
     _ensure_work()
-    StoreWrite.cells(store, _work, func(_entry): return -1)   # reshape keeps each cell's material
-    var origin := position - Vector3.ONE * radius
-    var dims   := Vector3.ONE * (radius * 2.0)
+    var box := StoreWrite.cells(store, _work, func(_entry): return -1)   # reshape keeps each cell's material
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, origin, dims))
+        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box.position, box.size))
 
 func preview() -> ActionPreview:
     _ensure_work()
     var p := ActionPreview.new()
-    p.refused = _work.is_empty() or _endangers()
-    var t := VoxelConstants.SDF_SOLID_THRESHOLD
-    for entry in _work:
-        var old_sdf: float = entry[2]
-        var new_sdf: float = entry[1]
-        if old_sdf >= t and new_sdf < t:
-            p.solid.append(entry[0])
-        elif old_sdf < t and new_sdf >= t:
-            p.air.append(entry[0])
+    p.refused = _work.is_empty() or endangered_by(_flips)
+    _flips.add_to(p)
     return p
 
 
@@ -63,6 +55,7 @@ func _ensure_work() -> void:
     if _work_computed or store == null:
         return
     _work          = _compute_work()
+    _flips         = StoreWrite.lattice(store, _work).flips(store) if not _work.is_empty() else CellFlips.new()
     _work_computed = true
 
 func _compute_work() -> Array:
@@ -72,32 +65,17 @@ func _compute_work() -> Array:
     var r2        := radius * radius
     var out: Array = []
 
-    VoxelUtils.for_each_in_bounding_box(origin, dims, func(cell: Vector3i) -> void:
-        var dx := float(cell.x) + 0.5 - position.x
-        var dz := float(cell.z) + 0.5 - position.z
+    # Walks store lattice points (StoreWrite writes corners), so the bell is evaluated at the
+    # point it writes — not half a cell away at a cell centre.
+    VoxelUtils.for_each_in_bounding_box(origin, dims, func(point: Vector3i) -> void:
+        var dx := float(point.x) - position.x
+        var dz := float(point.z) - position.z
         var d2 := dx * dx + dz * dz
         if d2 >= r2:
             return
         var t       := d2 / r2
         var falloff := (1.0 - t) * (1.0 - t)   # quartic
         var bell    := amplitude * falloff
-        var old_sdf := store.sample(Vector3(cell))
-        out.append([cell, old_sdf + _sign * bell, old_sdf])
+        out.append([point, store.sample(Vector3(point)) + _sign * bell])
     )
     return out
-
-# Bury (a cell became solid in the capsule) or drop (a cell became air in the support
-# box). Raise only ever makes solid, Lower only ever makes air, so each direction is a
-# no-op for the other — one check serves both.
-func _endangers() -> bool:
-    if player == null:
-        return false
-    var t := VoxelConstants.SDF_SOLID_THRESHOLD
-    for entry in _work:
-        var old_sdf: float = entry[2]
-        var new_sdf: float = entry[1]
-        if old_sdf >= t and new_sdf < t and buries(entry[0]):
-            return true
-        if old_sdf < t and new_sdf >= t and drops(entry[0]):
-            return true
-    return false

@@ -3,12 +3,9 @@
 **Status:** Deferred (2026-06-22). A bundle of small, individually-minor findings from the full-sweep code
 review. Grouped to avoid index bloat; split any one out if it grows teeth.
 
-## 1. `voxel_utils.gd` docstring contradicts the code (misleading shared util)
-`scripts/voxel_utils.gd:5-7`. The docstring for `for_each_in_bounding_box` says the second param is the far
-*corner* ("the other corner; all axes of origin must be ≤ dimensions"), but the code treats it as an
-**extent** added to origin (`x_to := ceil(origin.x + dimensions.x)`, `:9-27`). Callers pass it correctly as
-a size (`footprint_from_aabb` passes `cell_aabb.size`), so the code is right and the doc is wrong — a reader
-trusting the comment would pass an absolute corner and get a doubled box. **Fix the doc.**
+## 1. ~~`voxel_utils.gd` docstring contradicts the code~~ — fixed 2026-09-25
+The `for_each_in_bounding_box` doc now says `dimensions` is an extent and that the walk visits cells
+(fixed alongside the cell sample-point convention; *note drafted by Claude*).
 
 ## 2. `action_factories.gd` hardcoded 0.5 nudge for fill-voxel
 `scenes/player/action_factories.gd:77` nudges `+hit_normal*0.5` while the empty-voxel side and everything

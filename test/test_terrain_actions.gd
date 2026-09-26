@@ -53,8 +53,8 @@ func test_fill_voxel_sets_one_solid_cell() -> void:
     var action := FillVoxelAction.new(cell, _ctx(store), &"Stone")
     assert_true(action.validate(), "an air cell can be filled")
     action.execute()
-    assert_lt(store.sample(Vector3(cell)), 0.0, "the cell is solid in the store")
-    assert_eq(store.material_at(Vector3(cell)), MaterialPalette.index_of(&"Stone"), "the cell carries its material")
+    assert_lt(store.sample(VoxelUtils.sample_point(cell)), 0.0, "the cell is solid in the store")
+    assert_eq(store.material_at(VoxelUtils.sample_point(cell)), MaterialPalette.index_of(&"Stone"), "the cell carries its material")
 
 
 func test_empty_voxel_clears_one_solid_cell() -> void:
@@ -63,7 +63,7 @@ func test_empty_voxel_clears_one_solid_cell() -> void:
     var action := EmptyVoxelAction.new(cell, _ctx(store))
     assert_true(action.validate(), "a solid cell can be emptied")
     action.execute()
-    assert_gt(store.sample(Vector3(cell)), 0.0, "the cell is air in the store")
+    assert_gt(store.sample(VoxelUtils.sample_point(cell)), 0.0, "the cell is air in the store")
 
 
 func test_dig_then_fill_returns_to_solid() -> void:

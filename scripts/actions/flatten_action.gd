@@ -7,7 +7,8 @@ var radius:      float
 
 var store:       EditStore
 
-var _work: Array         = []   # [[Vector3i cell, float sdf], ...]
+var _work: Array         = []   # [[Vector3i lattice point, float sdf], ...]
+var _flips: CellFlips    = CellFlips.new()   # what _work does to cells (preview + safety)
 var _work_computed: bool = false
 
 
@@ -28,19 +29,15 @@ func validate() -> bool:
     _ensure_work()
     if _work.is_empty():
         return false
-    if _endangers():
+    if endangered_by(_flips):
         return false
     return true
 
 func preview() -> ActionPreview:
     var p := ActionPreview.new()
     _ensure_work()
-    for entry in _work:
-        if entry[1] > 0.0:
-            p.air.append(entry[0])
-        else:
-            p.solid.append(entry[0])
-    p.refused = _work.is_empty() or _endangers()
+    _flips.add_to(p)
+    p.refused = _work.is_empty() or endangered_by(_flips)
     return p
 
 func execute() -> void:
@@ -49,35 +46,24 @@ func execute() -> void:
         return
 
     _ensure_work()
-    StoreWrite.cells(store, _work, func(_entry): return -1)   # keep each cell's current material
-
-    var origin := plane_point - Vector3.ONE *  radius
-    var dims   :=                Vector3.ONE * (radius * 2.0)
+    var box := StoreWrite.cells(store, _work, func(_entry): return -1)   # keep each cell's current material
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, origin, dims))
+        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box.position, box.size))
 
 
 # --- Internals ---
-
-# Refuse if any work cell would bury the player (new solid in their capsule) or knock
-# their support out (new air under their feet). The boxes live in PlayerSafeAction.
-func _endangers() -> bool:
-    for entry in _work:
-        var sdf: float = entry[1]   # the new SDF for this cell
-        if sdf < 0.0 and buries(entry[0]):
-            return true
-        if sdf > 0.0 and drops(entry[0]):
-            return true
-    return false
 
 func _ensure_work() -> void:
     if _work_computed or store == null:
         return
     _work          = _compute_work()
+    _flips         = StoreWrite.lattice(store, _work).flips(store) if not _work.is_empty() else CellFlips.new()
     _work_computed = true
 
-# Bucket cells by column (lateral position on the plane). For each column,
+# Works on store LATTICE points (StoreWrite writes corners), reading and writing the field at
+# the same point; which CELLS that flips is _flips.
+# Bucket points by column (lateral position on the plane). For each column,
 # only emit work on a side when both phases (air + solid) are present on
 # that side — i.e. the cut actually reaches an existing surface within
 # radius. Skip columns whose +N side is all-solid (would dig a buried slot)

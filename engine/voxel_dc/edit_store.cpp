@@ -56,7 +56,10 @@ void EditStore::_stamp_region(int idx, const voxel_dc::Field &brush, const Vecto
 			o.x >= rmax.x || o.y >= rmax.y || o.z >= rmax.z) {
 		return; // doesn't overlap the brush — leave it sparse (generator)
 	}
-	if (s <= min_leaf * 1.0000001) {
+	// Write at a leaf no coarser than min_leaf. A node that small which already has children
+	// (refined by an earlier, finer edit) is NOT a leaf — sample() reads its children, so the
+	// brush must land on them too, or the stamp would be a silent no-op there.
+	if (s <= min_leaf * 1.0000001 && nodes[idx].is_leaf()) {
 		Node &n = nodes[idx];
 		const bool was_edited = n.has_corners;
 		bool any_solid = false;
@@ -107,7 +110,11 @@ void EditStore::_write_region(int idx, const voxel_dc::ArrayField &sdf, const Pa
 			o.x >= rmax.x || o.y >= rmax.y || o.z >= rmax.z) {
 		return;
 	}
-	if (s <= cell * 1.0000001) {
+	// Set the corners of every LEAF in the region no coarser than `cell`. Leaves finer than
+	// `cell` (refined by an earlier, finer edit) are written too, from the array's trilerp — which
+	// reproduces the coarse field exactly — so a coarse write over fine leaves lands instead of
+	// setting an internal node's corners that sample() never reads.
+	if (s <= cell * 1.0000001 && nodes[idx].is_leaf()) {
 		Node &n = nodes[idx];
 		for (int i = 0; i < 8; ++i) {
 			n.corners[i] = float(sdf.sample(corner(o, s, i)));
