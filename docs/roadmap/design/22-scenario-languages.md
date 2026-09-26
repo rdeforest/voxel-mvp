@@ -49,10 +49,14 @@ and predicates.** A battlement repeat in an assembly and a "place each merlon" s
 generator. This is the design's central commitment.
 
 - **Values:** number, length, angle, point, frame, material, part type, enum, bool, cell.
-- **Units are kept as authored.** A quantity is stored as `[value, unit]` in canonical names:
-  `[2, "foot"]`, `[9.8, "meter / second ** 2"]`. The parser also accepts `"2 ft"`, `"2'"`,
-  `[2, "feet"]` and `[2, "ft"]`, normalising through an alias table. Values convert to metric only at
-  evaluation and are never written back converted. That keeps `2 ft` exact: 0.3048 m has no exact
+- **Units are kept as authored.** A quantity is a string, `"#{number} #{unit}"`, with the number
+  kept as the decimal text the author typed (never passed through a binary float) and only the
+  unit's spelling canonicalized: `"5.5 foot"`, `"9.8 meter / second ** 2"`. No normalization to a
+  base unit; 66 inches stays 66 inches. The parser also accepts `"2 ft"`, `"2'"`, `[2, "feet"]` and
+  `[2, "ft"]`. Mixed-unit forms like `5'6"` or `5 ft 6 in` are written as a sum in the expression
+  language, `"5 foot + 6 inch"`, so there's no special case. Values convert to metric only at
+  evaluation and are never written back converted. We use Pint's definitions file, not its parser;
+  our grammar decides what parses. That keeps `2 ft` exact: 0.3048 m has no exact
   binary representation, so converting and saving would lose the value. It also keeps intent, such
   as a deliberately imperial house beside a metric one. Dimension checking makes "metres + degrees"
   an error. `'` means feet for a length and arcminutes for an angle; the parser resolves it from the
@@ -276,5 +280,3 @@ dependency and why it exists.
   the long experimental thread.
 - **The product description:** which traits are declared by the author, which are derived by
   evaluation (dimensions, mass), and which are computed on demand (pathing)?
-- **Unit form:** a string unit expression (`"meter / second ** 2"`, which reuses the one grammar) or a
-  structured list (`[["meter", 1], ["second", -2]]`)? The draft uses the string.
