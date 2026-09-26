@@ -155,7 +155,7 @@ Dictionary EditStore::predict_sphere_stamp(Vector3 center, double radius, int op
 		const double brush = p.distance_to(center) - radius;
 		return op == OP_UNION ? MIN(before, brush) : MAX(before, -brush);
 	});
-	return lat.to_dictionary();
+	return prediction(*this, lat);
 }
 
 // VoxelImprint.lattice (world_box inlined).
@@ -174,7 +174,7 @@ Dictionary EditStore::predict_imprint(int shape, const PackedFloat64Array &dims,
 		const double dist = CLAMP(csg_sdf(shape, d, inverse.xform(p)), -SDF_BAND, SDF_BAND);
 		return op == OP_UNION ? MIN(existing, dist) : MAX(existing, -dist);
 	});
-	return lat.to_dictionary();
+	return prediction(*this, lat);
 }
 
 // SdfLattice.value_at at every rewritten cell's sample point, then CellFlips._add, in z-y-x order.
@@ -242,6 +242,66 @@ bool EditStore::lattice_turns_in(const PackedFloat32Array &sdf, int dim, Vector3
 					}
 				}
 			}
+		}
+	}
+	return false;
+}
+
+// lattice_writes: _write_region (edit_store.cpp) without the write — the same descent, stopping at
+// the first corner it would change.
+bool EditStore::lattice_writes(const PackedFloat32Array &sdf, int dim, Vector3 origin, double cell) const {
+	ERR_FAIL_COND_V_MSG(dim < 2 || !(cell > 0.0) || sdf.size() != int64_t(dim) * dim * dim, false,
+			"Not a lattice: sdf must hold dim^3 values, dim >= 2, cell > 0.");
+	if (nodes.is_empty()) {
+		return false;
+	}
+	const RegionWrite write{ voxel_dc::ArrayField(sdf.ptr(), dim, origin, cell), cell, origin,
+		origin + Vector3(1, 1, 1) * (double(dim - 1) * cell) };
+	return _write_changes(0, write);
+}
+
+bool EditStore::_write_changes(int idx, const RegionWrite &write) const {
+	const Node &n = nodes[idx];
+	if (n.is_leaf()) {
+		return _leaf_write_changes(n.origin, n.size, n.has_corners ? n.corners : nullptr, write);
+	}
+	if (!overlaps(n.origin, n.size, write.rmin, write.rmax)) {
+		return false;
+	}
+	for (int i = 0; i < 8; ++i) {
+		if (_write_changes(n.children[i], write)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// A leaf as _write_region finds it (`corners` null = unedited, the generator). One coarser than
+// the write's cell is split as _subdivide splits it (child_corners), so the corners compared are the ones
+// the write would replace, down to the float32 _subdivide rounds them to.
+bool EditStore::_leaf_write_changes(const Vector3 &o, double s, const float *corners, const RegionWrite &write) const {
+	if (!overlaps(o, s, write.rmin, write.rmax)) {
+		return false;
+	}
+	if (is_write_leaf(s, write.cell)) {
+		for (int i = 0; i < 8; ++i) {
+			const Vector3 c = voxel_dc::corner(o, s, i);
+			const float held = corners ? corners[i] : float(_gen.sample(c));
+			if (float(write.field.sample(c)) != held) {
+				return true;
+			}
+		}
+		return false;
+	}
+	const double half = s * 0.5;
+	for (int i = 0; i < 8; ++i) {
+		float child[8];
+		if (corners) {
+			child_corners(corners, i, child);
+		}
+		const Vector3 child_origin = o + Vector3(voxel_dc::CB[i][0], voxel_dc::CB[i][1], voxel_dc::CB[i][2]) * half;
+		if (_leaf_write_changes(child_origin, half, corners ? child : nullptr, write)) {
+			return true;
 		}
 	}
 	return false;

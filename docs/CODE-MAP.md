@@ -400,6 +400,11 @@ names.
   Preview and write build the lattice through the same call. `test_edit_store_predict` gates them
   bit for bit against the GDScript originals, kept as the oracle in
   `test/support/lattice_oracle.gd`; a change to one needs the same change in the other.
+- **A lattice's "before" is the rewritten leaf's own value.** Builders read each point with
+  `EditStore.sample_toward`, so a point on the region's max faces is read from the leaf the write
+  replaces, not the untouched neighbour `sample` would pick. `SdfLattice.writes` (CSG refuses on
+  it) is exact: a point whose float32 changes, else `EditStore.lattice_writes`, a dry run of
+  `write_region` over every corner of every leaf it would rewrite. Material is not part of it.
 - **Lattice writes are typed.** `StoreWrite` takes `Array[LatticeEdit]` (lattice point, new
   SDF, leaf material or -1 to keep) — FillVoxel, EmptyVoxel and the MPM carve all hand it that;
   `StoreWrite.lattice(store, work).flips(store)` is what the work does to cells. Bell and Flatten

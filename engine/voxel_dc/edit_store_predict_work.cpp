@@ -40,14 +40,19 @@ Lattice work_lattice(const EditStore &store, const Work &work) {
 	for (uint32_t k = 0; k < work.points.size(); ++k) {
 		const Vector3i i = work.points[k] - lo_cell;
 		const int at = voxel_dc::flat_index(i.x, i.y, i.z, lat.dim);
-		lat.writes = lat.writes || double(w[at]) != work.sdfs[k];
-		w[at] = float(work.sdfs[k]);
+		const float now = float(work.sdfs[k]);
+		lat.writes = lat.writes || w[at] != now;
+		w[at] = now;
 	}
 	return lat;
 }
 
 Dictionary work_prediction(const EditStore &store, const Work &work) {
-	return work.points.is_empty() ? Dictionary() : work_lattice(store, work).to_dictionary();
+	if (work.points.is_empty()) {
+		return Dictionary();
+	}
+	Lattice lat = work_lattice(store, work);
+	return prediction(store, lat);
 }
 
 // VoxelUtils.for_each_in_bounding_box: every integer point from floor(origin) up to (excluding)
@@ -87,7 +92,7 @@ Dictionary EditStore::predict_work(const TypedArray<Vector3i> &points, const Pac
 	for (int64_t k = 0; k < points.size(); ++k) {
 		work.add(points[k], sdfs[k]);
 	}
-	return work_lattice(*this, work).to_dictionary();
+	return work_prediction(*this, work);
 }
 
 // BellSculptAction._compute_work: every lattice point in the brush's XZ disc takes its current value

@@ -6,7 +6,10 @@ extends RefCounted
 # FlattenAction._compute_work — kept verbatim so the byte-identical gate compares the C++ against an
 # independent implementation rather than against itself. Nothing in the game calls this.
 # (Drafted by Claude, overnight 2026-09-26; moved from scripts/actions/ unchanged but for the
-# receiver: each former method takes its SdfLattice / store / action parameters explicitly.)
+# receiver: each former method takes its SdfLattice / store / action parameters explicitly. Since
+# sdf-lattice-writes-false-change-at-max-faces the builders read "before" from the rewritten leaf
+# that owns each point and compare at float32 — the originals' store.sample read the neighbouring
+# leaf on the region's max faces.)
 
 
 static func sphere_stamp(store: EditStore, center: Vector3, radius: float, op: int, min_leaf: float) -> SdfLattice:
@@ -20,12 +23,12 @@ static func sphere_stamp(store: EditStore, center: Vector3, radius: float, op: i
             for x in lat.dim:
                 var i := Vector3i(x, y, z)
                 var p := lat.point(i)
-                var before := store.sample(p)
+                var before := store.sample_toward(p, _owner_centre(lat, i))
                 var brush  := p.distance_to(center) - radius
                 var after  := minf(before, brush) if op == VoxelConstants.STORE_OP_UNION else maxf(before, -brush)
                 lat.sdf[lat.index(i)] = after
-                lat.writes = lat.writes or after != before
-    return lat
+                lat.writes = lat.writes or lat.sdf[lat.index(i)] != _f32(before)
+    return _settled(lat, store)
 
 
 static func imprint(store: EditStore, shape: CsgShape, xform: Transform3D, op: int) -> SdfLattice:
@@ -43,11 +46,11 @@ static func imprint(store: EditStore, shape: CsgShape, xform: Transform3D, op: i
                 var i := Vector3i(x, y, z)
                 var wp := lat.point(i)
                 var dist := clampf(shape.sdf(inverse * wp), VoxelConstants.SDF_SOLID, VoxelConstants.SDF_AIR)
-                var existing := store.sample(wp)
+                var existing := store.sample_toward(wp, _owner_centre(lat, i))
                 var combined := minf(existing, dist) if op == CsgState.Op.ADD else maxf(existing, -dist)
                 lat.sdf[lat.index(i)] = combined
-                lat.writes = lat.writes or combined != existing
-    return lat
+                lat.writes = lat.writes or lat.sdf[lat.index(i)] != _f32(existing)
+    return _settled(lat, store)
 
 
 static func work(store: EditStore, edits: Array[LatticeEdit]) -> SdfLattice:
@@ -59,11 +62,31 @@ static func work(store: EditStore, edits: Array[LatticeEdit]) -> SdfLattice:
         for y in dim:
             for x in dim:
                 var i := Vector3i(x, y, z)
-                lat.sdf[lat.index(i)] = store.sample(lat.point(i))
+                lat.sdf[lat.index(i)] = store.sample_toward(lat.point(i), _owner_centre(lat, i))
     for edit in edits:
         var i := lat.index(edit.point - lo_cell)
-        lat.writes = lat.writes or lat.sdf[i] != edit.sdf
+        lat.writes = lat.writes or lat.sdf[i] != _f32(edit.sdf)
         lat.sdf[i] = edit.sdf
+    return _settled(lat, store)
+
+
+# The rewritten leaf a point's "before" is read from: the one above it, but below it on a max face.
+static func _owner_centre(lat: SdfLattice, i: Vector3i) -> Vector3:
+    var top := lat.dim - 2
+    return lat.origin + (Vector3(mini(i.x, top), mini(i.y, top), mini(i.z, top)) + Vector3.ONE * 0.5) * lat.cell
+
+
+# The float32 a lattice stores for `v`.
+static func _f32(v: float) -> float:
+    return PackedFloat32Array([v])[0]
+
+
+# Points that all match the leaf they were read from can still change another rewritten leaf's
+# corner; that part of the question is EditStore's own dry run of the write (not re-derived here:
+# it needs the tree), tested directly in test_lattice_writes. So when no point changes, the gate's
+# `writes` is the C++ answer, not an independent one.
+static func _settled(lat: SdfLattice, store: EditStore) -> SdfLattice:
+    lat.writes = lat.writes or store.lattice_writes(lat.sdf, lat.dim, lat.origin, lat.cell)
     return lat
 
 

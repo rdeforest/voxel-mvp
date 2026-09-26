@@ -6,7 +6,7 @@ or move to `docs/completed/` when the session is closed out.*
 ## Progress
 
 - [x] Track A1 — preview lattice in C++ (`actions-preview-gdscript-slow`) — A1a (C++ prediction + byte-identical gate) and A1b (callers switched, `_compute_work` + `_turns_in` ported, re-measured under "before"); bug closed
-- [ ] Track A2 — `sdf-lattice-writes-false-change-at-max-faces`
+- [x] Track A2 — `sdf-lattice-writes-false-change-at-max-faces` — flag now "changes a stored float32 corner": owner-leaf reads at max faces, float32 compare, and a dry run for seams/finer leaves; bug closed
 - [ ] Track A3 — `mmap-arena-no-mmap-fallback` (if time)
 - [ ] Track B1 — characterize `single-voxel-edits-unexpected`
 - [ ] Track B2 — `empty-voxel-no-player-safety`

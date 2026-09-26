@@ -23,8 +23,8 @@ var dim:       int                   # points per axis (a cube)
 var sdf:       PackedFloat32Array    # dim^3 values, x fastest (write_region's layout)
 var region_lo: Vector3               # leaves overlapping the open box (region_lo, region_hi)
 var region_hi: Vector3               # are the ones the write rewrites: the whole cube
-var writes:    bool = false          # some point differs from the store's current value there
-                                     # (set by the builder, which reads both)
+var writes:    bool = false          # the write changes some stored leaf corner's SDF (set by
+                                     # the builder: EditStore.predict_*; material not considered)
 
 
 func _init(p_origin: Vector3, p_cell: float, p_dim: int) -> void:
