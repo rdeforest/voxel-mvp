@@ -76,6 +76,20 @@ passing, 2 pending, 0 failing.
 - Do not scope-reduce a chunk to close it. If the hard part is being cut, say
   so in the brief instead.
 
+## Autonomy expectation
+
+Robert is asleep for roughly eight hours from 2026-09-25 late evening. He is not
+available to unblock anything. Work the whole window; do not stop and wait.
+
+- A reviewer that raises a question it cannot answer from its packet passes the
+  uncertainty up. Resolve it yourself — including by starting a flow whose only
+  job is to answer that question — rather than parking the chunk.
+- Where a question genuinely needs Robert's judgement (what something should
+  *look* like, what he expected to happen), record it in the morning brief with
+  the evidence gathered so far and move to the next chunk. Do not guess his
+  intent and build on the guess.
+- Anything decided unilaterally goes in the morning brief so he can overrule it.
+
 ## Session facts (survive a restart)
 
 - Claude Code is **2.1.283** (installed from the `latest` channel; `stable` was
