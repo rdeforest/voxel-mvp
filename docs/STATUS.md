@@ -35,32 +35,37 @@ correctness, one for completeness), and an Opus agent applies the findings. GUT
 gates each step.
 
 
-## The active thread: clear the actions bugs, then construction (5.5g)
+## The active thread: preview perf, then construction (5.5g)
 
-Before construction work, two bugs get fixed, because every construction
-feature sits on top of them:
+**Done (2026-09-25), committed:**
+- `f11d284` fixed `sdf-sample-corner-vs-center`. Every cell now has one sample
+  point, the cell centre (see [CODE-MAP §SDF conventions](CODE-MAP.md)), and
+  every brush predicts exactly what it writes. It changed the engine
+  (`EditStore` writes land on finer leaves), so **run `tools/build` after
+  pulling.**
+- `c9430a4` fixed `actions-untyped-work-tuple` and
+  `construction-bury-check-single-point`. It adds a typed `LatticeEdit`
+  record. Each action's ghost, events and safety refusal now come from the
+  field it writes, so a sub-cell part can't slip past the safety check.
 
-1. `sdf-sample-corner-vs-center` (fixed; file removed): one cell→sample-point
-   convention and a shared sphere walk. The convention now lives in
-   [CODE-MAP §SDF conventions](CODE-MAP.md). It changed the engine
-   (`EditStore` writes now land on leaves finer than the write), so run
-   `tools/build` after pulling.
-2. `actions-untyped-work-tuple` (fixed; file removed): lattice writers pass
-   typed `LatticeEdit` records to `StoreWrite`; every action's ghost and
-   events are the `CellFlips` of the field it writes, and its player-safety
-   refusal reads that field itself (`SdfLattice.solidifies_in/empties_in`), so
-   a sub-cell part or brush can't slip past it. Construction included: its
-   ghost was the coarse footprint, its bury check one point, its attach test
-   the footprint — `construction-bury-check-single-point` fell with it (file
-   removed). *Item drafted by Claude.*
+Robert checked it in play: Raise/Lower refusal near the player looks right,
+and the desaturated ghost makes refusal easy to see. Single-voxel edits didn't
+do what he expected; that's filed as a known unknown,
+[`single-voxel-edits-unexpected`](bugs/single-voxel-edits-unexpected.md).
 
-Both are fixed, uncommitted (2026-09-25). After them comes **FEAT089, parts look like
-parts**, the stated blocker for the rest of 5.5g (see the v0.1 backlog doc).
-Volumetric worldgen tier 1 (`planned/18`) is independent and can run
-alongside.
+**Next: [`actions-preview-gdscript-slow`](bugs/actions-preview-gdscript-slow.md).**
+The exact prediction made previews 5–10× slower (CSG 2.5 ms per frame). The fix
+is to build the lattice in C++; caching was rejected. Then comes **FEAT089,
+parts look like parts**, which blocks the rest of 5.5g. Volumetric worldgen
+tier 1 (`planned/18`) is independent and can run alongside.
 
-GUT after both fixes: 192 tests, 190 passing, 2 pending, 0 failing
-(baseline before them: 173 / 171 / 2).
+The same review loop filed four more bugs: EmptyVoxel safety, PartIndex
+footprint, lattice upper-face writes, and MPM thaw events. See
+`docs/bugs/00_INDEX.md`.
+
+GUT: 192 tests, 190 passing, 2 pending, 0 failing.
+
+*Section drafted by Claude.*
 
 
 ## Paused: full-project code review, pass 2
@@ -147,9 +152,10 @@ recolours the overlap — use `PartIndex`.
 
 ## Immediate next actions
 
-1. Finish and review the two bug fixes above, then commit.
-2. FEAT089: parts look like parts.
-3. The rest of 5.5g, with worldgen tier 1 alongside.
+1. Move the preview lattice into C++ (`actions-preview-gdscript-slow`).
+2. Characterize `single-voxel-edits-unexpected` with Robert.
+3. FEAT089: parts look like parts, then the rest of 5.5g, with worldgen tier 1
+   alongside.
 
 
 ---
@@ -181,6 +187,21 @@ Git log is the authoritative narrative of what shipped.
 
 These are design and tuning *limits*, not defects. Defects live in
 `docs/bugs/`.
+
+- **A sub-cell part's ghost falls back to its footprint cells.** A part that
+  flips no cell centre, like a 0.5 m log, still shows its refusal on the coarse
+  footprint. A ghost drawn from the brush mesh would be the truthful display.
+  *(Added by Claude.)*
+
+- **Construction attach reach is a new tolerance.** A part counts as attached
+  within half a lattice diagonal of the brush, plus one cell downward. It
+  replaced the footprint rule in `c9430a4`, and placement shifts slightly.
+  *(Added by Claude.)*
+
+- **Style budget overruns** reported by the commit hook: `edit_store.cpp`
+  (396 lines), `dc_world_preview.gd` (528), `simplex.gd` `minimize()` (55-line
+  function), and `test_cell_sample_convention.gd` (471). They don't block;
+  they're candidates for pass 2. *(Added by Claude.)*
 
 - **Flatten preview z-fights with the surface it's matching.** Cosmetic.
   Cleanest fix is a small forward offset on the preview plane normal.

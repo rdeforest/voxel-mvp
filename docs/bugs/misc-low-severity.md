@@ -41,6 +41,13 @@ lookup) and `:253-258` (`_placement_chord_axis` W/A/E chain). Most are *forced* 
 choice. Flagged for completeness against the explicit rule; not worth rewriting. (Keycode map scanned: no
 duplicate or missing bindings.)
 
+## 7. Player-safety "was it already solid/air" is judged only at sampled points
+*Added by Claude (agent), 2026-09-25.* `SdfLattice._turns_in` (`scripts/actions/sdf_lattice.gd:85`)
+finds exactly where the write makes new solid or air, but only checks what was there *before* at the overlap
+corners and the cell sample points. If the store is already solid at every tested point and the write adds
+solid between them, the check isn't proven exhaustive. That errs toward refusing. **Fix (optional):**
+bound the prior field per leaf the way the written field is bounded.
+
 ## References
 `scripts/voxel_utils.gd`, `scenes/player/action_factories.gd`, `scripts/terrain_raymarch.gd`,
 `scripts/ui/perf.gd`, `scenes/player/player.gd`.

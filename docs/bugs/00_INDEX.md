@@ -13,6 +13,12 @@ When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a 
 
 | Bug | Area | Severity | Notes |
 |-----|------|----------|-------|
+| [actions-preview-gdscript-slow](actions-preview-gdscript-slow.md) | actions (preview perf) | **med (regression, next up)** | Exact field prediction runs in GDScript every frame; previews 5–10× slower (CSG 2.5 ms). Fix: build the lattice in C++. |
+| [single-voxel-edits-unexpected](single-voxel-edits-unexpected.md) | actions (FillVoxel/EmptyVoxel) | **known unknown** | Robert saw unexpected single-voxel results in play. Not yet characterized; hypotheses in file. |
+| [empty-voxel-no-player-safety](empty-voxel-no-player-safety.md) | actions (EmptyVoxel, Fill) | low-med | EmptyVoxel can empty the player's support cell; Fill uses its own distance check instead of `endangered_by`. |
+| [part-index-footprint-cells-never-released](part-index-footprint-cells-never-released.md) | structural (PartIndex) | low-med | Parts are registered under the AABB footprint, not the imprint's flips; cells never solid are never released. |
+| [sdf-lattice-writes-false-change-at-max-faces](sdf-lattice-writes-false-change-at-max-faces.md) | actions (CSG no-op refusal) | low | "Writes anything" samples the neighbour leaf at the upper faces; an identical CSG re-stamp into air is never refused. |
+| [mpm-thaw-events-unmeasured](mpm-thaw-events-unmeasured.md) | MPM thaw | low | Emits `voxel_removed` from its plan, not measured flips; neighbour flips go unreported. |
 | [event-bus-reentrancy](event-bus-reentrancy.md) | event bus | med (latent) | No reentrancy guard; prunes dead subs mid-iteration. Reachable by design; no channel self-chains *yet*. |
 | [dig-action-no-validate-no-safety](dig-action-no-validate-no-safety.md) | actions (dig) | low-med | `validate()` always true (ghost disagrees); no player-safety guard unlike siblings. Confirm intent. |
 | [mmap-arena-no-mmap-fallback](mmap-arena-no-mmap-fallback.md) | EditStore (mmap arena) | low-med | Crashes on `mmap` failure of a valid fd instead of using the anon fallback. Env-dependent. |
