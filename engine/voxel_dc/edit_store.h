@@ -113,19 +113,34 @@ public:
 	static double terrain_surface(double x, double z, double base, double amp, double period, int octaves, int seed);
 
 	PackedByteArray serialize() const;     // the sparse edited tree + root + generator params
-	void deserialize(const PackedByteArray &bytes);
+	bool deserialize(const PackedByteArray &bytes);
 
 protected:
 	static void _bind_methods();
 
 private:
+	// Where a node's field comes from. Subdividing an edited leaf must leave its field exactly as it
+	// was (a trilerp re-rounded to float32 at the children's corners moves samples a write never
+	// touched), so its children read the subdivided leaf's own corners over its own cube: they are
+	// INHERITED leaves of that FIELD_SOURCE (`Node::source`). An inherited leaf also holds that field
+	// at its corners, rounded to float32 (what a write or stamp compares or combines with).
+	// Serialized as the byte that was `has_corners` (0 / 1), so older blobs read unchanged; `source`
+	// is not serialized but relinked on load (_link_sources) from the FIELD_SOURCE ancestors.
+	enum FieldState : uint8_t {
+		NO_FIELD,        // internal, or an unedited leaf (-> generator)
+		OWN_FIELD,       // an edited leaf: its corners over its cube
+		INHERITED_FIELD, // an edited leaf: its FIELD_SOURCE's field
+		FIELD_SOURCE,    // internal: a subdivided edited leaf, its corners the field its inheritors read
+	};
+
 	struct Node {
 		Vector3 origin;
 		double size = 0.0;
 		int children[8];
 		float corners[8];
-		bool has_corners = false; // a stored (edited) leaf; false = internal or unedited (-> generator)
+		FieldState field = NO_FIELD;
 		uint8_t material = 0;
+		int source = -1; // an edited leaf: the node whose field it reads (itself, or its FIELD_SOURCE)
 		Node() {
 			for (int i = 0; i < 8; ++i) {
 				children[i] = -1;
@@ -133,6 +148,7 @@ private:
 			}
 		}
 		bool is_leaf() const { return children[0] < 0; }
+		bool is_edited() const { return field == OWN_FIELD || field == INHERITED_FIELD; }
 	};
 
 	LocalVector<Node> nodes; // nodes[0] = root
@@ -154,10 +170,15 @@ private:
 			int adim, const Vector3 &aorigin, double cell, const Vector3 &rmin, const Vector3 &rmax);
 	void _subdivide(int idx); // edited leaf -> inherit its field; unedited -> fresh (still generator)
 	bool _write_changes(int idx, RegionWrite &write) const;
-	bool _leaf_write_changes(const Vector3 &o, double s, const float *corners, RegionWrite &write) const;
+	bool _leaf_write_changes(const Vector3 &o, double s, int field, RegionWrite &write) const;
 	bool _corner_changes(const Vector3 &c, int slot, const float *held, RegionWrite &write) const;
 	int _leaf_at(const Vector3 &p) const;
 	int _leaf_toward(const Vector3 &p, const Vector3 &toward) const;
+	int _leaf_field(int leaf) const;
+	static bool _read_node(StreamPeerBuffer &b, int index, Node &n);
+	bool _link_sources(int idx, int source);
+	double _field_value(int field, const Vector3 &p) const;
+	float _held_corner(int field, const Vector3 &o, double s, int i) const;
 	bool _inside_root(const Vector3 &p) const;
 };
 
