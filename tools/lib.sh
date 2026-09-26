@@ -10,8 +10,25 @@ _voxmvp_lib_dir() {
 	cd "$(dirname "${BASH_SOURCE[0]}")" && pwd
 }
 
-# Project root is one level up from tools/.
+# Project root is one level up from tools/. In a git worktree this is the
+# worktree, which is what anything reading project sources wants.
 VOXMVP_ROOT="$(cd "$(_voxmvp_lib_dir)/.." && pwd)"
+
+# The sibling engine repos (versions.env *_DIR_REL) hang off the MAIN
+# checkout, not a worktree: a worktree lives at .claude/worktrees/<name>/, so
+# resolving ../../godotengine from there lands inside .claude/. The git common
+# dir is shared by every worktree and names the main checkout. Falls back to
+# VOXMVP_ROOT outside git (e.g. an exported tarball).
+_voxmvp_engine_anchor() {
+	local common
+	common="$(git -C "${VOXMVP_ROOT}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+	if [[ -n "${common}" && -d "${common}" ]]; then
+		dirname "${common}"
+	else
+		echo "${VOXMVP_ROOT}"
+	fi
+}
+VOXMVP_ENGINE_ANCHOR="$(_voxmvp_engine_anchor)"
 
 # Print the expected Godot editor binary name for the current platform.
 # Both halves of the toolchain agree on this single function.
@@ -47,7 +64,7 @@ platform_binary_name() {
 platform_binary_path() {
 	local name
 	name="$(platform_binary_name)" || return 1
-	echo "${VOXMVP_ROOT}/${GODOT_DIR_REL}/bin/${name}"
+	echo "${VOXMVP_ENGINE_ANCHOR}/${GODOT_DIR_REL}/bin/${name}"
 }
 
 # A SCons-friendly platform token, in case the build script wants it.
@@ -73,10 +90,10 @@ scons_platform() {
 
 # Absolute path to the godot_voxel repo checkout.
 godot_voxel_dir() {
-	echo "$(cd "${VOXMVP_ROOT}/${GODOT_VOXEL_DIR_REL}" && pwd)"
+	echo "$(cd "${VOXMVP_ENGINE_ANCHOR}/${GODOT_VOXEL_DIR_REL}" && pwd)"
 }
 
 # Absolute path to where the symlink must live (and must be named `voxel`).
 voxel_module_link() {
-	echo "${VOXMVP_ROOT}/${GODOT_DIR_REL}/modules/voxel"
+	echo "${VOXMVP_ENGINE_ANCHOR}/${GODOT_DIR_REL}/modules/voxel"
 }
