@@ -2,9 +2,11 @@ class_name TerrainRaymarch
 
 # Sphere-trace a ray through the EditStore SDF to a sub-metre-precise surface hit. Used for player
 # aim (the cooked collision mesh is only ~1m, so a physics raycast quantizes the aim — fatal for
-# placing sub-metre parts). Fixed fine steps so a sub-metre feature is never stepped over, then a
-# bisection of the air->solid crossing for the precise surface point; the normal is the SDF
-# gradient there. Pure + static so it's unit-testable against an analytic field.
+# placing sub-metre parts). Fixed steps, sampled at both ends of every segment (the first one's
+# near end is the origin test), so solid at least `step` thick along the ray is never stepped over;
+# thinner solid can be, on any segment. Then a bisection of the air->solid crossing for the precise
+# surface point; the normal is the SDF gradient there. Pure + static so it's unit-testable against
+# an analytic field.
 
 # Returns {hit: bool, position: Vector3, normal: Vector3}. `step` should be <= the render cell so
 # features aren't skipped; `reach` is the max ray distance.
