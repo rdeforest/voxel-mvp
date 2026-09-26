@@ -83,3 +83,8 @@ or condensed.
   from basalt vesicles instead, obsidian requires a late-stage evolved dome, and
   pyrite from the hydrothermal zones. Includes the failure-legibility rule that
   applies to every ladder.
+- [`22-scenario-languages.md`](22-scenario-languages.md) — **draft for review.**
+  Splits test instruments from play verbs, and specifies three description formats that share
+  one expression language and generator registry: field captures (the bitmap), parametric
+  assemblies (the vector drawing) and HTN-style methods (the commands, also the recording
+  format). Also covers the record → GUT-test loop.
