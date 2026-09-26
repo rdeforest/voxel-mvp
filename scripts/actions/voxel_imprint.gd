@@ -21,8 +21,10 @@ static func world_box(shape: CsgShape, xform: Transform3D) -> AABB:
 # actually flipped (measured across it — the same lattice() field CsgAction predicts from), plus terrain_sdf_changed over
 # the rewritten box for the render/collision re-mesh. What the brush makes solid takes the part
 # material; existing terrain keeps its material; air is 0 (matches the freeze union rule).
+# Returns those measured flips, so a caller that tracks what the write did (PartIndex, via
+# ConstructionAction) reads the very set the events carried instead of measuring it again.
 static func apply(store: EditStore, material_name: StringName,
-        shape: CsgShape, xform: Transform3D, op: int) -> void:
+        shape: CsgShape, xform: Transform3D, op: int) -> CellFlips:
     var lat := lattice(store, shape, xform, op)
     var inverse := xform.affine_inverse()
     var part := MaterialPalette.index_of(material_name) if op == CsgState.Op.ADD else -1
@@ -30,10 +32,12 @@ static func apply(store: EditStore, material_name: StringName,
         func(c: Vector3) -> bool: return shape.sdf(inverse * c) < VoxelConstants.SDF_SOLID_THRESHOLD, false)
     var before := CellFlips.snapshot(store, lat.cells())
     lat.write(store, indices)
-    CellFlips.since(store, before).emit(store)
+    var flips := CellFlips.since(store, before)
+    flips.emit(store)
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
         TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, lat.region_lo, lat.region_hi - lat.region_lo))
+    return flips
 
 
 # The field the imprint writes: the brush's analytic SDF combined with the store over a dense

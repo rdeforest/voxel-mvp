@@ -71,16 +71,13 @@ func execute() -> void:
     if store == null:
         push_error("ConstructionAction.execute(): no store")
         return
-    _ensure_flips()
-    var xform  := _xform()
-    var before := CellFlips.snapshot(store, _lattice.cells())
-    VoxelImprint.apply(store, material_name, _shape(), xform, CsgState.Op.ADD)
+    var xform := _xform()
+    var flips := VoxelImprint.apply(store, material_name, _shape(), xform, CsgState.Op.ADD)
     # PartIndex releases a cell only when a carve flips it back to air, so the part is registered
-    # under exactly the cells the write made solid (the voxel_added set), measured across it.
+    # under exactly the cells the write made solid (the voxel_added set apply just emitted).
     VoxelEventBusSingleton.emit(
         PartPlacedEvent.CHANNEL,
-        PartPlacedEvent.new(VoxelConstants.GRID_ID, CellFlips.since(store, before).solid,
-            material_name, part.dimensions, xform))
+        PartPlacedEvent.new(VoxelConstants.GRID_ID, flips.solid, material_name, part.dimensions, xform))
 
 
 # --- internals ---

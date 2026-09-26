@@ -15,6 +15,7 @@ or move to `docs/completed/` when the session is closed out.*
 - [x] Track B4 — `mpm-thaw-events-unmeasured` (particles now follow the measured flips too; filed `mpm-thaw-carve-leaves-planned-cells`)
 - [x] Track B5 — MPM SVD regression test (all four rows pinned; filed `mpm-svd-ill-conditioned-u`)
 - [x] Track C1 (follow-up) — ConstructionAction._attached ported to C++ (`EditStore.imprint_near_solid`); GDScript original to the oracle; gate `test_construction_attach_predict` (placements, lift/side boundaries bisected to adjacent doubles, exact ties). Beam preview, no player: resting 0.326 → 0.144 ms, floating +3 m 0.890 → 0.154 ms (attach scan itself 0.005 / 0.015 ms). Now dominated by `predict_imprint` (~0.067 ms) + `lattice_flips` (~0.064 ms) over the 13³ lattice
+- [x] Track C2 (follow-up) — `VoxelImprint.apply` returns its measured `CellFlips`; ConstructionAction registers the part from `.solid` and drops its own snapshot (one measurement per placement). Beam execute() on the game store 7.5 → 6.1 ms (`scripts/dev/bench_construction_execute.gd`). What remains is `SdfLattice.materials` (~4.4 ms: a GDScript Callable per lattice point, 13³) and `CellFlips.snapshot`/`since` (~0.57 / 0.72 ms over 1728 cells); filed `actions-imprint-materials-gdscript-per-point`
 - [ ] Morning brief + play-test list at the bottom of this doc
 
 ## The constraint that shapes everything
