@@ -28,7 +28,7 @@ When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a 
 | [dc-mesher-latent-arg-traps](dc-mesher-latent-arg-traps.md) | DC mesher entry points | low (no live caller) | Unenforced preconditions in `mesh_clipmap`/`grow_world`. Filed before someone hits them. |
 | [save-pair-consistency](save-pair-consistency.md) | persistence (save pair) | low (needs a call) | A lone snapshot or blob still loads on its own, and a new snapshot beside an old blob is not detected. Needs a shared save id plus a call on legacy snapshot-only saves. |
 | [mpm-physics-fidelity-notes](mpm-physics-fidelity-notes.md) | MPM | note (not a bug) | Drucker-Prager coeff is a knob; grid vs particle contact differ. Design simplifications recorded. |
-| [misc-low-severity](misc-low-severity.md) | various | low | Bundle: fill-voxel 0.5 nudge, raymarch first-segment gap, perf ring buffers, input if-chains. |
+| [misc-low-severity](misc-low-severity.md) | various | low | Bundle: input if-chains (no fix proposed), player-safety prior field checked only at sampled points. |
 | [dc-inside-coverage-cracks](dc-inside-coverage-cracks.md) | DC world-octree render | **blocks doc 17 P3** | Graded-floor coarse leaves place misaligned vertices → LOD-seam holes. Reproduced headlessly; proactive accumulate-fine-QEF fix proposed. |
 | [dc-reversed-triangles-ridges](dc-reversed-triangles-ridges.md) | DC meshing (shared) | low (rare) | Back-facing triangle on convex ridges; pre-existing, in the live render too (~1/few-thousand tris). |
 | [dc-crease-normals-soft](dc-crease-normals-soft.md) | DC meshing | low (conditional) | Sharp edges shade soft; needs Hermite/crease-split in C++. v0.2 art pass. |
@@ -43,4 +43,6 @@ and, where the report was wrong, why.
 | Bug | Area | Verdict | Notes |
 |-----|------|---------|-------|
 | [mpm-svd-reflection-sign](closed/mpm-svd-reflection-sign.md) | MPM (mat3 SVD) | not a bug (2026-09-25) | Reported double σ₂ flip is correct: a reflected F fires one `if`, not both; the both-fire case is `det F > 0`. Four-case table in the file. The *test* gap it found is closed: `test/test_mpm_svd.gd` (2026-09-26). |
+| [fill-voxel-half-nudge-tie](closed/fill-voxel-half-nudge-tie.md) | actions (FillVoxel targeting) | not a bug (2026-09-26) | `floor(hit + n*0.5)` ties only with the hit exactly on a cell centre; the 0.5 picks the first air-centred cell on both faces. Switching to `SURFACE_NUDGE` would change the target, which is [single-voxel-edits-unexpected](single-voxel-edits-unexpected.md) Q2. |
+| [raymarch-first-segment-unsampled](closed/raymarch-first-segment-unsampled.md) | aim (TerrainRaymarch) | not a bug (2026-09-26) | The first segment is sampled at both ends like every other (origin test + `t = step`); the header's "never stepped over" was reworded to "at least `step` thick". |
 | [edit-remesh-padding-gap](closed/edit-remesh-padding-gap.md) | edit re-mesh (clipmap) | obsolete (2026-09-25) | Filed against the clipmap render + godot_voxel notification; both deleted in `d58e8ce`, so the mechanism has no live code path. Live successor: [dc-incremental-emit-ring-insufficient](dc-incremental-emit-ring-insufficient.md). |
