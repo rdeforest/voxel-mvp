@@ -10,228 +10,117 @@
 
 # Resumption Brief
 
-*Last rewritten: 2026-09-13*
+*Last rewritten: 2026-09-24*
 
 
 ## Where things stand right now
 
-Work stopped in mid-June and resumed 2026-09-13 after a three-month gap.
+The branch merge is done. `master` is the only branch; the M-thesis scale-up
+(mmap disk-paged cell arena, hot/cold cell split, parallel bottom-up DC build,
+incremental-emit bug hunt) is on it. Verify with `git log --oneline -5` if in
+doubt — this brief was rewritten from the refs, not the log.
 
-Branch situation is resolved. What looked like nine branches was one line of
-work plus five empty pointers. Everything real lives on
-`audit/claude-code-review` (52 commits ahead of `master`), which despite its
-name is the **M-thesis scale-up**: mmap disk-paged cell arena, 725M cells,
-incremental grow (c1–c4a), hot/cold cell split (296 → 124 B), parallel
-bottom-up DC build, plus the incremental-emit bug hunt at the tip.
+The `dc_octree_mesher.cpp` header split (formerly
+`docs/refactor-dc-octree-mesher-split.md`) has also landed:
+`dc_sdf_source.h`, `dc_clipmap_source.h`, `dc_edit_store_source.h` and
+`dc_octree.h` now hold the internals; the .cpp keeps `DCOctreePersist` and the
+`DCOctreeMesher::` methods. The brief is retired.
 
-`master` has two commits the branch lacks (`6a5ed6f`, `49cf512`) that
-re-apply branch work; the merge is a real merge, not a fast-forward.
+**Immediate goal: demo-ready for Jamin and Cecilia.** The game must launch,
+generate, and let someone dig, build and watch a collapse without falling over.
+Robert is smoke-testing that now. Anything found goes to `docs/bugs/`, and
+demo-blockers jump the queue ahead of pass 2.
 
 
 ## The active thread: full-project code review, pass 2
 
-The plan, in two passes:
+**Pass 1** (Claude reviews and applies) is done and merged: `4e57cad`,
+`624e204`, `23403e4`. GUT green throughout.
 
-**Pass 1 — Claude reviews and applies.** Low-level (style fit, loop/branch
-handling, branch→data-structure conversion, split/merge, naming, comment
-density) and high-level (single responsibility, duplication, needless
-recompute, data moved that needn't be).
+**Pass 2** — Robert reads every file, leaves `RdF:` comments, Claude applies
+fixes and extracts going-forward guidance. The point is the mental model as
+much as the code.
 
-**Pass 2 — Robert reads every file**, edits to taste, asks where the code
-isn't self-explanatory. Claude extracts going-forward guidance from each
-diff. The point is the mental model as much as the code.
+Guidance so far: group related params; comments say *why* not *what*, design
+goes to docs; no pimpl pattern.
 
-Performance is known-poor and that's accepted. Pass 1 flags perf
-*structurally* (recompute, churn) but does not chase frame time.
+Pass-2 commits: `3b8c3a5` (`ActionContext`), `3464f9c` (drop `box` from
+`VoxelImprint.apply`), `d58e8ce` (delete clipmap render, splice path,
+`DcMeshAudit`; ~1700 lines). `mesh_clipmap`/`remesh` stay — collision,
+falling chunks and ~10 test oracles use them.
 
-### Pass 1: done
+Deferred `RdF:` items: un-pimpl (`DCOctreePersist` holds the `Clipmap` that
+`mesh_clipmap` needs) and `mesh_clipmap`'s 20 params (~17 positional call
+sites, GDScript-binding-constrained).
 
-Applied on `refactor/review-pass-1`, since merged to master. GUT green
-throughout (207/206 pass/1 pending/0 fail).
+**Queued:** `EditEntry` typed record (see bug `actions-untyped-work-tuple`),
+the `Brush` bundle, internal `TerrainParams` in C++, the name-and-comment
+sweep, `mesh_world` `ViewParams`.
 
-- `4e57cad` — delete `SparseVoxelOctree`, the GDScript SVO prototypes
-  (`voxel_octree`/`octree_mesher`), `dcgen` (`DcSubstratePreview`) and their
-  tests; relocate the `terrain_surface` oracle to `EditStore`. −1834 lines.
+### Read progress
 
-- `624e204` — consolidate duplicated GDScript. New shared homes:
-  `TerrainProbe`, `OverlayMaterial`, `PhysicsUtils`, `VoxelUtils.euler_basis`.
-  Single-sourced `TERRAIN_MATERIAL_PATH` / `SURFACE_NUDGE` /
-  `PLAYER_CLEARANCE` into `VoxelConstants`.
+- `engine/voxel_dc/` — paused. `dc_octree_mesher.h` fully read. The reviewed
+  `Level::build_mip` / `append_reduced_level` code now lives in
+  `dc_clipmap_source.h`. Everything else unread, including the big one,
+  `dc_octree.h` (~75 KB, the irreducible `Octree` struct).
+- `scripts/` — done: `voxel_utils.gd`, `tools/ncls`. Deferred:
+  `voxel_constants.gd`. `structural/mpm_structure.gd` started (renamed
+  `PARTICLE_SIZE`→`DEBUG_CUBE_SIZE`, one `VOXEL_CENTER_OFFSET`), unfinished.
+- `scenes/`, `test/` — unread.
 
-- `23403e4` — dedup the DC mesher's leaf-decision logic
-  (`want_leaf`/`sample_leaf`/`discard_children`).
+**Scale:** ~5k lines / 147 files under `scripts/`, ~5k / 25 under `engine/`.
+Plan: sort by line count descending, real sessions for the top ~20,
+batch-skim the long tail, keep a review ledger.
 
-**Two findings were false positives, verified and not applied:** the mat3 SVD
-"double-flip" is correct (both-improper case has det F≥0; the double-negate is
-intended), and the MPM sand-viscosity flag is the known *pending* repose-tuning
-test, not a new bug.
-
-**Deferred to separate focused passes:** emit-via-`StoreWrite` consolidation
-(changes the `terrain_sdf_changed` footprint the structural layer subscribes
-to — wants event-coverage tests first); a C++ constants module (low value);
-the LOW structural-perf items (per-frame Action rebuild, `perf.gd` O(n) ring).
-
-### Pass 2: in progress, this is where to resume
-
-Robert reads file-by-file leaving `RdF:` comments; Claude applies fixes.
-
-Guidance extracted so far: group related params; comments say *why* not
-*what*, design goes to docs; no pimpl pattern.
-
-His first lens — too many parameters, doing too much — drove a re-review and
-these commits:
-
-- `3b8c3a5` — `ActionContext` bundles the store/player/integrity tail every
-  Action constructor repeated.
-- `3464f9c` — drop the redundant `box` arg from `VoxelImprint.apply`.
-- `d58e8ce` — the DC cleanup pass, brought forward: delete the clipmap render
-  (`DCTerrainManager`), the splice path (`DCEditSplicer` + C++
-  `mesh_subregion`), `DcMeshAudit`, their tests and wiring. ~1700 lines.
-  **Key finding:** `mesh_clipmap`/`remesh` are *not* clipmap-only — collision,
-  falling chunks and ~10 test oracles use them. They stay.
-
-Two `RdF:` items deferred with reasons: un-pimpl (`DCOctreePersist` still holds
-the `Clipmap` that `mesh_clipmap` needs — doesn't collapse cleanly), and
-`mesh_clipmap`'s 20 params (load-bearing and GDScript-binding-constrained
-across ~17 positional call sites).
-
-**Queued after that:** `EditEntry` typed record (the `entry[0..3]` work tuples,
-behavior-sensitive), the `Brush` bundle, internal `TerrainParams` in C++, the
-name-and-comment sweep on live files, `mesh_world` `ViewParams`.
-
-### Read progress — which files have been walked
-
-- `engine/voxel_dc/` — **paused, come back later.** `dc_octree_mesher.h` fully
-  read, `RdF:` items resolved. `dc_octree_mesher.cpp` only to ~line 100 of
-  1409 (`Level::build_mip` / `append_reduced_level` reviewed and cleaned).
-  Started here only because it sorts first, *not* because it's the right
-  starting point. It's the hardest file. Rest of the directory unread.
-
-- `scripts/` — in progress. Done: `voxel_utils.gd` (recently authored, no
-  changes), `tools/ncls`. Deferred: `voxel_constants.gd` (does what it says on
-  the tin). `scripts/structural/mpm_structure.gd` started — renamed
-  `PARTICLE_SIZE`→`DEBUG_CUBE_SIZE` and `0.5,0.5,0.5`→`VOXEL_CENTER_OFFSET` —
-  then abandoned for the accel-bake work below.
-
-- `scenes/` — unread.
-- `test/` — unread, lower priority.
-
-**Scale, measured 2026-09-13:** ~5k lines across 147 files under `scripts/`,
-~5k across 25 under `engine/`. At one file per session this is not finishable
-as-is. Plan: sort by line count descending, give real sessions to the top ~20,
-batch-skim the long tail, and keep a review ledger so the pile visibly shrinks.
-
-**Suggested resume:** a small leaf file to build momentum (`voxel_constants.gd`,
-an `actions/*.gd`), then back to `engine/voxel_dc/`.
+**Resume with** a small leaf file (`voxel_constants.gd`, an `actions/*.gd`),
+then back to `engine/voxel_dc/`.
 
 
-## Two perf threads in flight
+## Perf threads (queued behind the demo and pass 2)
 
-### Incremental accel bake (doc 17, P1 nit)
+**Incremental accel bake** (impl doc 17, P1 nit). `grow_world` re-bakes the
+whole min/max prune accel every move — a fixed mesh-lag floor. Fix:
+scrolling-buffer reuse mirroring `EditStore::fill_region` (res-snap each
+level, copy the overlap, sample only the entered shell). Rejected:
+heightfield-derived accel — assumes the generator is forever a heightfield.
 
-`grow_world` re-bakes the whole concentric min/max prune accel on every move.
-That's a fixed mesh-lag cost independent of `eps_px` — the floor that stops the
-controller refining.
-
-Fix: scrolling-buffer reuse, mirroring `EditStore::fill_region`. Res-snap each
-accel level so a move scrolls it cell-aligned, copy the overlap, sample only
-the entered shell.
-
-Unlocks lower per-move lag *and* idle progressive refinement (cheap grows let
-the controller keep refining a held view toward the 0.25 m floor).
-
-**Considered and rejected:** heightfield-derived accel (O(dim³)→O(dim²)). It
-assumes the generator is forever a heightfield. Manifesto says no.
-
-### Multithread the mesher
-
-The DC remesh is a single `WorkerThreadPool` task — one core does the whole
-build while the other 23 idle. At meshlag 20s / coverage 256 the controller
-settled at eps 19 (~5s remesh) because the refine target is `mesh_ceil*0.2`,
-not because of the ceiling.
-
-Plan, in order:
-
-1. **Instrument the phases** (accel-bake vs build-sample vs collapse/emit ms).
-   Diagnose before fixing — we don't yet know where the 4s goes. Octree
-   descent plus multi-octave FastNoiseLite over tens of millions of samples
-   could be honest compute.
-2. **Runtime thread-count knob** (`dcthreads` console). Also the instrument
-   for the SMT question: sweep past physical-core count — keeps scaling means
-   latency-bound, plateaus means compute-bound.
-3. **Parallelize the accel bake** — pure `dim³` independent loop, safe first
-   win.
-4. **Parallelize build leaf-sampling** (the likely-dominant cost) via a
-   structure-pass-then-parallel-sample-pass split. Tree-structure decisions
-   need only the accel and floor, so leaf QEF sampling can be a separate
-   parallel pass, sidestepping the shared node-array/free-list thread-unsafety.
-
-Byte-identical build tests gate parallel correctness.
+**Multithread the mesher.** The DC remesh is one `WorkerThreadPool` task on
+one of 24 cores. In order: (1) instrument phases (accel-bake / build-sample /
+collapse-emit ms) before fixing anything; (2) `dcthreads` console knob, also
+the SMT probe; (3) parallelize the accel bake; (4) parallelize leaf sampling
+via a structure-pass-then-sample-pass split. Byte-identical build tests gate
+correctness. (`g_mesh_threads` now lives with `Octree` in `dc_octree.h`.)
 
 
 ## Standing TODO: vocabulary sweep, "terrain" → "matter"
 
-**Matter** is the umbrella term for any solid the voxels describe, natural or
-built. Reserve **terrain** for naturally generated ground. **Material** stays
-per-cell type.
-
-Sweep code, comments and docs for umbrella uses — judgment per site, don't
-rename the genuine natural-ground ones. Fold into the name-and-comment sweep.
-
-While touching files, bare `Vector3(0.5, 0.5, 0.5)` cell-centers should become
-`VoxelConstants.VOXEL_CENTER_OFFSET` (~4 remain in `mpm_structure.gd`).
+**Matter** = any solid the voxels describe, natural or built. **Terrain** =
+naturally generated ground only. **Material** = per-cell type. Judgment per
+site; fold into the name-and-comment sweep. Also replace bare
+`Vector3(0.5, 0.5, 0.5)` cell-centers with `VoxelConstants.VOXEL_CENTER_OFFSET`
+(~4 remain in `mpm_structure.gd`).
 
 
 ## Paused threads
 
-### MPM continuum-physics substrate — spike done, verdict GO
+**MPM continuum substrate — spike done, verdict GO.** Spec:
+`docs/roadmap/design/12-mpm-structural-substrate.md`. Next per doc 12: fast
+3×3 SVD (McAdams 2011) → multi-thread → GPU compute → EditStore thaw/freeze
+coupling (the remaining research risk). PBD is already removed on master.
+The SVD reflection handling was re-verified correct; a regression test
+feeding a `det F < 0` matrix and asserting `det(U)·det(V)` and `sign(σ₂)`
+would lock that in before the fast-SVD rewrite.
 
-GUI-testing parts-as-voxels surfaced PBD's structural limits: a beam on a peak
-sags through the mountain (no terrain contact), break-off chunks lock mid-fall.
-PBD is the mass-spring approximation and the manifesto says don't keep an
-approximation for effort reasons.
-
-So the structural sim moves to **MPM**. Terrain, parts and debris deform,
-fracture, flow and settle under one solver; its grid *is* our voxel grid;
-topology change is intrinsic; contact resolves on the grid. MPM subsumes PBD,
-`VoxelChunkBody`, the falling-body classifier, and parts-as-voxels stages 5–6.
-
-Spec and verdict: `docs/roadmap/design/12-mpm-structural-substrate.md`.
-
-**The spike** (`engine/voxel_dc/mpm_sim.*`, `mpm_material.*`, `mat3.*`,
-`test/test_mpm_sim.gd`, 183/183 GUT) proved headlessly: stable core loop;
-verified 3×3 SVD; fixed-corotated and neo-Hookean elasticity; EditStore SDF as
-a grid collider, so a stiff body rests *on* terrain (the beam-through-mountain
-fix); Drucker-Prager sand flowing to a repose pile; sparse sleeping (settled is
-an exact lossless no-op, wakes on disturbance).
-
-Cost is per-particle-linear and SVD-dominated: corotated 2.4 µs/particle, so
-8k particles is 19.6 ms single-threaded.
-
-**Next, per doc 12:** graduate toward real-time (fast 3×3 SVD per McAdams 2011,
-then multi-thread, then GPU compute) → the EditStore thaw/freeze coupling,
-which is the one remaining *research* risk → retire PBD, `VoxelChunkBody` and
-the falling-body classifier.
-
-Note: `a0e9965` on the current branch already removes PBD. Merging lands that.
-
-### Parts-as-voxels, stages 1–5 — done
-
-`3735bf7`, `4eaf553`, `228b417`, `059f36b`, `ffc725c`. Parts are imprinted
-voxels; identity lives in the `PartIndex` sidecar; the old `PartSupport` spine
-is deleted (998 lines). Stage 6 (merge-back) is **parked** — it becomes the MPM
-freeze transition, don't build it twice.
-
-**Known issue:** placing a part over another recolours the overlap. Use
-PartIndex.
+**Parts-as-voxels, stages 1–5 — done.** Stage 6 (merge-back) is parked; it
+becomes the MPM freeze transition. Known issue: placing a part over another
+recolours the overlap — use `PartIndex`.
 
 
 ## Immediate next actions
 
-1. Merge `audit/claude-code-review` into `master`; delete the dead branches.
-2. Update this brief to reflect the merged state.
-3. Bug bash — see `docs/bugs/00_INDEX.md`.
-4. Resume pass 2 with the line-count-sorted plan above.
+1. Demo smoke test (Robert, in progress). File what breaks.
+2. Fix demo-blockers.
+3. Resume pass 2 with the line-count-sorted plan.
 
 
 ---
@@ -250,15 +139,13 @@ Rather than duplicating them here:
 | Why are we doing this at all? | `docs/MANIFESTO.md` (wins over everything) |
 | What is the game? | `docs/roadmap/vision/06-what-the-game-is.md` |
 | What version answers what question? | `docs/roadmap/implementation/01-version-strategy.md` |
-| What's in the v0.1 backlog? | `docs/roadmap/implementation/05-phase-5_5-*.md` (FEAT030–047) |
-| What's deferred and why? | Same, plus `docs/completed/` |
-| Which commitments are immovable? | `docs/roadmap.md` → Architectural Commitments |
+| What's in the v0.1 backlog? | `docs/roadmap/implementation/started/05-phase-5_5-architectural-maturation.md` (FEAT030–047) |
+| What's deferred and why? | `docs/roadmap/implementation/planned/`; shipped work in `implementation/done/` |
+| Which commitments are immovable? | `docs/roadmap/design/02-architectural-commitments.md` |
 | What defects are open? | `docs/bugs/00_INDEX.md` |
-| Where does the code live? | `CLAUDE.md` |
+| Where does the code live? | `docs/CODE-MAP.md` |
 
-The v0.0/v0.1 phase-completion tables that used to live here duplicated
-`docs/roadmap/implementation/` and `docs/completed/`. They're gone; those are
-the source of truth. Git log is the authoritative narrative of what shipped.
+Git log is the authoritative narrative of what shipped.
 
 
 ## Known limits — recorded, not fixed
