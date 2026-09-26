@@ -61,46 +61,90 @@ func thaw_sphere(center: Vector3, radius: float, material_index := 1) -> int:
     return thaw_cells(VoxelUtils.cells_in_sphere(center, radius), material_index)
 
 
-# Thaw a set of (presumed solid) terrain cells into MPM particles: carve each from the store (a
-# hole opens, DC re-meshes), seed 8 particles per cell. Air cells are skipped. Returns the count
-# thawed. This is what the loss-of-support auto-trigger feeds.
+# Thaw a set of (presumed solid) terrain cells into MPM particles: carve them from the store (a
+# hole opens, DC re-meshes) and seed 8 particles per cell the carve actually turned to air. Air
+# cells are skipped. Returns the count thawed. This is what the loss-of-support auto-trigger feeds.
+#
+# The planned cells are only the carve's input. A planned cell can survive it (every corner it has
+# is shared with kept solid, so none may clear), and rewriting the box re-encodes the field there,
+# which can flip cells the plan never named. So the events and the particles both follow the flips
+# measured across the write, as VoxelImprint.apply does: matter leaves the store exactly where it
+# enters the sim.
 func thaw_cells(cells: Array, material_index := 1) -> int:
     _material_index = material_index   # freeze fallback only; each particle carries its own material
 
-    var p_vol  := 0.125
-    var p_mass := RHO * p_vol
-    var carved := {}   # Vector3i -> true: the cells actually thawed (center sampled solid)
-    var box_lo := Vector3(INF, INF, INF)
-    var box_hi := Vector3(-INF, -INF, -INF)
+    var work := _carve_corners(_plan_thaw(cells))
 
-    for cell in cells:
-        if _sim.particle_count() >= MAX_PARTICLES:
-            break # runaway-thaw guard: leave the rest as terrain rather than choke
-
-        if not TerrainProbe.is_solid(_store, cell):
-            continue # already air
-
-        var mat := TerrainProbe.material(_store, cell)
-
-        for ox in [0.25, 0.75]:
-            for oy in [0.25, 0.75]:
-                for oz in [0.25, 0.75]:
-                    _sim.add_particle(Vector3(cell) + Vector3(ox, oy, oz), p_mass, p_vol, mat)
-
-        carved[cell] = true
-        VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))
-        box_lo = box_lo.min(Vector3(cell))
-        box_hi = box_hi.max(Vector3(cell) + Vector3.ONE)
-
-    if carved.is_empty():
+    if work.is_empty():
         return 0
 
-    StoreWrite.cells(_store, _carve_corners(carved)) # carve the corner field to air
-    VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL, TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box_lo, box_hi - box_lo))
+    var before    := CellFlips.snapshot(_store, StoreWrite.lattice(_store, work).cells())
+    var materials := _solid_materials(before)
+    var region    := StoreWrite.cells(_store, work)
+    var flips     := CellFlips.since(_store, before)
+
+    # Particles go in before any event: DetachmentScout ignores edits made while MPM is active,
+    # and that is how it tells this carve from a player's.
+    _seed_particles(flips.air, materials)
     _settled_frames = 0
     _mm.instance_count = _sim.particle_count()
 
-    return carved.size()
+    flips.emit(_store)
+
+    # A rewrite that changed nothing needs no re-mesh. Skipping it also stops a thaw that empties
+    # no cell (so MPM stays idle) from re-seeding the scout onto the same piece forever.
+    if _changed(before):
+        VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL,
+            TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, region.position, region.size))
+
+    return flips.air.size()
+
+
+func _changed(before: Dictionary) -> bool:
+    for cell: Vector3i in before:
+        if TerrainProbe.sdf(_store, cell) != before[cell]:
+            return true
+
+    return false
+
+
+# The solid cells to carve (centre sampled solid), capped so the planned cells' particles fit
+# under MAX_PARTICLES: past the cap the rest stays terrain rather than choke the sim.
+func _plan_thaw(cells: Array) -> Dictionary:
+    var planned := {}
+    var budget  := (MAX_PARTICLES - _sim.particle_count()) / 8
+
+    for cell in cells:
+        if planned.size() >= budget:
+            break
+
+        if TerrainProbe.is_solid(_store, cell):
+            planned[cell] = true
+
+    return planned
+
+
+# Material of every cell solid in the before-snapshot, read before the write so a cell the carve
+# empties still seeds particles of what it was made of.
+func _solid_materials(before: Dictionary) -> Dictionary:
+    var materials := {}
+
+    for cell: Vector3i in before:
+        if before[cell] < VoxelConstants.SDF_SOLID_THRESHOLD:
+            materials[cell] = TerrainProbe.material(_store, cell)
+
+    return materials
+
+
+func _seed_particles(emptied: Array[Vector3i], materials: Dictionary) -> void:
+    var p_vol  := 0.125
+    var p_mass := RHO * p_vol
+
+    for cell in emptied:
+        for ox in [0.25, 0.75]:
+            for oy in [0.25, 0.75]:
+                for oz in [0.25, 0.75]:
+                    _sim.add_particle(Vector3(cell) + Vector3(ox, oy, oz), p_mass, p_vol, materials[cell])
 
 
 # Carving a corner-sampled SDF cleanly. StoreWrite sets the value at the grid CORNER it's handed,
@@ -109,11 +153,11 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
 # Instead: raise a grid corner to air UNLESS a kept-solid cell still needs it — a corner clears iff
 # none of its 8 surrounding cells is solid-and-not-thawed. Interior corners (all neighbours thawed)
 # clear; corners against the kept terrain stay, so the carve leaves a clean wall, not a crust.
-func _carve_corners(carved: Dictionary) -> Array[LatticeEdit]:
+func _carve_corners(planned: Dictionary) -> Array[LatticeEdit]:
     var corner_work: Array[LatticeEdit] = []
     var seen := {}
 
-    for cell in carved:
+    for cell in planned:
         for cx in [0, 1]:
             for cy in [0, 1]:
                 for cz in [0, 1]:
@@ -124,7 +168,7 @@ func _carve_corners(carved: Dictionary) -> Array[LatticeEdit]:
 
                     seen[corner] = true
 
-                    if _corner_clears(corner, carved):
+                    if _corner_clears(corner, planned):
                         corner_work.append(LatticeEdit.new(corner, VoxelConstants.SDF_AIR))
 
     return corner_work
@@ -132,13 +176,13 @@ func _carve_corners(carved: Dictionary) -> Array[LatticeEdit]:
 
 # The 8 cells touching grid corner C have base corners C-{0,1}³. The corner can go air unless one
 # of them is kept solid (not thawed, and its centre samples solid).
-func _corner_clears(corner: Vector3i, carved: Dictionary) -> bool:
+func _corner_clears(corner: Vector3i, planned: Dictionary) -> bool:
     for dx in [0, 1]:
         for dy in [0, 1]:
             for dz in [0, 1]:
                 var nc: Vector3i = corner - Vector3i(dx, dy, dz)
 
-                if carved.has(nc):
+                if planned.has(nc):
                     continue
 
                 if TerrainProbe.is_solid(_store, nc):

@@ -141,9 +141,10 @@ cell→point read goes through `VoxelUtils.sample_point`.)
 `docs/roadmap/design/12-mpm-structural-substrate.md`. Next per doc 12: fast
 3×3 SVD (McAdams 2011) → multi-thread → GPU compute → EditStore thaw/freeze
 coupling (the remaining research risk). PBD is already removed on master.
-The SVD reflection handling was re-verified correct; a regression test
-feeding a `det F < 0` matrix and asserting `det(U)·det(V)` and `sign(σ₂)`
-would lock that in before the fast-SVD rewrite.
+The SVD reflection handling was re-verified correct and is now pinned by
+`test/test_mpm_svd.gd` (all four reflection rows). The rewrite must also fix
+`docs/bugs/mpm-svd-ill-conditioned-u.md` (U degrades below σ₂/σ₀ ≈ 1e-4;
+pending test waiting for it).
 
 **Parts-as-voxels, stages 1–5 — done.** Stage 6 (merge-back) is parked; it
 becomes the MPM freeze transition. Known issue: placing a part over another
@@ -208,8 +209,6 @@ These are design and tuning *limits*, not defects. Defects live in
 
 - **`_resume_unfinished_floods` budget starvation.** Components larger than
   `DETECTION_BUDGET` (500 voxels) take multiple settled frames to fully detect.
-
-- **`PLAYER_CLEARANCE = 1.0 m`** in Fill/Flatten is a guess.
 
 - **Lazy-expansion cascade per dig is bounded by material decay budget.** For
   STONE (decay 0.05) the cascade reaches ~20 cells. Future load-propagation

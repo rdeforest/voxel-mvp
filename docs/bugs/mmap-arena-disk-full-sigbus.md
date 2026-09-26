@@ -1,7 +1,7 @@
 # mmap arena: a full disk kills the process with SIGBUS
 
 *Filed by Claude (agent), overnight 2026-09-26, split out of
-[mmap-arena-no-mmap-fallback](closed/mmap-arena-no-mmap-fallback.md) while fixing it. Diagnosed from the code
+`mmap-arena-no-mmap-fallback` (fixed in `16c977c`) while fixing it. Diagnosed from the code
 and my understanding of Linux/btrfs behaviour. Not reproduced, and the btrfs claims were not tested here.*
 
 **Status:** Open. Severity low-med. Needs Robert's call on policy (see Question).

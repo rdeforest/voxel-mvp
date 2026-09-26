@@ -10,6 +10,8 @@ var shape:     int  # Shape enum
 
 var store:     EditStore
 
+var _stamp_cache: SdfLattice = null
+
 
 func _init(
     p_position: Vector3,
@@ -23,7 +25,9 @@ func _init(
     store    = p_ctx.store
 
 func validate() -> bool:
-    return true
+    if store == null:
+        return false
+    return not _stamp().flips(store).is_empty()   # a carve that flips no cell: the ghost's refusal
 
 func preview() -> ActionPreview:
     var p := ActionPreview.new()
@@ -55,7 +59,11 @@ func execute() -> void:
         TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, scan_origin, scan_size))
 
 
-# The field execute() writes — preview and events both read this brush.
+# The field execute() writes — validate, preview and events all read this brush. Stamped once, so
+# the cache is a snapshot of the store: safe only because every caller builds a fresh action and
+# runs validate/preview/execute with no other write in between (player.gd, the preview renderer).
 func _stamp() -> SdfLattice:
-    return SdfLattice.sphere_stamp(store, position, radius,
-        VoxelConstants.STORE_OP_SUBTRACT, VoxelConstants.RENDER_BASE_CELL)
+    if _stamp_cache == null:
+        _stamp_cache = SdfLattice.sphere_stamp(store, position, radius,
+            VoxelConstants.STORE_OP_SUBTRACT, VoxelConstants.RENDER_BASE_CELL)
+    return _stamp_cache

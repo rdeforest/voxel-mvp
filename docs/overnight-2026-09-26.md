@@ -9,11 +9,11 @@ or move to `docs/completed/` when the session is closed out.*
 - [x] Track A2 — `sdf-lattice-writes-false-change-at-max-faces` — flag now "changes a stored float32 corner": owner-leaf reads at max faces, float32 compare, and a dry run for seams/finer leaves; bug closed
 - [x] Track A3 — `mmap-arena-no-mmap-fallback` — disk mmap failure falls through to the next dir, then anon; fd closed; hook-driven test. SIGBUS-on-full-disk split to `mmap-arena-disk-full-sigbus` (needs a policy call)
 - [x] Track A4 (follow-up) — lattice dry-run worst case — generator and array read once per lattice point; buried refused preview 0.68 → 0.34 ms (dry run 0.47 → 0.126); no change to the answer
-- [ ] Track B1 — characterize `single-voxel-edits-unexpected`
-- [ ] Track B2 — `empty-voxel-no-player-safety`
-- [ ] Track B3 — `part-index-footprint-cells-never-released`
-- [ ] Track B4 — `mpm-thaw-events-unmeasured`
-- [ ] Track B5 — MPM SVD regression test (if time)
+- [x] Track B1 — characterize `single-voxel-edits-unexpected`
+- [x] Track B2 — `empty-voxel-no-player-safety` (Dig: empty-carve refusal only; its player-safety guard needs `preview()`, specified in its bug file)
+- [x] Track B3 — `part-index-footprint-cells-never-released` (sub-cell parts now get no record; filed `part-index-sub-cell-parts-untracked`)
+- [x] Track B4 — `mpm-thaw-events-unmeasured` (particles now follow the measured flips too; filed `mpm-thaw-carve-leaves-planned-cells`)
+- [x] Track B5 — MPM SVD regression test (all four rows pinned; filed `mpm-svd-ill-conditioned-u`)
 - [ ] Morning brief + play-test list at the bottom of this doc
 
 ## The constraint that shapes everything
@@ -111,3 +111,30 @@ available to unblock anything. Work the whole window; do not stop and wait.
 
 *Filled in at the end of the session: decisions made unilaterally, open
 questions, what got skipped and why, and a short play-test list.*
+
+Items recorded during the session (to fold into the brief):
+
+- **Behaviour change (B3):** a part that flips no cell centre (e.g. a 0.5 m log
+  lying between cell-centre planes) now gets no PartIndex record at all. Before,
+  it got an AABB-footprint record nothing could ever release. Only runtime
+  consumer is the console `parts` count. Open design question in
+  `docs/bugs/part-index-sub-cell-parts-untracked.md`.
+- **Convention conflict:** `docs/bugs/00_INDEX.md` says a fixed bug's file is
+  deleted and `closed/` is for not-a-bug/obsolete. Track B follows that; Track A
+  archived fixed bugs to `closed/` with "fixed" verdicts. Pick one.
+- **Behaviour change (B4):** an MPM thaw now seeds particles only for cells the carve actually
+  emptied, not every planned cell. Before, planned cells the carve couldn't empty were in the store
+  and in the sim at once (a terrain `mpmthaw` r=5: 176 planned, 143 emptied, 33 duplicated). The
+  thaw is about 30 % slower (729-cell floating block: 8.8 -> 11.1 ms, once per thaw) because it
+  builds the StoreWrite lattice twice; `StoreWrite.cells` taking a prebuilt lattice would remove
+  that, but `store_write.gd` is Track A's file tonight. Cells the box rewrite empties outside the
+  plan also become particles now, so a thaw can drop debris a few metres from where it was aimed
+  (seen: 3 m outside a r=1.4 sphere).
+- **Question (B4):** a thaw plan the 1 m corner carve can't realize (a lone buried cell, the shell
+  of a sphere in solid ground): refuse it, reshape it, or solve for corners that carve it exactly?
+  Evidence in `docs/bugs/mpm-thaw-carve-leaves-planned-cells.md`.
+- **Finding (B5):** `Mat3::svd` holds the signed-SVD convention in all four reflection rows (now
+  pinned by `test/test_mpm_svd.gd`), but U stops being a rotation as F nears singular: det U = 0.93
+  at σ₂/σ₀ = 1e-8, 0.16 at 1e-9, 0 at rank ≤ 1 (an uninitialized read). Filed
+  `docs/bugs/mpm-svd-ill-conditioned-u.md` with a pending test for the fast-SVD rewrite to turn on.
+  Whether the sim ever gets there is unmeasured.

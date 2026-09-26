@@ -20,7 +20,13 @@ func _init() -> void:
 
 # --- bus handlers ---
 
+# A record lives exactly as long as it owns a cell, so a placement that made no cell solid (a
+# part thinner than a cell, or one wholly inside existing solid) leaves none: with no cell to
+# carve, nothing could ever release it.
 func _on_part_placed(event: PartPlacedEvent) -> void:
+    if event.cells.is_empty():
+        return
+
     var id := _next_id
     _next_id += 1
     _records[id] = PartRecord.new(id, event.cells.duplicate(), event.material,

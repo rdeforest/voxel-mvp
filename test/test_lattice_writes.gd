@@ -3,7 +3,7 @@ extends GutTest
 # The "does this write change anything" flag every predicted lattice carries (SdfLattice.writes),
 # which CsgAction refuses on. It must be the answer for the write itself: false exactly when
 # write_region would leave every stored leaf corner as it is. The false-change case this pins is
-# docs/bugs/closed/sdf-lattice-writes-false-change-at-max-faces.md: a lattice point on the region's
+# sdf-lattice-writes-false-change-at-max-faces (fixed in af19749): a lattice point on the region's
 # max faces was compared against store.sample, which reads the neighbouring leaf the write doesn't
 # touch. The store is the game's own (EditStoreManager: aligned root, the real generator).
 

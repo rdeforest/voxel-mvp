@@ -8,6 +8,8 @@ var radius:    float
 var shape:     int  # Shape enum
 var store:     EditStore
 
+var _stamp_cache: SdfLattice = null
+
 
 func _init(
     p_position: Vector3,
@@ -24,11 +26,9 @@ func _init(
     material_name = p_material
 
 func validate() -> bool:
-    if player != null:
-        var dist := player.global_position.distance_to(position)
-        if dist <= radius + VoxelConstants.PLAYER_CLEARANCE:
-            return false
-    return true
+    if store == null:
+        return false
+    return not endangered_by(_stamp(), store)
 
 func preview() -> ActionPreview:
     var p := ActionPreview.new()
@@ -61,10 +61,14 @@ func execute() -> void:
         TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, lattice.region_lo, lattice.region_hi - lattice.region_lo))
 
 
-# The field execute() writes — preview and events both read this brush.
+# The field execute() writes — validate, preview and events all read this brush. Stamped once, so
+# the cache is a snapshot of the store: safe only because every caller builds a fresh action and
+# runs validate/preview/execute with no other write in between (player.gd, the preview renderer).
 func _stamp() -> SdfLattice:
-    return SdfLattice.sphere_stamp(store, position, radius,
-        VoxelConstants.STORE_OP_UNION, VoxelConstants.RENDER_BASE_CELL)
+    if _stamp_cache == null:
+        _stamp_cache = SdfLattice.sphere_stamp(store, position, radius,
+            VoxelConstants.STORE_OP_UNION, VoxelConstants.RENDER_BASE_CELL)
+    return _stamp_cache
 
 
 func _freeze_bodies_in_volume() -> void:

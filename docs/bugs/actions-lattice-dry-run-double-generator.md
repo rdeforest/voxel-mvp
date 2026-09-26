@@ -1,7 +1,7 @@
 # A refused preview reads the generator twice per lattice point
 
 *Filed by Claude (agent), overnight 2026-09-26, while closing chunk A4 of
-[sdf-lattice-writes-false-change-at-max-faces](closed/sdf-lattice-writes-false-change-at-max-faces.md)
+`sdf-lattice-writes-false-change-at-max-faces` (fixed in `af19749`)
 (its "Follow-up" section has the measurements).*
 
 **Status:** Open. Severity low (perf; ~0.05 ms per no-op-looking preview against a 20 ms frame). Needs a

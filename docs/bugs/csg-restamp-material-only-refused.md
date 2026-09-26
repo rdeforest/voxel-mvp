@@ -1,7 +1,7 @@
 # Re-stamping a CSG shape in a different material is refused as a no-op
 
 *Filed by Claude (agent), overnight 2026-09-26, while fixing
-[sdf-lattice-writes-false-change-at-max-faces](closed/sdf-lattice-writes-false-change-at-max-faces.md). From
+`sdf-lattice-writes-false-change-at-max-faces` (fixed in `af19749`). From
 reading the code; no test has run this case.*
 
 **Status:** Open. Severity low. Needs Robert's call on intent.
