@@ -31,6 +31,30 @@ for planet-scale coordinates.
 derived from the directory; `custom_modules=` breaks symbol registration. The
 symlink is the only supported path.
 
+## After a pull
+
+```
+git pull
+tools/build                                    # engine sources may have changed
+bin/godot --path . --headless --editor --quit   # if the pull added a class_name
+```
+
+The class-cache pass is not optional when new `class_name` declarations arrive.
+Godot's global-class registry lives in `.godot/global_script_class_cache.cfg`,
+which is untracked local state, so a `class_name` someone else added is
+invisible here until an editor pass rewrites it. Until then GUT reports
+`Invalid call. Nonexistent function 'new' in base 'GDScript'` at every use of
+the new class and silently drops test files it can't resolve — a stale cache
+that reads as a couple of dozen code failures.
+
+`git diff --name-only <before>..HEAD | xargs grep -l '^class_name'` tells you
+whether a given pull needs it. Running it unconditionally costs a few seconds,
+so the cheap habit is to run it. Read the clobber section below first: it writes
+`.godot/`, so the editor GUI must be closed.
+
+*Section drafted by Claude.*
+
+
 ## Tests (GUT)
 
 ```

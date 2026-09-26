@@ -5,14 +5,21 @@
 # Not executable on its own. `source` it.
 
 # Resolve the directory this file lives in, even when sourced.
+#
+# pwd -P, not pwd: every path here must be physical. `git rev-parse` below
+# always answers physically, and the module-symlink checks in tools/build
+# compare a resolved link target against a root-derived path by string. A
+# logical root (whatever spelling the caller entered through — ~/git is a
+# symlink to /mnt/nvme0n1p4/git on the desktop) makes those halves disagree
+# and the build dies on a symlink that is in fact correct.
 _voxmvp_lib_dir() {
 	# BASH_SOURCE[0] is this file regardless of who sourced it.
-	cd "$(dirname "${BASH_SOURCE[0]}")" && pwd
+	cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P
 }
 
 # Project root is one level up from tools/. In a git worktree this is the
 # worktree, which is what anything reading project sources wants.
-VOXMVP_ROOT="$(cd "$(_voxmvp_lib_dir)/.." && pwd)"
+VOXMVP_ROOT="$(cd "$(_voxmvp_lib_dir)/.." && pwd -P)"
 
 # The sibling engine repos (versions.env *_DIR_REL) hang off the MAIN
 # checkout, not a worktree: a worktree lives at .claude/worktrees/<name>/, so
