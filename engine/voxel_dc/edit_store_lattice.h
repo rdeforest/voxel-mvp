@@ -28,15 +28,6 @@ inline bool is_write_leaf(double s, double cell) {
 	return s <= cell * 1.0000001;
 }
 
-// The corners of child `child` of a leaf with corners `src`: its field, trilerped, at float32.
-inline void child_corners(const float *src, int child, float *out) {
-	using voxel_dc::CB;
-	for (int j = 0; j < 8; ++j) {
-		out[j] = float(voxel_dc::trilerp(src, (CB[child][0] + CB[j][0]) * 0.5, (CB[child][1] + CB[j][1]) * 0.5,
-				(CB[child][2] + CB[j][2]) * 0.5));
-	}
-}
-
 // Mirrors of GDScript constants. The byte-identical gate fails if one drifts.
 constexpr double CELL_SAMPLE_OFFSET = 0.5; // VoxelConstants.VOXEL_CENTER_OFFSET (VoxelUtils.sample_point)
 constexpr double SOLID_THRESHOLD = 0.0;    // VoxelConstants.SDF_SOLID_THRESHOLD

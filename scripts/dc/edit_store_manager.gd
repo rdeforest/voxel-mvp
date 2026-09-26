@@ -43,15 +43,14 @@ func save_to(path: String) -> Error:
     return OK
 
 # Deserialize into the existing store instance (render/collision hold its reference, so we
-# mutate in place rather than replace). Skips a blob refusal() rejects.
+# mutate in place rather than replace). Skips a blob refusal() or deserialize() rejects.
 func load_from(path: String) -> bool:
     if not refusal(path).is_empty():
         return false
 
     var f := FileAccess.open(path, FileAccess.READ)
     f.seek(HEADER_BYTES)
-    store.deserialize(f.get_buffer(f.get_length() - HEADER_BYTES))
-    return true
+    return store.deserialize(f.get_buffer(f.get_length() - HEADER_BYTES))
 
 # Why this build won't load the blob at `path`, or "" when it will. Strict on version: the blob
 # has no field-defaulting, so there is no older layout this build can read.

@@ -412,6 +412,12 @@ names.
   it) is exact: a point whose float32 changes, else `EditStore.lattice_writes`, a dry run of
   `write_region` over every corner of every leaf it would rewrite (`edit_store_dry_run.cpp`; it reads
   the array and the generator once per lattice point, not once per leaf corner). Material is not part of it.
+- **A write moves nothing outside the leaves it rewrites.** Subdividing an edited leaf coarser
+  than the write's cell doesn't re-store its children's corners: they read the subdivided leaf's own
+  field (`EditStore::FieldState`, inherited leaves of a field source), so every sample outside the
+  rewritten leaves is bit-identical before and after a write or stamp
+  (`test_edit_store_subdivide_exact`). Inside, the field is the lattice's trilerp, even where it
+  matches the old corners (`docs/bugs/edit-store-noop-write-reports-changed.md`).
 - **Lattice writes are typed.** `StoreWrite` takes `Array[LatticeEdit]` (lattice point, new
   SDF, leaf material or -1 to keep) — FillVoxel, EmptyVoxel and the MPM carve all hand it that;
   `StoreWrite.lattice(store, work).flips(store)` is what the work does to cells. Bell and Flatten

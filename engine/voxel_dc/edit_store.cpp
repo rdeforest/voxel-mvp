@@ -38,68 +38,6 @@ void EditStore::setup(Vector3 origin, double size, double base, double amp, doub
 	_new_node(origin, size);
 }
 
-void EditStore::stamp_sphere(Vector3 center, double radius, int op, int material, double min_leaf) {
-	const voxel_dc::SphereField brush(center, radius);
-	const Vector3 r = Vector3(1, 1, 1) * (radius + min_leaf);
-	_stamp(brush, center - r, center + r, op, material, min_leaf);
-}
-
-void EditStore::stamp_box(Vector3 center, Vector3 size, int op, int material, double min_leaf) {
-	const voxel_dc::BoxField brush(center, size);
-	const Vector3 r = size * 0.5 + Vector3(1, 1, 1) * min_leaf;
-	_stamp(brush, center - r, center + r, op, material, min_leaf);
-}
-
-void EditStore::_stamp(const voxel_dc::Field &brush, const Vector3 &rmin, const Vector3 &rmax, int op, int material, double min_leaf) {
-	if (nodes.is_empty()) {
-		return;
-	}
-	_stamp_region(0, brush, rmin, rmax, op, material, min_leaf);
-}
-
-// Copy-on-write: descend only into nodes overlapping the brush region, subdividing toward
-// it (so the rest stays sparse -> generator). At a min_leaf leaf, combine the brush with
-// the cell's CURRENT value — the stored corner if already edited, else the generator — so
-// re-edits stack and first edits materialise from the generator.
-void EditStore::_stamp_region(int idx, const voxel_dc::Field &brush, const Vector3 &rmin, const Vector3 &rmax, int op, int material, double min_leaf) {
-	const Vector3 o = nodes[idx].origin;
-	const double s = nodes[idx].size;
-	if (!overlaps(o, s, rmin, rmax)) {
-		return; // leave it sparse (generator)
-	}
-	// Write at a leaf no coarser than min_leaf. A node that small which already has children
-	// (refined by an earlier, finer edit) is NOT a leaf — sample() reads its children, so the
-	// brush must land on them too, or the stamp would be a silent no-op there.
-	if (is_write_leaf(s, min_leaf) && nodes[idx].is_leaf()) {
-		Node &n = nodes[idx];
-		const bool was_edited = n.has_corners;
-		bool any_solid = false;
-		for (int i = 0; i < 8; ++i) {
-			const Vector3 c = corner(o, s, i);
-			const double before = was_edited ? double(n.corners[i]) : _gen.sample(c);
-			const double b = brush.sample(c);
-			const double after = op == 0 ? MIN(before, b) : MAX(before, -b);
-			n.corners[i] = float(after);
-			any_solid = any_solid || after < 0.0;
-		}
-		n.has_corners = true;
-		if (any_solid && op == 0) {
-			n.material = uint8_t(material); // a UNION (add) paints its material; a carve keeps existing
-		}
-		return;
-	}
-	if (nodes[idx].is_leaf()) {
-		_subdivide(idx);
-	}
-	int ch[8];
-	for (int i = 0; i < 8; ++i) {
-		ch[i] = nodes[idx].children[i];
-	}
-	for (int i = 0; i < 8; ++i) {
-		_stamp_region(ch[i], brush, rmin, rmax, op, material, min_leaf);
-	}
-}
-
 void EditStore::write_region(const PackedFloat32Array &sdf, const PackedByteArray &indices, int dim, Vector3 origin, double cell) {
 	if (nodes.is_empty() || sdf.size() < int64_t(dim) * dim * dim) {
 		return;
@@ -129,7 +67,8 @@ void EditStore::_write_region(int idx, const voxel_dc::ArrayField &sdf, const Pa
 		for (int i = 0; i < 8; ++i) {
 			n.corners[i] = float(sdf.sample(corner(o, s, i)));
 		}
-		n.has_corners = true;
+		n.field = OWN_FIELD;
+		n.source = idx;
 		if (!indices.is_empty()) {
 			// Material is indexed at the leaf ORIGIN cell (floor of the centre), so it lines
 			// up with the array cell whose SDF corner sits at this leaf's origin — the
@@ -154,27 +93,26 @@ void EditStore::_write_region(int idx, const voxel_dc::ArrayField &sdf, const Pa
 	}
 }
 
-// An edited leaf subdivides into children that reproduce its field (trilerp'd corners), so
-// refining doesn't move the stored surface. An unedited leaf subdivides into fresh unedited
-// children (they still defer to the generator until a brush materialises them).
+// An edited leaf subdivides into children that read its field unchanged (see FieldState), so
+// refining moves no sample, the stored surface included. An unedited leaf subdivides into fresh
+// unedited children (they still defer to the generator until a brush materialises them).
 void EditStore::_subdivide(int idx) {
 	const Vector3 o = nodes[idx].origin;
-	const double s = nodes[idx].size;
-	const double half = s * 0.5;
-	const bool inherit = nodes[idx].has_corners;
-	float src[8];
+	const double half = nodes[idx].size * 0.5;
+	const int field = _leaf_field(idx);
 	const uint8_t mat = nodes[idx].material;
-	for (int i = 0; i < 8; ++i) {
-		src[i] = nodes[idx].corners[i];
-	}
 	int ch[8];
 	for (int i = 0; i < 8; ++i) {
-		const int ci = _new_node(o + Vector3(CB[i][0], CB[i][1], CB[i][2]) * half, half);
-		if (inherit) {
+		const Vector3 child_origin = o + Vector3(CB[i][0], CB[i][1], CB[i][2]) * half;
+		const int ci = _new_node(child_origin, half);
+		if (field >= 0) {
 			Node &c = nodes[ci];
-			c.has_corners = true;
+			c.field = INHERITED_FIELD;
+			c.source = field;
 			c.material = mat;
-			edit_store_lattice::child_corners(src, i, c.corners);
+			for (int j = 0; j < 8; ++j) {
+				c.corners[j] = _held_corner(field, child_origin, half, j);
+			}
 		}
 		ch[i] = ci;
 	}
@@ -182,7 +120,25 @@ void EditStore::_subdivide(int idx) {
 	for (int i = 0; i < 8; ++i) {
 		n.children[i] = ch[i];
 	}
-	n.has_corners = false;
+	n.field = n.field == OWN_FIELD ? FIELD_SOURCE : NO_FIELD;
+}
+
+// The field node `field` holds (see FieldState) at `p`.
+double EditStore::_field_value(int field, const Vector3 &p) const {
+	const Node &f = nodes[field];
+	const Vector3 at = (p - f.origin) / f.size;
+	return trilerp(f.corners, at.x, at.y, at.z);
+}
+
+// What the edited leaf (o, s), whose field node `field` holds, stores at its corner `i`: that corner
+// as it is for a leaf holding its own field, else the field there rounded as a stored corner is. Read
+// from the corner itself rather than trilerped at it, which need not reproduce it to the bit.
+float EditStore::_held_corner(int field, const Vector3 &o, double s, int i) const {
+	const Node &f = nodes[field];
+	if (f.origin == o && f.size == s) {
+		return f.corners[i];
+	}
+	return float(_field_value(field, corner(o, s, i)));
 }
 
 bool EditStore::_inside_root(const Vector3 &p) const {
@@ -203,6 +159,11 @@ int EditStore::_leaf_toward(const Vector3 &p, const Vector3 &toward) const {
 	return idx;
 }
 
+// The node holding leaf `leaf`'s field (see FieldState), -1 for an unedited leaf (the generator).
+int EditStore::_leaf_field(int leaf) const {
+	return nodes[leaf].is_edited() ? nodes[leaf].source : -1;
+}
+
 int EditStore::_leaf_at(const Vector3 &p) const {
 	return _leaf_toward(p, p);
 }
@@ -215,20 +176,15 @@ double EditStore::sample_toward(Vector3 p, Vector3 toward) const {
 	if (nodes.is_empty() || !_inside_root(p)) {
 		return _gen.sample(p);
 	}
-	const int idx = _leaf_toward(p, toward);
-	if (!nodes[idx].has_corners) {
-		return _gen.sample(p); // unedited -> defer to the generator
-	}
-	const Node &n = nodes[idx];
-	const Vector3 f = (p - n.origin) / n.size;
-	return trilerp(n.corners, f.x, f.y, f.z);
+	const int field = _leaf_field(_leaf_toward(p, toward));
+	return field < 0 ? _gen.sample(p) : _field_value(field, p);
 }
 
 bool EditStore::has_edit(Vector3 p) const {
 	if (nodes.is_empty() || !_inside_root(p)) {
 		return false;
 	}
-	return nodes[_leaf_at(p)].has_corners;
+	return nodes[_leaf_at(p)].is_edited();
 }
 
 int EditStore::material_at(Vector3 p) const {
@@ -237,7 +193,7 @@ int EditStore::material_at(Vector3 p) const {
 	}
 	const int idx = _leaf_at(p);
 	// Unedited leaf -> the generator's material (so deep terrain reads Bedrock); edited -> stored.
-	return nodes[idx].has_corners ? int(nodes[idx].material) : _gen.material(p);
+	return nodes[idx].is_edited() ? int(nodes[idx].material) : _gen.material(p);
 }
 
 PackedFloat32Array EditStore::fill_region(Vector3i origin, int dim, double cell,
@@ -307,7 +263,7 @@ Ref<EditStore> EditStore::duplicate() const {
 int EditStore::leaf_count() const {
 	int n = 0;
 	for (uint32_t i = 0; i < nodes.size(); ++i) {
-		if (nodes[i].is_leaf() && nodes[i].has_corners) {
+		if (nodes[i].is_leaf() && nodes[i].is_edited()) {
 			++n;
 		}
 	}

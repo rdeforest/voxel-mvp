@@ -6,7 +6,6 @@
 // EditStore.lattice_writes: write_region as a dry run, settling whether a predicted lattice changes
 // any stored corner. Split from edit_store_predict.cpp.
 
-using edit_store_lattice::child_corners;
 using edit_store_lattice::is_write_leaf;
 using edit_store_lattice::overlaps;
 
@@ -77,7 +76,7 @@ bool EditStore::lattice_writes(const PackedFloat32Array &sdf, int dim, Vector3 o
 bool EditStore::_write_changes(int idx, RegionWrite &write) const {
 	const Node &n = nodes[idx];
 	if (n.is_leaf()) {
-		return _leaf_write_changes(n.origin, n.size, n.has_corners ? n.corners : nullptr, write);
+		return _leaf_write_changes(n.origin, n.size, _leaf_field(idx), write);
 	}
 	if (!overlaps(n.origin, n.size, write.rmin, write.rmax)) {
 		return false;
@@ -90,10 +89,10 @@ bool EditStore::_write_changes(int idx, RegionWrite &write) const {
 	return false;
 }
 
-// A leaf as _write_region finds it (`corners` null = unedited, the generator). One coarser than
-// the write's cell is split as _subdivide splits it (child_corners), so the corners compared are the ones
-// the write would replace, down to the float32 _subdivide rounds them to.
-bool EditStore::_leaf_write_changes(const Vector3 &o, double s, const float *corners, RegionWrite &write) const {
+// A leaf as _write_region finds it, holding node `field`'s field (-1 = unedited, the generator). One
+// coarser than the write's cell is split as _subdivide splits it: its children hold the same field,
+// and the corners compared are the ones they would store (_held_corner).
+bool EditStore::_leaf_write_changes(const Vector3 &o, double s, int field, RegionWrite &write) const {
 	if (!overlaps(o, s, write.rmin, write.rmax)) {
 		return false;
 	}
@@ -102,10 +101,11 @@ bool EditStore::_leaf_write_changes(const Vector3 &o, double s, const float *cor
 		for (int i = 0; i < 8; ++i) {
 			const int at = slot < 0 ? -1 : slot + write.corner_step[i];
 			// An unedited leaf's corner depends on the point alone, so another unedited leaf settled it.
-			if (!corners && at >= 0 && (write.settled[at] & RegionWrite::GENERATOR_KEPT)) {
+			if (field < 0 && at >= 0 && (write.settled[at] & RegionWrite::GENERATOR_KEPT)) {
 				continue;
 			}
-			if (_corner_changes(voxel_dc::corner(o, s, i), at, corners ? &corners[i] : nullptr, write)) {
+			const float held = field < 0 ? 0.0f : _held_corner(field, o, s, i);
+			if (_corner_changes(voxel_dc::corner(o, s, i), at, field < 0 ? nullptr : &held, write)) {
 				return true;
 			}
 		}
@@ -113,12 +113,8 @@ bool EditStore::_leaf_write_changes(const Vector3 &o, double s, const float *cor
 	}
 	const double half = s * 0.5;
 	for (int i = 0; i < 8; ++i) {
-		float child[8];
-		if (corners) {
-			child_corners(corners, i, child);
-		}
 		const Vector3 child_origin = o + Vector3(voxel_dc::CB[i][0], voxel_dc::CB[i][1], voxel_dc::CB[i][2]) * half;
-		if (_leaf_write_changes(child_origin, half, corners ? child : nullptr, write)) {
+		if (_leaf_write_changes(child_origin, half, field, write)) {
 			return true;
 		}
 	}
