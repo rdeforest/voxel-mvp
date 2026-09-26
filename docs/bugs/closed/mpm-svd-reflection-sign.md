@@ -6,6 +6,10 @@ make twice — this is the second time the reflection handling has been flagged.
 
 *Refutation drafted by Claude, 2026-09-25, at Robert's request.*
 
+**Regression test now exists (2026-09-26):** `test/test_mpm_svd.gd` asserts det U = det V = +1,
+reconstruction and sign(σ₂) = sign(det F) on inputs that reach every row of the table below. Which
+input reaches which row is at the end of this file. *(Line and section drafted by Claude.)*
+
 ## Verdict first
 
 The report claims both reflection `if`s fire for a genuinely reflected F. They don't: a reflected F
@@ -51,6 +55,46 @@ So a real regression test is still worth writing, not to fix today's code but to
 Write it **before** the McAdams-2011 fast-SVD rewrite (doc 12's next step), which will replace this
 routine wholesale and has every opportunity to get the parity wrong for real. That is tracked in
 `docs/STATUS.md` under the MPM paused thread.
+
+## Which test input reaches which row
+
+Classified with `scripts/dev/svd_branch_port.py`, a line-for-line Python port of `Mat3::svd` fed the
+exact matrices the tests build (dumped by `scripts/dev/dump_svd_random_inputs.gd`, which also prints
+the engine's `debug_svd` output on each). On all 121 inputs the port's det U, det V, σ and
+reconstruction error agree with the engine's to within 7e-16 on the fixed inputs other than
+R·diag(1, 1, 1e-3)·Rᵀ (4e-11), and within 1.1e-13 on the random ones. `debug_svd` only reports values
+after the flips, so this checks the arithmetic, not the branch directly.
+
+Row membership is exact only where the spectrum is well separated: there det V before the flips is
+the parity of the sort permutation (Jacobi rotations have det +1), so the axis-aligned diagonal
+inputs land in their rows by construction — diag(2, 1, 0.5) none, diag(0.5, 1, 2) both,
+diag(2, 1, −0.5) and −I U, diag(−0.5, 1, 2) and diag(1, −2, 0.5) V. Where FᵀF has repeated or nearly
+repeated eigenvalues (R, the Euler rotation, the repeated-σ and near-singular inputs), the sort order
+is decided by rounding noise, and their rows below are what the port reports today, not a stable fact.
+The assertions don't depend on which row an input lands in.
+
+| Row (det F, det V before the flips) | Inputs in `test_mpm_svd.gd` |
+|-----|-----|
+| +, + (neither flip) | diag(2, 1, 0.5), diag(1, 0.5, 2), identity, R·diag(2, 2, 0.5)·Rᵀ, R·diag(1, 1e-3, 1e-3)·Rᵀ |
+| +, − (both flip) | pure rotation R, diag(0.5, 1, 2), R·diag(0.5, 1, 2), R·diag(2, 1, 0.5), the Euler rotation and its scaling, R·diag(2, 0.5, 0.5)·Rᵀ, R·diag(1, 1, 1e-3)·Rᵀ, 32 of the 64 random U·Σ·Vᵀ, 15 of the 32 random-entry matrices |
+| −, + (U flips) | diag(2, 1, −0.5), diag(−1, 0.5, 2), −I, R·diag(1, 1, −1e-3)·Rᵀ |
+| −, − (V flips) | diag(−0.5, 1, 2), diag(1, −2, 0.5), R·diag(2, 1, −0.5), R·diag(−0.5, 1, 2), the Euler reflection, R·diag(2, 0.5, −0.5)·Rᵀ, R·diag(1, 1, −1)·Rᵀ, −R, 32 of the 64 random U·Σ·Vᵀ, 17 of the 32 random-entry matrices |
+
+The same port, run with the reflection block replaced, shows what each wrong version fails:
+
+- **The report's rule as written** (both negative: flip both columns, leave σ; one negative: flip
+  it and negate σ₂) passes everything. It is the current code: two negations of σ₂ cancel. The
+  report was wrong about which F reaches the both-flip row, not about the flips.
+- **The fix the report's diagnosis leads to** (negate σ₂ once whenever any column flips, so a
+  "reflected" both-flip row keeps σ₂ < 0) fails reconstruction, sign(σ₂) = sign(det F) and Πσ =
+  det F on every both-flip input (55 of the 121). Only that row catches it, which is why the pure
+  rotation and diag(0.5, 1, 2) are in the tests.
+- **A missing V flip** fails det V = +1, sign(σ₂) = sign(det F) and Πσ = det F on every both-flip
+  and V-flip input. **A missing U flip** fails the same three, with det U, on every both-flip and
+  U-flip input. **No flips at all** fails det U and det V on the both-flip inputs, and the
+  determinant, sign and Πσ checks on the single-flip ones.
+- The report's own proposed assertion, det(U)·det(V) == sign(det F), would fail on the *correct*
+  code for every reflection. The tests assert det U = det V = +1 instead.
 
 ## References
 

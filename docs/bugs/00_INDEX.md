@@ -17,6 +17,7 @@ When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a 
 | [single-voxel-edits-unexpected](single-voxel-edits-unexpected.md) | actions (FillVoxel/EmptyVoxel) | **characterized** | Fill makes a ~2.5 m³ smooth mound (target ~half full, paint off-centre), Empty refuses 48 % of clicks and can't dig down; questions for Robert in file. |
 | [part-index-sub-cell-parts-untracked](part-index-sub-cell-parts-untracked.md) | structural (PartIndex) | low (design call) | A part that makes no cell solid gets no record: identity is cell-granular. Needs a decision on sub-cell identity. |
 | [sdf-lattice-writes-false-change-at-max-faces](sdf-lattice-writes-false-change-at-max-faces.md) | actions (CSG no-op refusal) | low | "Writes anything" samples the neighbour leaf at the upper faces; an identical CSG re-stamp into air is never refused. |
+| [mpm-svd-ill-conditioned-u](mpm-svd-ill-conditioned-u.md) | MPM (mat3 SVD) | low (latent) | U loses orthonormality as σ₂/σ₀ drops (det U 0.93 at 1e-8, 0.16 at 1e-9); singular U at rank ≤ 1 via an uninitialized read. Acceptance bar for the fast-SVD rewrite; pending test in `test_mpm_svd.gd`. |
 | [mpm-thaw-carve-leaves-planned-cells](mpm-thaw-carve-leaves-planned-cells.md) | MPM thaw | low | The corner carve can't empty a planned cell that touches kept terrain: a terrain `mpmthaw` r=5 empties 143 of 176 planned cells, a lone buried cell none. |
 | [event-bus-reentrancy](event-bus-reentrancy.md) | event bus | med (latent) | No reentrancy guard; prunes dead subs mid-iteration. Reachable by design; no channel self-chains *yet*. |
 | [dig-action-no-validate-no-safety](dig-action-no-validate-no-safety.md) | actions (dig) | low-med | Ghost and action now agree on the empty carve; no player-safety guard yet (change specified in file, needs `preview()`). |
@@ -41,5 +42,5 @@ and, where the report was wrong, why.
 
 | Bug | Area | Verdict | Notes |
 |-----|------|---------|-------|
-| [mpm-svd-reflection-sign](closed/mpm-svd-reflection-sign.md) | MPM (mat3 SVD) | not a bug (2026-09-25) | Reported double σ₂ flip is correct: a reflected F fires one `if`, not both; the both-fire case is `det F > 0`. Four-case table in the file. The *test* gap it found is real — assert `det_u`/`det_v`/`s2` before the fast-SVD rewrite. |
+| [mpm-svd-reflection-sign](closed/mpm-svd-reflection-sign.md) | MPM (mat3 SVD) | not a bug (2026-09-25) | Reported double σ₂ flip is correct: a reflected F fires one `if`, not both; the both-fire case is `det F > 0`. Four-case table in the file. The *test* gap it found is closed: `test/test_mpm_svd.gd` (2026-09-26). |
 | [edit-remesh-padding-gap](closed/edit-remesh-padding-gap.md) | edit re-mesh (clipmap) | obsolete (2026-09-25) | Filed against the clipmap render + godot_voxel notification; both deleted in `d58e8ce`, so the mechanism has no live code path. Live successor: [dc-incremental-emit-ring-insufficient](dc-incremental-emit-ring-insufficient.md). |

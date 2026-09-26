@@ -1,10 +1,10 @@
 extends GutTest
 
-# PB-MPM solver (doc 12, Lewin 2024). Headless validation: the 3×3 SVD, the elastic constraint
+# PB-MPM solver (doc 12, Lewin 2024). Headless validation: the elastic constraint
 # behaviour (a body falls, rests on terrain without tunnelling, holds together), UNCONDITIONAL
 # STABILITY at large timesteps (the whole point — explicit MLS-MPM needed dt~1e-3; PB-MPM stays
 # stable at dt orders of magnitude larger), and sparse sleeping. PB-MPM sand is the next
-# increment (the granular test is pending).
+# increment (the granular test is pending). The 3×3 SVD is pinned in test_mpm_svd.gd.
 
 const DX      := 1.0
 const FLOOR_Y := 0.0
@@ -30,31 +30,6 @@ func _elastic_block(lo: Vector3i, hi: Vector3i, dt := DT) -> MpmSim:
                         for oz in [0.25, 0.75]:
                             sim.add_particle(Vector3(cx + ox, cy + oy, cz + oz), p_mass, p_vol)
     return sim
-
-
-# --- SVD (unchanged from the spike; the riskiest numerical code) ---
-
-func _check_svd(basis: Basis, label: String) -> void:
-    var r := MpmSim.new().debug_svd(basis)
-    assert_almost_eq(r["error"], 0.0, 1e-9, "%s: U·Σ·Vᵀ reconstructs the matrix" % label)
-    assert_almost_eq(r["det_u"], 1.0, 1e-9, "%s: U is a proper rotation" % label)
-    assert_almost_eq(r["det_v"], 1.0, 1e-9, "%s: V is a proper rotation" % label)
-    var prod: float = r["s0"] * r["s1"] * r["s2"]
-    assert_almost_eq(prod, basis.determinant(), 1e-9, "%s: Πσ = det(F)" % label)
-    assert_true(r["s0"] >= r["s1"] and r["s1"] >= abs(r["s2"]), "%s: singular values sorted by magnitude" % label)
-
-func test_svd_reconstructs_known_matrices() -> void:
-    _check_svd(Basis.IDENTITY, "identity")
-    _check_svd(Basis.IDENTITY.scaled(Vector3(2.0, 1.0, 0.5)), "diagonal scale")
-    _check_svd(Basis.from_euler(Vector3(0.3, 0.5, 0.7)), "pure rotation")
-    _check_svd(Basis.from_euler(Vector3(0.3, 0.5, 0.7)).scaled(Vector3(3.0, 1.5, 0.7)), "rotation·scale")
-
-func test_svd_signed_convention_handles_reflection() -> void:
-    var r := MpmSim.new().debug_svd(Basis.IDENTITY.scaled(Vector3(2.0, 1.0, -0.5)))
-    assert_almost_eq(r["error"], 0.0, 1e-9, "reconstructs the reflected matrix")
-    assert_almost_eq(r["det_u"], 1.0, 1e-9, "U stays a rotation")
-    assert_almost_eq(r["det_v"], 1.0, 1e-9, "V stays a rotation")
-    assert_lt(r["s2"], 0.0, "the reflection is absorbed as a negative smallest singular value")
 
 
 # --- PB-MPM elastic ---

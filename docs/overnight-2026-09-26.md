@@ -12,7 +12,7 @@ or move to `docs/completed/` when the session is closed out.*
 - [x] Track B2 — `empty-voxel-no-player-safety` (Dig: empty-carve refusal only; its player-safety guard needs `preview()`, specified in its bug file)
 - [x] Track B3 — `part-index-footprint-cells-never-released` (sub-cell parts now get no record; filed `part-index-sub-cell-parts-untracked`)
 - [x] Track B4 — `mpm-thaw-events-unmeasured` (particles now follow the measured flips too; filed `mpm-thaw-carve-leaves-planned-cells`)
-- [ ] Track B5 — MPM SVD regression test (if time)
+- [x] Track B5 — MPM SVD regression test (all four rows pinned; filed `mpm-svd-ill-conditioned-u`)
 - [ ] Morning brief + play-test list at the bottom of this doc
 
 ## The constraint that shapes everything
@@ -132,3 +132,8 @@ Items recorded during the session (to fold into the brief):
 - **Question (B4):** a thaw plan the 1 m corner carve can't realize (a lone buried cell, the shell
   of a sphere in solid ground): refuse it, reshape it, or solve for corners that carve it exactly?
   Evidence in `docs/bugs/mpm-thaw-carve-leaves-planned-cells.md`.
+- **Finding (B5):** `Mat3::svd` holds the signed-SVD convention in all four reflection rows (now
+  pinned by `test/test_mpm_svd.gd`), but U stops being a rotation as F nears singular: det U = 0.93
+  at σ₂/σ₀ = 1e-8, 0.16 at 1e-9, 0 at rank ≤ 1 (an uninitialized read). Filed
+  `docs/bugs/mpm-svd-ill-conditioned-u.md` with a pending test for the fast-SVD rewrite to turn on.
+  Whether the sim ever gets there is unmeasured.
