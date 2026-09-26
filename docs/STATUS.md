@@ -10,60 +10,43 @@
 
 # Resumption Brief
 
-*Last rewritten: 2026-09-25*
+*Last rewritten: 2026-09-26, by Claude, at the end of the overnight session.*
 
 
 ## Where things stand right now
 
-The branch merge is done. `master` is the only branch; the M-thesis scale-up
-(mmap disk-paged cell arena, hot/cold cell split, parallel bottom-up DC build,
-incremental-emit bug hunt) is on it. Verify with `git log --oneline -5` if in
-doubt — this brief was rewritten from the refs, not the log.
+`master` holds everything, **local only**: the overnight pushes failed on SSH auth, so push first.
+The overnight run (plan, results, open questions and play-test list) is
+[`overnight-2026-09-26.md`](overnight-2026-09-26.md). Read its **Morning brief** before anything else.
+It moves to `roadmap/implementation/done/` once you've been through it.
 
-The `dc_octree_mesher.cpp` header split (formerly
-`docs/refactor-dc-octree-mesher-split.md`) has also landed:
-`dc_sdf_source.h`, `dc_clipmap_source.h`, `dc_edit_store_source.h` and
-`dc_octree.h` now hold the internals; the .cpp keeps `DCOctreePersist` and the
-`DCOctreeMesher::` methods. The brief is retired.
+What changed, in one breath:
+- Every action lattice runs in C++, for preview and write alike, with the GDScript originals kept as
+  a bit-exact oracle in `test/support/lattice_oracle.gd`. That covers build, flips, safety, the
+  "writes anything" dry run, material paint, measured write flips and the construction attach scan.
+  Previews are back under their pre-`f11d284` times; a placement click costs ~0.7 ms, down from ~6.3.
+- Safety, events and part records come from the field each action writes: EmptyVoxel/Fill safety,
+  PartIndex registration and the MPM thaw's events and particles.
+- Also fixed: event-bus re-entrancy, honest save failures, the mmap-arena crash fallback and the
+  DC mesher's argument traps. The SVD sign convention is pinned by tests.
 
-**Demo check: done (2026-09-25).** Robert smoke-tested launch, generate,
-dig, build and collapse for Jamin and Cecilia; nothing blocking turned up.
+**Run `tools/build` after pulling** (engine changes), then the class-cache pass
+(`bin/godot --path . --headless --editor --quit`); new `class_name`s landed.
 
-**Now: back to features.** Every change uses this loop: an Opus agent authors
-the change, two Fable agents adversarially review the diff (one for
-correctness, one for completeness), and an Opus agent applies the findings. GUT
-gates each step.
+GUT: **288 tests, 284 passing, 4 pending**, 0 failing. The 4 pending tests are known gates (see `docs/bugs/00_INDEX.md`).
+
+The per-change loop that ran all night: an Opus author, an Opus correctness reviewer and a Sonnet
+completeness reviewer (a different model family on purpose), then an Opus fixer. A Fable tiebreak
+settled real disagreements. Reviewers see only the diff; any question they raise gets its own
+researcher.
 
 
-## The active thread: preview perf, then construction (5.5g)
+## The active thread: answers, then FEAT089
 
-**Done (2026-09-25), committed:**
-- `f11d284` fixed `sdf-sample-corner-vs-center`. Every cell now has one sample
-  point, the cell centre (see [CODE-MAP §SDF conventions](CODE-MAP.md)), and
-  every brush predicts exactly what it writes. It changed the engine
-  (`EditStore` writes land on finer leaves), so **run `tools/build` after
-  pulling.**
-- `c9430a4` fixed `actions-untyped-work-tuple` and
-  `construction-bury-check-single-point`. It adds a typed `LatticeEdit`
-  record. Each action's ghost, events and safety refusal now come from the
-  field it writes, so a sub-cell part can't slip past the safety check.
-
-Robert checked it in play: Raise/Lower refusal near the player looks right,
-and the desaturated ghost makes refusal easy to see. Single-voxel edits didn't
-do what he expected; that's filed as a known unknown,
-[`single-voxel-edits-unexpected`](bugs/single-voxel-edits-unexpected.md).
-
-**Fixed on `perf/preview-lattice-cpp`: [`actions-preview-gdscript-slow`](bugs/closed/actions-preview-gdscript-slow.md).**
-The exact prediction had made previews 5–10× slower; the lattice is now built in
-C++ and previews are back under their pre-regression times. Next is **FEAT089,
-parts look like parts**, which blocks the rest of 5.5g. Volumetric worldgen
-tier 1 (`planned/18`) is independent and can run alongside.
-
-The same review loop filed four more bugs: EmptyVoxel safety, PartIndex
-footprint, lattice upper-face writes, and MPM thaw events. See
-`docs/bugs/00_INDEX.md`.
-
-GUT: 192 tests, 190 passing, 2 pending, 0 failing.
+1. **Answer the morning brief's three "needs you" questions**: single-voxel edits, whether
+   terraforming emits cell events, and Dig's safety guard. Each unblocks a ready fix.
+2. **FEAT089, parts look like parts**, which blocks the rest of 5.5g. Volumetric worldgen tier 1
+   (`planned/18`) is independent and can run alongside.
 
 *Section drafted by Claude.*
 
@@ -153,10 +136,9 @@ recolours the overlap — use `PartIndex`.
 
 ## Immediate next actions
 
-1. Move the preview lattice into C++ (`actions-preview-gdscript-slow`).
-2. Characterize `single-voxel-edits-unexpected` with Robert.
-3. FEAT089: parts look like parts, then the rest of 5.5g, with worldgen tier 1
-   alongside.
+1. Push `master` (and the merged branches, if you want them on origin).
+2. Morning brief in `docs/overnight-2026-09-26.md`: questions, then the play-test list on a GPU.
+3. FEAT089, with worldgen tier 1 alongside.
 
 
 ---
@@ -199,10 +181,12 @@ These are design and tuning *limits*, not defects. Defects live in
   replaced the footprint rule in `c9430a4`, and placement shifts slightly.
   *(Added by Claude.)*
 
-- **Style budget overruns** reported by the commit hook: `edit_store.cpp`
-  (396 lines), `dc_world_preview.gd` (528), `simplex.gd` `minimize()` (55-line
-  function), and `test_cell_sample_convention.gd` (471). They don't block;
-  they're candidates for pass 2. *(Added by Claude.)*
+- **Style budget overruns** reported by the commit hook: `dc_world_preview.gd` (529),
+  `player.gd` (431), `console_commands.gd` (402), `dc_octree.h` and
+  `dc_octree_mesher.cpp` (long file, several long functions),
+  `simplex.gd` `minimize()` (55-line function), and a few long test files. They don't block;
+  they're candidates for pass 2. (`edit_store.cpp` is back under budget after the overnight
+  split into `edit_store_*.cpp`.) *(Added by Claude.)*
 
 - **Flatten preview z-fights with the surface it's matching.** Cosmetic.
   Cleanest fix is a small forward offset on the preview plane normal.

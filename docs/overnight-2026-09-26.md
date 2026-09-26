@@ -24,7 +24,7 @@ or move to `docs/completed/` when the session is closed out.*
 - [x] Track F2 (follow-up) — `save-honesty-gaps` — `force_quiescent` returns whether it drained and push_errors at its pass limit; `settle` says so (F5 never called it — it gates on `is_quiescent` and already refused). The snapshot + EditStore blob load as one `SavedWorld`: a half this build can't read (blob version bump, newer snapshot, foreign blob) refuses the pair with a push_error + Toast, applies neither half, and F5 refuses to overwrite it; `save_to`'s Error is no longer ignored; `reset` warns that the next F5 replaces an unreadable save. No migration: design 11's 2026-06-10 decision (test-only saves, no importer) covers it until real player saves exist. Lone/mismatched halves still load, filed as `save-pair-consistency`; bug closed
 - [x] Track F3 (follow-up) — `misc-low-severity` bundle — perf HUD rings are head-indexed (no per-frame `remove_at(0)`) and stale labels/status keys are erased, not just hidden; `Tool.activities` is read-only so the player's remembered activity index can't go out of range; items 2 (FillVoxel 0.5 nudge) and 3 (raymarch first segment) closed as not bugs with the raymarch header reworded; item 7 repointed at `EditStore::lattice_turns_in`; items 6 (input if-chains) and 7 stay open
 - [x] Track H1 (follow-up) — DC mesher arg traps (`dc-mesher-latent-arg-traps`) — a splice is its own binding, `mesh_clipmap_splice`, with both boxes required and refused (error, empty result, retained build untouched) unless each has extent on every axis; `mesh_clipmap` has no box params, so box presence is the entry point, not a value. `grow_world(reuse_frontier=true, refine_budget=-1)` drains the whole retained frontier instead of silently doing nothing, and every rebuild grow resets the heap bound (an unbudgeted one used to report, and leave poppable, the last budgeted grow's stale bound). No existing caller's mesh changes; the one observable difference is `get_last_refine_queue_size()` after an unbudgeted rebuild (stale → 0), which the live preview never issues (its moves pass `refine_us` or 0). Filed evidence on `dc-incremental-emit-ring-insufficient`: a one-shot drain drops 89 triangles (pending gate, ratcheted at ≤ 100); bug closed. Trap 1's old/new red-green was done with `scripts/dev/probe_dc_arg_traps.gd` (the box API was renamed, so the GUT tests pin the new contract, not the old wrong output). Follow-ups filed: `dc-mesher-box-value-sentinels` (same sentinel in `mesh_world`/`grow_world`), `dc-edit-world-stale-refine-frontier`
-- [ ] Morning brief + play-test list at the bottom of this doc
+- [x] Morning brief + play-test list at the bottom of this doc
 
 ## The constraint that shapes everything
 
@@ -119,40 +119,118 @@ available to unblock anything. Work the whole window; do not stop and wait.
 
 ## Morning brief
 
-*Filled in at the end of the session: decisions made unilaterally, open
-questions, what got skipped and why, and a short play-test list.*
+*Drafted by Claude at the end of the session. Everything is merged to local `master`; nothing is
+pushed (see "Environment").*
 
-Items recorded during the session (to fold into the brief):
+### Needs you first
 
-- **Behaviour change (B3):** a part that flips no cell centre (e.g. a 0.5 m log
-  lying between cell-centre planes) now gets no PartIndex record at all. Before,
-  it got an AABB-footprint record nothing could ever release. Only runtime
-  consumer is the console `parts` count. Open design question in
-  `docs/bugs/part-index-sub-cell-parts-untracked.md`.
-- **Convention conflict:** `docs/bugs/00_INDEX.md` says a fixed bug's file is
-  deleted and `closed/` is for not-a-bug/obsolete. Track B follows that; Track A
-  archived fixed bugs to `closed/` with "fixed" verdicts. Pick one.
-- **Behaviour change (B4):** an MPM thaw now seeds particles only for cells the carve actually
-  emptied, not every planned cell. Before, planned cells the carve couldn't empty were in the store
-  and in the sim at once (a terrain `mpmthaw` r=5: 176 planned, 143 emptied, 33 duplicated). The
-  thaw is about 30 % slower (729-cell floating block: 8.8 -> 11.1 ms, once per thaw) because it
-  builds the StoreWrite lattice twice; `StoreWrite.cells` taking a prebuilt lattice would remove
-  that, but `store_write.gd` is Track A's file tonight. Cells the box rewrite empties outside the
-  plan also become particles now, so a thaw can drop debris a few metres from where it was aimed
-  (seen: 3 m outside a r=1.4 sphere).
-- **Finding (D1):** the double lattice build was not most of B4's slowdown. Profiled on the 729-cell
-  block: the second `predict_work` cost ~0.25 ms of the ~1.5 ms; the rest is the measurement itself
-  (`lat.cells()` 0.1, `snapshot` 0.44, `since` 0.62 ms of per-cell `store.sample` calls). D1 builds
-  the lattice once, reads `StoreWrite`'s current materials with one `fill_indices_region` call
-  (0.49 → ~0.03 ms; identical on 270 lattices over a multi-level, multi-material field; `test_store_write.gd` pins it on work, bell and flatten lattices, and an off-grid lattice is refused with an error rather than asserted), and probes
-  each kept cell once in the thaw's corner carve (3.7 → 2.1 ms; identical work on 9 test plans).
-  Thaw: 9.4 → 7.4 ms (pre-B4: 7.85). The last two speed up code pre-B4 also ran, so the
-  measurement still costs ~1.2 ms over an unmeasured thaw; a C++ batch sample would remove it.
-- **Question (B4):** a thaw plan the 1 m corner carve can't realize (a lone buried cell, the shell
-  of a sphere in solid ground): refuse it, reshape it, or solve for corners that carve it exactly?
-  Evidence in `docs/bugs/mpm-thaw-carve-leaves-planned-cells.md`.
-- **Finding (B5):** `Mat3::svd` holds the signed-SVD convention in all four reflection rows (now
-  pinned by `test/test_mpm_svd.gd`), but U stops being a rotation as F nears singular: det U = 0.93
-  at σ₂/σ₀ = 1e-8, 0.16 at 1e-9, 0 at rank ≤ 1 (an uninitialized read). Filed
-  `docs/bugs/mpm-svd-ill-conditioned-u.md` with a pending test for the fast-SVD rewrite to turn on.
-  Whether the sim ever gets there is unmeasured.
+1. **Single-voxel edits** — the characterization is done. Answer its questions and the fix can be
+   designed: [`single-voxel-edits-unexpected`](bugs/single-voxel-edits-unexpected.md).
+   In short: Fill makes a ~2.5 m³ smooth mound, 83 % of it outside the target, and the target ends
+   about half full. 0 of 982 edits read as a cube. Empty refuses "already air" on 48 % of first
+   clicks and can't dig down (a second click refuses 36 of 39 times). Did you expect a crisp 1 m
+   cube? Which cell should Fill fill? Should paint cover the whole visible change?
+2. **Should terraforming count as cell edits?** Raise, Lower and Flatten emit no
+   `voxel_added`/`voxel_removed`, so PartIndex never releases a part they carve, and support and
+   detachment never react to them. This predates tonight. The fix is ready (writes now return
+   measured flips); the intent isn't:
+   [`actions-reshape-no-voxel-events`](bugs/actions-reshape-no-voxel-events.md).
+3. **Dig under your own feet:** guard it the way Lower is guarded, or keep Dig as "dig anywhere"?
+   The guard would refuse digs aimed within ~4.5 m of your feet:
+   [`dig-action-no-validate-no-safety`](bugs/dig-action-no-validate-no-safety.md).
+
+### Decided without you — overrule freely
+
+- **Fixed-bug convention:** I followed `00_INDEX.md`'s preamble. A fixed bug's file is deleted, and
+  `closed/` is only for not-a-bug and obsolete verdicts. Track A had archived three fixed bugs; the
+  merge deleted them and repointed their links at the fixing commits. The preview before/after
+  table is kept below.
+- **Scope grew past the plan.** Once A and B landed early, I ran follow-ups: every per-frame and
+  per-click GDScript lattice loop moved to C++ (A4, C1, C2, G1, G2), plus backlog bugs with clear
+  fixes (D1, E1, F1–F3, H1, I). Each got the same author → two reviewers → fixer loop.
+- **Asked-then-answered overnight:** agents asked whether to port the construction attach scan, the
+  per-click material paint and the thaw's measurement to C++. The manifesto answers that, so I did
+  (C1, G1, G2). Flatten's work generation and the safety scan went too (A1b), because the plan's
+  gate couldn't be met otherwise.
+- **Event bus re-entrancy (F1):** nested emits dispatch synchronously in full. A subscriber added
+  mid-dispatch hears only later emits; one removed mid-dispatch hears nothing more.
+- **Saves (F2):** an unreadable save (version bump, bad pair) is refused loudly and kept on disk,
+  never overwritten. F5 stays blocked until `reset`.
+- **Mesher (H1):** a splice now has its own entry point, `mesh_clipmap_splice`, with required boxes,
+  and a box without extent is refused. `grow_world(reuse, -1)` drains the whole frontier. No
+  live-caller behaviour changed. I did not apply the same design to `mesh_world`/`grow_world`,
+  because that would change the live preview's signatures; it's filed as `dc-mesher-box-value-sentinels`.
+- **Behaviour changes to know about:** a sub-cell part (e.g. a 0.5 m log between cell-centre planes)
+  now gets no PartIndex record (B3). An MPM thaw seeds particles only from cells it actually
+  emptied, and can drop debris a few metres outside the aim when the box rewrite flips extra cells (B4).
+
+### Open questions (evidence in each file)
+
+| Question | Where |
+|---|---|
+| Re-stamping the same CSG shape in a new material: repaint, or refuse as a no-op (today)? | `csg-restamp-material-only-refused` |
+| Sub-cell part identity in PartIndex | `part-index-sub-cell-parts-untracked` |
+| A thaw plan the corner carve can't realize: refuse, reshape, or solve exactly? | `mpm-thaw-carve-leaves-planned-cells` |
+| StoreWrite's box re-encode flips cells nobody edited (17 air, 1 solid over 190 thaws): repair like `one_cell`? | `mpm-thaw-carve-leaves-planned-cells` |
+| Disk-full policy for the DC arena: migrate to RAM, or stop refining? macOS matters? | `mmap-arena-disk-full-sigbus` |
+| Save pairs: refuse or warn on a lone or mismatched half; per-version readers once real saves exist; move unreadable saves aside? | `save-pair-consistency` |
+| `stamp_sphere`/`stamp_box` UNION repaints terrain it didn't make: test-only, or match `materials()`? | `edit-store-stamp-union-repaints-terrain` |
+| Dry run reads the generator twice (~0.045 ms of a refused preview): couple it to the builders, or leave it? | `actions-lattice-dry-run-double-generator` |
+| SVD ill-conditioning: interim fix now, or wait for the McAdams rewrite? Does the sim ever get there? | `mpm-svd-ill-conditioned-u` |
+| `edit_world` and a stale refine frontier: clear it, or refuse reuse after an edit? | `dc-edit-world-stale-refine-frontier` |
+| One-shot frontier drain drops 89 triangles in `emit_incremental` (pending gate test added). Does that match `dcdrop` in play, and change the priority? | `dc-incremental-emit-ring-insufficient` |
+| Should `TerrainSdfChanged` carry its source, so DetachmentScout can ignore MPM edits explicitly? | (B4 commit `7e6c225`) |
+| Close misc item 6 (player.gd input if-chains) as won't-fix? | `misc-low-severity` |
+| 04-event-bus.md "Lifetime & cleanup" predates WeakRef subscriptions: update, or keep as history? | `docs/roadmap/design/04-event-bus.md` |
+
+### Numbers
+
+Preview per call, radius 3, real terrain (A1b; "Before" is pre-`f11d284`):
+
+| Action | Before | After `f11d284` | Now |
+|---|---|---|---|
+| dig / fill | 0.07 ms | 0.76 ms | 0.055 ms |
+| raise | 0.11 ms | 0.65 ms | 0.047 ms |
+| flatten | 0.23 ms | 0.73 ms | 0.045 ms |
+| CSG sphere | 0.63 ms | 2.5 ms | 0.156 ms |
+| beam 6×2×2, resting / +3 m (C1) | — | 0.33 / 0.89 ms | 0.14 / 0.15 ms |
+
+Per click, `execute()`: beam placement 6.3 → 0.70 ms, CSG ~6.5 → 0.70 ms, fill r2 1.33 → 0.16 ms
+(G1, G2). 729-cell MPM thaw 9.4 → 6.0 ms (D1, G2). Buried refused CSG preview 0.68 → 0.34 ms (A4).
+
+GUT: 192 tests / 190 passing / 2 pending at the start → **288 / 284 / 4** at the end, 0 failing
+throughout. New pending tests are gates for filed bugs (`mpm-svd-ill-conditioned-u`,
+`dc-incremental-emit-ring-insufficient`).
+
+### Not done, and why
+
+- **Dig's player-safety guard:** waits on question 3.
+- **The DC mesher bugs** (`dc-inside-coverage-cracks` and the rest): design work that's yours;
+  tonight only added evidence and a gate test.
+- **Nothing was checked on a GPU.** Everything here is headless. The render-visible changes (paint
+  at seams, previews, placement) need your eyes; see the play-test list.
+
+### Environment
+
+- **Nothing pushed.** Every `git push` failed: `Permission denied (publickey)` from this session's
+  ssh-agent. Branches and `master` are local only; push when you're up.
+- **`claude` on PATH reverted to 2.1.274.** `~/.local/bin/claude` was repointed at 22:28, most likely
+  by the stable-channel auto-updater, so "Session facts" above is wrong about the pin. A plain
+  `claude` relaunch can't run Opus 5.5 until you `claude install 2.1.283` (or later) again.
+- The main checkout is back on `master`; the two worktrees under `.claude/worktrees/` are removed.
+
+### Play-test list
+
+1. Aim dig, fill, raise, flatten and CSG sphere around: the ghost should keep up with no hitch.
+2. Place beams (rotate, float, rest on an edge): no hitch on click, and attach/refuse where it was.
+3. Fill and CSG a new material against earlier edits: no stray repaint on the leaves beside the
+   stamp (E1).
+4. EmptyVoxel the cell under your feet: refused. Fill near yourself: refused only when the field
+   actually buries you (B2).
+5. CSG ADD the same shape twice in open air: the second is refused as a no-op (A2).
+6. Place a part, dig or CSG it away, then check `parts`: its record goes (B3). With Lower or Flatten
+   it probably stays (question 2).
+7. `mpmthaw` a block and a sphere: debris comes from what was emptied; watch for strays outside the aim (B4).
+8. F5, then quit and reload; then try a save from an older build: a loud refusal toast, and the
+   file is untouched (F2).
+9. Try FillVoxel and EmptyVoxel with question 1's numbers in mind.
