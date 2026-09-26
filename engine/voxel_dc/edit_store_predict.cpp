@@ -5,8 +5,9 @@
 
 #include "edit_store_lattice.h"
 
-// The brush predictions (SdfLattice.sphere_stamp, VoxelImprint.lattice) and the two questions
-// asked of any predicted lattice (the cells it flips, and whether it turns a box solid or air).
+// The brush predictions (SdfLattice.sphere_stamp, VoxelImprint.lattice), the material a brush
+// lattice paints, and the two questions asked of any predicted lattice (the cells it flips, and
+// whether it turns a box solid or air).
 // Bit-exactness rules: edit_store_lattice.h.
 
 using namespace edit_store_lattice;
@@ -22,13 +23,6 @@ enum CsgShapeKind { // CsgSdf.Shape
 	CSG_SPHERE,
 };
 
-// Whether the write rewrites the leaves over coordinate `v` on `axis` (EditStore's strict-overlap
-// test, which is separable per axis).
-bool rewrites_1d(const Lattice &lat, double v, int axis) {
-	const double leaf = Math::floor(v / lat.cell) * lat.cell;
-	return leaf < lat.region_hi()[axis] && leaf + lat.cell > lat.origin[axis];
-}
-
 // The leaf with lattice corner `i0`, trilerped at fractions `f` across it.
 double trilerp(const Lattice &lat, const float *sdf, const Vector3i &i0, const Vector3 &f) {
 	const int sy = lat.dim;
@@ -39,19 +33,6 @@ double trilerp(const Lattice &lat, const float *sdf, const Vector3i &i0, const V
 	const double c01 = Math::lerp(double(sdf[i + sz]), double(sdf[i + sz + 1]), f.x);
 	const double c11 = Math::lerp(double(sdf[i + sy + sz]), double(sdf[i + sy + sz + 1]), f.x);
 	return Math::lerp(Math::lerp(c00, c10, f.y), Math::lerp(c01, c11, f.y), f.z);
-}
-
-// Along one axis, every cell whose sample point sits in a rewritten leaf (SdfLattice.cells).
-LocalVector<int> rewritten_cells(const Lattice &lat, int axis) {
-	LocalVector<int> out;
-	const int64_t first = int64_t(Math::floor(lat.origin[axis])) - 1;
-	const int64_t end = int64_t(Math::ceil(lat.region_hi()[axis])) + 1;
-	for (int64_t c = first; c < end; ++c) {
-		if (rewrites_1d(lat, double(c) + CELL_SAMPLE_OFFSET, axis)) {
-			out.push_back(int(c));
-		}
-	}
-	return out;
 }
 
 // A rewritten leaf the box overlaps along one axis: its lattice index and the fractions across it
@@ -174,10 +155,7 @@ Dictionary EditStore::predict_sphere_stamp(Vector3 center, double radius, int op
 	const Vector3 first = ((center - pad) / min_leaf).floor();
 	const Vector3 span = ((center + pad) / min_leaf).ceil() - first;
 	Lattice lat(first * min_leaf, min_leaf, int(MAX(span.x, MAX(span.y, span.z))) + 1);
-	fill(*this, lat, [&](const Vector3 &p, double before) {
-		const double brush = p.distance_to(center) - radius;
-		return op == OP_UNION ? MIN(before, brush) : MAX(before, -brush);
-	});
+	fill_brush(*this, lat, op, [&](const Vector3 &p) { return p.distance_to(center) - radius; });
 	return prediction(*this, lat);
 }
 
@@ -190,9 +168,8 @@ Dictionary EditStore::predict_imprint(int shape, const PackedFloat64Array &dims,
 	const Transform3D inverse = xform.affine_inverse();
 	const LatticePlace place = imprint_place(shape, d, xform, cell);
 	Lattice lat(place.origin, cell, place.dim);
-	fill(*this, lat, [&](const Vector3 &p, double existing) {
-		const double dist = CLAMP(csg_sdf(shape, d, inverse.xform(p)), -SDF_BAND, SDF_BAND);
-		return op == OP_UNION ? MIN(existing, dist) : MAX(existing, -dist);
+	fill_brush(*this, lat, op, [&](const Vector3 &p) {
+		return CLAMP(csg_sdf(shape, d, inverse.xform(p)), -SDF_BAND, SDF_BAND);
 	});
 	return prediction(*this, lat);
 }
@@ -224,37 +201,69 @@ bool EditStore::imprint_near_solid(int shape, const PackedFloat64Array &dims, Tr
 	return false;
 }
 
+// SdfLattice.materials: a leaf takes `material` iff the write made one of its corners solid (`made`,
+// from fill_brush); otherwise it keeps its current material (read at its centre) if it keeps a solid
+// corner or `air_keeps`, else 0. `material` < 0 never repaints (a carve).
+PackedByteArray EditStore::lattice_materials(const PackedFloat32Array &sdf, const PackedByteArray &made, int dim,
+		Vector3 origin, double cell, int material, bool air_keeps) const {
+	const Lattice lat(sdf, dim, origin, cell);
+	ERR_FAIL_COND_V_MSG(!lat.is_valid(), PackedByteArray(), "Not a lattice: sdf must hold dim^3 values, dim >= 2, cell > 0.");
+	ERR_FAIL_COND_V_MSG(made.size() != sdf.size(), PackedByteArray(), "made must hold dim^3 values (a brush prediction's).");
+	const float *values = sdf.ptr();
+	const uint8_t *m = made.ptr();
+	const Vector3 half = Vector3(1, 1, 1) * (cell * 0.5);
+	PackedByteArray out;
+	out.resize(sdf.size());
+	uint8_t *w = out.ptrw();
+	memset(w, 0, out.size());
+	for (int z = 0; z < dim - 1; ++z) {
+		for (int y = 0; y < dim - 1; ++y) {
+			for (int x = 0; x < dim - 1; ++x) {
+				bool painted = false;
+				bool solid = false;
+				for (int k = 0; k < 8; ++k) {
+					const int j = voxel_dc::flat_index(x + voxel_dc::CB[k][0], y + voxel_dc::CB[k][1], z + voxel_dc::CB[k][2], dim);
+					painted = painted || m[j] == 1;
+					solid = solid || values[j] < SOLID_THRESHOLD;
+				}
+				const int i = voxel_dc::flat_index(x, y, z, dim);
+				if (painted && material >= 0) {
+					w[i] = uint8_t(material);
+				} else if (solid || air_keeps) {
+					w[i] = uint8_t(material_at(lat.point(x, y, z) + half));
+				}
+			}
+		}
+	}
+	return out;
+}
+
 // SdfLattice.value_at at every rewritten cell's sample point, then CellFlips._add, in z-y-x order.
 // Refused (an empty Dictionary) when a rewritten cell's sample point falls outside the lattice
 // (a cell size that does not tile the unit grid), rather than returning missing cells.
 Dictionary EditStore::lattice_flips(const PackedFloat32Array &sdf, int dim, Vector3 origin, double cell) const {
 	const Lattice lat(sdf, dim, origin, cell);
 	ERR_FAIL_COND_V_MSG(!lat.is_valid(), Dictionary(), "Not a lattice: sdf must hold dim^3 values, dim >= 2, cell > 0.");
-	const LocalVector<int> xs = rewritten_cells(lat, 0);
-	const LocalVector<int> ys = rewritten_cells(lat, 1);
-	const LocalVector<int> zs = rewritten_cells(lat, 2);
 	const float *values = sdf.ptr();
 	TypedArray<Vector3i> solid;
 	TypedArray<Vector3i> air;
-	for (const int z : zs) {
-		for (const int y : ys) {
-			for (const int x : xs) {
-				const Vector3i c(x, y, z);
-				const Vector3 p = Vector3(c) + Vector3(1, 1, 1) * CELL_SAMPLE_OFFSET;
-				const Vector3 l = (p - origin) / cell;
-				const Vector3i i0(int64_t(Math::floor(l.x)), int64_t(Math::floor(l.y)), int64_t(Math::floor(l.z)));
-				ERR_FAIL_COND_V_MSG(MIN(i0.x, MIN(i0.y, i0.z)) < 0 || MAX(i0.x, MAX(i0.y, i0.z)) > dim - 2, Dictionary(),
-						"A rewritten cell's sample point lies outside the lattice: the cell size does not tile the unit grid.");
-				const double was = sample(p);
-				const double now = trilerp(lat, values, i0, l - Vector3(i0));
-				if (was >= SOLID_THRESHOLD && now < SOLID_THRESHOLD) {
-					solid.push_back(c);
-				} else if (was < SOLID_THRESHOLD && now >= SOLID_THRESHOLD) {
-					air.push_back(c);
-				}
-			}
+	const bool tiled = for_each_rewritten_cell(lat, [&](const Vector3i &c) {
+		const Vector3 p = cell_sample_point(c);
+		const Vector3 l = (p - origin) / cell;
+		const Vector3i i0(int64_t(Math::floor(l.x)), int64_t(Math::floor(l.y)), int64_t(Math::floor(l.z)));
+		if (MIN(i0.x, MIN(i0.y, i0.z)) < 0 || MAX(i0.x, MAX(i0.y, i0.z)) > dim - 2) {
+			return false;
 		}
-	}
+		const Flip f = flip(sample(p), trilerp(lat, values, i0, l - Vector3(i0)));
+		if (f == FLIP_TO_SOLID) {
+			solid.push_back(c);
+		} else if (f == FLIP_TO_AIR) {
+			air.push_back(c);
+		}
+		return true;
+	});
+	ERR_FAIL_COND_V_MSG(!tiled, Dictionary(),
+			"A rewritten cell's sample point lies outside the lattice: the cell size does not tile the unit grid.");
 	Dictionary out;
 	out["solid"] = solid;
 	out["air"] = air;

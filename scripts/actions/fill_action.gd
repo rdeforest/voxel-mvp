@@ -51,10 +51,7 @@ func execute() -> void:
     # Write the very field the preview read; events are the cells whose sample point the write
     # actually flipped, measured across it. What the sphere makes solid takes the fill material.
     var lattice := _stamp()
-    var before  := CellFlips.snapshot(store, lattice.cells())
-    lattice.write(store, lattice.materials(store, MaterialPalette.index_of(material_name),
-        func(c: Vector3) -> bool: return c.distance_to(position) < radius, true))
-    CellFlips.since(store, before).emit(store)
+    lattice.write(store, lattice.materials(store, MaterialPalette.index_of(material_name), true)).emit(store)
 
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,

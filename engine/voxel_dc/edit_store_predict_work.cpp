@@ -35,7 +35,7 @@ Lattice work_lattice(const EditStore &store, const Work &work) {
 	const Vector3i span = hi - lo + Vector3i(2, 2, 2);
 	const Vector3i lo_cell = lo - Vector3i(1, 1, 1);
 	Lattice lat(Vector3(lo_cell), 1.0, MAX(span.x, MAX(span.y, span.z)) + 1);
-	fill(store, lat, [](const Vector3 &, double before) { return before; });
+	fill(store, lat, [](int, const Vector3 &, double before) { return before; });
 	float *w = lat.sdf.ptrw();
 	for (uint32_t k = 0; k < work.points.size(); ++k) {
 		const Vector3i i = work.points[k] - lo_cell;

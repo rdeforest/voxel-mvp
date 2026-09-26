@@ -46,9 +46,7 @@ func execute() -> void:
     # Write the very field the preview read; events are the cells whose sample point the write
     # actually flipped, measured across it. A carve repaints nothing.
     var lattice := _stamp()
-    var before  := CellFlips.snapshot(store, lattice.cells())
-    lattice.write(store, lattice.materials(store, -1, func(_c: Vector3) -> bool: return false, true))
-    CellFlips.since(store, before).emit(store)
+    lattice.write(store, lattice.materials(store, -1, true)).emit(store)
 
     # Box one cell wider than the dig sphere so the boundary-cell scan in
     # TerrainSupport sees newly-exposed neighbours just outside the sphere.

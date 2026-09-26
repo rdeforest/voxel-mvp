@@ -21,6 +21,9 @@ var origin:    Vector3               # world position of lattice point (0, 0, 0)
 var cell:      float                 # lattice spacing = the leaf size the write lands at
 var dim:       int                   # points per axis (a cube)
 var sdf:       PackedFloat32Array    # dim^3 values, x fastest (write_region's layout)
+var made:      PackedByteArray       # per point, 1 = the write made it solid; set with `sdf` by
+                                     # the brush builders (sphere_stamp, VoxelImprint.lattice) and
+                                     # true only of that sdf; materials() reads it
 var region_lo: Vector3               # leaves overlapping the open box (region_lo, region_hi)
 var region_hi: Vector3               # are the ones the write rewrites: the whole cube
 var writes:    bool = false          # the write changes some stored leaf corner's SDF (set by
@@ -42,6 +45,7 @@ static func predicted(d: Dictionary) -> SdfLattice:
         return null
     var lat := SdfLattice.new(d.origin, d.cell, d.dim)
     lat.sdf    = d.sdf
+    lat.made   = d.made
     lat.writes = d.writes
     return lat
 
@@ -113,59 +117,48 @@ func cells() -> Array[Vector3i]:
     return out
 
 
-# The cells this write will flip, predicted against the store's current field.
+# The cells this write will flip, predicted against the store's current field. None when EditStore
+# refuses the lattice (an empty Dictionary, with its error).
 func flips(store: EditStore) -> CellFlips:
     var d   := store.lattice_flips(sdf, dim, origin, cell)
     var out := CellFlips.new()
+    if d.is_empty():
+        return out
+
     out.solid = d.solid
     out.air   = d.air
     return out
 
 
 # Write the lattice into the store (every leaf in the region), with per-leaf `indices`
-# (materials(), or empty for material 0).
-func write(store: EditStore, indices: PackedByteArray) -> void:
-    store.write_region(sdf, indices, dim, origin, cell)
+# (materials(), or empty: leaves keep the material they hold, 0 for one newly materialised).
+# Returns the cells it flipped, MEASURED: each cells() member's sample read just before and just
+# after the write (EditStore.write_region_flips), with what each emptied cell was made of. None,
+# and nothing written, when EditStore refuses the lattice.
+func write(store: EditStore, indices: PackedByteArray) -> CellFlips:
+    var d   := store.write_region_flips(sdf, indices, dim, origin, cell)
+    var out := CellFlips.new()
+    if d.is_empty():
+        return out
+
+    out.solid         = d.solid
+    out.air           = d.air
+    out.air_materials = d.air_materials
+    out.changed       = d.changed
+    return out
 
 
 # Per-leaf material for write(). A leaf holds solid iff one of its corners is solid (a trilerp's
 # extremes are at its corners), so a leaf takes `material` iff the edit made one of its corners
-# solid — the brush is solid there (`brush_solid(point)`), or the write turned an air point solid
-# (air as the owner leaf held it, the value the builders combined with; at a seam on a max face the
-# leaf beyond can disagree).
+# solid: `made`, which the brush builder records — the brush is solid there, or the write turned an
+# air point solid (air as the owner leaf held it, the value the builder combined with; at a seam on
+# a max face the leaf beyond can disagree). So this answers for the store as the builder read it.
 # `material` < 0 never repaints (a carve). Existing terrain the brush didn't make keeps its
 # material, read at the leaf centre; a leaf left with no solid corner takes 0 unless `air_keeps`.
-func materials(store: EditStore, material: int, brush_solid: Callable, air_keeps: bool) -> PackedByteArray:
-    var made := PackedByteArray()   # per point: 1 = the edit made it solid
-    made.resize(dim * dim * dim)
-    if material >= 0:
-        for z in dim:
-            for y in dim:
-                for x in dim:
-                    var i := Vector3i(x, y, z)
-                    var p := point(i)
-                    var now := sdf[index(i)]
-                    if now < VoxelConstants.SDF_SOLID_THRESHOLD and (brush_solid.call(p) \
-                            or store.sample_toward(p, owner_centre(i)) >= VoxelConstants.SDF_SOLID_THRESHOLD):
-                        made[index(i)] = 1
-    var out := PackedByteArray()
-    out.resize(dim * dim * dim)
-    var half := Vector3.ONE * (cell * 0.5)
-    for z in dim - 1:
-        for y in dim - 1:
-            for x in dim - 1:
-                var i := Vector3i(x, y, z)
-                var painted := false
-                var solid   := false
-                for k in 8:
-                    var j := index(i + Vector3i(CubeGeometry.corner(k)))
-                    painted = painted or made[j] == 1
-                    solid   = solid or sdf[j] < VoxelConstants.SDF_SOLID_THRESHOLD
-                if painted:
-                    out[index(i)] = material
-                elif solid or air_keeps:
-                    out[index(i)] = store.material_at(point(i) + half)
-    return out
+# Runs in EditStore (lattice_materials); test_lattice_materials_predict gates it against the
+# GDScript original (test/support/lattice_oracle.gd).
+func materials(store: EditStore, material: int, air_keeps: bool) -> PackedByteArray:
+    return store.lattice_materials(sdf, made, dim, origin, cell, material, air_keeps)
 
 
 # The field a sphere brush writes: every leaf overlapping the brush box (radius + one leaf of

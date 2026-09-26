@@ -1,17 +1,20 @@
 extends RefCounted
 
-# The reference oracle for test_edit_store_predict: the GDScript lattice builders and lattice
-# queries the game ran before they moved into EditStore (C++) — SdfLattice.sphere_stamp / flips /
-# _turns_in, VoxelImprint.lattice, StoreWrite.lattice, BellSculptAction._compute_work,
-# FlattenAction._compute_work and ConstructionAction._attached — kept verbatim so the
-# byte-identical gate compares the C++ against an independent implementation rather than against
-# itself. Nothing in the game calls this.
+# The reference oracle for test_edit_store_predict (and the attach / materials gates): the
+# GDScript lattice builders and lattice queries the game ran before they moved into EditStore
+# (C++) — SdfLattice.sphere_stamp / flips / _turns_in / materials, VoxelImprint.lattice,
+# CellFlips.snapshot / since (the measurement across SdfLattice.write),
+# StoreWrite.lattice, BellSculptAction._compute_work, FlattenAction._compute_work and
+# ConstructionAction._attached — kept verbatim so the byte-identical gate compares the C++
+# against an independent implementation rather than against itself. Nothing in the game calls
+# this.
 # (Drafted by Claude, overnight 2026-09-26; moved from scripts/actions/ unchanged but for the
-# receiver: each former method takes its SdfLattice / store / action parameters explicitly. Since
+# receiver: each former method takes its SdfLattice / store / action parameters explicitly, and
+# materials' second loop is split out as _paint for length. Since
 # sdf-lattice-writes-false-change-at-max-faces the builders read "before" from the rewritten leaf
 # that owns each point and compare at float32 — the originals' store.sample read the neighbouring
-# leaf on the region's max faces. The owner-leaf rule is SdfLattice.owner_centre, shared with
-# SdfLattice.materials.)
+# leaf on the region's max faces; materials reads it the same way. The owner-leaf rule is
+# SdfLattice.owner_centre.)
 
 
 static func sphere_stamp(store: EditStore, center: Vector3, radius: float, op: int, min_leaf: float) -> SdfLattice:
@@ -103,8 +106,59 @@ static func flips(lat: SdfLattice, store: EditStore) -> CellFlips:
     var out := CellFlips.new()
     for c in lat.cells():
         var p := VoxelUtils.sample_point(c)
-        out._add(c, store.sample(p), _value_at(lat, p))
+        _add(out, c, store.sample(p), _value_at(lat, p))
     return out
+
+
+static func _add(out: CellFlips, cell: Vector3i, was: float, now: float) -> void:
+    var t := VoxelConstants.SDF_SOLID_THRESHOLD
+    if was >= t and now < t:
+        out.solid.append(cell)
+    elif was < t and now >= t:
+        out.air.append(cell)
+
+
+# SdfLattice.write as the game measured it before EditStore.write_region_flips: CellFlips.snapshot
+# of lat.cells(), write_region, CellFlips.since, with MpmStructure's _solid_materials (read from the
+# snapshot, before the write) for the emptied cells' materials and its _changed for `changed`.
+static func measured_write(lat: SdfLattice, store: EditStore, indices: PackedByteArray) -> CellFlips:
+    var before    := snapshot(store, lat.cells())
+    var materials := _solid_materials(store, before)
+    store.write_region(lat.sdf, indices, lat.dim, lat.origin, lat.cell)
+    var out := since(store, before)
+    for cell in out.air:
+        out.air_materials.append(materials[cell])
+    out.changed = _changed(store, before)
+    return out
+
+
+static func snapshot(store: EditStore, cells: Array[Vector3i]) -> Dictionary:
+    var before := {}
+    for cell in cells:
+        before[cell] = TerrainProbe.sdf(store, cell)
+    return before
+
+
+static func since(store: EditStore, before: Dictionary) -> CellFlips:
+    var out := CellFlips.new()
+    for cell: Vector3i in before:
+        _add(out, cell, before[cell], TerrainProbe.sdf(store, cell))
+    return out
+
+
+static func _solid_materials(store: EditStore, before: Dictionary) -> Dictionary:
+    var materials := {}
+    for cell: Vector3i in before:
+        if before[cell] < VoxelConstants.SDF_SOLID_THRESHOLD:
+            materials[cell] = TerrainProbe.material(store, cell)
+    return materials
+
+
+static func _changed(store: EditStore, before: Dictionary) -> bool:
+    for cell: Vector3i in before:
+        if TerrainProbe.sdf(store, cell) != before[cell]:
+            return true
+    return false
 
 
 static func _value_at(lat: SdfLattice, p: Vector3) -> float:
@@ -250,3 +304,45 @@ class _Candidate:
     func _init(p_edit: LatticeEdit, p_was_solid: bool) -> void:
         edit      = p_edit
         was_solid = p_was_solid
+
+
+# SdfLattice.materials, with the brush as the Callable its callers passed: FillAction the sphere
+# (`c.distance_to(position) < radius`), VoxelImprint the shape's SDF behind the xform's inverse
+# (`shape.sdf(inverse * c) < SDF_SOLID_THRESHOLD`), DigAction none.
+static func materials(lat: SdfLattice, store: EditStore, material: int, brush_solid: Callable,
+        air_keeps: bool) -> PackedByteArray:
+    var made := PackedByteArray()   # per point: 1 = the edit made it solid
+    made.resize(lat.dim * lat.dim * lat.dim)
+    if material >= 0:
+        for z in lat.dim:
+            for y in lat.dim:
+                for x in lat.dim:
+                    var i := Vector3i(x, y, z)
+                    var p := lat.point(i)
+                    var now := lat.sdf[lat.index(i)]
+                    if now < VoxelConstants.SDF_SOLID_THRESHOLD and (brush_solid.call(p) \
+                            or store.sample_toward(p, lat.owner_centre(i)) >= VoxelConstants.SDF_SOLID_THRESHOLD):
+                        made[lat.index(i)] = 1
+    return _paint(lat, store, made, material, air_keeps)
+
+
+static func _paint(lat: SdfLattice, store: EditStore, made: PackedByteArray, material: int,
+        air_keeps: bool) -> PackedByteArray:
+    var out := PackedByteArray()
+    out.resize(lat.dim * lat.dim * lat.dim)
+    var half := Vector3.ONE * (lat.cell * 0.5)
+    for z in lat.dim - 1:
+        for y in lat.dim - 1:
+            for x in lat.dim - 1:
+                var i := Vector3i(x, y, z)
+                var painted := false
+                var solid   := false
+                for k in 8:
+                    var j := lat.index(i + Vector3i(CubeGeometry.corner(k)))
+                    painted = painted or made[j] == 1
+                    solid   = solid or lat.sdf[j] < VoxelConstants.SDF_SOLID_THRESHOLD
+                if painted:
+                    out[lat.index(i)] = material
+                elif solid or air_keeps:
+                    out[lat.index(i)] = store.material_at(lat.point(i) + half)
+    return out

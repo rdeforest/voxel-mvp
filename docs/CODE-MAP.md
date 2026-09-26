@@ -383,8 +383,11 @@ names.
   and DC diagnostics use. An edit's preview and voxel events come from one `CellFlips`:
   predicted by `SdfLattice.flips()` from the field the edit writes (dig/fill
   `SdfLattice.sphere_stamp` + `write()`, `StoreWrite`, `VoxelImprint` — all through
-  `EditStore.write_region`, so the prediction IS the write), measured with
-  `CellFlips.snapshot/since` for events. Event materials are read back from the store.
+  `EditStore.write_region`, so the prediction IS the write), measured across the write for
+  events: `SdfLattice.write` returns them (`EditStore.write_region_flips` reads each rewritten
+  cell's sample just before and just after, `edit_store_write_flips.cpp`, gated against the
+  GDScript `snapshot`/`since` by `test_lattice_write_flips`), with the pre-write material of each
+  emptied cell (the MPM thaw's particles). Event materials are read back from the store.
   Construction's ghost (`part`) is its imprint's flips too (its AABB footprint only when the
   part flips no cell centre, and for the `PartPlaced` sidecar).
 - **Player safety reads the written field, not cell flips.** `PlayerSafeAction.endangered_by`

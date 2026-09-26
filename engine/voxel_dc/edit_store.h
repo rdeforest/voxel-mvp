@@ -42,14 +42,22 @@ public:
 	// re-read from godot_voxel after an edit — into the store, REPLACING whatever was
 	// there (the array is the authoritative result, not a brush to combine). The dual-
 	// write shadow path. Copy-on-write: materialises the region down to `cell`, leaving
-	// the rest sparse. `indices` may be empty (material 0).
+	// the rest sparse. `indices` may be empty: leaves keep the material they hold (0 for
+	// one this write materialises from the generator).
 	void write_region(const PackedFloat32Array &sdf, const PackedByteArray &indices, int dim, Vector3 origin, double cell);
+	// write_region, returning what it did to cells: { solid, air } the cells whose sample point it
+	// flipped (every cell whose sample point sits in a rewritten leaf, in z-y-x order, like
+	// lattice_flips), `air_materials` the material each `air` cell held before (parallel to it), and
+	// `changed` whether any of those cells' sample value moved at all. See edit_store_write_flips.cpp.
+	Dictionary write_region_flips(const PackedFloat32Array &sdf, const PackedByteArray &indices, int dim,
+			Vector3 origin, double cell);
 
 	// The field an edit WOULD write, without writing: the lattice every SdfLattice builder hands
 	// write_region (SdfLattice.sphere_stamp, VoxelImprint.lattice, StoreWrite.lattice, and the work
 	// sets BellSculptAction / FlattenAction generate), bit for bit — test_edit_store_predict gates it
 	// against the GDScript originals kept in test/support/lattice_oracle.gd. Each returns
-	// { origin, cell, dim, sdf, writes } (what SdfLattice.predicted reads); an empty Dictionary is a
+	// { origin, cell, dim, sdf, made, writes } (what SdfLattice.predicted reads; `made` is filled by the
+	// brush predictions, sphere stamp and imprint, and empty for the rest); an empty Dictionary is a
 	// refusal (bad arguments) or, for bell / flatten, a reshape that writes no point. `shape` is a
 	// CsgSdf.Shape with `dims` = box [x, y, z], cylinder [radius, height], sphere [radius]; `peak`
 	// is the SDF the bell adds at its centre column (negative raises the surface).
@@ -72,10 +80,13 @@ public:
 	// write turns any point of `box` solid (to_solid) or air that the store holds otherwise now.
 	// lattice_writes: whether write_region would change any stored corner — every corner of every
 	// leaf it rewrites, compared at float32 against what that leaf holds now (the generator's value
-	// for an unedited leaf); material is not considered.
+	// for an unedited leaf); material is not considered. lattice_materials = SdfLattice.materials:
+	// the per-leaf material write_region takes, painting the leaves with a corner in `made`.
 	Dictionary lattice_flips(const PackedFloat32Array &sdf, int dim, Vector3 origin, double cell) const;
 	bool lattice_turns_in(const PackedFloat32Array &sdf, int dim, Vector3 origin, double cell, AABB box, bool to_solid) const;
 	bool lattice_writes(const PackedFloat32Array &sdf, int dim, Vector3 origin, double cell) const;
+	PackedByteArray lattice_materials(const PackedFloat32Array &sdf, const PackedByteArray &made, int dim,
+			Vector3 origin, double cell, int material, bool air_keeps) const;
 
 	double sample(Vector3 p) const;  // stored edit if any, else the generator
 	// sample() read from the leaf on `toward`'s side of every leaf boundary `p` lies on (sample()
