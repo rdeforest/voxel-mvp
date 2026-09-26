@@ -32,6 +32,8 @@ the measured cell flips and the source, so raise, lower and flatten stop being t
 
 **Robert:**
 
+100% agree with your recommendation.
+
 ---
 
 ## 2. A thaw plan the corner carve can't carve
@@ -54,6 +56,8 @@ one solve can do both.
 
 **Robert:**
 
+Agreed, for the same reason.
+
 ---
 
 ## 3. StoreWrite's box rewrite flips cells nobody edited
@@ -72,6 +76,8 @@ their side), or accept and report it.
 side they're on" constraints.
 
 **Robert:**
+
+Agreed, per #2 above.
 
 ---
 
@@ -100,6 +106,22 @@ detail.
 
 **Robert:**
 
+First just thoughts:
+
+* Normally I bias for no-compromise, but I think compromise that standardizes
+  on common platform features is acceptable. Therefore, the Mac build (and
+  eventually Windows too) matters.
+
+* In the interest of failing early, let's choose conservative memory and disk
+  budgets for testing and development. Trying things out with all my ram and
+  disk available is fun but not necessarily productive. I'm thinking 32g disk,
+  32g RAM and of course 32g VRAM because that's about what my 5090 has when
+  it's not running an LLM.
+
+Now for the answer: I don't remember what arena refers to in this context. I
+need a refresher. It may also be possible to simplify this answer by not doing
+things just because I think they're cool, like using mmap for anything.
+
 ---
 
 ## 5. Save pairs: lone or mismatched halves
@@ -124,6 +146,8 @@ F5 until `reset`"** (today's behaviour). Named saves from doc 22 make blocking l
 
 **Robert:**
 
+Your take sounds right to me. Make it so.
+
 ---
 
 ## 6. `stamp_sphere` / `stamp_box` repaint terrain the brush didn't make
@@ -143,6 +167,8 @@ remove.
 
 **Robert:**
 
+Yes, make them match. Good call.
+
 ---
 
 ## 7. Sub-cell part identity in PartIndex
@@ -161,6 +187,8 @@ this until assemblies exist and solve it there.
 
 **Robert:**
 
+100% agree with your take AGAIN. :)
+
 ---
 
 ## 8. Re-stamping a CSG shape in a new material
@@ -174,6 +202,8 @@ here", and replacing wood with stone means moving the wood out first.
 covers the testing need.
 
 **Robert (confirm):**
+
+Agreed, close it.
 
 ---
 
@@ -196,6 +226,8 @@ construction), or wait for McAdams.
 
 **Robert:**
 
+Agreed.
+
 ---
 
 ## 10. `edit_world` and a stale refine frontier
@@ -213,6 +245,11 @@ reuse-grow. This is your mesher area, though, so it's your call.
 
 **Robert:**
 
+Why does the edit not clear the impacted portion of the frontier already? I
+would expect an edit to result in an invalidation of stored facts around the
+area of the edit, including what needs to be refined. Can we clear just that
+which has been made obsolete? Clearing the whole frontier seems .. dramatic.
+
 ---
 
 ## 11. One-shot frontier drain drops 89 triangles
@@ -227,6 +264,10 @@ the gate.
 this bug's priority? It's your active mesher thread.
 
 **Robert:**
+
+I have no recollection of what I was seeing in game play. I'd like to
+de-prioritize this in hopes of it becoming moot after we make bigger
+improvements.
 
 ---
 
@@ -248,6 +289,8 @@ re-mesh the first time a thaw lands on such a leaf.
 
 **Robert:**
 
+Agreed, I suspect this is another item that will be mooted by bigger work.
+
 ---
 
 ## 13. Dry run reads the generator twice
@@ -265,6 +308,8 @@ then.
 
 **Robert:**
 
+Agreed.
+
 ---
 
 ## 14. Close misc item 6 (player.gd input if-chains)?
@@ -279,6 +324,8 @@ wasted work.
 
 **Robert:**
 
+Good catch, but I also agree with your take.
+
 ---
 
 ## 15. Event bus spec: update, or keep as history?
@@ -292,6 +339,8 @@ subscriptions for a while.
 history.
 
 **Robert:**
+
+Agreed.
 
 ---
 

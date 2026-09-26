@@ -292,13 +292,13 @@ up?
 
 Preview per call, radius 3, real terrain (A1b; "Before" is pre-`f11d284`):
 
-| Action | Before | After `f11d284` | Now |
-|---|---|---|---|
-| dig / fill | 0.07 ms | 0.76 ms | 0.055 ms |
-| raise | 0.11 ms | 0.65 ms | 0.047 ms |
-| flatten | 0.23 ms | 0.73 ms | 0.045 ms |
-| CSG sphere | 0.63 ms | 2.5 ms | 0.156 ms |
-| beam 6×2×2, resting / +3 m (C1) | — | 0.33 / 0.89 ms | 0.14 / 0.15 ms |
+| Action                          | Before  | After `f11d284` | Now            |
+|---------------------------------|---------|-----------------|----------------|
+| dig / fill                      | 0.07 ms | 0.76 ms         | 0.055 ms       |
+| raise                           | 0.11 ms | 0.65 ms         | 0.047 ms       |
+| flatten                         | 0.23 ms | 0.73 ms         | 0.045 ms       |
+| CSG sphere                      | 0.63 ms | 2.5 ms          | 0.156 ms       |
+| beam 6×2×2, resting / +3 m (C1) | —       | 0.33 / 0.89 ms  | 0.14 / 0.15 ms |
 
 Per click, `execute()`: beam placement 6.3 → 0.70 ms, CSG ~6.5 → 0.70 ms, fill r2 1.33 → 0.16 ms
 (G1, G2). 729-cell MPM thaw 9.4 → 6.0 ms (D1, G2). Buried refused CSG preview 0.68 → 0.34 ms (A4).
