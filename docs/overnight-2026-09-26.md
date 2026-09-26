@@ -153,7 +153,6 @@ pushed (see "Environment").*
   corrupt or truncated terrain blob used to crash the load (SIGSEGV or a FATAL index error, shown on
   the old build); it's now refused with the store untouched, and the save pair isn't applied or
   overwritten.
-
 - **Fixed-bug convention:** I followed `00_INDEX.md`'s preamble. A fixed bug's file is deleted, and
   `closed/` is only for not-a-bug and obsolete verdicts. Track A had archived three fixed bugs; the
   merge deleted them and repointed their links at the fixing commits. The preview before/after
@@ -229,10 +228,12 @@ throughout. New pending tests are gates for filed bugs (`mpm-svd-ill-conditioned
 ### Environment
 
 - **Nothing pushed.** Every `git push` failed: `Permission denied (publickey)` from this session's
-  ssh-agent. Branches and `master` are local only; push when you're up.
+  ssh-agent. `master` is local only; push it when you're up. Every overnight branch is merged into
+  it, so pushing the branches is optional.
 - **`claude` on PATH reverted to 2.1.274.** `~/.local/bin/claude` was repointed at 22:28, most likely
   by the stable-channel auto-updater, so "Session facts" above is wrong about the pin. A plain
-  `claude` relaunch can't run Opus 5.5 until you `claude install 2.1.283` (or later) again.
+  `claude` relaunch can't run Opus 5.5 until you `claude install 2.1.283` (or later) again, and the
+  stable auto-updater will revert that too unless `autoUpdatesChannel` moves to `latest`.
 - The main checkout is back on `master`; the two worktrees under `.claude/worktrees/` are removed.
 
 ### Play-test list
@@ -247,6 +248,7 @@ throughout. New pending tests are gates for filed bugs (`mpm-svd-ill-conditioned
 6. Place a part, dig or CSG it away, then check `parts`: its record goes (B3). With Lower or Flatten
    it probably stays (question 2).
 7. `mpmthaw` a block and a sphere: debris comes from what was emptied; watch for strays outside the aim (B4).
-8. F5, then quit and reload; then try a save from an older build: a loud refusal toast, and the
-   file is untouched (F2).
+8. Load a save from before tonight: it loads (v1 is still read). F5, quit, reload. Then corrupt a
+   copy of `world.editstore` (truncate it) and load: a loud refusal toast, and the file stays
+   untouched (F2, J1).
 9. Try FillVoxel and EmptyVoxel with question 1's numbers in mind.
