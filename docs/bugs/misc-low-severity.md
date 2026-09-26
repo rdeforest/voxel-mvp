@@ -15,14 +15,9 @@ lookup) and `:253-258` (`_placement_chord_axis` W/A/E chain). Most are *forced* 
 choice. Flagged for completeness against the explicit rule; not worth rewriting. (Keycode map scanned: no
 duplicate or missing bindings.)
 
-## 7. Player-safety "was it already solid/air" is judged only at sampled points
-*Added by Claude (agent), 2026-09-25; location updated 2026-09-26 after the C++ port.*
-`EditStore::lattice_turns_in` (`engine/voxel_dc/edit_store_predict.cpp`), reached through
-`SdfLattice.solidifies_in` / `empties_in`, finds exactly where the write makes new solid or air. But
-it only checks what was there *before* at the overlap corners and the cell sample points. If the
-store is already solid at every tested point and the write adds solid between them, the check isn't
-proven exhaustive. That errs toward refusing. **Fix (optional):** bound the prior field per leaf the
-way the written field is bounded.
+## 7. (moved)
+Split out as [`player-safety-misses-sub-cell-burial`](player-safety-misses-sub-cell-burial.md), because
+this item had the direction backwards: the check misses burials; it doesn't over-refuse.
 
 ## References
 `scenes/player/player.gd`, `scripts/actions/sdf_lattice.gd`, `engine/voxel_dc/edit_store_predict.cpp`.
