@@ -5,7 +5,7 @@ or move to `docs/completed/` when the session is closed out.*
 
 ## Progress
 
-- [ ] Track A1 — preview lattice in C++ (`actions-preview-gdscript-slow`)
+- [ ] Track A1 — preview lattice in C++ (`actions-preview-gdscript-slow`) — A1a done (C++ prediction + byte-identical gate); A1b (switch callers, port `_compute_work` + `_turns_in`, re-measure) open
 - [ ] Track A2 — `sdf-lattice-writes-false-change-at-max-faces`
 - [ ] Track A3 — `mmap-arena-no-mmap-fallback` (if time)
 - [ ] Track B1 — characterize `single-voxel-edits-unexpected`

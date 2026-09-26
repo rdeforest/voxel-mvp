@@ -15,9 +15,12 @@
 // stream. C++ so render/collision can sample it on a worker thread.
 
 #include "core/io/stream_peer.h"
+#include "core/math/transform_3d.h"
 #include "core/object/ref_counted.h"
 #include "core/templates/local_vector.h"
 #include "core/variant/array.h"
+#include "core/variant/dictionary.h"
+#include "core/variant/typed_array.h"
 
 #include "terrain_field.h"
 
@@ -39,6 +42,19 @@ public:
 	// write shadow path. Copy-on-write: materialises the region down to `cell`, leaving
 	// the rest sparse. `indices` may be empty (material 0).
 	void write_region(const PackedFloat32Array &sdf, const PackedByteArray &indices, int dim, Vector3 origin, double cell);
+
+	// The field an edit WOULD write and the cells it would flip, without writing — the three
+	// GDScript SdfLattice builders (SdfLattice.sphere_stamp, VoxelImprint.lattice,
+	// StoreWrite.lattice) and SdfLattice.flips, reproduced bit for bit so a preview can run
+	// them every frame. Each returns { origin, cell, dim, sdf, region_lo, region_hi, writes,
+	// solid, air }. `shape` is a CsgSdf.Shape with `dims` = box [x, y, z], cylinder
+	// [radius, height], sphere [radius]. `cell` / `min_leaf` are the callers' own (VoxelImprint
+	// passes RENDER_BASE_CELL), so only the values the callers pass are gated. An empty Dictionary
+	// is a refusal (bad arguments, or a cell size that does not tile the unit grid).
+	// See edit_store_predict.cpp.
+	Dictionary predict_sphere_stamp(Vector3 center, double radius, int op, double min_leaf) const;
+	Dictionary predict_imprint(int shape, const PackedFloat64Array &dims, Transform3D xform, int op, double cell) const;
+	Dictionary predict_work(const TypedArray<Vector3i> &points, const PackedFloat64Array &sdfs) const;
 
 	double sample(Vector3 p) const;  // stored edit if any, else the generator
 	bool has_edit(Vector3 p) const;  // true where the player has edited (stored), false = generator

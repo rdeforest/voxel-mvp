@@ -30,4 +30,40 @@ Rejected: caching the preview in `voxel_preview_renderer` while the aim and para
 hides the cost only while the player holds still; aiming is when previews matter.
 
 ## References
-`scripts/actions/sdf_lattice.gd`, `store_write.gd`, `voxel_imprint.gd`, `engine/voxel_dc/edit_store.cpp`.
+`scripts/actions/sdf_lattice.gd`, `store_write.gd`, `voxel_imprint.gd`, `cell_flips.gd`, `player_safe_action.gd`;
+the shape math the imprint mirrors, `scripts/csg/csg_sdf.gd` and `scripts/csg/shape/`;
+`engine/voxel_dc/edit_store.cpp`, `edit_store_predict.cpp`; the gate `test/test_edit_store_predict.gd`;
+the bench `scripts/dev/bench_preview_predict.gd`.
+
+## Progress
+*Added by Claude (agent), overnight 2026-09-26.*
+
+- [x] A1a — `EditStore.predict_sphere_stamp` / `predict_imprint` / `predict_work`
+  (`engine/voxel_dc/edit_store_predict.cpp`) reproduce `SdfLattice.sphere_stamp`,
+  `VoxelImprint.lattice`, `StoreWrite.lattice` and `SdfLattice.flips` bit for bit. Gate:
+  `test/test_edit_store_predict.gd`, on the game's store under a 2 m / 1 m / 0.5 m / 0.25 m edit history.
+- [ ] A1b — switch the callers, port `_compute_work` (bell, flatten) and `_turns_in` so the
+  preview's remaining GDScript cost goes too, then re-measure `preview()` against "before".
+
+Lattice + flips, radius 3, same run (`scripts/dev/bench_preview_predict.gd`):
+
+| Stamp | GDScript | C++ |
+|---|---|---|
+| dig | 0.99 ms | 0.055 ms |
+| CSG sphere | 3.40 ms | 0.16 ms |
+| raise (175 points) | 0.72 ms | 0.036 ms |
+| flatten (23 points) | 0.45 ms | 0.026 ms |
+
+Raise and flatten keep a GDScript cost this does not touch: `_compute_work` takes 0.20 ms (raise) and
+0.49 ms (flatten). Flatten's alone is over its 0.23 ms "before" figure, so A1b can't meet the gate for
+flatten unless the work generation moves too.
+
+The player-safety check is a second GDScript cost A1a does not touch. `PlayerSafeAction.endangered_by`
+runs inside `preview()` for CSG, construction, flatten, raise / lower and fill-voxel. It calls
+`SdfLattice.solidifies_in` / `empties_in` (`_turns_in`, `_pieces_1d`), which walk the rewritten leaves
+under the capsule and support boxes with a trilerp and a `store.sample` per test point. The same bench,
+with the player standing at the brush's edge (boxes over rewritten leaves, nothing endangered, so no
+early out), measures it at 0.27 ms (dig lattice), 0.38 ms (CSG sphere) and 0.27 ms (raise). A player
+whose boxes miss the lattice costs almost nothing. At the brush's edge it alone exceeds the "before"
+figure for raise (0.11 ms) and is well over half of CSG's (0.63 ms), so A1b must move `_turns_in` to C++
+alongside the lattice to meet the gate; the byte-identical requirement applies to it as well.
