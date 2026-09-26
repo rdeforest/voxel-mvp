@@ -97,10 +97,6 @@ const FALL_THRESHOLD := 0.01
 # Below this, the change is treated as noise and propagation halts.
 const SUPPORT_EPSILON := 0.01
 
-# Extra radius (m) a fill keeps clear of the player so an additive edit can't fill the
-# space the player occupies. Cross-cutting rule shared by the additive verbs.
-const PLAYER_CLEARANCE := 1.0
-
 
 # ============================================================================
 # Asset paths

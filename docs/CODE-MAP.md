@@ -407,7 +407,11 @@ names.
 ## Key conventions
 
 **Refuse-don't-deform.** Actions refuse via `validate()` when constraints can't
-be met (`FillAction` refuses within `PLAYER_CLEARANCE` of the player).
+be met. Construction, CSG, Fill, FillVoxel, EmptyVoxel, Flatten and the bell
+sculpts (Raise, Lower) ask `PlayerSafeAction.endangered_by` of the field they
+write: each refuses to turn any point of the player's capsule solid or of the
+support box under their feet air. Dig does not yet
+(`docs/bugs/dig-action-no-validate-no-safety.md`).
 `ConstructionAction.validate` requires a part cell to overlap existing solid OR
 rest directly on solid below — a part floating in air is refused, and one that
 would bury the player is refused. Where an edit can't refuse but might overlap a
@@ -417,9 +421,6 @@ physics tick doesn't squirt it sideways.
 
 **Input dispatch via dictionary lookup.** `_key_actions` and
 `_mouse_button_actions` map keycodes and buttons to callables. No if-chains.
-
-**`PLAYER_CLEARANCE = 1.0 m`** in `FillAction` and `FlattenAction` prevents
-filling the player's occupied space.
 
 **Mutations go through the bus.** Actions emit primitive events; they don't call
 `StructuralIntegrity` directly for state changes. The remaining synchronous

@@ -1,5 +1,5 @@
 class_name EmptyVoxelAction
-extends Action
+extends PlayerSafeAction
 
 # Empty a single targeted cell to air — that cell and no other (StoreWrite.one_cell), or refuse.
 
@@ -10,15 +10,20 @@ var _work_cache: Array[LatticeEdit] = []
 var _work_computed := false
 
 func _init(p_cell: Vector3i, p_ctx: ActionContext) -> void:
-    cell  = p_cell
-    store = p_ctx.store
+    cell   = p_cell
+    store  = p_ctx.store
+    player = p_ctx.player
 
 func validate() -> bool:
     if store == null:
         return false
     if not TerrainProbe.is_solid(store, cell):
         return false   # already air — nothing to do
-    return not _work().is_empty()   # else no corner write empties it without emptying a neighbour
+    if _work().is_empty():
+        return false   # no corner write empties it without emptying a neighbour
+    if endangered_by(StoreWrite.lattice(store, _work()), store):
+        return false   # would carve the ground from under the player
+    return true
 
 func execute() -> void:
     if _work().is_empty():

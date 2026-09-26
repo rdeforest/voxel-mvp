@@ -209,8 +209,6 @@ These are design and tuning *limits*, not defects. Defects live in
 - **`_resume_unfinished_floods` budget starvation.** Components larger than
   `DETECTION_BUDGET` (500 voxels) take multiple settled frames to fully detect.
 
-- **`PLAYER_CLEARANCE = 1.0 m`** in Fill/Flatten is a guess.
-
 - **Lazy-expansion cascade per dig is bounded by material decay budget.** For
   STONE (decay 0.05) the cascade reaches ~20 cells. Future load-propagation
   will need its own cascade rules.

@@ -9,7 +9,7 @@ or move to `docs/completed/` when the session is closed out.*
 - [ ] Track A2 — `sdf-lattice-writes-false-change-at-max-faces`
 - [ ] Track A3 — `mmap-arena-no-mmap-fallback` (if time)
 - [x] Track B1 — characterize `single-voxel-edits-unexpected`
-- [ ] Track B2 — `empty-voxel-no-player-safety`
+- [x] Track B2 — `empty-voxel-no-player-safety` (Dig: empty-carve refusal only; its player-safety guard needs `preview()`, specified in its bug file)
 - [ ] Track B3 — `part-index-footprint-cells-never-released`
 - [ ] Track B4 — `mpm-thaw-events-unmeasured`
 - [ ] Track B5 — MPM SVD regression test (if time)
