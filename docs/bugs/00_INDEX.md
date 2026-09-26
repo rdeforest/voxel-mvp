@@ -2,7 +2,9 @@
 
 One file per known bug we've chosen to defer. The thesis is **get the major changes done first**; bugs are
 parked here (with diagnosis + a proposed fix where we have one) so nothing is lost and any can be picked up
-cold. A bug graduates out by being fixed (delete the file) — not by aging.
+cold. A bug graduates out by being fixed (delete the file) — not by aging. A bug that turns out not to be a
+bug, or whose mechanism a refactor deleted, moves to `closed/` with the verdict written into it and a
+row in the Closed table below; that costs one file and saves re-litigating it from the same code read.
 
 When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a one-liner where it surfaced
 (STATUS known-limits, the relevant doc). Keep severity honest.
@@ -13,7 +15,6 @@ When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a 
 |-----|------|----------|-------|
 | [sdf-sample-corner-vs-center](sdf-sample-corner-vs-center.md) | actions / structural / preview | **high (pervasive)** | No single source of truth for cell→sample-point; corner vs center disagree by ½ cell. Previews/events drift from the actual write. Code-read, not yet reproduced. |
 | [actions-untyped-work-tuple](actions-untyped-work-tuple.md) | actions | med (structural) | Untyped positional work-array → preview/safety/geometry use different cell sets; `_endangers()` triplicated. Root of several action bugs. |
-| [mpm-svd-reflection-sign](mpm-svd-reflection-sign.md) | MPM (mat3 SVD) | med | Double σ₂ flip → wrong polar rotation for inverted F. Existing SVD test can't catch it. |
 | [event-bus-reentrancy](event-bus-reentrancy.md) | event bus | med (latent) | No reentrancy guard; prunes dead subs mid-iteration. Reachable by design; no channel self-chains *yet*. |
 | [construction-bury-check-single-point](construction-bury-check-single-point.md) | actions (construction) | med | Bury check tests body origin only, not the capsule; a part across head/feet validates as safe. |
 | [dig-action-no-validate-no-safety](dig-action-no-validate-no-safety.md) | actions (dig) | low-med | `validate()` always true (ghost disagrees); no player-safety guard unlike siblings. Confirm intent. |
@@ -28,5 +29,15 @@ When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a 
 | [dc-inside-coverage-cracks](dc-inside-coverage-cracks.md) | DC world-octree render | **blocks doc 17 P3** | Graded-floor coarse leaves place misaligned vertices → LOD-seam holes. Reproduced headlessly; proactive accumulate-fine-QEF fix proposed. |
 | [dc-reversed-triangles-ridges](dc-reversed-triangles-ridges.md) | DC meshing (shared) | low (rare) | Back-facing triangle on convex ridges; pre-existing, in the live render too (~1/few-thousand tris). |
 | [dc-crease-normals-soft](dc-crease-normals-soft.md) | DC meshing | low (conditional) | Sharp edges shade soft; needs Hermite/crease-split in C++. v0.2 art pass. |
-| [edit-remesh-padding-gap](edit-remesh-padding-gap.md) | edit re-mesh (clipmap) | low | Missing triangle near a block border until reload; may be moot once the clipmap retires. |
 | [distant-shadow-shimmer](distant-shadow-shimmer.md) | rendering / shadows | cosmetic | CSM far-cascade crawl when panning. v0.2 polish. |
+
+
+## Closed
+
+Not open work. Kept because the reasoning is worth being able to look up — each file carries the verdict
+and, where the report was wrong, why.
+
+| Bug | Area | Verdict | Notes |
+|-----|------|---------|-------|
+| [mpm-svd-reflection-sign](closed/mpm-svd-reflection-sign.md) | MPM (mat3 SVD) | not a bug (2026-09-25) | Reported double σ₂ flip is correct: a reflected F fires one `if`, not both; the both-fire case is `det F > 0`. Four-case table in the file. The *test* gap it found is real — assert `det_u`/`det_v`/`s2` before the fast-SVD rewrite. |
+| [edit-remesh-padding-gap](closed/edit-remesh-padding-gap.md) | edit re-mesh (clipmap) | obsolete (2026-09-25) | Filed against the clipmap render + godot_voxel notification; both deleted in `d58e8ce`, so the mechanism has no live code path. Live successor: [dc-incremental-emit-ring-insufficient](dc-incremental-emit-ring-insufficient.md). |
