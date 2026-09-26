@@ -331,6 +331,7 @@ void EditStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("imprint_near_solid", "shape", "dims", "xform", "cell", "reach", "below"), &EditStore::imprint_near_solid);
 	ClassDB::bind_method(D_METHOD("lattice_flips", "sdf", "dim", "origin", "cell"), &EditStore::lattice_flips);
 	ClassDB::bind_method(D_METHOD("lattice_turns_in", "sdf", "dim", "origin", "cell", "box", "to_solid"), &EditStore::lattice_turns_in);
+	ClassDB::bind_method(D_METHOD("lattice_materials", "sdf", "made", "dim", "origin", "cell", "material", "air_keeps"), &EditStore::lattice_materials);
 	ClassDB::bind_method(D_METHOD("lattice_writes", "sdf", "dim", "origin", "cell"), &EditStore::lattice_writes);
 	ClassDB::bind_method(D_METHOD("sample", "p"), &EditStore::sample);
 	ClassDB::bind_method(D_METHOD("sample_toward", "p", "toward"), &EditStore::sample_toward);

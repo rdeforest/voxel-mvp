@@ -49,6 +49,7 @@ struct Lattice {
 	double cell = 1.0;
 	int dim = 0;
 	PackedFloat32Array sdf;
+	PackedByteArray made; // brush lattices only (fill_brush): per point, 1 = the write made it solid
 	bool writes = false;
 
 	Lattice(const Vector3 &p_origin, double p_cell, int p_dim) :
@@ -84,27 +85,48 @@ struct Lattice {
 		out["cell"] = cell;
 		out["dim"] = dim;
 		out["sdf"] = sdf;
+		out["made"] = made;
 		out["writes"] = writes;
 		return out;
 	}
 };
 
-// Every point takes combine(point, the value a rewritten leaf holds there now). `writes` notes a
-// point whose stored float32 changes; most writes show one, and prediction() settles the rest.
+// Every point takes combine(its flat index, point, the value a rewritten leaf holds there now).
+// `writes` notes a point whose stored float32 changes; most writes show one, and prediction()
+// settles the rest.
 template <typename Combine>
 void fill(const EditStore &store, Lattice &lat, Combine combine) {
 	float *w = lat.sdf.ptrw();
 	for (int z = 0; z < lat.dim; ++z) {
 		for (int y = 0; y < lat.dim; ++y) {
 			for (int x = 0; x < lat.dim; ++x) {
+				const int i = voxel_dc::flat_index(x, y, z, lat.dim);
 				const Vector3 p = lat.point(x, y, z);
 				const double before = store.sample_toward(p, lat.owner_centre(x, y, z));
-				const float after = float(combine(p, before));
-				w[voxel_dc::flat_index(x, y, z, lat.dim)] = after;
+				const float after = float(combine(i, p, before));
+				w[i] = after;
 				lat.writes = lat.writes || after != float(before);
 			}
 		}
 	}
+}
+
+// A brush combined into the field: union = min(before, brush(p)), subtract = max(before, -brush(p)),
+// brush(p) < SOLID_THRESHOLD being the brush's inside. `made` is SdfLattice.materials's paint rule,
+// taken here because the brush value and the owner leaf's "before" are both in hand: a point the
+// write leaves solid that the brush is solid at. The GDScript rule also counted a point the write
+// turned from air to solid; under this combine that point is always one the brush is solid at
+// (a subtract never makes solid), so the clause adds nothing and is left out.
+template <typename Brush>
+void fill_brush(const EditStore &store, Lattice &lat, int op, Brush brush) {
+	lat.made.resize(lat.sdf.size());
+	uint8_t *made = lat.made.ptrw();
+	fill(store, lat, [&](int i, const Vector3 &p, double before) {
+		const double b = brush(p);
+		const double after = op == OP_UNION ? MIN(before, b) : MAX(before, -b);
+		made[i] = float(after) < SOLID_THRESHOLD && b < SOLID_THRESHOLD;
+		return after;
+	});
 }
 
 // What SdfLattice.predicted reads. A lattice whose points all match the leaf they were read from

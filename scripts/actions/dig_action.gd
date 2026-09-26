@@ -47,7 +47,7 @@ func execute() -> void:
     # actually flipped, measured across it. A carve repaints nothing.
     var lattice := _stamp()
     var before  := CellFlips.snapshot(store, lattice.cells())
-    lattice.write(store, lattice.materials(store, -1, func(_c: Vector3) -> bool: return false, true))
+    lattice.write(store, lattice.materials(store, -1, true))
     CellFlips.since(store, before).emit(store)
 
     # Box one cell wider than the dig sphere so the boundary-cell scan in

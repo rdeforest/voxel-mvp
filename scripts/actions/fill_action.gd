@@ -52,8 +52,7 @@ func execute() -> void:
     # actually flipped, measured across it. What the sphere makes solid takes the fill material.
     var lattice := _stamp()
     var before  := CellFlips.snapshot(store, lattice.cells())
-    lattice.write(store, lattice.materials(store, MaterialPalette.index_of(material_name),
-        func(c: Vector3) -> bool: return c.distance_to(position) < radius, true))
+    lattice.write(store, lattice.materials(store, MaterialPalette.index_of(material_name), true))
     CellFlips.since(store, before).emit(store)
 
     VoxelEventBusSingleton.emit(

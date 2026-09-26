@@ -6,7 +6,12 @@ extends GutTest
 # which on the region's max faces reads the neighbouring leaf the write leaves alone. At a seam
 # there (the owner leaf solid, the neighbour air) the old read repainted leaves the brush never
 # reached. The store is the game's own (EditStoreManager: aligned root, the real generator).
+# The seams also gate the C++ paint (EditStore.lattice_materials) against the GDScript original
+# (test/support/lattice_oracle.gd) on every max face; the rest of that gate is
+# test_lattice_materials_predict.
 # (Drafted by Claude, overnight 2026-09-26.)
+
+const Oracle := preload("res://test/support/lattice_oracle.gd")
 
 const KEPT := &"Wood"
 const FILL := &"Stone"
@@ -28,10 +33,10 @@ func _ctx() -> ActionContext:
     return ActionContext.new(_store, null, null)
 
 
-# Store `lat`'s region as air everywhere but its x max-face plane, which is solid, every leaf
-# painted KEPT: the leaves at x = dim - 2 hold solid on that face, the unedited leaves beyond it
-# the generator's deep air — a seam on the region's max face.
-func _seam_at_max_x(lat: SdfLattice) -> void:
+# Store `lat`'s region as air everywhere but its max-face plane on `axis`, which is solid, every
+# leaf painted KEPT: the leaves at dim - 2 on that axis hold solid on that face, the unedited leaves
+# beyond it the generator's deep air — a seam on the region's max face.
+func _seam_at_max(lat: SdfLattice, axis: int) -> void:
     var sdf := PackedFloat32Array()
     sdf.resize(lat.dim * lat.dim * lat.dim)
     var indices := PackedByteArray()
@@ -40,11 +45,12 @@ func _seam_at_max_x(lat: SdfLattice) -> void:
     for z in lat.dim:
         for y in lat.dim:
             for x in lat.dim:
-                var face := x == lat.dim - 1
+                var face := Vector3i(x, y, z)[axis] == lat.dim - 1
                 sdf[lat.index(Vector3i(x, y, z))] = VoxelConstants.SDF_SOLID if face else VoxelConstants.SDF_AIR
     _store.write_region(sdf, indices, lat.dim, lat.origin, lat.cell)
 
-    var probe := Vector3i(lat.dim - 1, floori(lat.dim / 2.0), floori(lat.dim / 2.0))
+    var probe := Vector3i.ONE * floori(lat.dim / 2.0)
+    probe[axis] = lat.dim - 1
     var face  := lat.point(probe)
     assert_gt(_store.sample(face), VoxelConstants.SDF_AIR,
         "store.sample reads the neighbouring leaf's deep air on the face (else this tests nothing)")
@@ -80,7 +86,7 @@ func test_fill_keeps_the_material_of_a_max_face_seam() -> void:
     var fill   := FillAction.new(centre, 2.0, _ctx(), FILL)
     var lat    := SdfLattice.sphere_stamp(_store, centre, 2.0, VoxelConstants.STORE_OP_UNION,
         VoxelConstants.RENDER_BASE_CELL)
-    _seam_at_max_x(lat)
+    _seam_at_max(lat, Vector3.AXIS_X)
     assert_true(fill.validate(), "the fill writes (else this tests nothing)")
     _assert_same_region(fill._stamp(), lat, "fill")
     fill.execute()
@@ -91,9 +97,41 @@ func test_imprint_keeps_the_material_of_a_max_face_seam() -> void:
     var shape := CsgSphereShape.new(1.0)
     var xform := Transform3D(Basis(), _air + Vector3(0.3, 0.1, -0.2))
     var lat   := VoxelImprint.lattice(_store, shape, xform, CsgState.Op.ADD)
-    _seam_at_max_x(lat)
+    _seam_at_max(lat, Vector3.AXIS_X)
     var csg := CsgAction.new(shape, xform, CsgState.Op.ADD, FILL, _ctx())
     assert_true(csg.validate(), "the imprint writes (else this tests nothing)")
     _assert_same_region(csg._lattice, lat, "imprint")
     csg.execute()
     _assert_face_leaves_kept(lat, "imprint")
+
+
+# The C++ paint against the oracle on a seam on each max face, for the fill sphere and imprints of
+# each shape (turned), every paint material, both air rules. Each case has its own patch of sky, so
+# no case's seam lies beyond another's face.
+func test_seam_materials_match_oracle() -> void:
+    var shapes: Array[CsgShape] = [CsgSphereShape.new(1.0), CsgBoxShape.new(Vector3(2.5, 1.2, 0.7)),
+        CsgCylinderShape.new(0.8, 2.0)]
+    var turn := Basis(Vector3(0.2, 1.0, 0.4).normalized(), 0.5)
+    var at   := _air + Vector3(0.3, 0.1, -0.2)
+    for axis in 3:
+        at += Vector3.RIGHT * 16.0
+        var fill := func() -> SdfLattice:
+            return SdfLattice.sphere_stamp(_store, at, 2.0, VoxelConstants.STORE_OP_UNION, VoxelConstants.RENDER_BASE_CELL)
+        _seam_at_max(fill.call(), axis)
+        _assert_paint_matches_oracle("fill axis %d" % axis, fill.call(),
+            func(c: Vector3) -> bool: return c.distance_to(at) < 2.0)
+        for shape in shapes:
+            at += Vector3.RIGHT * 16.0
+            var xform   := Transform3D(turn, at)
+            var inverse := xform.affine_inverse()
+            _seam_at_max(VoxelImprint.lattice(_store, shape, xform, CsgState.Op.ADD), axis)
+            _assert_paint_matches_oracle("imprint %s axis %d" % [shape.sdf_kind(), axis],
+                VoxelImprint.lattice(_store, shape, xform, CsgState.Op.ADD),
+                func(c: Vector3) -> bool: return shape.sdf(inverse * c) < VoxelConstants.SDF_SOLID_THRESHOLD)
+
+
+func _assert_paint_matches_oracle(label: String, lat: SdfLattice, brush_solid: Callable) -> void:
+    for material in [MaterialPalette.index_of(FILL), MaterialPalette.index_of(KEPT), -1]:
+        for keeps in [true, false]:
+            assert_eq(lat.materials(_store, material, keeps), Oracle.materials(lat, _store, material, brush_solid, keeps),
+                "%s material %d keeps %s: the C++ paint is the oracle's" % [label, material, keeps])
