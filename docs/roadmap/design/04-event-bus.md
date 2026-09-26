@@ -92,6 +92,26 @@ walks every cell in its box; a `voxel_added` walks one cell.
   the autoload bus holds Callables that reference RefCounted
   components, preventing them from freeing.
 
+## Re-entrancy
+
+*Added 2026-09-26, drafted by Claude.*
+
+Handlers emit from inside handlers by design (TerrainSupport emits
+`voxel_removed` while handling `terrain_sdf_changed`), and emit is
+synchronous, so a nested emit is dispatched in full before the outer
+dispatch resumes. That holds for the same channel too. On entry, before any
+handler runs, `emit` snapshots the channel-wide list and the per-cell list
+of every cell in `event.cells`; it dispatches from those snapshots and
+prunes dead subscriptions from the live lists afterwards. So nothing a
+handler does to the lists (nested emit, subscribe, unsubscribe, freeing a
+subscriber) can make the outer dispatch skip or repeat a subscriber. A
+subscription added mid-dispatch, on any list, first hears the next emit;
+one removed mid-dispatch hears nothing more, including the rest of the
+event in flight; one whose owner is freed mid-dispatch is skipped and
+pruned. A handler that
+re-emits its own channel unconditionally recurses without bound: the bus
+does not guard against that.
+
 ## Out of scope (deferred)
 
 - Region/AABB subscriptions (`subscribe_region`) — add when a second

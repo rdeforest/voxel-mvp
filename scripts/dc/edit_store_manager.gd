@@ -21,6 +21,7 @@ const SEED    := 1337
 
 const SAVE_MAGIC   := 0x45445331   # "EDS1" — guards against loading a stale/foreign blob
 const SAVE_VERSION := 1
+const HEADER_BYTES := 8            # magic + version, both 32-bit
 
 var store: EditStore
 
@@ -42,12 +43,26 @@ func save_to(path: String) -> Error:
     return OK
 
 # Deserialize into the existing store instance (render/collision hold its reference, so we
-# mutate in place rather than replace). Skips a blob whose magic/version doesn't match.
+# mutate in place rather than replace). Skips a blob refusal() rejects.
 func load_from(path: String) -> bool:
+    if not refusal(path).is_empty():
+        return false
+
+    var f := FileAccess.open(path, FileAccess.READ)
+    f.seek(HEADER_BYTES)
+    store.deserialize(f.get_buffer(f.get_length() - HEADER_BYTES))
+    return true
+
+# Why this build won't load the blob at `path`, or "" when it will. Strict on version: the blob
+# has no field-defaulting, so there is no older layout this build can read.
+static func refusal(path: String) -> String:
     var f := FileAccess.open(path, FileAccess.READ)
     if f == null:
-        return false
-    if f.get_32() != SAVE_MAGIC or f.get_32() != SAVE_VERSION:
-        return false
-    store.deserialize(f.get_buffer(f.get_length() - f.get_position()))
-    return true
+        return "terrain save can't be opened (%s)" % error_string(FileAccess.get_open_error())
+    if f.get_32() != SAVE_MAGIC:
+        return "terrain save is not an EditStore blob"
+
+    var version := f.get_32()
+    if version != SAVE_VERSION:
+        return "terrain save is format v%d; this build reads v%d" % [version, SAVE_VERSION]
+    return ""

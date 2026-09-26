@@ -417,14 +417,13 @@ func _save_game() -> void:
     if not integrity.is_quiescent():
         Toast.failure("Can't save — world still settling.")
         return
-    var world := get_parent()
-    var err := WorldSnapshot.save(SavePaths.SNAPSHOT_FILE, world)
-    if err == OK:
-        world.save_edit_store()   # S4: persist terrain edits via the EditStore blob
+    var problem: String = get_parent().save_game()
+    if problem.is_empty():
         Toast.success("Saved.")
-    else:
-        push_error("Save failed: %s" % error_string(err))
-        Toast.failure("Save failed: %s" % error_string(err))
+        return
+
+    push_error("Save failed: %s" % problem)
+    Toast.failure("Save failed: %s" % problem)
 
 func _load_game() -> void:
     if not SavePaths.snapshot_exists():

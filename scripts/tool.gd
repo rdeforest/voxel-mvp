@@ -15,6 +15,9 @@ var name:       String
 var activities: Array[EditMode] = []
 
 
+# A private, read-only copy because the player remembers an activity index per tool and reads it
+# back unchecked (Player.current_activity); a list shrunk in place would leave that index out of range.
 func _init(p_name: String, p_activities: Array[EditMode]) -> void:
     name       = p_name
-    activities = p_activities
+    activities = p_activities.duplicate()
+    activities.make_read_only()

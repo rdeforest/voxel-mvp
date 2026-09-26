@@ -1,6 +1,8 @@
 class_name StructuralIntegrity
 extends Node
 
+const QUIESCE_PASS_LIMIT := 100000
+
 
 var store:              EditStore   # SDF source (generator + edits); set by world.gd after the store exists
 
@@ -50,13 +52,22 @@ func get_support(pos: Vector3i) -> float:
 
 # --- Helpers ---
 
-# Force the world to a settled state so a save is never blocked: drain the support fixpoint.
-# The save stays honest (a genuinely-settled snapshot) rather than bypassing the gate.
-func force_quiescent() -> void:
-    var guard := 0
-    while not terrain_support.dirty_queue.is_empty() and guard < 100000:
+# Drain the support fixpoint now instead of at PROPAGATION_BUDGET per frame (console `settle`),
+# so the save gate's is_quiescent() can pass. A queue still dirty after QUIESCE_PASS_LIMIT passes
+# means propagation isn't converging — a defect to surface, not load to wait out — so it reports
+# and returns false; the save gate then keeps refusing rather than capturing an unsettled world.
+func force_quiescent() -> bool:
+    var passes := 0
+    while not terrain_support.dirty_queue.is_empty() and passes < QUIESCE_PASS_LIMIT:
         terrain_support.process_dirty_queue()
-        guard += 1
+        passes += 1
+
+    if terrain_support.dirty_queue.is_empty():
+        return true
+
+    push_error("StructuralIntegrity: support did not settle after %d passes; %d cells still dirty"
+        % [QUIESCE_PASS_LIMIT, terrain_support.dirty_queue.size()])
+    return false
 
 
 func is_quiescent() -> bool:

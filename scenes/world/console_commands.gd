@@ -370,14 +370,22 @@ func reset() -> void:
     # `reset_pending = true`, which detaches the terrain stream (procedural terrain
     # regenerates) and skips the snapshot load. F9 afterwards reloads normally.
     WorldSnapshot.reset_pending = true
-    LimboConsole.info("Resetting to defaults — saves left intact. F9 to restore.")
+    var refusal: String = host.save_refusal()
+    if refusal.is_empty():
+        LimboConsole.info("Resetting to defaults — saves left intact until the next F5. F9 to restore.")
+    else:
+        LimboConsole.warn("Resetting to defaults. This build can't load the save on disk (%s); it stays until the next F5, which replaces it."
+            % refusal)
     host.get_tree().reload_current_scene.call_deferred()
 
 func quiescent() -> void:
     LimboConsole.info("quiescent: %s" % integrity.is_quiescent())
 
 func settle() -> void:
-    integrity.force_quiescent()
+    if not integrity.force_quiescent():
+        LimboConsole.error("support did not settle (%d cells still dirty) — saving stays blocked"
+            % integrity.terrain_support.dirty_queue.size())
+        return
     LimboConsole.info("settled — quiescent: %s" % integrity.is_quiescent())
 
 func parts() -> void:

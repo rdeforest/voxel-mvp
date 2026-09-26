@@ -14,6 +14,14 @@ class TestToolBasics:
         var t := Tool.new("Empty", [] as Array[EditMode])
         assert_eq(t.activities.size(), 0)
 
+    # The player's remembered per-tool activity index is only in range while the list can't shrink.
+    func test_activities_are_fixed_at_construction():
+        var given: Array[EditMode] = [EditMode.new().named("Probe")]
+        var t := Tool.new("None", given)
+        assert_true(t.activities.is_read_only(), "a tool's activity list can't be shrunk after construction")
+        given.clear()
+        assert_eq(t.activities.size(), 1, "the caller's array isn't the tool's list")
+
 
 # Activity-memory pattern: the player carries an `_activity_indices`
 # array (one per tool). This test exercises the index-bookkeeping

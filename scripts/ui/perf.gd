@@ -32,15 +32,20 @@ var _label: Label
 var _shown := false
 var _last_physics_frame := 0
 
-var _frames: PackedFloat32Array = PackedFloat32Array()   # ring of recent frame times (ms)
-var _marks: PackedByteArray = PackedByteArray()           # parallel: 1 = mesh applied that frame
+# Three parallel rings of GRAPH_CAP slots, one slot per frame. _head is the slot the next frame
+# goes in; _count is how many slots hold a frame so far. _slot(i) maps oldest-first order to a slot.
+var _frames: PackedFloat32Array = PackedFloat32Array()   # frame-gen time (ms)
+var _marks:  PackedByteArray    = PackedByteArray()      # 1 = mesh applied that frame
+var _queue:  PackedFloat32Array = PackedFloat32Array()   # refine-queue size that frame
+var _head  := 0
+var _count := 0
+
 var _pending_mark := false
 var _drawer: Control
 var _last_gen_ms := 0.0                                   # last frame-gen cost (cap-independent); read by the DC budget controller
 
 const QUEUE_GRAPH_H := 40.0                               # refine-queue graph height (px)
 const _CYAN := Color(0.30, 0.80, 0.95)
-var _queue: PackedFloat32Array = PackedFloat32Array()     # ring of recent refine-queue sizes (parallel to _frames)
 var _last_queue := 0.0                                    # latest reported refine-queue depth (held between grows)
 var _queue_drawer: Control
 
@@ -51,6 +56,12 @@ class Strip extends Control:
     func _draw() -> void:
         if draw_fn.is_valid():
             draw_fn.call(self)
+
+
+func _init() -> void:
+    _frames.resize(GRAPH_CAP)
+    _marks.resize(GRAPH_CAP)
+    _queue.resize(GRAPH_CAP)
 
 
 func _ready() -> void:
@@ -130,22 +141,17 @@ func _process(_dt: float) -> void:
     # game work here is minor anyway — the mesher runs off-thread (mesh-lag, not proc) — so render-cpu
     # + GPU is the real per-frame cost.
     var gen_ms := maxf(render_cpu_ms, gpu_ms)
+    var now    := Engine.get_process_frames()
     _last_gen_ms = gen_ms
-    _frames.append(gen_ms)
-    _marks.append(1 if _pending_mark else 0)
-    _pending_mark = false
-    _queue.append(_last_queue)
-    if _frames.size() > GRAPH_CAP:
-        _frames.remove_at(0)
-        _marks.remove_at(0)
-    if _queue.size() > GRAPH_CAP:
-        _queue.remove_at(0)
+    _record(gen_ms)
+    _drop_stale(_times, now)
+    _drop_stale(_status, now)
     if not _shown:
         return
+
     _drawer.queue_redraw()
     _queue_drawer.queue_redraw()
     var fps := Engine.get_frames_per_second()
-    var now := Engine.get_process_frames()
     var ticks := Engine.get_physics_frames() - _last_physics_frame
     _last_physics_frame = Engine.get_physics_frames()
     var lines: Array[String] = [
@@ -157,8 +163,6 @@ func _process(_dt: float) -> void:
     var cpu_sum := 0.0
     for label in labels:
         var e: Dictionary = _times[label]
-        if now - int(e.frame) > STALE_FRAMES:
-            continue
         cpu_sum += e.ms
         lines.append("%s  %.2f ms" % [label, e.ms])
     # Accounted CPU vs the whole frame: a large, bouncing "other" with small/steady CPU means the
@@ -169,10 +173,30 @@ func _process(_dt: float) -> void:
     keys.sort()
     for key in keys:
         var s: Dictionary = _status[key]
-        if now - int(s.frame) > STALE_FRAMES:
-            continue
         lines.append("%s: %s" % [key, s.text])
     _label.text = "\n".join(lines)
+
+
+func _record(gen_ms: float) -> void:
+    _frames[_head] = gen_ms
+    _marks[_head]  = 1 if _pending_mark else 0
+    _queue[_head]  = _last_queue
+    _pending_mark  = false
+    _head  = (_head + 1) % GRAPH_CAP
+    _count = mini(_count + 1, GRAPH_CAP)
+
+
+# The ring slot holding the i-th oldest recorded frame, for i in [0, _count).
+func _slot(i: int) -> int:
+    return (_head - _count + i + GRAPH_CAP) % GRAPH_CAP
+
+
+# Erased, not just hidden: a label carrying a count ("DC collision (%d regions)") makes a new key
+# per value, so without this the dicts grow for the whole session.
+func _drop_stale(entries: Dictionary, now: int) -> void:
+    for key in entries.keys():
+        if now - int(entries[key].frame) > STALE_FRAMES:
+            entries.erase(key)
 
 
 # GPU time to render the last frame, in ms (cap-independent — GPU execution, measured by the render server).
@@ -215,13 +239,12 @@ func _draw_graph(c: Control) -> void:
     for ms in _LIMITS:                                   # faint reference lines at 8/16/34/100
         var ry := control_size.y - clampf(ms / FULL_MS, 0.0, 1.0) * control_size.y
         c.draw_line(Vector2(0.0, ry), Vector2(control_size.x, ry), Color(1.0, 1.0, 1.0, 0.12))
-    var n := _frames.size()
-    for i in n:
-        var ms := _frames[i]
+    for i in _count:
+        var ms := _frames[_slot(i)]
         var h := clampf(ms / FULL_MS, 0.0, 1.0) * control_size.y
         var x := i * bw
         c.draw_rect(Rect2(x, control_size.y - h, maxf(bw, 1.0), h), _frame_color(ms))
-        if _marks[i] != 0:
+        if _marks[_slot(i)] != 0:
             c.draw_line(Vector2(x, 0.0), Vector2(x, control_size.y), Color(0.40, 0.70, 1.0, 0.85), 1.0)
 
 
@@ -231,13 +254,12 @@ func _draw_graph(c: Control) -> void:
 func _draw_queue_graph(c: Control) -> void:
     var control_size := c.size
     c.draw_rect(Rect2(Vector2.ZERO, control_size), Color(0.0, 0.0, 0.0, 0.30))
-    var n := _queue.size()
-    if n == 0:
+    if _count == 0:
         return
     var peak := 1.0
-    for q in _queue:
-        peak = maxf(peak, q)
+    for i in _count:
+        peak = maxf(peak, _queue[_slot(i)])
     var bw := control_size.x / float(GRAPH_CAP)
-    for i in n:
-        var h := (_queue[i] / peak) * control_size.y
+    for i in _count:
+        var h := (_queue[_slot(i)] / peak) * control_size.y
         c.draw_rect(Rect2(i * bw, control_size.y - h, maxf(bw, 1.0), h), _CYAN)

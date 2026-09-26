@@ -157,7 +157,8 @@ func _sorted(cells: Array[Vector3i]) -> Array[Vector3i]:
     return out
 
 
-# docs/bugs/mpm-thaw-events-unmeasured.md. On the game's field at this spot, a radius-1.4 thaw
+# Provenance: docs/bugs/mpm-thaw-carve-leaves-planned-cells.md (filed from the fix for the since-
+# deleted mpm-thaw-events-unmeasured). On the game's field at this spot, a radius-1.4 thaw
 # plans cells that the carve can't empty (their corners are shared with kept terrain), and
 # rewriting the box re-encodes the generated field so a cell the plan never named reads air
 # afterwards. voxel_removed (and the particles) must name exactly the cells that went air.

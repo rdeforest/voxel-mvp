@@ -48,3 +48,14 @@ func test_air_ray_misses() -> void:
     # Aim straight up from above the surface — only air ahead.
     var hit := TerrainRaymarch.surface(es, Vector3(0, s0 + 10.0, 0), Vector3.UP, 30.0, 0.2)
     assert_false(hit.hit, "a ray into open air reports no hit")
+
+
+# The march's first segment is sampled at both ends like every other (the origin test is its near
+# end), so a surface closer than one step to the camera is hit, not stepped over.
+func test_surface_within_the_first_step_is_hit() -> void:
+    var es   := _store()
+    var s0   := EditStore.terrain_surface(0, 0, BASE, AMP, PERIOD, OCTAVES, SEED)
+    var step := 0.2
+    var hit  := TerrainRaymarch.surface(es, Vector3(0, s0 + step * 0.5, 0), Vector3.DOWN, 5.0, step)
+    assert_true(hit.hit, "a surface half a step below the camera is hit")
+    assert_almost_eq(hit.position.y, s0, step * 0.5, "and hit where it is, inside the first segment")

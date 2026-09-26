@@ -10,6 +10,7 @@ var _awake_overlay: AwakeOverlay
 var _mpm_structure: MpmStructure
 var _detachment_scout: DetachmentScout
 var _edit_store: EditStoreManager
+var _saved: SavedWorld
 var _part_index: PartIndex
 var _console: ConsoleCommands
 var _debug_server: DebugServer
@@ -24,19 +25,13 @@ func _enter_tree() -> void:
     SavePaths.ensure_dir()
 
 func _ready() -> void:
-    var resetting := WorldSnapshot.reset_pending
-    WorldSnapshot.reset_pending = false
-    if not resetting and SavePaths.snapshot_exists():
-        if WorldSnapshot.load_into(SavePaths.SNAPSHOT_FILE, self):
-            Toast.success("Loaded save.")
-    # The EditStore is the authoritative terrain (SDF + material). Build it, restore any saved
-    # edits, then hand it to everything that reads or writes terrain: render, collision, the
+    # The EditStore is the authoritative terrain (SDF + material). Build it, restore the save,
+    # then hand it to everything that reads or writes terrain: render, collision, the
     # structural tracking, and (lazily, via edit_store_ref) the player's actions.
     _part_index = PartIndex.new()   # identity sidecar; subscribes to part_placed / voxel_removed
     _edit_store = EditStoreManager.new()
     _edit_store.setup()
-    if not resetting and SavePaths.editstore_exists():
-        _edit_store.load_from(SavePaths.EDITSTORE_FILE)   # S4: restore persisted terrain edits into the store
+    _restore_save()
     _integrity.set_store(_edit_store.store)               # solidity checks + falling-body classification
     _inval_overlay = preload("res://scenes/player/invalidation_overlay.gd").new()
     add_child(_inval_overlay)
@@ -102,11 +97,30 @@ func _grab_os_focus() -> void:
     DisplayServer.window_move_to_foreground()
     get_window().grab_focus()
 
-# Persist the EditStore blob (terrain SDF). Called by the player's F5 save alongside the
-# WorldSnapshot (parts/player/tunables). S4: replaces the godot_voxel stream's save.
-func save_edit_store() -> void:
-    if _edit_store != null:
-        _edit_store.save_to(SavePaths.EDITSTORE_FILE)
+# A `reset` reload skips the save and may overwrite it; otherwise a save this build can't read
+# is left on disk untouched, and the player is told why the world started fresh.
+func _restore_save() -> void:
+    var resetting := WorldSnapshot.reset_pending
+    WorldSnapshot.reset_pending = false
+    if resetting:
+        _saved = SavedWorld.new(SavePaths.SNAPSHOT_FILE, SavePaths.EDITSTORE_FILE)
+        return
+
+    _saved = SavedWorld.read(SavePaths.SNAPSHOT_FILE, SavePaths.EDITSTORE_FILE)
+    if not _saved.refusal.is_empty():
+        push_error("Save not loaded: %s" % _saved.refusal)
+        Toast.failure("Save not loaded: %s. Files kept; F5 won't overwrite them (console `reset` starts over)."
+            % _saved.refusal)
+    elif _saved.load_into(self, _edit_store):
+        Toast.success("Loaded save.")
+
+# The player's F5: both halves of the save. "" on success, otherwise the reason it didn't save.
+func save_game() -> String:
+    return _saved.save(self, _edit_store)
+
+# Why the save on disk wasn't loaded and won't be overwritten; "" when there's no such save.
+func save_refusal() -> String:
+    return _saved.refusal
 
 # The authoritative terrain store. Actions resolve it lazily through here (they're built in
 # the player's _ready, before this world's _ready creates the store).
