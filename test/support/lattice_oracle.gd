@@ -2,9 +2,10 @@ extends RefCounted
 
 # The reference oracle for test_edit_store_predict: the GDScript lattice builders and lattice
 # queries the game ran before they moved into EditStore (C++) — SdfLattice.sphere_stamp / flips /
-# _turns_in, VoxelImprint.lattice, StoreWrite.lattice, BellSculptAction._compute_work and
-# FlattenAction._compute_work — kept verbatim so the byte-identical gate compares the C++ against an
-# independent implementation rather than against itself. Nothing in the game calls this.
+# _turns_in, VoxelImprint.lattice, StoreWrite.lattice, BellSculptAction._compute_work,
+# FlattenAction._compute_work and ConstructionAction._attached — kept verbatim so the
+# byte-identical gate compares the C++ against an independent implementation rather than against
+# itself. Nothing in the game calls this.
 # (Drafted by Claude, overnight 2026-09-26; moved from scripts/actions/ unchanged but for the
 # receiver: each former method takes its SdfLattice / store / action parameters explicitly. Since
 # sdf-lattice-writes-false-change-at-max-faces the builders read "before" from the rewritten leaf
@@ -166,6 +167,23 @@ static func _pieces_1d(lat: SdfLattice, box: AABB, axis: int) -> Array:
                 fracs.append((sp - leaf_lo) / lat.cell)
         out.append([k, fracs])
     return out
+
+
+# ConstructionAction._attached: `lat` is the part's imprint lattice, `shape` / `xform` its brush.
+static func attached(store: EditStore, lat: SdfLattice, shape: CsgShape, xform: Transform3D) -> bool:
+    var inverse := xform.affine_inverse()
+    var reach   := lat.cell * sqrt(3.0) * 0.5
+    var down    := Vector3.DOWN * VoxelConstants.VOXEL_SIZE
+    for z in lat.dim:
+        for y in lat.dim:
+            for x in lat.dim:
+                var p := lat.point(Vector3i(x, y, z))
+                if shape.sdf(inverse * p) > reach:
+                    continue
+                if store.sample(p) < VoxelConstants.SDF_SOLID_THRESHOLD \
+                        or store.sample(p + down) < VoxelConstants.SDF_SOLID_THRESHOLD:
+                    return true
+    return false
 
 
 # BellSculptAction._compute_work; `sign` is -1 for raise, +1 for lower.

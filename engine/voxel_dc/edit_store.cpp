@@ -328,6 +328,7 @@ void EditStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("predict_work", "points", "sdfs"), &EditStore::predict_work);
 	ClassDB::bind_method(D_METHOD("predict_bell", "center", "radius", "peak"), &EditStore::predict_bell);
 	ClassDB::bind_method(D_METHOD("predict_flatten", "plane_point", "normal", "radius"), &EditStore::predict_flatten);
+	ClassDB::bind_method(D_METHOD("imprint_near_solid", "shape", "dims", "xform", "cell", "reach", "below"), &EditStore::imprint_near_solid);
 	ClassDB::bind_method(D_METHOD("lattice_flips", "sdf", "dim", "origin", "cell"), &EditStore::lattice_flips);
 	ClassDB::bind_method(D_METHOD("lattice_turns_in", "sdf", "dim", "origin", "cell", "box", "to_solid"), &EditStore::lattice_turns_in);
 	ClassDB::bind_method(D_METHOD("lattice_writes", "sdf", "dim", "origin", "cell"), &EditStore::lattice_writes);

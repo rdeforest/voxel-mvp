@@ -8,18 +8,16 @@ extends GutTest
 # preview that differs from the write by one ulp can name a cell the write doesn't flip. The
 # originals live on as the oracle (test/support/lattice_oracle.gd), an independent implementation.
 #
-# The store is the game's own (EditStoreManager: the real TerrainField generator) under a
-# multi-level edit history — edited leaves at 2 m, 1 m, 0.5 m and 0.25 m beside unedited
-# generator ground — so lattice points land on stored corners, trilerps inside finer leaves, and
-# the generator itself. A raw analytic field would hide every one of those paths.
+# The store is the game's own under a multi-level edit history (test/support/predict_store.gd).
 
-const Oracle := preload("res://test/support/lattice_oracle.gd")
+const Oracle       := preload("res://test/support/lattice_oracle.gd")
+const PredictStore := preload("res://test/support/predict_store.gd")
 
 const MIN_FLIPS := 200   # across a test's cases; far fewer means the cases stopped reaching the surface
 
+var _fixture: PredictStore
 var _store:   EditStore
-var _base:    Vector3   # the edited column's surface point, floored to the 2 m leaf grid
-var _surface: float     # the generator's surface height there (fractional)
+var _base:    Vector3
 
 var _mismatches: Array[String] = []
 var _solid:      int           = 0
@@ -28,48 +26,17 @@ var _no_writes:  int           = 0
 
 
 func before_each() -> void:
-    var manager := EditStoreManager.new()
-    manager.setup()
-    _store   = manager.store
-    _surface = EditStore.terrain_surface(100.0, 100.0, EditStoreManager.BASE, EditStoreManager.AMP,
-        EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
-    _base    = Vector3(100.0, floorf(_surface / 2.0) * 2.0, 100.0)
+    _fixture   = PredictStore.new()
+    _store     = _fixture.store
+    _base      = _fixture.base
     _mismatches.clear()
     _solid     = 0
     _air       = 0
     _no_writes = 0
-    _edit_history()
 
 
-# Earlier edits at four leaf sizes, overlapping each other and the positions under test.
-func _edit_history() -> void:
-    var s := Vector3(100.0, _surface, 100.0)
-    _store.stamp_box(s + Vector3(3.0, 0.0, -2.0), Vector3(6.0, 4.0, 6.0), VoxelConstants.STORE_OP_UNION, 3, 2.0)
-    _store.stamp_sphere(s + Vector3(-2.0, 0.3, 1.0), 2.5, VoxelConstants.STORE_OP_SUBTRACT, 0, 1.0)
-    _store.stamp_sphere(s + Vector3(1.0, -0.5, 2.0), 1.6, VoxelConstants.STORE_OP_UNION, 2, 0.5)
-    _store.stamp_sphere(s + Vector3(0.3, 0.7, -0.4), 1.1, VoxelConstants.STORE_OP_SUBTRACT, 0, 0.25)
-    Oracle.sphere_stamp(_store, s + Vector3(-1.2, 1.4, -1.7), 1.3, VoxelConstants.STORE_OP_UNION,
-        VoxelConstants.RENDER_BASE_CELL).write(_store, PackedByteArray())
-
-
-# Cell/leaf corners (1 m, 2 m, 0.5 m, 0.25 m), cell centres, generic points, the fractional
-# surface, and one well above it (where a dig writes nothing).
 func _positions() -> Array[Vector3]:
-    var s := Vector3(100.0, _surface, 100.0)
-    return [
-        _base,
-        _base + Vector3(0.5, 0.5, 0.5),
-        _base + Vector3(0.25, 0.75, 0.5),
-        _base + Vector3(1.0, 0.0, -1.0),
-        _base + Vector3(2.0, 2.0, -2.0),
-        _base + Vector3(0.37, 0.61, 0.13),
-        _base + Vector3(-2.5, 1.0, 1.5),
-        s,
-        s + Vector3(0.0, 1.3, 0.0),
-        s + Vector3(0.0, -1.1, 0.0),
-        s + Vector3(3.0, 0.0, -2.0),
-        s + Vector3(0.0, 12.0, 0.0),
-    ]
+    return _fixture.positions()
 
 
 # The game's lattice (and its flips) against the oracle's.

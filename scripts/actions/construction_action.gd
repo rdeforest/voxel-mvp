@@ -71,16 +71,13 @@ func execute() -> void:
     if store == null:
         push_error("ConstructionAction.execute(): no store")
         return
-    _ensure_flips()
-    var xform  := _xform()
-    var before := CellFlips.snapshot(store, _lattice.cells())
-    VoxelImprint.apply(store, material_name, _shape(), xform, CsgState.Op.ADD)
+    var xform := _xform()
+    var flips := VoxelImprint.apply(store, material_name, _shape(), xform, CsgState.Op.ADD)
     # PartIndex releases a cell only when a carve flips it back to air, so the part is registered
-    # under exactly the cells the write made solid (the voxel_added set), measured across it.
+    # under exactly the cells the write made solid (the voxel_added set apply just emitted).
     VoxelEventBusSingleton.emit(
         PartPlacedEvent.CHANNEL,
-        PartPlacedEvent.new(VoxelConstants.GRID_ID, CellFlips.since(store, before).solid,
-            material_name, part.dimensions, xform))
+        PartPlacedEvent.new(VoxelConstants.GRID_ID, flips.solid, material_name, part.dimensions, xform))
 
 
 # --- internals ---
@@ -94,21 +91,12 @@ func _ensure_flips() -> void:
 
 # Whether the part's actual (rotated, sub-cell) geometry overlaps or rests on existing solid —
 # measured against the brush at the lattice the imprint writes, not against the coarse AABB
-# footprint, whose corners a rotated part never reaches.
+# footprint, whose corners a rotated part never reaches. EditStore scans that lattice (C++: it runs
+# every preview).
 func _attached() -> bool:
-    var inverse := _xform().affine_inverse()
-    var shape   := _shape()
-    var reach   := _lattice.cell * sqrt(3.0) * 0.5
-    for z in _lattice.dim:
-        for y in _lattice.dim:
-            for x in _lattice.dim:
-                var p := _lattice.point(Vector3i(x, y, z))
-                if shape.sdf(inverse * p) > reach:
-                    continue
-                if store.sample(p) < VoxelConstants.SDF_SOLID_THRESHOLD \
-                        or store.sample(p + _ATTACH_DOWN) < VoxelConstants.SDF_SOLID_THRESHOLD:
-                    return true
-    return false
+    var shape := _shape()
+    return store.imprint_near_solid(shape.sdf_kind(), shape.sdf_dims(), _xform(), _lattice.cell,
+        _lattice.cell * sqrt(3.0) * 0.5, _ATTACH_DOWN)
 
 func _basis() -> Basis:
     return VoxelUtils.euler_basis(rotation)
