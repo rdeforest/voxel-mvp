@@ -9,7 +9,8 @@ extends RefCounted
 # receiver: each former method takes its SdfLattice / store / action parameters explicitly. Since
 # sdf-lattice-writes-false-change-at-max-faces the builders read "before" from the rewritten leaf
 # that owns each point and compare at float32 — the originals' store.sample read the neighbouring
-# leaf on the region's max faces.)
+# leaf on the region's max faces. The owner-leaf rule is SdfLattice.owner_centre, shared with
+# SdfLattice.materials.)
 
 
 static func sphere_stamp(store: EditStore, center: Vector3, radius: float, op: int, min_leaf: float) -> SdfLattice:
@@ -23,7 +24,7 @@ static func sphere_stamp(store: EditStore, center: Vector3, radius: float, op: i
             for x in lat.dim:
                 var i := Vector3i(x, y, z)
                 var p := lat.point(i)
-                var before := store.sample_toward(p, _owner_centre(lat, i))
+                var before := store.sample_toward(p, lat.owner_centre(i))
                 var brush  := p.distance_to(center) - radius
                 var after  := minf(before, brush) if op == VoxelConstants.STORE_OP_UNION else maxf(before, -brush)
                 lat.sdf[lat.index(i)] = after
@@ -46,7 +47,7 @@ static func imprint(store: EditStore, shape: CsgShape, xform: Transform3D, op: i
                 var i := Vector3i(x, y, z)
                 var wp := lat.point(i)
                 var dist := clampf(shape.sdf(inverse * wp), VoxelConstants.SDF_SOLID, VoxelConstants.SDF_AIR)
-                var existing := store.sample_toward(wp, _owner_centre(lat, i))
+                var existing := store.sample_toward(wp, lat.owner_centre(i))
                 var combined := minf(existing, dist) if op == CsgState.Op.ADD else maxf(existing, -dist)
                 lat.sdf[lat.index(i)] = combined
                 lat.writes = lat.writes or lat.sdf[lat.index(i)] != _f32(existing)
@@ -62,18 +63,12 @@ static func work(store: EditStore, edits: Array[LatticeEdit]) -> SdfLattice:
         for y in dim:
             for x in dim:
                 var i := Vector3i(x, y, z)
-                lat.sdf[lat.index(i)] = store.sample_toward(lat.point(i), _owner_centre(lat, i))
+                lat.sdf[lat.index(i)] = store.sample_toward(lat.point(i), lat.owner_centre(i))
     for edit in edits:
         var i := lat.index(edit.point - lo_cell)
         lat.writes = lat.writes or lat.sdf[i] != _f32(edit.sdf)
         lat.sdf[i] = edit.sdf
     return _settled(lat, store)
-
-
-# The rewritten leaf a point's "before" is read from: the one above it, but below it on a max face.
-static func _owner_centre(lat: SdfLattice, i: Vector3i) -> Vector3:
-    var top := lat.dim - 2
-    return lat.origin + (Vector3(mini(i.x, top), mini(i.y, top), mini(i.z, top)) + Vector3.ONE * 0.5) * lat.cell
 
 
 # The float32 a lattice stores for `v`.
