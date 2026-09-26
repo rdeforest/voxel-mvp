@@ -3,6 +3,7 @@ extends RefCounted
 # The reference oracle for test_edit_store_predict (and the attach / materials gates): the
 # GDScript lattice builders and lattice queries the game ran before they moved into EditStore
 # (C++) — SdfLattice.sphere_stamp / flips / _turns_in / materials, VoxelImprint.lattice,
+# CellFlips.snapshot / since (the measurement across SdfLattice.write),
 # StoreWrite.lattice, BellSculptAction._compute_work, FlattenAction._compute_work and
 # ConstructionAction._attached — kept verbatim so the byte-identical gate compares the C++
 # against an independent implementation rather than against itself. Nothing in the game calls
@@ -105,8 +106,59 @@ static func flips(lat: SdfLattice, store: EditStore) -> CellFlips:
     var out := CellFlips.new()
     for c in lat.cells():
         var p := VoxelUtils.sample_point(c)
-        out._add(c, store.sample(p), _value_at(lat, p))
+        _add(out, c, store.sample(p), _value_at(lat, p))
     return out
+
+
+static func _add(out: CellFlips, cell: Vector3i, was: float, now: float) -> void:
+    var t := VoxelConstants.SDF_SOLID_THRESHOLD
+    if was >= t and now < t:
+        out.solid.append(cell)
+    elif was < t and now >= t:
+        out.air.append(cell)
+
+
+# SdfLattice.write as the game measured it before EditStore.write_region_flips: CellFlips.snapshot
+# of lat.cells(), write_region, CellFlips.since, with MpmStructure's _solid_materials (read from the
+# snapshot, before the write) for the emptied cells' materials and its _changed for `changed`.
+static func measured_write(lat: SdfLattice, store: EditStore, indices: PackedByteArray) -> CellFlips:
+    var before    := snapshot(store, lat.cells())
+    var materials := _solid_materials(store, before)
+    store.write_region(lat.sdf, indices, lat.dim, lat.origin, lat.cell)
+    var out := since(store, before)
+    for cell in out.air:
+        out.air_materials.append(materials[cell])
+    out.changed = _changed(store, before)
+    return out
+
+
+static func snapshot(store: EditStore, cells: Array[Vector3i]) -> Dictionary:
+    var before := {}
+    for cell in cells:
+        before[cell] = TerrainProbe.sdf(store, cell)
+    return before
+
+
+static func since(store: EditStore, before: Dictionary) -> CellFlips:
+    var out := CellFlips.new()
+    for cell: Vector3i in before:
+        _add(out, cell, before[cell], TerrainProbe.sdf(store, cell))
+    return out
+
+
+static func _solid_materials(store: EditStore, before: Dictionary) -> Dictionary:
+    var materials := {}
+    for cell: Vector3i in before:
+        if before[cell] < VoxelConstants.SDF_SOLID_THRESHOLD:
+            materials[cell] = TerrainProbe.material(store, cell)
+    return materials
+
+
+static func _changed(store: EditStore, before: Dictionary) -> bool:
+    for cell: Vector3i in before:
+        if TerrainProbe.sdf(store, cell) != before[cell]:
+            return true
+    return false
 
 
 static func _value_at(lat: SdfLattice, p: Vector3) -> float:

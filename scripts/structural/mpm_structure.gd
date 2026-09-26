@@ -83,15 +83,12 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
     if work.is_empty():
         return 0
 
-    var lat       := StoreWrite.lattice(_store, work)
-    var before    := CellFlips.snapshot(_store, lat.cells())
-    var materials := _solid_materials(before)
-    var region    := StoreWrite.write(_store, lat, work)
-    var flips     := CellFlips.since(_store, before)
+    var lat   := StoreWrite.lattice(_store, work)
+    var flips := StoreWrite.write(_store, lat, work)
 
     # Particles go in before any event: DetachmentScout ignores edits made while MPM is active,
     # and that is how it tells this carve from a player's.
-    _seed_particles(flips.air, materials)
+    _seed_particles(flips)
     _settled_frames = 0
     _mm.instance_count = _sim.particle_count()
 
@@ -99,19 +96,11 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
 
     # A rewrite that changed nothing needs no re-mesh. Skipping it also stops a thaw that empties
     # no cell (so MPM stays idle) from re-seeding the scout onto the same piece forever.
-    if _changed(before):
+    if flips.changed:
         VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL,
-            TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, region.position, region.size))
+            TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, lat.region_lo, lat.region_hi - lat.region_lo))
 
     return flips.air.size()
-
-
-func _changed(before: Dictionary) -> bool:
-    for cell: Vector3i in before:
-        if TerrainProbe.sdf(_store, cell) != before[cell]:
-            return true
-
-    return false
 
 
 # The solid cells to carve (centre sampled solid), capped so the planned cells' particles fit
@@ -130,27 +119,17 @@ func _plan_thaw(cells: Array) -> Dictionary:
     return planned
 
 
-# Material of every cell solid in the before-snapshot, read before the write so a cell the carve
-# empties still seeds particles of what it was made of.
-func _solid_materials(before: Dictionary) -> Dictionary:
-    var materials := {}
-
-    for cell: Vector3i in before:
-        if before[cell] < VoxelConstants.SDF_SOLID_THRESHOLD:
-            materials[cell] = TerrainProbe.material(_store, cell)
-
-    return materials
-
-
-func _seed_particles(emptied: Array[Vector3i], materials: Dictionary) -> void:
+# Eight particles in each cell the carve emptied, of what the cell was made of.
+func _seed_particles(carved: CellFlips) -> void:
     var p_vol  := 0.125
     var p_mass := RHO * p_vol
 
-    for cell in emptied:
+    for i in carved.air.size():
+        var cell := carved.air[i]
         for ox in [0.25, 0.75]:
             for oy in [0.25, 0.75]:
                 for oz in [0.25, 0.75]:
-                    _sim.add_particle(Vector3(cell) + Vector3(ox, oy, oz), p_mass, p_vol, materials[cell])
+                    _sim.add_particle(Vector3(cell) + Vector3(ox, oy, oz), p_mass, p_vol, carved.air_materials[i])
 
 
 # Carving a corner-sampled SDF cleanly. StoreWrite sets the value at the grid CORNER it's handed,

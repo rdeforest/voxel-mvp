@@ -42,11 +42,10 @@ func test_write_lays_down_the_handed_lattice() -> void:
     var margin := Vector3i(0, 2, 1)
     lat.sdf[lat.index(margin)] = 0.75
 
-    var box := StoreWrite.write(_store, lat, _work())
+    StoreWrite.write(_store, lat, _work())
 
     assert_eq(_store.sample(lat.point(margin)), 0.75, "the nudged margin point is what the store holds")
     assert_almost_eq(_store.sample(Vector3(_at)), -0.4, 1e-6, "the work's own point is written")
-    assert_eq(box, AABB(lat.region_lo, lat.region_hi - lat.region_lo), "the rewritten box is the lattice's")
 
 
 func test_write_keeps_current_materials_except_the_works() -> void:
@@ -82,7 +81,7 @@ func test_off_grid_lattice_is_refused() -> void:
     var before := _store.serialize()
     lat.origin += Vector3(0.5, 0.0, 0.0)
 
-    assert_eq(StoreWrite.write(_store, lat, _work()), AABB(), "write() refuses")
+    assert_true(StoreWrite.write(_store, lat, _work()).is_empty(), "write() refuses")
     assert_push_error("not a whole number", "write() says why")
     assert_eq(StoreWrite.reshape(_store, lat), AABB(), "reshape() refuses")
     assert_push_error("not a whole number", "reshape() says why")

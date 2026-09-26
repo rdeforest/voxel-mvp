@@ -323,6 +323,7 @@ void EditStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stamp_sphere", "center", "radius", "op", "material", "min_leaf"), &EditStore::stamp_sphere);
 	ClassDB::bind_method(D_METHOD("stamp_box", "center", "size", "op", "material", "min_leaf"), &EditStore::stamp_box);
 	ClassDB::bind_method(D_METHOD("write_region", "sdf", "indices", "dim", "origin", "cell"), &EditStore::write_region);
+	ClassDB::bind_method(D_METHOD("write_region_flips", "sdf", "indices", "dim", "origin", "cell"), &EditStore::write_region_flips);
 	ClassDB::bind_method(D_METHOD("predict_sphere_stamp", "center", "radius", "op", "min_leaf"), &EditStore::predict_sphere_stamp);
 	ClassDB::bind_method(D_METHOD("predict_imprint", "shape", "dims", "xform", "op", "cell"), &EditStore::predict_imprint);
 	ClassDB::bind_method(D_METHOD("predict_work", "points", "sdfs"), &EditStore::predict_work);

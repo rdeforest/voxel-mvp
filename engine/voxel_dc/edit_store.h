@@ -45,6 +45,12 @@ public:
 	// the rest sparse. `indices` may be empty: leaves keep the material they hold (0 for
 	// one this write materialises from the generator).
 	void write_region(const PackedFloat32Array &sdf, const PackedByteArray &indices, int dim, Vector3 origin, double cell);
+	// write_region, returning what it did to cells: { solid, air } the cells whose sample point it
+	// flipped (every cell whose sample point sits in a rewritten leaf, in z-y-x order, like
+	// lattice_flips), `air_materials` the material each `air` cell held before (parallel to it), and
+	// `changed` whether any of those cells' sample value moved at all. See edit_store_write_flips.cpp.
+	Dictionary write_region_flips(const PackedFloat32Array &sdf, const PackedByteArray &indices, int dim,
+			Vector3 origin, double cell);
 
 	// The field an edit WOULD write, without writing: the lattice every SdfLattice builder hands
 	// write_region (SdfLattice.sphere_stamp, VoxelImprint.lattice, StoreWrite.lattice, and the work

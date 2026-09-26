@@ -117,10 +117,14 @@ func cells() -> Array[Vector3i]:
     return out
 
 
-# The cells this write will flip, predicted against the store's current field.
+# The cells this write will flip, predicted against the store's current field. None when EditStore
+# refuses the lattice (an empty Dictionary, with its error).
 func flips(store: EditStore) -> CellFlips:
     var d   := store.lattice_flips(sdf, dim, origin, cell)
     var out := CellFlips.new()
+    if d.is_empty():
+        return out
+
     out.solid = d.solid
     out.air   = d.air
     return out
@@ -128,8 +132,20 @@ func flips(store: EditStore) -> CellFlips:
 
 # Write the lattice into the store (every leaf in the region), with per-leaf `indices`
 # (materials(), or empty: leaves keep the material they hold, 0 for one newly materialised).
-func write(store: EditStore, indices: PackedByteArray) -> void:
-    store.write_region(sdf, indices, dim, origin, cell)
+# Returns the cells it flipped, MEASURED: each cells() member's sample read just before and just
+# after the write (EditStore.write_region_flips), with what each emptied cell was made of. None,
+# and nothing written, when EditStore refuses the lattice.
+func write(store: EditStore, indices: PackedByteArray) -> CellFlips:
+    var d   := store.write_region_flips(sdf, indices, dim, origin, cell)
+    var out := CellFlips.new()
+    if d.is_empty():
+        return out
+
+    out.solid         = d.solid
+    out.air           = d.air
+    out.air_materials = d.air_materials
+    out.changed       = d.changed
+    return out
 
 
 # Per-leaf material for write(). A leaf holds solid iff one of its corners is solid (a trilerp's

@@ -11,35 +11,35 @@ extends RefCounted
 #
 # `work` is the lattice writers' shared currency: LatticeEdit records (point, new SDF, and the
 # material of the leaf whose origin is that point, < 0 to keep its current one).
-# Returns the world-space box whose leaves were rewritten (for the terrain_sdf_changed event).
+# cells() and write() return the cells the write flipped, measured across it (SdfLattice.write).
 #
 # The grid points here are store LATTICE points (a leaf's corners), not cells: a cell's
 # solidity is read at its sample point (VoxelUtils.sample_point), which a write moves through
 # the trilerp of its 8 corners. lattice(work).flips(store) is what a work set does to cells.
-static func cells(store: EditStore, work: Array[LatticeEdit]) -> AABB:
+static func cells(store: EditStore, work: Array[LatticeEdit]) -> CellFlips:
     if work.is_empty():
-        return AABB()
+        return CellFlips.new()
     return write(store, lattice(store, work), work)
 
 
 # Write `lat`, which must be lattice(store, work) built against the store as it is now, with the
 # work's materials. For a caller that measures or previews the field before writing it: handing
-# over the lattice it measured makes the write that field, not a rebuild of it.
-static func write(store: EditStore, lat: SdfLattice, work: Array[LatticeEdit]) -> AABB:
+# over the lattice it measured makes the write that field, not a rebuild of it. The caller's
+# terrain_sdf_changed box is the lattice's region.
+static func write(store: EditStore, lat: SdfLattice, work: Array[LatticeEdit]) -> CellFlips:
     var indices := _current_materials(store, lat)
     if indices.is_empty():
-        return AABB()
+        return CellFlips.new()
 
     var lo_cell := Vector3i(lat.origin)
     for edit in work:
         if edit.material >= 0:
             indices[lat.index(edit.point - lo_cell)] = edit.material
-    lat.write(store, indices)
-    return AABB(lat.region_lo, lat.region_hi - lat.region_lo)
+    return lat.write(store, indices)
 
 
 # Write a work lattice (a work set's field, as lattice() or EditStore.predict_bell / predict_flatten
-# build it) keeping every leaf's current material. Returns the rewritten box, as cells() does.
+# build it) keeping every leaf's current material. Returns the rewritten box.
 static func reshape(store: EditStore, lat: SdfLattice) -> AABB:
     var indices := _current_materials(store, lat)
     if indices.is_empty():

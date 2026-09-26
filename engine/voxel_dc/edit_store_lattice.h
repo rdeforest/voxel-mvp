@@ -91,6 +91,67 @@ struct Lattice {
 	}
 };
 
+// Whether the write rewrites the leaves over coordinate `v` on `axis` (EditStore's strict-overlap
+// test, which is separable per axis).
+inline bool rewrites_1d(const Lattice &lat, double v, int axis) {
+	const double leaf = Math::floor(v / lat.cell) * lat.cell;
+	return leaf < lat.region_hi()[axis] && leaf + lat.cell > lat.origin[axis];
+}
+
+// Along one axis, every cell whose sample point sits in a rewritten leaf.
+inline LocalVector<int> rewritten_cells(const Lattice &lat, int axis) {
+	LocalVector<int> out;
+	const int64_t first = int64_t(Math::floor(lat.origin[axis])) - 1;
+	const int64_t end = int64_t(Math::ceil(lat.region_hi()[axis])) + 1;
+	for (int64_t c = first; c < end; ++c) {
+		if (rewrites_1d(lat, double(c) + CELL_SAMPLE_OFFSET, axis)) {
+			out.push_back(int(c));
+		}
+	}
+	return out;
+}
+
+// visit(cell) for every cell whose sample point sits in a rewritten leaf — the only cells the
+// write can change — in SdfLattice.cells's z-y-x order, which the flip lists keep. Stops at the
+// first visit that returns false.
+template <typename Visit>
+bool for_each_rewritten_cell(const Lattice &lat, Visit visit) {
+	const LocalVector<int> xs = rewritten_cells(lat, 0);
+	const LocalVector<int> ys = rewritten_cells(lat, 1);
+	const LocalVector<int> zs = rewritten_cells(lat, 2);
+	for (const int z : zs) {
+		for (const int y : ys) {
+			for (const int x : xs) {
+				if (!visit(Vector3i(x, y, z))) {
+					return false;
+				}
+			}
+		}
+	}
+	return true;
+}
+
+inline Vector3 cell_sample_point(const Vector3i &c) {
+	return Vector3(c) + Vector3(1, 1, 1) * CELL_SAMPLE_OFFSET;
+}
+
+enum Flip {
+	FLIP_NONE,
+	FLIP_TO_SOLID,
+	FLIP_TO_AIR,
+};
+
+// CellFlips._add: how a cell's sample value crossing SOLID_THRESHOLD, from `was` to `now`, flips it.
+inline Flip flip(double was, double now) {
+	if (was >= SOLID_THRESHOLD && now < SOLID_THRESHOLD) {
+		return FLIP_TO_SOLID;
+	}
+	if (was < SOLID_THRESHOLD && now >= SOLID_THRESHOLD) {
+		return FLIP_TO_AIR;
+	}
+	return FLIP_NONE;
+}
+
 // Every point takes combine(its flat index, point, the value a rewritten leaf holds there now).
 // `writes` notes a point whose stored float32 changes; most writes show one, and prediction()
 // settles the rest.

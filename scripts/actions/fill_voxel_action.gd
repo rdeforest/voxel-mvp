@@ -35,13 +35,11 @@ func execute() -> void:
         return
     if _work().is_empty():
         return
-    var lat    := _lattice()
-    var before := CellFlips.snapshot(store, lat.cells())
-    var box    := StoreWrite.write(store, lat, _work())
-    CellFlips.since(store, before).emit(store)
+    var lat := _lattice()
+    StoreWrite.write(store, lat, _work()).emit(store)
     VoxelEventBusSingleton.emit(
         TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box.position, box.size))
+        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, lat.region_lo, lat.region_hi - lat.region_lo))
 
 func preview() -> ActionPreview:
     var p := ActionPreview.new()
