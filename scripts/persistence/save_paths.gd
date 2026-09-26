@@ -14,6 +14,3 @@ static func ensure_dir() -> void:
 
 static func snapshot_exists() -> bool:
     return FileAccess.file_exists(SNAPSHOT_FILE)
-
-static func editstore_exists() -> bool:
-    return FileAccess.file_exists(EDITSTORE_FILE)

@@ -23,21 +23,24 @@ static func save(path: String, world: Node) -> Error:
     file.store_string(var_to_str(encode(world)))
     return OK
 
-static func load_into(path: String, world: Node) -> bool:
+# The parsed snapshot at `path`; empty when it can't be opened or isn't a snapshot.
+static func read(path: String) -> Dictionary:
     var file := FileAccess.open(path, FileAccess.READ)
     if file == null:
-        return false
+        return {}
     var snap = str_to_var(file.get_as_text())
-    if not (snap is Dictionary):
-        return false
+    return snap if snap is Dictionary else {}
+
+# Why this build won't apply `snap`, or "" when it will. Older versions apply (missing keys
+# default, e.g. V2 saves lack tunables); newer ones are refused.
+static func refusal(snap: Dictionary) -> String:
+    if snap.is_empty():
+        return "world snapshot is unreadable"
+
     var v: int = snap.get("version", 0)
-    # Forward-compat: newer-than-known schema → refuse.
-    # Backward-compat: older snapshot → load what we can, missing keys
-    # use defaults (e.g. V2 saves lack tunables; shader keeps its defaults).
     if v > VERSION:
-        return false
-    apply(snap, world)
-    return true
+        return "world snapshot is format v%d; this build reads up to v%d" % [v, VERSION]
+    return ""
 
 
 # --- encode ---

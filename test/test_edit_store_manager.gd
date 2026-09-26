@@ -47,3 +47,16 @@ func test_rejects_foreign_blob() -> void:
 func test_missing_file_returns_false() -> void:
     var manager := _manager()
     assert_false(manager.load_from("user://does_not_exist.tmp"), "missing file loads nothing")
+
+
+func test_rejects_other_version_with_a_reason() -> void:
+    var file := FileAccess.open(TMP, FileAccess.WRITE)
+    file.store_32(EditStoreManager.SAVE_MAGIC)
+    file.store_32(EditStoreManager.SAVE_VERSION + 1)
+    file.store_buffer(PackedByteArray([1, 2, 3]))
+    file.close()
+    var manager := _manager()
+
+    assert_false(manager.load_from(TMP), "a blob from another format version is skipped")
+    assert_eq(EditStoreManager.refusal(TMP), "terrain save is format v%d; this build reads v%d"
+        % [EditStoreManager.SAVE_VERSION + 1, EditStoreManager.SAVE_VERSION])

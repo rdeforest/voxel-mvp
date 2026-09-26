@@ -58,7 +58,7 @@ class TestSnapshotFileIO:
         assert_eq(parsed["voxels"][0]["pos"], Vector3i(5, 6, 7))
 
 
-# load_into() must accept older schemas (missing fields default) and
+# WorldSnapshot.refusal() must accept older schemas (missing fields default) and
 # reject newer-than-known ones. Tests at the file-IO + parse level —
 # the apply() leg needs a real terrain so we don't go that far.
 class TestSnapshotVersionCompat:
@@ -92,19 +92,19 @@ class TestSnapshotVersionCompat:
         var file := FileAccess.open(TMP_PATH, FileAccess.READ)
         var parsed = str_to_var(file.get_as_text())
         assert_eq(parsed["version"], 2)
-        # The load_into version check accepts anything ≤ VERSION; the
+        # The refusal() version check accepts anything ≤ VERSION; the
         # apply() path tolerates missing tunables / activity_indices
         # by `.has()`-guarding their reads.
         assert_true(parsed["version"] <= WorldSnapshot.VERSION)
 
     func test_newer_version_rejected():
         _write({"version": WorldSnapshot.VERSION + 1, "player": {}, "voxels": [], "parts": []})
-        assert_false(WorldSnapshot.load_into(TMP_PATH, null),
-            "newer-than-known version should be refused even with a null world")
+        assert_string_contains(WorldSnapshot.refusal(WorldSnapshot.read(TMP_PATH)),
+            "format v%d" % (WorldSnapshot.VERSION + 1), "newer-than-known version is refused")
 
     func test_nonexistent_file_returns_false():
         var fake := "user://does_not_exist_%d.tmp" % Time.get_ticks_msec()
-        assert_false(WorldSnapshot.load_into(fake, null))
+        assert_eq(WorldSnapshot.refusal(WorldSnapshot.read(fake)), "world snapshot is unreadable")
 
     func test_v3_tunables_section_serializes_through_var_to_str():
         # Verifies the V3 shape round-trips. Apply uses get/set_shader_parameter
