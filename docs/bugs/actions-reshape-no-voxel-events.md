@@ -24,6 +24,14 @@ holds for fill, dig, CSG, construction, FillVoxel, EmptyVoxel and the MPM thaw, 
 `SdfLattice.write` now returns the cell flips it measured in C++ (`71236e1`), so `reshape` can hand
 them back and both actions can emit `voxel_added` / `voxel_removed` like every other writer.
 
+## Cost of waiting
+Since G2, `SdfLattice.write` always measures (`write_region_flips`), and `StoreWrite.reshape`
+discards the result. So every raise/lower/flatten stroke pays for sampling each rewritten cell before
+and after the write and uses none of it. Found by the second overnight integration review of
+`75348f2`. Once the question below is answered, it goes one of two ways: emit the flips (the cost is
+then spent), or give reshape a non-measuring write. Choosing the second now would be thrown away if
+the answer is yes.
+
 ## Question
 Should terraforming (raise, lower, flatten) count as cell edits for structural purposes? If so,
 support checks and detachment will start running on terraform edits, which is a gameplay change.
