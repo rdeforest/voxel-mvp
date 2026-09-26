@@ -73,3 +73,16 @@ before he has to.
   so. Robert's repo, Robert's voice by default; anything else gets labelled.
 
 - **Vendor addons, don't submodule them.** See `docs/CODE-MAP.md`.
+
+## ClodForest (inter-project messaging)
+
+This project is registered with ClodForest as **`voxel-mvp`** (parent: `meta-project`).
+
+At the start of a session, call the ClodForest MCP tool `checkin` with
+`project: "voxel-mvp"` (or `path:` set to your working directory) and follow the
+protocol it returns.
+
+If the MCP server is unreachable, the same data is a plain directory tree in
+the local checkout at `~/git/github/rdeforest/ClodForestState`
+(`messages/`, `receipts/voxel-mvp/`, `projects/`). Read it directly; write there
+only if the server is down, and say so in the commit message.
