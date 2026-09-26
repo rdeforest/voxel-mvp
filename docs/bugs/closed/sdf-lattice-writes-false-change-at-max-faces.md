@@ -57,3 +57,52 @@ ground 0.69 ms (dry run 0.51, the generator at 8 corners per unedited leaf). The
 (`upper_side`) made previews on an edited store faster than before: 0.36 → 0.22 ms. Other previews did not
 change (`bench_preview_predict`: dig 0.058, CSG 0.169 ms).
 
+
+## Follow-up: the dry run's repeated reads (chunk A4)
+*Drafted by Claude (agent), overnight 2026-09-26.*
+
+The buried case's cost was measured, not assumed. Doubling each generator call in the old dry run
+added 0.29 ms of its 0.47 ms; doubling each array read added 0.115 ms. The buried lattice is 14³
+points under 13³ unedited leaves, so the old code ran 8 × 13³ = 17,576 generator calls and 17,576
+array trilerps for 2,744 distinct points.
+
+The dry run (now `engine/voxel_dc/edit_store_dry_run.cpp`) keeps two things per lattice point: the
+array's float32 value, and whether an unedited leaf's corner there was found unchanged. Neither
+depends on which leaf asks, so the next leaf sharing the point reuses them. It shares a point only
+when a leaf's corners are that lattice point exactly: each axis's coordinates are checked against a
+per-axis table, once per leaf. A leaf finer than the cell, or one past the lattice, takes the old
+per-corner path. An edited leaf reuses the array's value but still compares against its own stored
+corner. `test_edited_leaf_beside_unedited_ones_is_compared_on_its_own` pins that. It fails if an
+edited leaf reuses its unedited neighbour's "unchanged" finding. The answer is unchanged by design.
+The three new tests pass on the old code too. What they guard against is a sharing bug. Of two
+deliberately broken builds, that test caught one, and five tests caught the other (wrong corner
+slots).
+
+Checking the exact coordinates once per corner instead of once per leaf cost ~0.1 ms by itself (dry
+run 0.27 ms), so the check is per axis per leaf.
+
+`bench_lattice_writes.gd`, before → after (ms):
+
+| case | preview | dry run alone |
+|---|---|---|
+| real stamp before any edit | 0.165 → 0.165 | — |
+| real stamp at the surface | 0.216 → 0.218 | 0.048 → 0.017 (not run by the preview) |
+| re-stamp in air | 0.40 → 0.36 | 0.13 → 0.08 |
+| union buried in ground | 0.68 → 0.34 | 0.47 → 0.126 |
+
+"Before" was re-measured on the A2 code (nothing on this path changed since `af19749`); the 0.69 / 0.51
+in the close-out above is an earlier run of the same code. The bench prints one mean over 300 reps, and
+back-to-back runs of it vary by roughly 5–10%.
+
+`bench_preview_predict.gd` is unchanged (dig 0.057, fill 0.058, raise 0.050, flatten 0.046, CSG sphere
+0.165, beam +0 m 0.32, beam +3 m 0.88 ms; the lattice dry run doesn't run for a real edit).
+
+What the buried dry run's 0.126 ms goes on now: 0.034 ms descending the tree and locating slots
+(measured by skipping the corner loop). The rest is 2,744 generator calls, 2,744 trilerps and the
+per-corner bookkeeping. The larger part of the buried preview is now outside the dry run: ~0.21 ms,
+the same lattice build a real stamp pays. That build already reads the generator at every point, so
+the dry run's 2,744 generator calls repeat it. Removing that repeat means handing the build's reads to
+the dry run, which couples the builders to it (not done; tracked as
+[actions-lattice-dry-run-double-generator](../actions-lattice-dry-run-double-generator.md)). A per-column generator cache
+(the generator is `y - surface(x, z)`) would also cut calls, but it relies on the generator being a
+heightfield, which the planned volumetric generator is not.

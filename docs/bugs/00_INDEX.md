@@ -14,6 +14,7 @@ When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a 
 | Bug | Area | Severity | Notes |
 |-----|------|----------|-------|
 | [csg-restamp-material-only-refused](csg-restamp-material-only-refused.md) | actions (CSG no-op refusal) | low (needs a call) | `writes` is SDF-only, so re-stamping the same shape in a new material is refused as a no-op. Was allowed by accident in high air before the max-face fix. |
+| [actions-lattice-dry-run-double-generator](actions-lattice-dry-run-double-generator.md) | actions (preview perf) | low (needs a call) | A no-op-looking preview reads the generator at each lattice point in the build, then again in the `lattice_writes` dry run: ~0.045 ms of the buried refused preview's 0.34 ms. |
 | [single-voxel-edits-unexpected](single-voxel-edits-unexpected.md) | actions (FillVoxel/EmptyVoxel) | **known unknown** | Robert saw unexpected single-voxel results in play. Not yet characterized; hypotheses in file. |
 | [empty-voxel-no-player-safety](empty-voxel-no-player-safety.md) | actions (EmptyVoxel, Fill) | low-med | EmptyVoxel can empty the player's support cell; Fill uses its own distance check instead of `endangered_by`. |
 | [part-index-footprint-cells-never-released](part-index-footprint-cells-never-released.md) | structural (PartIndex) | low-med | Parts are registered under the AABB footprint, not the imprint's flips; cells never solid are never released. |

@@ -51,6 +51,21 @@ func test_identical_csg_add_in_air_is_refused() -> void:
         assert_true(again.preview().refused, "%s: and previewed refused" % label)
 
 
+# The re-stamp's dry run runs over the edited leaves the first stamp left, sharing each lattice
+# point between them; any one changed point must still be found.
+func test_one_changed_point_over_a_restamp_in_air_writes() -> void:
+    var shape := CsgSphereShape.new(2.0)
+    var xform := Transform3D(Basis(), _air)
+    CsgAction.new(shape, xform, CsgState.Op.ADD, &"Stone", _ctx()).execute()
+    var lat := VoxelImprint.lattice(_store, shape, xform, CsgState.Op.ADD)
+    assert_false(lat.writes, "the identical re-stamp writes nothing (else this tests nothing)")
+    var mid := floori(lat.dim / 2.0)
+    for at: Vector3i in [Vector3i.ZERO, Vector3i(mid, mid, mid), Vector3i(lat.dim - 1, mid, 0), Vector3i.ONE * (lat.dim - 1)]:
+        var nudged := lat.sdf.duplicate()
+        nudged[lat.index(at)] = nudged[lat.index(at)] + 0.5
+        assert_true(_store.lattice_writes(nudged, lat.dim, lat.origin, lat.cell), "nudging point %s is a write" % at)
+
+
 func test_identical_sphere_stamp_writes_nothing() -> void:
     for op in [VoxelConstants.STORE_OP_UNION, VoxelConstants.STORE_OP_SUBTRACT]:
         var center := _air + Vector3(0.0, -40.0, 0.0) + Vector3(0.3, 0.1, -0.2)
@@ -160,3 +175,59 @@ func test_reproducing_a_coarser_leaf_writes_nothing() -> void:
     var mid    := lat.index(Vector3i(2, 2, 2))
     nudged[mid] = nudged[mid] + 0.5
     assert_true(_store.lattice_writes(nudged, lat.dim, lat.origin, lat.cell), "and nudging one point is a write")
+
+
+# The dry run over unedited ground (lattice_writes shares each lattice point's generator value
+# between the up-to-eight leaves meeting there): deep enough that the brush wins nowhere, a union
+# changes nothing, and any one changed point is still found, whichever leaf reaches it first.
+func _buried() -> Transform3D:
+    return Transform3D(Basis(), _air + Vector3(0.0, -80.0, 0.0))
+
+
+# The store's own value at every lattice point, rounded to float32 as a lattice holds it.
+func _ground(lat: SdfLattice) -> PackedFloat32Array:
+    var ground := PackedFloat32Array()
+    ground.resize(lat.sdf.size())
+    for z in lat.dim:
+        for y in lat.dim:
+            for x in lat.dim:
+                ground[lat.index(Vector3i(x, y, z))] = _store.sample(lat.point(Vector3i(x, y, z)))
+
+    return ground
+
+
+func test_union_buried_in_ground_is_refused() -> void:
+    var shape := CsgSphereShape.new(3.0)
+    var lat   := VoxelImprint.lattice(_store, shape, _buried(), CsgState.Op.ADD)
+    assert_false(_store.has_edit(lat.origin + (lat.region_hi - lat.origin) * 0.5), "the ground there is unedited")
+    assert_eq(lat.sdf, _ground(lat), "the lattice is the ground's own field: the brush wins nowhere (else this tests nothing)")
+    assert_false(lat.writes, "a union into deep ground writes nothing")
+    assert_true(CsgAction.new(shape, _buried(), CsgState.Op.ADD, &"Stone", _ctx()).preview().refused, "so it previews refused")
+
+
+func test_one_changed_point_in_unedited_ground_writes() -> void:
+    var lat := VoxelImprint.lattice(_store, CsgSphereShape.new(3.0), _buried(), CsgState.Op.ADD)
+    var mid := floori(lat.dim / 2.0)
+    for at: Vector3i in [Vector3i.ZERO, Vector3i(mid, mid, mid), Vector3i(lat.dim - 1, mid, 0), Vector3i.ONE * (lat.dim - 1)]:
+        var nudged := lat.sdf.duplicate()
+        nudged[lat.index(at)] = nudged[lat.index(at)] + 0.5
+        assert_true(_store.lattice_writes(nudged, lat.dim, lat.origin, lat.cell), "nudging point %s is a write" % at)
+
+
+# An edited leaf and unedited ones meet at a point where the unedited leaves keep the generator's
+# value and the edited leaf holds another. The unedited leaf below it on x is reached first; its
+# finding (unchanged) must not stand for the edited leaf.
+func test_edited_leaf_beside_unedited_ones_is_compared_on_its_own() -> void:
+    var lat    := VoxelImprint.lattice(_store, CsgSphereShape.new(3.0), _buried(), CsgState.Op.ADD)
+    var ground := _ground(lat)
+    assert_false(_store.lattice_writes(ground, lat.dim, lat.origin, lat.cell), "the generator's own values write nothing")
+    var at   := lat.point(Vector3i.ONE * floori(lat.dim / 2.0))
+    var leaf := PackedFloat32Array()
+    for i in 8:
+        leaf.append(_store.sample(at + Vector3(i & 1, (i >> 1) & 1, (i >> 2) & 1) * lat.cell))
+    leaf[0] = leaf[0] + 0.5
+    _store.write_region(leaf, PackedByteArray(), 2, at, lat.cell)
+    assert_true(_store.has_edit(at + Vector3.ONE * lat.cell * 0.5), "the leaf at the point is edited")
+    assert_false(_store.has_edit(at - Vector3(0.5, -0.5, -0.5) * lat.cell), "and the one below it on x is not")
+    assert_true(_store.lattice_writes(ground, lat.dim, lat.origin, lat.cell),
+        "writing the generator's values restores the edited leaf's corner: a write")

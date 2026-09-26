@@ -404,7 +404,8 @@ names.
   `EditStore.sample_toward`, so a point on the region's max faces is read from the leaf the write
   replaces, not the untouched neighbour `sample` would pick. `SdfLattice.writes` (CSG refuses on
   it) is exact: a point whose float32 changes, else `EditStore.lattice_writes`, a dry run of
-  `write_region` over every corner of every leaf it would rewrite. Material is not part of it.
+  `write_region` over every corner of every leaf it would rewrite (`edit_store_dry_run.cpp`; it reads
+  the array and the generator once per lattice point, not once per leaf corner). Material is not part of it.
 - **Lattice writes are typed.** `StoreWrite` takes `Array[LatticeEdit]` (lattice point, new
   SDF, leaf material or -1 to keep) — FillVoxel, EmptyVoxel and the MPM carve all hand it that;
   `StoreWrite.lattice(store, work).flips(store)` is what the work does to cells. Bell and Flatten
