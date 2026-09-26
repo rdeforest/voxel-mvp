@@ -15,11 +15,11 @@ Probe `scripts/dev/probe_turns_in_exactness.gd`, run with
 `bin/godot --path . --headless -s addons/gut/gut_cmdln.gd -gtest=res://scripts/dev/probe_turns_in_exactness.gd`,
 on 1 m leaves at y = 500:
 
-| Case | Reported | Truth |
-|---|---|---|
-| Prior `y_frac - 0.1`, write `y_frac - 0.3`: new solid over y in [0.1, 0.3) | `solidifies_in` = false | true (missed burial) |
-| The mirror for air | `empties_in` = false | true (missed carve-out) |
-| Prior is -1 below a leaf face and +1 above it; the box ends on that face | `solidifies_in` = true | false (false refusal) |
+| Case                                                                       | Reported                | Truth                   |
+|----------------------------------------------------------------------------|-------------------------|-------------------------|
+| Prior `y_frac - 0.1`, write `y_frac - 0.3`: new solid over y in [0.1, 0.3) | `solidifies_in` = false | true (missed burial)    |
+| The mirror for air                                                         | `empties_in`    = false | true (missed carve-out) |
+| Prior is -1 below a leaf face and +1 above it; the box ends on that face   | `solidifies_in` = true  | false (false refusal)   |
 
 A small raise or carve on a slope has exactly the first two shapes.
 
