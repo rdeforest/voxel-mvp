@@ -76,6 +76,22 @@ passing, 2 pending, 0 failing.
 - Do not scope-reduce a chunk to close it. If the hard part is being cut, say
   so in the brief instead.
 
+## Session facts (survive a restart)
+
+- Claude Code is **2.1.283** (installed from the `latest` channel; `stable` was
+  2.1.274 and does not know Opus 5.5, which needs >= 2.1.280). `autoUpdatesChannel`
+  is left on `stable` deliberately, so the version is pinned, not tracking.
+- Robert relaunches with `claude --model 'claude-opus-5-5[1m]'`. Both that and
+  the plain id were probe-tested on this machine.
+- Confirm that the Agent/Workflow `model: "opus"` alias resolves to 5.5 in this
+  build before launching the workflows. If it still resolves to Opus 5, name the
+  model explicitly wherever the workflow API allows it.
+- GUT baseline on master at `9fe188b`: **192 tests, 190 passing, 2 pending, 0
+  failing** (`tmp/gut-after-cache.log`). Any change to those counts needs an
+  explanation.
+- `tools/build` and `bin/godot` now work from either path spelling, so `cd -P` is
+  no longer required.
+
 ## Morning brief
 
 *Filled in at the end of the session: decisions made unilaterally, open
