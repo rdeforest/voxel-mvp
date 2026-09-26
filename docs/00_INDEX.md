@@ -13,6 +13,8 @@ disagree, the manifesto wins.
   against scope drift; read first.
 - [`STATUS.md`](STATUS.md) — the resumption brief for picking the project
   back up; updated each session.
+- [`GLOSSARY.md`](GLOSSARY.md) — one-line definitions of the project's jargon
+  (MPM, DC, splice, frontier, arena, ...), for getting back up to speed.
 
 ## Subdirectories
 
