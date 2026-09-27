@@ -18,6 +18,10 @@ static func ops() -> Dictionary:
         "csg":         CsgAction,
         "build":       ConstructionAction,
         "probe":       ProbeAction,
+        # The instruments (doc 22's instrument layer): console writes that bypass player safety.
+        "set_corners":  SetCornersAction,
+        "set_material": SetMaterialAction,
+        "stamp":        StampAction,
     }
 
 

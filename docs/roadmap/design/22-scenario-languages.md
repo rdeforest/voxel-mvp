@@ -297,6 +297,35 @@ instruments.
   Decisions).
 - **Named saves** (`save <name>` / `load <name>`), and commands to export and import assemblies.
 
+*Built 2026-09-27 (Claude, G4.4), except the probe's leaf read-out, the overlay, and assembly
+export/import (assemblies are phase 3, so that command waits for them):*
+- *The probe (`ProbeAction.report()`, which the HUD, the click and `mark` share) adds whether the
+  cell's leaf is edited or the generator's, the 8 corner values the mesher samples, its sign test
+  (solid corners, and how many of the 12 edges cross zero, as `dc_octree.h` tests an edge), and
+  any corner where the cell's own leaf holds a different value than the mesher reads (a seam).
+  **Not built: the owning leaf's origin, size and field state.** No EditStore binding exposes a
+  leaf, and this chunk can't touch C++; it needs `Dictionary EditStore::leaf_info(Vector3 p)`
+  (origin, size, `FieldState`, material, its 8 held corners, its field source). The overlay of
+  leaf boundaries and corner signs isn't built either.*
+- *Exact writes: console `setcorners <x y z> <c0..c7>` (corner k at cell + (k&1, k>>1&1,
+  k>>2&1); the store rounds each to float32), `setmaterial <x y z> <material>`, and
+  `stamp <shape> <add|subtract> <material> <x y z> <dims> [<rx ry rz>]` (the CSG tool's dims and
+  rotation). Typed numbers are read with `ExactDecimal`, since the console's own parse can land an
+  ulp off. Each is an Action with a step op (`set_corners`, `set_material`, `stamp`), written
+  through `StoreWrite` / `VoxelImprint` with one matter-changed event credited to `INSTRUMENT`,
+  and recorded at its `validate()` like a click. A setmaterial on a cell the generator held stores
+  it (only an edited leaf has a material), so between lattice points its field becomes a trilerp
+  and a cell's centre can flip; the event carries it.*
+- *The rescue: `PlayerSafeAction.danger_of()` (the test `endangered_by()` refuses a player edit
+  with) runs on the written field before the write. Burying the player turns on fly with noclip,
+  so they can get out; removing their ground turns on fly. X lands, and also drops the noclip the
+  rescue turned on (not examine mode's).
+  A stamp is refused past 256 m on an axis (its lattice alone would be ~0.3 GB).*
+- *Named saves: `SaveSlot`; `user://saves/<name>/` holds a pair like the default slot's, with
+  the same refusals. F5 and F9 stay on the default slot. A slot can't be named after the default
+  slot's own files (`world.snapshot`, `world.editstore`, or their `.tmp`), which share the
+  directory.*
+
 ## Build order
 
 Each phase is gated by GUT and ships on its own.

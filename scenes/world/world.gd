@@ -13,6 +13,7 @@ var _edit_store: EditStoreManager
 var _saved: SavedWorld
 var _part_index: PartIndex
 var _console: ConsoleCommands
+var _instruments: InstrumentCommands
 var _recording: RecordingCommands
 var _debug_server: DebugServer
 
@@ -92,10 +93,16 @@ func _wire_console() -> void:
     _console.edit_store        = _edit_store
     _console.part_index        = _part_index
     _console.register_all()
+    _instruments = InstrumentCommands.new()
+    _instruments.host       = self
+    _instruments.edit_store = _edit_store
+    _instruments.integrity  = _integrity
+    _instruments.player     = _player
+    _instruments.register_all()
     _recording = RecordingCommands.new()
     _recording.name = "RecordingCommands"
     add_child(_recording)
-    _recording.setup(_console)
+    _recording.setup(_console, _instruments)
     _player.examine_toggle_requested.connect(_console.examine.bind(""))   # Ctrl+E = `examine`
 
 func _grab_os_focus() -> void:
@@ -103,25 +110,35 @@ func _grab_os_focus() -> void:
     get_window().grab_focus()
 
 # A `reset` reload skips the save and may overwrite it; otherwise a save this build can't read
-# is left on disk untouched, and the player is told why the world started fresh.
+# is left on disk untouched, and the player is told why the world started fresh. The slot read is
+# the one a console `load <name>` asked for, else the default; F5 always saves the default.
 func _restore_save() -> void:
     var resetting := WorldSnapshot.reset_pending
+    var slot      := SaveSlot.take_pending_load()
     WorldSnapshot.reset_pending = false
     if resetting:
-        _saved = SavedWorld.new(SavePaths.SNAPSHOT_FILE, SavePaths.EDITSTORE_FILE)
+        _saved = SavedWorld.new(SaveSlot.snapshot_path(SaveSlot.DEFAULT), SaveSlot.editstore_path(SaveSlot.DEFAULT))
         return
 
-    _saved = SavedWorld.read(SavePaths.SNAPSHOT_FILE, SavePaths.EDITSTORE_FILE)
-    if _saved.load_into(self, _edit_store):
-        Toast.success("Loaded save.")
-    elif not _saved.refusal.is_empty():
-        push_error("Save not loaded: %s" % _saved.refusal)
-        Toast.failure("Save not loaded: %s. Files kept; F5 won't overwrite them (console `reset` starts over)."
-            % _saved.refusal)
+    _saved = SaveSlot.read(SaveSlot.DEFAULT)
+    var loading := _saved if slot == SaveSlot.DEFAULT else SaveSlot.read(slot)
+    var named   := "" if slot == SaveSlot.DEFAULT else " \"%s\"" % slot
+    if loading.load_into(self, _edit_store):
+        Toast.success("Loaded save%s." % named)
+    elif not loading.refusal.is_empty():
+        push_error("Save%s not loaded: %s" % [named, loading.refusal])
+        Toast.failure("Save%s not loaded: %s. %s" % [named, loading.refusal, _kept_note(slot)])
 
-# The player's F5: both halves of the save. "" on success, otherwise the reason it didn't save.
-func save_game() -> String:
-    return _saved.save(self, _edit_store)
+# A refused pair stays on disk. The default slot's then blocks F5; F5 never writes a named one.
+static func _kept_note(slot: String) -> String:
+    if slot == SaveSlot.DEFAULT:
+        return "Files kept; F5 won't overwrite them (console `reset` starts over)."
+    return "Its files are kept; F5 saves to the default slot, not over them."
+
+# Both halves of the save, into the default slot (F5) or a named one (console `save <name>`). ""
+# on success, otherwise the reason it didn't save.
+func save_game(slot := SaveSlot.DEFAULT) -> String:
+    return _saved.save(self, _edit_store) if slot == SaveSlot.DEFAULT else SaveSlot.save(slot, self, _edit_store)
 
 # Why the save on disk wasn't loaded and won't be overwritten; "" when there's no such save.
 func save_refusal() -> String:
@@ -141,6 +158,8 @@ func _exit_tree() -> void:
     # so LimboConsole never holds a callable bound to a freed object.
     if _console != null:
         _console.unregister_all()
+    if _instruments != null:
+        _instruments.unregister_all()
 
 
 func _process(_delta: float) -> void:

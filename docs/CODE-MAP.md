@@ -154,6 +154,23 @@ An action as data, for recordings and hand-written scenarios (doc 22, Format 2).
   A new store-writing console command must announce itself the same way, or a
   recording made across it won't replay.
 
+### Instruments (`scripts/instruments/`, `scenes/world/instrument_commands.gd`)
+
+Doc 22's instrument layer: exact, grid-aware console writes for testing, kept
+apart from the player's verbs. *(Section drafted by Claude, 2026-09-27.)*
+
+- `SetCornersAction` (`set_corners`), `SetMaterialAction` (`set_material`) and
+  `StampAction` (`stamp`, a `CsgAction` without the safety refusal) are Actions
+  with step ops, so recordings and the runner's builder hold them like any step.
+  Each has `refusal()` (why `validate()` is false) and `written_field()` (the
+  lattice `execute()` writes).
+- `InstrumentCommands` is the console side (`setcorners`, `setmaterial`,
+  `stamp`, `save`, `load`). Numbers go through `ExactDecimal`, not the console's
+  parse. Every write takes `write()`: `validate()`, the `validated` signal
+  (`RecordingCommands` records it as it does a click), then the write, then the
+  rescue: `PlayerSafeAction.danger_of()` on the written field, read before the
+  write, puts the player in fly mode (`Player.enter_fly`), with noclip when buried.
+
 ---
 
 ## Event bus (`scripts/events/`)
@@ -534,6 +551,11 @@ encodes parts separately.
 **Restore path.** `world.gd:_ready` loads the snapshot if present, then the
 EditStore blob. Tracked voxels skip the propagation queue — saved values were
 captured while quiescent.
+
+**Slots.** `SaveSlot` names where a pair lives: the default slot (F5/F9) is
+`user://saves/` itself; console `save <name>` / `load <name>` use
+`user://saves/<name>/`. A load marks the slot (`SaveSlot.request_load`) and
+reloads the scene; `world._restore_save` takes it. F5 always saves the default.
 
 **Version check is asymmetric:** newer-than-known schemas are rejected; older
 ones load with missing fields defaulted. Pre-V6 saves still load, just without

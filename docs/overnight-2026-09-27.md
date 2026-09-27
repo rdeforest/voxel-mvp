@@ -27,7 +27,7 @@
   is finished by the next load or F5. Lone, mismatched or older halves are refused and kept.
   **Unilateral:** a refused save still blocks F5 until console `reset` (not moved aside); named
   saves (G4.4) soften that. Q5 left the choice open.
-- [ ] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments
+- [ ] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments (G4.0–G4.4 done; G4.4 partial, see below)
   - [x] G4.0 — gaps: PartIndex saved (snapshot v9, bit-exact bytes; a snapshot whose parts break
     one-owner/unique-id is refused); scout pending work and MPM's unannounced freeze chunks gate
     `is_quiescent()`; MPM freeze chunks announced bottom-up by position, appended (a second freeze
@@ -77,6 +77,14 @@
     recording; a name defaults to the date-time; an existing directory is refused. **Not verified
     live:** `mpmthaw`'s step (the console aims with the physics raycast, which never hit terrain
     in the headless World; covered in GUT) and the screenshot (headless has no rendered viewport).
+  - [x] G4.4 — instrument layer, **partial**: the probe adds edited/generator leaf, the 8 corners
+    the mesher samples, its sign test and seams; console `setcorners`/`setmaterial`/`stamp` write
+    exactly (ExactDecimal) through StoreWrite/VoxelImprint as INSTRUMENT, recorded as steps
+    (`set_corners`/`set_material`/`stamp`); a write that buries the player or drops their ground
+    puts them in fly (noclip when buried); `save <name>`/`load <name>` slots under
+    `user://saves/<name>/`. Tested through LimboConsole's own dispatcher. **Not built:** the
+    owning leaf's origin/size/field state (needs C++ `EditStore.leaf_info`, question for Robert),
+    the leaf/sign overlay, assembly export/import (phase 3).
 - [ ] R1 — research: what the refine frontier spends its effort on + perceptual LOD survey
 - [ ] Integration review of the merged result; morning brief at the bottom of this doc
 

@@ -168,6 +168,17 @@ func build(part: Part, position: Vector3, rotation: Vector3, material: StringNam
 func probe(hit_pos: Vector3, hit_normal: Vector3, offset: Vector3) -> bool:
     return act(ProbeAction.new(hit_pos, hit_normal, offset, _ctx))
 
+# The instruments (InstrumentCommands' writes). A replay only moves the player by player_at, so
+# the fly mode a live instrument write may switch on isn't a step.
+func set_corners(cell: Vector3i, corners: PackedFloat64Array) -> bool:
+    return act(SetCornersAction.new(cell, corners, _ctx))
+
+func set_material(cell: Vector3i, material: StringName) -> bool:
+    return act(SetMaterialAction.new(cell, material, _ctx))
+
+func stamp(shape: CsgShape, xform: Transform3D, mode: CsgState.Op, material: StringName) -> bool:
+    return act(StampAction.new(shape, xform, mode, material, _ctx))
+
 # Any action built in context(): recorded as its step, then that step is what runs.
 func act(action: Action) -> bool:
     return _record(StepRegistry.step_of(action)) and steps.back()["expect_valid"]

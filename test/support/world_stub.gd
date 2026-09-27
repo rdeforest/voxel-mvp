@@ -12,11 +12,19 @@ class PlayerStub:
     var tool_index        := 2
     var _activity_indices: Array[int] = [1, 0, 3]
 
+    var flying := false   # what the player's enter_fly() was asked for
+    var noclip := false
+
 
     func _init() -> void:
         var head := Node3D.new()
         head.name = "Head"
         add_child(head)
+
+
+    func enter_fly(p_noclip: bool) -> void:
+        flying = true
+        noclip = noclip or p_noclip
 
 
 var index := PartIndex.new()

@@ -25,6 +25,7 @@ var tool_index:        int       = 0
 var _activity_indices: Array[int] = []   # remembered per tool
 
 var wireframe_enabled := false
+var _rescue_noclip    := false   # noclip enter_fly turned on, which the next X takes back
 
 # Inactive until the world finishes loading (WorldReadyEvent): no gravity/movement
 # (so we don't fall through ground that hasn't grown yet) and no edits. Look still
@@ -395,15 +396,29 @@ func _toggle_incremental_edits() -> void:
     var on := world_preview.toggle_incremental_edits()
     Toast.show_message("Incremental edits %s" % ("ON (edit_world)" if on else "OFF (full rebuild)"), Color.AQUA if on else Color.GRAY)
 
+# X is plain flight, so it also drops a noclip enter_fly turned on; examine's noclip it leaves be.
 func _toggle_fly() -> void:
     _movement.fly_enabled = not _movement.fly_enabled
+    if _rescue_noclip:
+        _movement.noclip = false
+        _rescue_noclip   = false
+    _update_mode_label()
+
+# An instrument write that buried the player (noclip, so they can fly out) or took the ground from
+# under them (flight holds them up). Stays on until X or `examine off`.
+func enter_fly(noclip: bool) -> void:
+    _movement.fly_enabled = true
+    if noclip and not _movement.noclip:
+        _movement.noclip = true
+        _rescue_noclip   = true
     _update_mode_label()
 
 # Examine mode (console `examine`): noclip free-flight so you can fly through terrain to
 # inspect geometry from the far side. Off restores grounded movement.
 func set_examine_movement(on: bool) -> void:
     _movement.fly_enabled = on
-    _movement.noclip = on
+    _movement.noclip      = on
+    _rescue_noclip        = false
     _update_mode_label()
 
 func _toggle_wireframe() -> void:

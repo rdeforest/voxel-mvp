@@ -109,6 +109,23 @@ func test_probe() -> void:
     _assert_round_trip("probe", func(ctx: ActionContext) -> Action:
         return ProbeAction.new(_at(0.2, 0.0, 0.4), Vector3.UP, Vector3(0.0, 1.0, THIRD), ctx), false)
 
+# The instruments (doc 22's instrument layer) are steps too.
+func test_set_corners() -> void:
+    var cell := Vector3i(int(COLUMN.x), floori(_surface), int(COLUMN.y))
+    _assert_round_trip("set_corners", func(ctx: ActionContext) -> Action:
+        return SetCornersAction.new(cell, PackedFloat64Array([-1.0, THIRD, -0.5, 2.0, 0.1, -THIRD, 1.0, -0.25]), ctx))
+
+func test_set_material() -> void:
+    var cell := Vector3i(int(COLUMN.x), floori(_surface) - 1, int(COLUMN.y))
+    _assert_round_trip("set_material", func(ctx: ActionContext) -> Action:
+        return SetMaterialAction.new(cell, &"Wood", ctx))
+
+func test_stamp() -> void:
+    var xform := Transform3D(VoxelUtils.euler_basis(Vector3(15.0, 30.0, -7.5)), _at(0.1, 0.0, 0.3))
+    _assert_round_trip("stamp", func(ctx: ActionContext) -> Action:
+        return StampAction.new(CsgCylinderShape.new(1.5, 2.0 + THIRD), xform, CsgState.Op.SUBTRACT, &"Stone", ctx))
+
+
 func _emptiable_surface_cell() -> Vector3i:
     for y in range(floori(_surface), floori(_surface) - 4, -1):
         var cell := Vector3i(int(COLUMN.x), y, int(COLUMN.y))
@@ -211,7 +228,16 @@ func _random_makers() -> Dictionary:
         "empty_voxel": func() -> Action: return EmptyVoxelAction.new(_rcell(), ctx),
         "csg":         func() -> Action: return CsgAction.new(_rshape(), _rxform(), _rng.randi_range(0, 1), _rmaterial(), ctx),
         "build":       func() -> Action: return ConstructionAction.new(_rpart(), _rvec(), _rvec() * 1000.0, _rmaterial(), ctx),
+        "set_corners":  func() -> Action: return SetCornersAction.new(_rcell(), _rcorners(), ctx),
+        "set_material": func() -> Action: return SetMaterialAction.new(_rcell(), _rmaterial(), ctx),
+        "stamp":        func() -> Action: return StampAction.new(_rshape(), _rxform(), _rng.randi_range(0, 1), _rmaterial(), ctx),
     }
+
+func _rcorners() -> PackedFloat64Array:
+    var out := PackedFloat64Array()
+    for k in SetCornersAction.CORNERS:
+        out.append(_rsigned())
+    return out
 
 # Magnitudes from 1e-3 to 1e3, half of them a third of something so the decimal never ends.
 func _rpos() -> float:

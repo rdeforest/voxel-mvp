@@ -3,8 +3,8 @@ extends Node
 
 # The console's `rec` and `mark`: the live game recorded as a scenario (ScenarioRecorder) that the
 # replay runner plays back. What it hears: every action the player's click validated
-# (Player.action_validated), and the console's own world writes, `mpmthaw` and `settle`
-# (ConsoleCommands.thawing / draining_support).
+# (Player.action_validated), every instrument write likewise (InstrumentCommands.validated), and the
+# console's own world writes, `mpmthaw` and `settle` (ConsoleCommands.thawing / draining_support).
 #
 # The clock is this node's physics frames. It ticks exactly when the structural simulations do and
 # pauses with them (an open console pauses the tree), which the engine's physics frame count doesn't.
@@ -23,9 +23,10 @@ var recorder:  ScenarioRecorder   # null when not recording
 var frames:    int = 0
 
 
-func setup(p_console: ConsoleCommands) -> void:
+func setup(p_console: ConsoleCommands, instruments: InstrumentCommands) -> void:
     console = p_console
     console.player.action_validated.connect(_on_action)
+    instruments.validated.connect(_on_action)
     console.thawing.connect(_on_thaw)
     console.draining_support.connect(_on_drain)
 
