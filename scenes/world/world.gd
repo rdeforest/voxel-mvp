@@ -13,6 +13,7 @@ var _edit_store: EditStoreManager
 var _saved: SavedWorld
 var _part_index: PartIndex
 var _console: ConsoleCommands
+var _recording: RecordingCommands
 var _debug_server: DebugServer
 
 # World-ready gate: gameplay + physics systems start inactive and resume on a
@@ -91,6 +92,10 @@ func _wire_console() -> void:
     _console.edit_store        = _edit_store
     _console.part_index        = _part_index
     _console.register_all()
+    _recording = RecordingCommands.new()
+    _recording.name = "RecordingCommands"
+    add_child(_recording)
+    _recording.setup(_console)
     _player.examine_toggle_requested.connect(_console.examine.bind(""))   # Ctrl+E = `examine`
 
 func _grab_os_focus() -> void:

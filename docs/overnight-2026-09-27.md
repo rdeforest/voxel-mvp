@@ -54,6 +54,29 @@
     from a save *pair* (`start_save`), not a lone blob: a blob alone drops part identity and
     tracked support, the gaps G4.0 closed. One scenario is live at a time, because the event bus
     is global and its events carry no world.
+  - [x] G4.3 — recorder: `Player.action_validated` (emitted between `validate()` and `execute()`
+    in `_try_edit_terrain`) feeds `ScenarioRecorder`; `RecordingCommands` (a World child) adds
+    console `rec start|fresh|stop [name]` and `mark [note]`; `mpmthaw` and console `settle` are
+    steps too (`thaw`, new `drain_support`). A directory under `user://scenarios/<name>/` holds
+    `steps.json` (rewritten per step, so a crash keeps what came before), the start's save pair
+    (`rec start`, gated on `is_quiescent()`), and `mark-NNN.json`/`.png`. The runner's
+    `run_recording(dir)` replays one; `capture()` now includes MPM's in-flight particles.
+    Verified live (headless World scene, `scripts/dev/probe_recorder_live.gd`): `rec fresh` and
+    `rec start` recordings with digs, a refused fill and a mark replay byte-identical in field,
+    parts, support and MPM; but MPM was empty and support drained at both stops, so the live
+    check proves the edits and step round-trip, not frame alignment. Frame alignment is covered by
+    GUT (one frame fewer, or one frame moved from after the cut to before it, replays to a
+    different world). **Debt:** `steps.json` is re-serialized whole per step (O(n) per step, O(n²)
+    per recording); fine at play-session sizes, revisit (append-only) if recordings get long.
+    **Found:** the console pauses the tree (`pause_when_open`), so the
+    engine's physics frame count keeps running while the simulations don't; the recorder counts
+    its own unpaused physics frames (measured: 10 paused frames, clock +0, engine +10).
+    **Unilateral:** frame and player position are encoded as `advance`/`player_at` steps (the
+    runner's strict decoding refuses extra fields on an action step); `rec fresh` resets the live
+    world (like `reset`) and starts on the reloaded world's first frame; `mark` needs a live
+    recording; a name defaults to the date-time; an existing directory is refused. **Not verified
+    live:** `mpmthaw`'s step (the console aims with the physics raycast, which never hit terrain
+    in the headless World; covered in GUT) and the screenshot (headless has no rendered viewport).
 - [ ] R1 — research: what the refine frontier spends its effort on + perceptual LOD survey
 - [ ] Integration review of the merged result; morning brief at the bottom of this doc
 

@@ -51,7 +51,7 @@ func _corner_solid_count(cell: Vector3i) -> int:
 
 # Target the solid cell behind the hit surface (same convention as the voxel grid
 # overlay), shifted by the placement offset.
-func _target_cell() -> Vector3i:
+func target_cell() -> Vector3i:
     var p := hit_pos + offset - hit_normal * VoxelConstants.SURFACE_NUDGE
     return Vector3i(floori(p.x), floori(p.y), floori(p.z))
 
@@ -65,7 +65,7 @@ func execute() -> void:
 # probe HUD, so both always agree. Store SDF + material are shown for ANY cell (solid terrain that
 # isn't tracked still reports its material), which is what makes scanning a scene useful.
 func report() -> PackedStringArray:
-    var cell := _target_cell()
+    var cell := target_cell()
     var out := PackedStringArray()
 
     var sdf      := TerrainProbe.sdf(store, cell)   # at the cell's sample point, like every solidity read
@@ -90,5 +90,5 @@ func report() -> PackedStringArray:
 
 func preview() -> ActionPreview:
     var p := ActionPreview.new()
-    p.solid.append(_target_cell())   # highlight the targeted cell
+    p.solid.append(target_cell())   # highlight the targeted cell
     return p

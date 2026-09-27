@@ -174,6 +174,13 @@ func _corner_clears(corner: Vector3i, planned: Dictionary, kept: Dictionary) -> 
 func active_count() -> int:
     return _sim.particle_count() if _sim != null else 0
 
+# Where the material in flight is, for comparing a replay with its recording mid-fall.
+func particle_positions() -> PackedVector3Array:
+    var out := PackedVector3Array()
+    for i in active_count():
+        out.append(_sim.get_position(i))
+    return out
+
 
 # No material in flight and no frozen region still waiting to be announced.
 func is_idle() -> bool:

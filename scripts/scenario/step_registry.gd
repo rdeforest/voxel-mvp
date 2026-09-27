@@ -22,9 +22,10 @@ static func ops() -> Dictionary:
 
 
 # The steps that aren't actions: where the player stands (the safety checks read it), physics frames
-# passing, the world coming to rest, a note, and the console's `mpmthaw`. A runner executes them
-# (test/support/scenario.gd); they are written here so a recorder and a builder emit one shape.
-const WORLD_OPS: Array[String] = ["player_at", "advance", "settle", "mark", "thaw"]
+# passing, the world coming to rest, a note (naming its capture file when recorded live), the
+# console's `mpmthaw`, and the console's `settle`, which drains support at once. A runner executes
+# them (test/support/scenario.gd); they are written here so a recorder and a builder emit one shape.
+const WORLD_OPS: Array[String] = ["player_at", "advance", "settle", "mark", "thaw", "drain_support"]
 
 static func player_at(position: Vector3) -> Dictionary:
     return {"op": "player_at", "position": StepFields.encode_vec3(position)}
@@ -35,11 +36,17 @@ static func advance(frames: int) -> Dictionary:
 static func settle() -> Dictionary:
     return {"op": "settle"}
 
-static func mark(note: String) -> Dictionary:
-    return {"op": "mark", "note": note}
+static func mark(note: String, capture := "") -> Dictionary:
+    var step := {"op": "mark", "note": note}
+    if not capture.is_empty():
+        step["capture"] = capture
+    return step
 
 static func thaw(center: Vector3, radius: float) -> Dictionary:
     return {"op": "thaw", "center": StepFields.encode_vec3(center), "radius": radius}
+
+static func drain_support() -> Dictionary:
+    return {"op": "drain_support"}
 
 
 # The step for `action`; {} (and an error) for an action class with no op.

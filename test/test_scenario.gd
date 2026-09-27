@@ -133,7 +133,7 @@ func test_a_hand_written_scenario_runs() -> void:
     assert_true(s.integrity.is_quiescent(), "settle left the world at rest")
 
     assert_eq(s.marks.size(), 2, "both marks")
-    assert_eq(s.marks[0], {"step": 5, "frame": 3, "note": "the wood voxel hangs in the air"},
+    assert_eq(s.marks[0], {"step": 5, "frame": 3, "note": "the wood voxel hangs in the air", "capture": ""},
         "the first mark: its step, after three frames")
     assert_gt(s.marks[1]["frame"], 3 + MpmStructure.SETTLE_FRAMES, "settling took the fall and the freeze")
 

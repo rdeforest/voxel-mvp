@@ -120,6 +120,11 @@ func material(key: String) -> StringName:
     return name
 
 
+# Whether an optional field is present (a mark's capture); a present one still has to be read.
+func has(key: String) -> bool:
+    return _step.has(key)
+
+
 # Records a failure the reader can't see from the shapes alone (a part whose file changed).
 func fail(message: String) -> void:
     _fail(message)

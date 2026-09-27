@@ -14,9 +14,10 @@ extends "res://test/support/world_stub.gd"
 # that doesn't run as recorded (validate() disagrees, or the step is malformed or can't settle) and
 # names its index; nothing after it runs.
 #
-# Usage: add the node to the tree, then start_fresh() or start_save(). The event bus is global and
-# its events carry no world, so a second live scenario would hear the first's edits: one is live at
-# a time, and a test free()s one before starting the next (queue_free is too late).
+# Usage: add the node to the tree, then start_fresh() or start_save(), or run_recording() for a
+# directory ScenarioRecorder wrote. The event bus is global and its events carry no world, so a
+# second live scenario would hear the first's edits: one is live at a time, and a test free()s one
+# before starting the next (queue_free is too late).
 # docs/roadmap/design/22-scenario-languages.md.
 # (Drafted by Claude, overnight 2026-09-27.)
 
@@ -32,7 +33,7 @@ var mpm:       MpmStructure
 var scout:     DetachmentScout
 
 var steps: Array[Dictionary] = []   # every step that ran, as a step file writes it
-var marks: Array[Dictionary] = []   # {step, frame, note}; step indexes `steps`
+var marks: Array[Dictionary] = []   # {step, frame, note, capture}; step indexes `steps`
 var frame: int               = 0    # physics frames advanced since the start
 
 var error:      String = ""   # why the scenario stopped; "" while it runs
@@ -103,6 +104,21 @@ func _wire() -> void:
     VoxelEventBusSingleton.emit(WorldReadyEvent.CHANNEL, WorldReadyEvent.new())
 
 
+# A ScenarioRecorder directory, start to finish: from its save pair when it has one (either half
+# present means a pair was meant; start_save refuses a lone half), otherwise fresh.
+func run_recording(dir: String) -> bool:
+    var snapshot  := "%s/%s" % [dir, ScenarioRecorder.SNAPSHOT_FILE]
+    var editstore := "%s/%s" % [dir, ScenarioRecorder.EDITSTORE_FILE]
+    var from_save := FileAccess.file_exists(snapshot) or FileAccess.file_exists(editstore)
+    if not (start_save(snapshot, editstore) if from_save else start_fresh()):
+        return false
+
+    var text := FileAccess.get_file_as_string("%s/%s" % [dir, ScenarioRecorder.STEPS_FILE])
+    if text.is_empty():
+        return _stop(-1, "%s has no %s" % [dir, ScenarioRecorder.STEPS_FILE])
+    return replay(text)
+
+
 # --- The builder ---
 
 # Each runs its step and records it; an action's returns what validate() said. A builder step that
@@ -159,6 +175,10 @@ func act(action: Action) -> bool:
 # Where a builder action is built: this world's store and player, its edits credited to REPLAY.
 func context() -> ActionContext:
     return _ctx
+
+# World's accessor, which the game's ActionFactories resolves the store through.
+func edit_store_ref() -> EditStore:
+    return manager.store
 
 
 func _record(step: Dictionary) -> bool:
@@ -233,11 +253,12 @@ func _run(step: Dictionary, step_index: int, recording: bool) -> bool:
 
 func _world_ops() -> Dictionary:
     return {
-        "player_at": _player_at_step,
-        "advance":   _advance_step,
-        "settle":    _settle_step,
-        "mark":      _mark_step,
-        "thaw":      _thaw_step,
+        "player_at":     _player_at_step,
+        "advance":       _advance_step,
+        "settle":        _settle_step,
+        "mark":          _mark_step,
+        "thaw":          _thaw_step,
+        "drain_support": _drain_support_step,
     }
 
 
@@ -292,12 +313,14 @@ func _settle_step(f: StepFields) -> String:
     return ""
 
 
+# A recorded mark names the file holding what the view was (ScenarioRecorder.save_capture).
 func _mark_step(f: StepFields) -> String:
-    var note := f.text("note")
+    var note    := f.text("note")
+    var capture := f.text("capture") if f.has("capture") else ""
     if not _decoded(f):
         return f.error
 
-    marks.append({"step": steps.size(), "frame": frame, "note": note})
+    marks.append({"step": steps.size(), "frame": frame, "note": note, "capture": capture})
     return ""
 
 
@@ -308,6 +331,15 @@ func _thaw_step(f: StepFields) -> String:
         return f.error
 
     mpm.thaw_sphere(center, radius, EditSource.Kind.REPLAY)
+    return ""
+
+
+# Deterministic, and it may leave support unsettled exactly as it did live, so it can't fail a replay.
+func _drain_support_step(f: StepFields) -> String:
+    if not _decoded(f):
+        return f.error
+
+    integrity.force_quiescent()
     return ""
 
 
@@ -335,12 +367,13 @@ func _stop(step_index: int, problem: String) -> bool:
 # --- Comparing worlds ---
 
 # Everything a replay must reproduce, as bytes: the field, part identity, the tracked voxels in the
-# order they were tracked, and where the player stands.
+# order they were tracked, the material MPM has in flight, and where the player stands.
 func capture() -> Dictionary:
     return {
         "store":  manager.store.serialize(),
         "parts":  var_to_bytes(index.encode()),
         "voxels": var_to_bytes(_tracked_voxels()),
+        "mpm":    var_to_bytes(mpm.particle_positions()),
         "player": var_to_bytes(player.global_position),
     }
 

@@ -136,7 +136,8 @@ An action as data, for recordings and hand-written scenarios (doc 22, Format 2).
   and drops `-0.0`'s sign, so numbers are read from their own text with correct
   rounding.
 - `StepRegistry` also encodes the steps that aren't actions (`WORLD_OPS`):
-  `player_at`, `advance`, `settle`, `mark`, `thaw` (the console's `mpmthaw`).
+  `player_at`, `advance`, `settle`, `mark`, `thaw` (the console's `mpmthaw`),
+  `drain_support` (the console's `settle`).
 - The replay runner and builder is `test/support/scenario.gd`: a headless world
   whose simulations tick only when it says (`advance`/`settle`, through the
   `tick()` seams on StructuralIntegrity, MpmStructure and DetachmentScout). A
@@ -144,6 +145,14 @@ An action as data, for recordings and hand-written scenarios (doc 22, Format 2).
   `s.replay(text)` takes; replay stops at the first step whose `validate()`
   differs from its `expect_valid`. `s.capture()` is the world as bytes for
   comparing runs. The event bus is global, so one scenario is live at a time.
+- `ScenarioRecorder` (`scripts/scenario/`) writes a directory the runner replays
+  (`s.run_recording(dir)`): `steps.json`, the start's save pair unless it started
+  fresh, and each mark's `mark-NNN.json` (+ `.png`). It takes the frame from its
+  caller; the live caller is `RecordingCommands` (`scenes/world/`, console `rec`
+  and `mark`), which counts its own unpaused physics frames and hears
+  `Player.action_validated` plus the console's `thawing`/`draining_support`.
+  A new store-writing console command must announce itself the same way, or a
+  recording made across it won't replay.
 
 ---
 

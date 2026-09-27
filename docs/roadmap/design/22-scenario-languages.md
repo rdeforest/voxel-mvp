@@ -246,6 +246,15 @@ assembly 'gatehouse',
    blob. **`rec fresh`** starts from the generator alone, which reproduces most reliably.
 3. **`mark [note]`** saves the camera, FOV, dcworld settings, the aimed cell with its probe report, and
    a screenshot. That turns "this looks wrong" into something an assertion can be written from.
+   *Built 2026-09-27 (Claude, G4.3): `ScenarioRecorder` + console `rec start|fresh|stop [name]` and
+   `mark [note]` (`scenes/world/recording_commands.gd`), hooked on `Player.action_validated`, which
+   fires between `validate()` and `execute()`. A recording is a directory, `user://scenarios/<name>/`:
+   `steps.json`, the save pair `rec start` wrote, and `mark-NNN.json` (+ `.png`) per mark, which the
+   mark step names as `"capture"`. The frame and the player's position are steps of their own
+   (`advance`, `player_at`), emitted only when they changed, so the action steps keep their strict
+   shape. Time is the frames the simulations ticked, not the engine's physics frame count: the open
+   console pauses the tree. The console `settle`, which drains support at once, is recorded as
+   `{"op": "drain_support"}`.*
 4. **Replay runner** (GUT, headless, no World scene): the simulations tick explicitly at 1/60 s,
    never on wall-clock time, and replay **stops at the first step whose result differs from the
    recording**, the lesson from Riot's determinism work. This needs tick functions on DetachmentScout

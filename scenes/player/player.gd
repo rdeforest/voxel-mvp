@@ -4,6 +4,11 @@ extends CharacterBody3D
 # its own noclip; World wires this to the console `examine` command, which orchestrates all of it.
 signal examine_toggle_requested
 
+# Every action a click built, with what validate() said, before it executes: the one place gameplay
+# edits happen, so the scenario recorder listens here (doc 22). A listener must not touch the world,
+# since the action executes on the validate() it just reported.
+signal action_validated(action: Action, valid: bool)
+
 var _movement:         PlayerMovement
 var _camera_rig:       CameraRig
 var build_state:       BuildState
@@ -285,7 +290,9 @@ func _try_edit_terrain() -> void:
     var action: Action = activity.make_action.call(aim.position, aim.normal)
     if action == null:
         return
-    if action.validate():
+    var valid := action.validate()
+    action_validated.emit(action, valid)
+    if valid:
         action.execute()
         if not activity.keep_offset_on_action:
             build_state.reset_offset()
