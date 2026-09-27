@@ -220,6 +220,7 @@ public:
 
 	// Total slots in the retained octree's cell array (live + free-list). Bounded across a traverse (B1b).
 	int get_octree_cell_count() const;
+	int get_octree_live_cell_count() const;  // slots less the free list: what the cell limit counts against
 	int64_t get_cell_arena_bytes() const;    // RAM held by the cell arenas (whole blocks)
 
 	// The cell limit (Q4): refinement stops gracefully at min(max_cells, get_cell_capacity()).

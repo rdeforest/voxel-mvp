@@ -85,9 +85,10 @@ it; the rename goes with the terrain→matter rename.
 Subscribers: `TerrainSupport` (tracks the flips, scans the box),
 `PartIndex` (releases the air flips, from any source), `DetachmentScout`
 (seeds from the box; for its own `SCOUT` thaw only from the flips outside
-the component it thawed; ignores `MPM`), and the DC render and
-collision (the box). The freeze doesn't measure its flips yet
-(`docs/bugs/mpm-freeze-flips-unmeasured.md`).
+the component it thawed; ignores `MPM`: `docs/bugs/scout-ignores-freeze-flips.md`), and the
+DC render and collision (the box). A chunked freeze gives each chunk's event
+the flips inside its box, announced frames after the write
+(`docs/bugs/mpm-chunked-freeze-flips-arrive-late.md`).
 
 ## Bus API
 

@@ -30,8 +30,9 @@ func _scan_box(event: TerrainSdfChangedEvent) -> void:
     for cell in event.cells:
         var is_solid := TerrainProbe.is_solid(store, cell)
         if voxel_data.has(cell):
-            # A tracked cell gone air that no flip named: an unmeasured write left it (the MPM
-            # freeze, docs/bugs/mpm-freeze-flips-unmeasured.md).
+            # A tracked cell gone air that no flip named. Every write is measured, so this is a
+            # consistency check. A chunked freeze delivers its flips frames after its write, and a
+            # write in between can leave its solid flips stale (doc 12, "The freeze (as built)").
             if not is_solid:
                 _remove_voxel(cell)
                 continue

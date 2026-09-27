@@ -140,16 +140,7 @@ func flips(store: EditStore) -> CellFlips:
 # after the write (EditStore.write_region_flips), with what each emptied cell was made of. None,
 # and nothing written, when EditStore refuses the lattice.
 func write(store: EditStore, indices: PackedByteArray) -> CellFlips:
-    var d   := store.write_region_flips(sdf, indices, dim, origin, cell)
-    var out := CellFlips.new()
-    if d.is_empty():
-        return out
-
-    out.solid         = d.solid
-    out.air           = d.air
-    out.air_materials = d.air_materials
-    out.changed       = d.changed
-    return out
+    return CellFlips.measured(store.write_region_flips(sdf, indices, dim, origin, cell))
 
 
 # Per-leaf material for write(). A leaf holds solid iff one of its corners is solid (a trilerp's

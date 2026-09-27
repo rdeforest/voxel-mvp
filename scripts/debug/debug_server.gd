@@ -85,21 +85,37 @@ func _stats_json() -> String:
 	var wp := _world_preview
 	if wp == null:
 		return JSON.stringify({ "error": "no world_preview" })
-	var m := wp._mesher
-	return JSON.stringify({
+
+	var cells := wp.cell_stats()
+	var stats := {
 		"fps": Engine.get_frames_per_second(),
 		"frame_gen_ms": Perf.frame_gen_ms(),
 		"eps": wp._eps_px,
-		"refine_queue": m.get_last_refine_queue_size(),
-		"refine_pending": m.get_refine_pending(),
-		"cells": m.get_octree_cell_count(),
-		"cells_ram_mb": int(m.get_cell_arena_bytes() / 1048576),
-		"cell_limit_hit": m.get_cell_limit_hit(),
+		"cells": cells.slots,
+		"live_cells": cells.live,
+		"cell_limit": cells.limit,
+		"cells_ram_mb": int(cells.ram_bytes / 1048576),
+		"cell_limit_hit": cells.limit_hit,
 		"job_ms": wp._job_work_ms,
 		"job_kind": wp._job_kind(),
 		"refine_us": wp.refine_us,
 		"retain_m": wp.retain_margin_m,
 		"coverage_m": wp.win_radius_m,
+		"mesher_busy": wp.is_job_running(),
+	}
+
+	# The worker writes these mid-job; a request then gets the fields above and mesher_busy.
+	if not wp.is_job_running():
+		stats.merge(_mesher_stats(wp))
+
+	return JSON.stringify(stats)
+
+
+func _mesher_stats(wp: DcWorldPreview) -> Dictionary:
+	var m := wp._mesher
+	return {
+		"refine_queue": m.get_last_refine_queue_size(),
+		"refine_pending": m.get_refine_pending(),
 		"threads": m.get_thread_count(),
 		"phase": {
 			"build_ms": m.get_last_build_ms(),
@@ -123,7 +139,7 @@ func _stats_json() -> String:
 			"total": m.get_emit_diff_total_drop(),
 			"info": m.get_last_drop_info(),
 		},
-	})
+	}
 
 
 func _respond(peer: StreamPeerTCP, content_type: String, body: String) -> void:

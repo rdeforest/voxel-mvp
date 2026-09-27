@@ -51,7 +51,7 @@ var base_cell    := VoxelConstants.RENDER_BASE_CELL  # metres per lattice unit (
 var win_radius_m := 128.0                            # resident window half-extent (m) — graded floor + budget make it affordable
 var _eps_px      := EPS_START                        # the single operating point; floor + collapse both derive from it
 var _frame_ms    := 0.0                              # smoothed frame time (render-cost signal)
-var _mem_status  := ""                               # cells/RAM readout, refreshed by the worker in _run_job
+var _mem_status  := ""                               # cells/RAM readout, refreshed in _finish
 var _eps_dirty   := false                            # the controller changed eps → re-mesh to apply it
 
 var _follow:     Node3D
@@ -62,6 +62,7 @@ var _mesher := DCOctreeMesher.new()  # persistent — holds the retained octree 
 var _root_origin_i := Vector3i.ZERO  # LATTICE coords of the root's (0,0,0) corner
 var _built := false
 var _cell_limit_warned := false      # one-shot — did we tell the player refinement hit the cell limit?
+var _cells := _read_cells()          # cell_stats' last read of the octree, returned while a job owns it
 var _verify_tripped := false         # dcverify: one-shot Toast on the first bad emit (rest streams via REST)
 var _dirty := false                  # an edit happened → full rebuild to pick it up
 var _last_center := Vector3.INF
@@ -154,6 +155,44 @@ func is_enabled() -> bool:
     return _enabled
 
 
+func is_job_running() -> bool:
+    return _task_id != -1
+
+
+# `dcmaxcells`: 0 restores the default, the RAM-budget capacity. Mid-job the worker owns the octree, so
+# the budget then reaches it at the next idle frame (_process).
+func set_max_cells(n: int) -> void:
+    max_cells = n if n > 0 else DCOctreeMesher.get_cell_capacity()
+
+    if not is_job_running():
+        _mesher.set_cell_budget(max_cells)
+
+
+# Mirrors Octree::cell_limit: max_cells can only lower the capacity, and 0 means the capacity.
+func cell_limit() -> int:
+    var capacity := DCOctreeMesher.get_cell_capacity()
+
+    return max_cells if max_cells > 0 and max_cells < capacity else capacity
+
+
+# Reading the mesher mid-job races the worker, so a read then returns the last idle-time snapshot.
+func cell_stats() -> Dictionary:
+    if not is_job_running():
+        _cells = _read_cells()
+
+    return _cells.merged({"capacity": DCOctreeMesher.get_cell_capacity(), "limit": cell_limit()})
+
+
+func _read_cells() -> Dictionary:
+    return {
+        "live":      _mesher.get_octree_live_cell_count(),
+        "slots":     _mesher.get_octree_cell_count(),
+        "ram_bytes": _mesher.get_cell_arena_bytes(),
+        "limit_hit": _mesher.get_cell_limit_hit(),
+        "at_limit":  _mesher.is_at_cell_limit(),
+    }
+
+
 func set_diagnostic_overlay(overlay: Node3D) -> void:
     _inval = overlay
 
@@ -221,7 +260,7 @@ func _process(_dt: float) -> void:
     # NOT the vsync/fps_max-capped dt — so the controller's frame-headroom gate sees true GPU load, not the
     # quantised display interval (a 144Hz vsync pins dt at ~6.9ms and only jumps at the fps cliff).
     Perf.status("dcworld", "eps_px %.1f   job %.0f ms (%s%s)" % [_eps_px, _job_work_ms, _job_kind(), " refining" if _refine_pending else ""])
-    Perf.status("dcmem", _mem_status)   # computed on the worker in _run_job (race-free, off the main thread)
+    Perf.status("dcmem", _mem_status)   # refreshed in _finish, so never read mid-job
     if _root_viz_on:
         var ctr := (Vector3(_root_origin_i) + Vector3.ONE * (ROOT_SIZE * 0.5)) * base_cell
         var off := (_follow.global_position - ctr).abs()
@@ -388,20 +427,19 @@ func _run_job() -> void:
     # the GPU upload command is marshalled safely; _finish then just assigns the finished mesh (a cheap swap).
     _job_mesh = _arrays_to_mesh(_job_arrays)
     _job_work_ms = (Time.get_ticks_usec() - t0) / 1000.0   # mesh lag = the controller's primary signal
-    _refresh_mem_status()   # telemetry computed HERE (worker owns _persist this job) — never on the main thread
 
 
-# Runs on the worker at the end of _run_job — _persist is stable (this thread just built it) and the main
-# thread never touches it mid-job, so there's no race and no stall.
+# Live cells, not slots: the free list's slots are reusable, so they count as room under the limit.
 func _refresh_mem_status() -> void:
-    var cap_m := mini(max_cells, DCOctreeMesher.get_cell_capacity()) / 1.0e6
+    var cells := cell_stats()
     _mem_status = "%.1fM / %.1fM cells   RAM %.1f GB" % [
-            _mesher.get_octree_cell_count() / 1.0e6, cap_m, _mesher.get_cell_arena_bytes() / 1073741824.0]
+            cells.live / 1.0e6, cells.limit / 1.0e6, cells.ram_bytes / 1073741824.0]
 
 
 func _finish() -> void:
     WorkerThreadPool.wait_for_task_completion(_task_id)
     _task_id = -1
+    _refresh_mem_status()
     if not _enabled:
         return
     var t0 := Time.get_ticks_usec()
@@ -436,7 +474,7 @@ func _warn_cell_limit() -> void:
 
     _cell_limit_warned = true
     var msg := "Terrain detail hit the cell limit (%.1fM cells): refinement stopped at the current detail." % [
-            mini(max_cells, DCOctreeMesher.get_cell_capacity()) / 1.0e6]
+            cell_limit() / 1.0e6]
     push_warning(msg)
     Toast.failure(msg)
 

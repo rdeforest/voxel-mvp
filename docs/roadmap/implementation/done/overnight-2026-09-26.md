@@ -165,7 +165,7 @@ expectations. :)
    `voxel_added`/`voxel_removed`, so PartIndex never releases a part they carve, and support and
    detachment never react to them. This predates tonight. The fix is ready (writes now return
    measured flips); the intent isn't:
-   [`actions-reshape-no-voxel-events`](../../../bugs/actions-reshape-no-voxel-events.md).
+   `actions-reshape-no-voxel-events` (bug file deleted; fixed in e681626).
 
 I suppose it wouldn't make sense to emit events that aren't true, so maybe
 "voxel modified" needs to be a new event? But that's not exactly the question.

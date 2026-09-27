@@ -2,10 +2,10 @@ extends GutTest
 
 # EditStore.predict_carve: the field that empties exactly a thaw's planned cells and leaves every other
 # cell it rewrites on the side it reads now, or a refusal naming the cells that can't all hold.
-# On the game's field (EditStoreManager: aligned root, the real generator). Provenance:
-# docs/bugs/mpm-thaw-carve-leaves-planned-cells.md, where MpmStructure's corner carve empties 52 of
-# a terrain r=3 sphere's 63 planned cells, 143 of r=5's 176, and none of a lone buried cell, and its
-# box rewrite flips cells nobody planned.
+# On the game's field (EditStoreManager: aligned root, the real generator). Provenance: the
+# since-closed bug mpm-thaw-carve-leaves-planned-cells (design now in docs/roadmap/design/12), where
+# MpmStructure's corner carve emptied 52 of a terrain r=3 sphere's 63 planned cells, 143 of r=5's 176,
+# and none of a lone buried cell, and its box rewrite flipped cells nobody planned.
 
 var _store:   EditStore
 var _surface: float

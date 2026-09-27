@@ -305,8 +305,9 @@ and handed to `MpmStructure.thaw_cells(...)`.
 
 The scout tells edits apart by source: for its own detachment thaw (`SCOUT`)
 it seeds only from the cells the thaw flipped outside the component it thawed
-(the box rewrite can flip unplanned cells), and it ignores `MPM` freezes, whose
-flips aren't measured yet (`docs/bugs/mpm-freeze-flips-unmeasured.md`). It
+(the carve is solved to flip none, but the seeding follows measured flips, not the
+promise), and it ignores `MPM` freezes: seeding from their measured flips
+was measured to loop (`docs/bugs/scout-ignores-freeze-flips.md`). It
 pauses resolving while material is in flight, so
 detachment proceeds in settled waves; edits made during flight are queued, not
 dropped. That's what breaks the runaway cascade the old scalar trigger risked.

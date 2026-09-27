@@ -1,7 +1,8 @@
 extends SceneTree
 
 # Times MpmStructure.thaw_cells on the game's field: terrain spheres and a floating block (the
-# shape the detachment auto-trigger thaws). Measured for docs/bugs/mpm-thaw-carve-leaves-planned-cells.md.
+# shape the detachment auto-trigger thaws). Measured for docs/roadmap/design/
+# 12-mpm-structural-substrate.md ("The thaw carve").
 #
 #   godot --path . --headless -s res://scripts/dev/bench_mpm_thaw.gd
 

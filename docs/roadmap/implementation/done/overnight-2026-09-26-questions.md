@@ -45,7 +45,7 @@ the measured cell flips and the source, so raise, lower and flatten stop being t
 
 ## 2. A thaw plan the corner carve can't carve
 
-**Where:** [`mpm-thaw-carve-leaves-planned-cells`](../../../bugs/mpm-thaw-carve-leaves-planned-cells.md)
+**Where:** `mpm-thaw-carve-leaves-planned-cells` (fixed; design in [doc 12, "The thaw carve"](../../design/12-mpm-structural-substrate.md))
 
 **Context.** Thawing a sphere of buried terrain leaves part of it in the ground: radius 5 plans 176
 cells and empties 143, and a single buried cell empties none. The carve can only clear lattice
@@ -69,7 +69,7 @@ Agreed, for the same reason.
 
 ## 3. StoreWrite's box rewrite flips cells nobody edited
 
-**Where:** [`mpm-thaw-carve-leaves-planned-cells`](../../../bugs/mpm-thaw-carve-leaves-planned-cells.md),
+**Where:** `mpm-thaw-carve-leaves-planned-cells` (fixed; design in [doc 12, "The thaw carve"](../../design/12-mpm-structural-substrate.md)),
 "Separate effect".
 
 **Context.** `StoreWrite.cells` rewrites its whole box, which flips some cells nobody asked to change:
@@ -90,7 +90,7 @@ Agreed, per #2 above.
 
 ## 4. Disk-full policy for the DC cell arena
 
-**Where:** [`mmap-arena-disk-full-sigbus`](../../../bugs/mmap-arena-disk-full-sigbus.md)
+**Where:** `mmap-arena-disk-full-sigbus` (bug file deleted; fixed in 2ffbf33)
 
 **Context.** When the disk under the arena's temp file fills, the next write to a fresh page kills the
 process with SIGBUS. Your `./tmp` is on btrfs, whose copy-on-write means a full disk can fault even on
@@ -133,7 +133,7 @@ things just because I think they're cool, like using mmap for anything.
 
 ## 5. Save pairs: lone or mismatched halves
 
-**Where:** [`save-pair-consistency`](../../../bugs/save-pair-consistency.md)
+**Where:** `save-pair-consistency` (bug file deleted; fixed in 596589f)
 
 **Context.** A save is two files, the snapshot and the terrain blob. Nothing checks that they belong
 together. A lone half loads with a cheerful "Loaded save.", and a failed blob write can leave a new
@@ -159,7 +159,7 @@ Your take sounds right to me. Make it so.
 
 ## 6. `stamp_sphere` / `stamp_box` repaint terrain the brush didn't make
 
-**Where:** [`edit-store-stamp-union-repaints-terrain`](../../../bugs/edit-store-stamp-union-repaints-terrain.md)
+**Where:** `edit-store-stamp-union-repaints-terrain` (bug file deleted; fixed in 7e97989)
 
 **Context.** These C++ stamps paint every leaf that ends up solid, including existing terrain the brush
 never reached. The action write path paints only where the edit made something solid. Only tests and dev
@@ -239,7 +239,7 @@ Agreed.
 
 ## 10. `edit_world` and a stale refine frontier
 
-**Where:** [`dc-edit-world-stale-refine-frontier`](../../../bugs/dc-edit-world-stale-refine-frontier.md)
+**Where:** `dc-edit-world-stale-refine-frontier` (bug file deleted; fixed in 4e8331e)
 
 **Context.** After an edit, the mesher's saved list of cells waiting to refine can name cells the edit
 freed. A later "reuse the frontier" grow would refine stale entries. Nothing does that today; only

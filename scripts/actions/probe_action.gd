@@ -88,8 +88,7 @@ func report() -> PackedStringArray:
     out.append("Cell %s" % cell)
     out.append("  SDF      %.3f (%s)" % [sdf, "solid" if _is_solid(sdf) else "air"])
     out.append("  material %d (%s)" % [mat_idx, MaterialPalette.name_of(mat_idx)])
-    out.append("  leaf     %s" % ("edited (the store holds it)" if store.has_edit(VoxelUtils.sample_point(cell))
-        else "unedited (the generator's)"))
+    out.append_array(_leaf_lines(cell))
     out.append_array(_corner_lines(cell))
     out.append("  tracked  %s" % tracked)
     if tracked:
@@ -97,6 +96,34 @@ func report() -> PackedStringArray:
         out.append("  support  %.3f" % rec.support)
         out.append("  dirty    %s" % rec.dirty)
     return out
+
+
+# No FIELD_SOURCE: it marks an internal node, and leaf_info only reports leaves.
+const FIELD_STATES := {
+    EditStore.NO_FIELD:        "unedited (the generator's)",
+    EditStore.OWN_FIELD:       "edited, its own field",
+    EditStore.INHERITED_FIELD: "edited, inherited",
+}
+
+# The store's leaf holding the cell's sample point, which may be far coarser than the cell: its cube,
+# where its field comes from, and for an inherited leaf the subdivided leaf whose corners it reads.
+func _leaf_lines(cell: Vector3i) -> PackedStringArray:
+    var info := store.leaf_info(VoxelUtils.sample_point(cell))
+    var out  := PackedStringArray()
+    if info.is_empty():
+        out.append("  leaf     none: outside the store's root (the generator's)")
+        return out
+
+    out.append("  leaf     %s, %s m at %s" % [FIELD_STATES[info.field], _num(info.size), _vec(info.origin)])
+    if info.has("source_origin"):
+        out.append("           from the %s m leaf at %s" % [_num(info.source_size), _vec(info.source_origin)])
+    return out
+
+static func _num(x: float) -> String:
+    return "%d" % x if x == floorf(x) else "%s" % x
+
+static func _vec(v: Vector3) -> String:
+    return "(%s, %s, %s)" % [_num(v.x), _num(v.y), _num(v.z)]
 
 
 # The corners the mesher reads, its sign test on them, and every corner where the cell's own leaf

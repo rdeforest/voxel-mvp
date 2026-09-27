@@ -9,15 +9,14 @@ extends Node
 # Cascade safety (why the scalar trigger died): the scout never re-floods what its own work was
 # meant to remove, and it resolves only a settled world. Neither rule is a timing guess.
 #   - Edits are told apart by source. For its own SCOUT thaw it seeds only from the collateral: the
-#     measured flips outside the component it thawed. The carve clears no corner a kept solid cell
-#     needs, but rewriting the lattice box re-encodes the field there, so an unplanned cell can go
-#     air (or solid) and cut someone else's support; the event's flips name exactly those cells.
-#     The thawed component itself is never re-seeded, so a thaw that empties only its component,
-#     or empties nothing (no event, or one with no flips), can't loop.
-#   - MPM freeze events are ignored entirely. That is a known hole, not a guarantee: the freeze's
-#     1 m rewrite can empty a cell, but its flips aren't measured yet, so there is nothing precise
-#     to seed from. Seeding its whole box instead would re-flood the pile it just deposited, and
-#     whether that can loop is unmeasured (docs/bugs/mpm-freeze-flips-unmeasured.md).
+#     measured flips outside the component it thawed. The thaw's carve is solved to keep every
+#     unplanned cell on its side, so there should be none; the seeding stays because the flips are
+#     measured, not assumed. The thawed component itself is never re-seeded, and a refused thaw writes
+#     and announces nothing, so neither can loop.
+#   - MPM freeze events are ignored entirely, flips and all. That is a known hole: the freeze's 1 m
+#     rewrite can empty a cell and leave a neighbour unsupported. Seeding from its flips was measured
+#     to loop: a pile frozen onto geometry the collider holds but GroundFlood reads as air floods
+#     DETACHED, thaws, and freezes again (docs/bugs/scout-ignores-freeze-flips.md).
 #   - It pauses resolving while MPM has material in flight, so the next wave is judged against the
 #     post-fall world. Edits by anyone else during flight are queued, not dropped.
 # So detachment proceeds in settled waves, never a runaway feedback loop.

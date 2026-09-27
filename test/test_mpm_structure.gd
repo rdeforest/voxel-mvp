@@ -4,7 +4,8 @@ extends GutTest
 # Headless: thaw a sphere of solid terrain into MPM (carve + seed particles), simulate until it
 # settles, and freeze it back into the store as terrain. This is the loop `mpmthaw` drives in-game.
 
-const MatterLog := preload("res://test/support/matter_log.gd")
+const MatterLog   := preload("res://test/support/matter_log.gd")
+const RefusingMpm := preload("res://test/support/refusing_mpm.gd")
 
 const THAWER := EditSource.Kind.INSTRUMENT   # these thaws stand in for `mpmthaw`
 
@@ -23,6 +24,11 @@ func _surface() -> int:
     var s := EditStore.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
         EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
     return int(s)
+
+
+func _surface_f() -> float:
+    return EditStore.terrain_surface(0.0, 0.0, EditStoreManager.BASE,
+        EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
 
 
 func test_thaw_simulate_freeze_loop_on_real_terrain() -> void:
@@ -142,30 +148,28 @@ func _sorted(cells: Array[Vector3i]) -> Array[Vector3i]:
     return out
 
 
-# Provenance: docs/bugs/mpm-thaw-carve-leaves-planned-cells.md (filed from the fix for the since-
-# deleted mpm-thaw-events-unmeasured). On the game's field at this spot, a radius-1.4 thaw
-# plans cells that the carve can't empty (their corners are shared with kept terrain), and
-# rewriting the box re-encodes the generated field so a cell the plan never named reads air
-# afterwards. The event's flips (and the particles) must name exactly the cells that went air.
-func test_thaw_events_are_the_measured_flips() -> void:
-    var store := EditStoreManager.new()
-    store.setup()
-    var top := EditStore.terrain_surface(15.0, -16.0, EditStoreManager.BASE,
-        EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
-    var center := Vector3(15.5, top, -15.5)
-    var around := Vector3i(center.floor())
+# MpmStructure._plan_thaw's plan, measured independently: the cells whose centre reads solid.
+func _plan(store: EditStore, cells: Array) -> Array[Vector3i]:
+    var out: Array[Vector3i] = []
+    for cell: Vector3i in cells:
+        if TerrainProbe.is_solid(store, cell):
+            out.append(cell)
+    return out
 
-    var planned := {}
-    for cell in VoxelUtils.cells_in_sphere(center, 1.4):
-        if TerrainProbe.is_solid(store.store, cell):
-            planned[cell] = true
 
+# Thaws `cells` and checks that the store changed exactly there: every planned (solid) cell went air
+# and no other cell within `reach` of `around` flipped either way; the event and the particles are
+# those flips. The rewritten box is the plan's box plus a margin, squared to a cube: `reach` must
+# cover it.
+func _assert_thaws_exactly(store: EditStore, cells: Array, around: Vector3i, reach: int) -> void:
+    var planned := _plan(store, cells)
     var ms: MpmStructure = autofree(MpmStructure.new())
-    ms.setup(store.store)
+    ms.setup(store)
 
-    var was := _solidity(store.store, around, 10)
-    var n   := ms.thaw_sphere(center, 1.4, THAWER)
-    var now := _solidity(store.store, around, 10)
+    var was := _solidity(store, around, reach)
+    _log.clear()
+    var n   := ms.thaw_cells(cells, THAWER)
+    var now := _solidity(store, around, reach)
 
     var went_air:   Array[Vector3i] = []
     var went_solid: Array[Vector3i] = []
@@ -175,33 +179,125 @@ func test_thaw_events_are_the_measured_flips() -> void:
         elif now[cell] and not was[cell]:
             went_solid.append(cell)
 
-    assert_true(went_air.any(func(c: Vector3i) -> bool: return not planned.has(c)),
-        "precondition: the thaw flips a cell outside its plan to air")
-    assert_true(planned.keys().any(func(c: Vector3i) -> bool: return not went_air.has(c)),
-        "precondition: a planned cell survives the carve")
-
-    assert_eq(_sorted(_log.air), _sorted(went_air), "the event's air flips are exactly the cells that went air")
-    assert_eq(_sorted(_log.solid), _sorted(went_solid), "its solid flips are exactly the cells that went solid")
-    assert_eq(n, went_air.size(), "the thaw count is the cells emptied")
-    assert_eq(ms.active_count(), 8 * went_air.size(), "particles are seeded only for the cells emptied")
+    assert_eq(_sorted(went_air), _sorted(planned), "exactly the planned cells went air")
+    assert_eq(went_solid, [] as Array[Vector3i], "no cell went solid")
+    assert_eq(_sorted(_log.air), _sorted(went_air), "the event's air flips are the cells that went air")
+    assert_eq(_log.solid, [] as Array[Vector3i], "and it names no solid flip")
+    assert_eq(n, planned.size(), "the thaw count is the planned cells")
+    assert_eq(ms.active_count(), 8 * planned.size(), "8 particles per emptied cell")
 
 
-# A lone cell deep in the ground has every corner shared with kept solid, so the carve can clear
-# none of them: nothing leaves the store, so nothing may be reported or enter the sim.
-func test_thaw_of_an_enclosed_cell_moves_nothing() -> void:
+# Provenance: the since-closed bug mpm-thaw-carve-leaves-planned-cells. The corner carve emptied 52 of this
+# sphere's 63 planned cells (a planned cell against kept terrain kept the corners it shares with it).
+func test_terrain_sphere_r3_thaw_empties_all_63_planned_cells() -> void:
+    var store  := EditStoreManager.new()
+    store.setup()
+    var center := Vector3(0.5, _surface_f() - 3.0, 0.5)
+    var cells  := VoxelUtils.cells_in_sphere(center, 3.0)
+    assert_eq(_plan(store.store, cells).size(), 63, "precondition: the bug file's r=3 plan")
+
+    _assert_thaws_exactly(store.store, cells, Vector3i(center.floor()), 8)
+
+
+# The same, where the corner carve emptied 143 of 176.
+func test_terrain_sphere_r5_thaw_empties_all_176_planned_cells() -> void:
+    var store  := EditStoreManager.new()
+    store.setup()
+    var center := Vector3(0.5, _surface_f() - 3.0, 0.5)
+    var cells  := VoxelUtils.cells_in_sphere(center, 5.0)
+    assert_eq(_plan(store.store, cells).size(), 176, "precondition: the bug file's r=5 plan")
+
+    _assert_thaws_exactly(store.store, cells, Vector3i(center.floor()), 10)
+
+
+# A lone cell deep in the ground shares every corner with kept solid, so the corner carve could clear
+# none of them and the thaw emptied nothing.
+func test_thaw_of_a_lone_buried_cell_empties_it() -> void:
     var store := EditStoreManager.new()
     store.setup()
     var cell := Vector3i(0, _surface() - 20, 0)
     assert_true(_solidity(store.store, cell, 1).values().all(func(v: bool) -> bool: return v),
-        "precondition: the cell and all 26 neighbours are solid, so no corner of it may clear")
+        "precondition: the cell and all 26 neighbours are solid")
 
+    _assert_thaws_exactly(store.store, [cell], cell, 4)
+
+
+# A 9^3 block under the ridge: 729 cells asked for, the largest the particle cap allows, some of them
+# already air in the generator's field.
+func test_thaw_of_a_buried_block_empties_its_solid_cells() -> void:
+    var store := EditStoreManager.new()
+    store.setup()
+    var cells: Array[Vector3i] = []
+    for x in 9:
+        for y in 9:
+            for z in 9:
+                cells.append(Vector3i(x - 4, _surface() - 16 + y, z - 4))
+
+    _assert_thaws_exactly(store.store, cells, Vector3i(0, _surface() - 12, 0), 10)
+
+
+# On the game's field at this spot, re-encoding the thaw's box alone flips a cell nobody planned to
+# air (scripts/dev/find_reencode_flip.gd finds such spots; test_edit_store_carve pins this one). The
+# corner carve let such a cell go, matter the sim gained from outside the plan. The solved carve keeps
+# it on its side.
+func test_thaw_leaves_cells_outside_its_plan_where_the_rewrite_would_flip_them() -> void:
+    var store := EditStoreManager.new()
+    store.setup()
+    var top := EditStore.terrain_surface(-20.0, 14.0, EditStoreManager.BASE,
+        EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
+    var center := Vector3(-19.5, top, 14.5)
+    var cells  := VoxelUtils.cells_in_sphere(center, 1.4)
+    var planned := _plan(store.store, cells)
+
+    var carve  := store.store.predict_carve(planned)
+    var plain  := store.store.fill_region(Vector3i(carve.origin), carve.dim, 1.0, PackedFloat32Array(),
+        Vector3i.ZERO, Vector3i.ZERO, Vector3i.ZERO)
+    var stray: Array = store.store.lattice_flips(plain, carve.dim, carve.origin, 1.0).air.filter(
+        func(c: Vector3i) -> bool: return not planned.has(c))
+    assert_gt(stray.size(), 0, "precondition: re-encoding the box flips an unplanned cell to air")
+
+    _assert_thaws_exactly(store.store, cells, Vector3i(center.floor()), 8)
+
+
+# A refused carve refuses the whole thaw: nothing is written, announced or seeded, and it says so.
+func test_a_refused_carve_refuses_the_thaw_loudly() -> void:
+    var store := EditStoreManager.new()
+    store.setup()
+    var center := Vector3(0.5, _surface_f() - 3.0, 0.5)
+    var ms = autofree(RefusingMpm.new())
+    ms.setup(store.store)
+    watch_signals(ms)
+
+    var before := store.store.serialize()
+    var n: int = ms.thaw_sphere(center, 3.0, THAWER)
+
+    assert_eq(ms.solves, 1, "precondition: the carve was solved and refused")
+    assert_eq(n, 0, "nothing thawed")
+    assert_eq(store.store.serialize(), before, "the store is untouched")
+    assert_eq(_log.events.size(), 0, "no edit announced")
+    assert_eq(ms.active_count(), 0, "no particles")
+    assert_push_error("thaw of 63 cells refused", "the refusal is logged")
+    assert_signal_emitted(ms, "thaw_refused", "and told to whoever shows the player")
+
+
+# The SVD conditioning gauge (MpmSim.get_min_sigma_ratio) reads per thaw: a thaw starts it afresh.
+func test_a_thaw_resets_the_conditioning_gauge() -> void:
+    var store := EditStoreManager.new()
+    store.setup()
     var ms: MpmStructure = autofree(MpmStructure.new())
     ms.setup(store.store)
 
-    assert_eq(ms.thaw_cells([cell], THAWER), 0, "no cell thawed")
-    assert_true(TerrainProbe.is_solid(store.store, cell), "the cell is still solid terrain")
-    assert_eq(_log.air.size(), 0, "no air flip for a cell that did not go air")
-    assert_eq(ms.active_count(), 0, "no particles duplicate matter still in the store")
+    ms.thaw_sphere(Vector3(0.5, _surface_f() - 3.0, 0.5), 3.0, THAWER)
+    for _i in 600:
+        ms.tick(1.0 / 60.0)
+        if ms._sim.get_min_sigma_ratio() < 0.99:
+            break
+    assert_lt(ms._sim.get_min_sigma_ratio(), 0.99, "precondition: the first thaw's material deformed")
+
+    var there := EditStore.terrain_surface(20.0, 0.0, EditStoreManager.BASE, EditStoreManager.AMP,
+        EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
+    assert_gt(ms.thaw_sphere(Vector3(20.5, there - 3.0, 0.5), 2.0, THAWER), 0, "precondition: a second thaw")
+    assert_eq(ms._sim.get_min_sigma_ratio(), 1.0, "the second thaw starts the gauge afresh")
 
 
 # DetachmentScout tells its own carve from anyone else's by the source the event carries, so a thaw
@@ -224,10 +320,9 @@ func test_thaw_is_announced_once_with_its_source() -> void:
         assert_eq(_log.sources(), [source] as Array[EditSource.Kind], "one event, credited to its source")
 
 
-# A second thaw of the same sphere plans the cells the first couldn't empty, but its rewrite
-# repeats the first's values: no change, so no re-mesh event (with MPM idle it would re-seed the
-# scout onto the same piece).
-func test_thaw_that_changes_nothing_announces_no_edit() -> void:
+# A second thaw of the same sphere finds every cell the first planned already air: nothing to carve,
+# so no edit is announced (with MPM idle it would re-seed the scout onto the same piece).
+func test_a_repeat_thaw_plans_nothing_and_announces_nothing() -> void:
     var store := EditStoreManager.new()
     store.setup()
     var center := Vector3(0.5, _surface() - 3.0, 0.5)
@@ -239,14 +334,12 @@ func test_thaw_that_changes_nothing_announces_no_edit() -> void:
     var ms: MpmStructure = autofree(MpmStructure.new())
     ms.setup(store.store)
 
-    var replan := ms._carve_corners(ms._plan_thaw(VoxelUtils.cells_in_sphere(center, 3.0)))
-    assert_false(replan.is_empty(), "precondition: the repeat still rewrites corners")
+    assert_eq(ms._plan_thaw(VoxelUtils.cells_in_sphere(center, 3.0)), [] as Array[Vector3i],
+        "the first thaw left no planned cell solid")
 
     _log.clear()
-    var n := ms.thaw_sphere(center, 3.0, THAWER)
-
-    assert_eq(n, 0, "precondition: the repeat empties nothing")
-    assert_eq(_log.events.size(), 0, "a rewrite that changed nothing announces no edit")
+    assert_eq(ms.thaw_sphere(center, 3.0, THAWER), 0, "the repeat empties nothing")
+    assert_eq(_log.events.size(), 0, "and announces no edit")
 
 
 # (Drafted by Claude, overnight 2026-09-27.) A large freeze is announced chunk by chunk, and the
@@ -269,7 +362,7 @@ func test_freeze_announcement_order_ignores_the_camera() -> void:
         cam.global_position = eye
         assert_eq(get_viewport().get_camera_3d(), cam, "precondition: the camera MpmStructure would see")
         _log.clear()
-        ms._queue_freeze_chunks(origin, dim)
+        ms._queue_freeze_chunks(origin, dim, CellFlips.new())
         while not ms._pending_chunks.is_empty():
             ms.tick(1.0 / 60.0)
         orders.append(_log.events.map(func(e: TerrainSdfChangedEvent) -> Vector3: return e.box_origin))
@@ -292,9 +385,9 @@ func test_a_freeze_during_announcement_keeps_the_earlier_chunks() -> void:
     ms.setup(manager.store)
     var dim := 3 * MpmStructure.CHUNK
 
-    ms._queue_freeze_chunks(Vector3(0, 40, 0), dim)
+    ms._queue_freeze_chunks(Vector3(0, 40, 0), dim, CellFlips.new())
     ms.tick(1.0 / 60.0)
-    ms._queue_freeze_chunks(Vector3(100, 40, 0), dim)
+    ms._queue_freeze_chunks(Vector3(100, 40, 0), dim, CellFlips.new())
     while not ms._pending_chunks.is_empty():
         ms.tick(1.0 / 60.0)
 

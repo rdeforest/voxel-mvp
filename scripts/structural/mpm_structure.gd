@@ -21,10 +21,26 @@ const CHUNK            := 12     # freeze region is re-meshed in CHUNK³ boxes (
 const CHUNKS_PER_FRAME := 2      # bounded work/frame
 const SINGLE_EMIT_MAX  := 24     # a settled clump this small re-meshes in ONE watertight box (no chunk seams)
 
-const _UNIT_CUBE: Array[Vector3i] = [
-    Vector3i(0, 0, 0), Vector3i(0, 0, 1), Vector3i(0, 1, 0), Vector3i(0, 1, 1),
-    Vector3i(1, 0, 0), Vector3i(1, 0, 1), Vector3i(1, 1, 0), Vector3i(1, 1, 1),
-]
+# predict_carve's refusal, keyed by [proven, pinned] (EditStore::predict_carve says what each means).
+const _REFUSALS := {
+    [true, false]:  "no field empties them and keeps every other cell on its side",
+    [true, true]:   "no field within the box a thaw may rewrite empties them and keeps the rest",
+    [false, false]: "the carve solve ran out of sweeps before finding a field",
+}
+
+# A thaw was refused and wrote nothing (why, for the player).
+signal thaw_refused(message: String)
+
+
+# One CHUNK³ box of a freeze still to be announced, and the freeze's flips that fall inside it.
+class FreezeChunk:
+    var box:   AABB
+    var flips: CellFlips
+
+    func _init(p_box: AABB, p_flips: CellFlips) -> void:
+        box   = p_box
+        flips = p_flips
+
 
 var _sim:   MpmSim
 var _store: EditStore
@@ -32,7 +48,7 @@ var _mm:    MultiMesh
 
 var _settled_frames := 0
 var _material_index := 1        # Stone — the material the frozen-back terrain takes
-var _pending_chunks: Array = [] # freeze re-mesh boxes still to emit, bottom layer first
+var _pending_chunks: Array[FreezeChunk] = []   # still to announce, bottom layer first
 
 
 func setup(store: EditStore) -> void:
@@ -66,52 +82,76 @@ func thaw_sphere(center: Vector3, radius: float, source: EditSource.Kind, materi
     return thaw_cells(VoxelUtils.cells_in_sphere(center, radius), source, material_index)
 
 
-# Thaw a set of (presumed solid) terrain cells into MPM particles: carve them from the store (a
-# hole opens, DC re-meshes) and seed 8 particles per cell the carve actually turned to air. Air
-# cells are skipped. Returns the count thawed. This is what the loss-of-support auto-trigger feeds;
-# the carve's event is credited to `source` (SCOUT for a detachment, INSTRUMENT for `mpmthaw`).
+# Thaw a set of (presumed solid) terrain cells into MPM particles: carve exactly the solid ones out of
+# the store (a hole opens, DC re-meshes) and seed 8 particles per cell emptied. Air cells are skipped.
+# Returns the count thawed. This is what the loss-of-support auto-trigger feeds; the carve's event is
+# credited to `source` (SCOUT for a detachment, INSTRUMENT for `mpmthaw`).
 #
-# The planned cells are only the carve's input. A planned cell can survive it (every corner it has
-# is shared with kept solid, so none may clear), and rewriting the box re-encodes the field there,
-# which can flip cells the plan never named. So the event and the particles both follow the flips
-# measured across the write, as VoxelImprint.apply does: matter leaves the store exactly where it
-# enters the sim.
+# The carve is solved (EditStore.predict_carve): every planned cell goes air and every other cell the
+# rewrite touches keeps its side. Where no field does that, the whole thaw is refused, loudly, and
+# nothing is written: a thaw that emptied part of its plan would leave the rest in the ground while
+# the caller believed it gone (docs/roadmap/design/12-mpm-structural-substrate.md, "The thaw carve").
+# The event and the particles still follow the flips measured across the write, as VoxelImprint.apply
+# does, so matter leaves the store exactly where it enters the sim.
 func thaw_cells(cells: Array, source: EditSource.Kind, material_index := 1) -> int:
     _material_index = material_index   # freeze fallback only; each particle carries its own material
 
-    var work := _carve_corners(_plan_thaw(cells))
+    var planned := _plan_thaw(cells)
 
-    if work.is_empty():
+    if planned.is_empty():
         return 0
 
-    var lat   := StoreWrite.lattice(_store, work)
-    var flips := StoreWrite.write(_store, lat, work)
+    var carve := _solve_carve(planned)
+
+    if not carve.has("sdf"):
+        _refuse(carve, planned.size())
+        return 0
+
+    _sim.reset_min_sigma_ratio()
+
+    var lat   := SdfLattice.predicted(carve)
+    var flips := StoreWrite.reshape(_store, lat)
 
     _seed_particles(flips)
     _settled_frames = 0
     _mm.instance_count = _sim.particle_count()
 
-    # A rewrite that changed nothing needs no re-mesh and has no flips to report.
-    if flips.changed:
-        TerrainSdfChangedEvent.announce(source, lat.region(), flips)
+    TerrainSdfChangedEvent.announce(source, lat.region(), flips)
 
     return flips.air.size()
 
 
 # The solid cells to carve (centre sampled solid), capped so the planned cells' particles fit
 # under MAX_PARTICLES: past the cap the rest stays terrain rather than choke the sim.
-func _plan_thaw(cells: Array) -> Dictionary:
-    var planned := {}
+func _plan_thaw(cells: Array) -> Array[Vector3i]:
+    var planned: Array[Vector3i] = []
+    var seen    := {}
     var budget  := (MAX_PARTICLES - _sim.particle_count()) / 8
 
-    for cell in cells:
+    for cell: Vector3i in cells:
         if planned.size() >= budget:
             break
 
-        if TerrainProbe.is_solid(_store, cell):
-            planned[cell] = true
+        if not seen.has(cell) and TerrainProbe.is_solid(_store, cell):
+            seen[cell] = true
+            planned.append(cell)
 
     return planned
+
+
+# Its own method so a test can stand in a refusal: no plan the thaw makes on the game's field has
+# been found that the solve refuses (doc 12, as above).
+func _solve_carve(planned: Array[Vector3i]) -> Dictionary:
+    return _store.predict_carve(planned)
+
+
+func _refuse(carve: Dictionary, planned: int) -> void:
+    var conflict: Array = carve.conflict
+    var message := "thaw of %d cells refused: %s; %d cells conflict, e.g. %s" % [planned,
+        _REFUSALS[[carve.proven, carve.pinned]], conflict.size(), conflict.slice(0, 4)]
+
+    push_error("MpmStructure: " + message)
+    thaw_refused.emit(message)
 
 
 # Eight particles in each cell the carve emptied, of what the cell was made of.
@@ -125,50 +165,6 @@ func _seed_particles(carved: CellFlips) -> void:
             for oy in [0.25, 0.75]:
                 for oz in [0.25, 0.75]:
                     _sim.add_particle(Vector3(cell) + Vector3(ox, oy, oz), p_mass, p_vol, carved.air_materials[i])
-
-
-# Carving a corner-sampled SDF cleanly. StoreWrite sets the value at the grid CORNER it's handed,
-# so the old per-cell `[cell, AIR]` raised only each cell's base (min) corner — the +X/+Y/+Z face
-# corners of the boundary cells stayed solid, leaving every thawed cell a 1..7/8-solid shell.
-# Instead: raise a grid corner to air UNLESS a kept-solid cell still needs it — a corner clears iff
-# none of its 8 surrounding cells is solid-and-not-thawed. Interior corners (all neighbours thawed)
-# clear; corners against the kept terrain stay, so the carve leaves a clean wall, not a crust.
-func _carve_corners(planned: Dictionary) -> Array[LatticeEdit]:
-    var corner_work: Array[LatticeEdit] = []
-    var seen := {}
-    var kept := {}   # unplanned cell -> kept solid; each is probed once, not once per corner
-
-    for cell: Vector3i in planned:
-        for offset in _UNIT_CUBE:
-            var corner := cell + offset
-
-            if seen.has(corner):
-                continue
-
-            seen[corner] = true
-
-            if _corner_clears(corner, planned, kept):
-                corner_work.append(LatticeEdit.new(corner, VoxelConstants.SDF_AIR))
-
-    return corner_work
-
-
-# The 8 cells touching grid corner C have base corners C-{0,1}³. The corner can go air unless one
-# of them is kept solid (not thawed, and its centre samples solid).
-func _corner_clears(corner: Vector3i, planned: Dictionary, kept: Dictionary) -> bool:
-    for offset in _UNIT_CUBE:
-        var nc := corner - offset
-
-        if planned.has(nc):
-            continue
-
-        if not kept.has(nc):
-            kept[nc] = TerrainProbe.is_solid(_store, nc)
-
-        if kept[nc]:
-            return false   # a kept-solid neighbour needs this corner
-
-    return true
 
 
 func active_count() -> int:
@@ -214,27 +210,28 @@ func _emit_pending_chunks() -> void:
     var n := 0
 
     while not _pending_chunks.is_empty() and n < CHUNKS_PER_FRAME:
-        var box: Vector3 = _pending_chunks.pop_front()
+        var chunk: FreezeChunk = _pending_chunks.pop_front()
 
-        _announce_freeze(AABB(box, Vector3.ONE * float(CHUNK)))
+        _announce_freeze(chunk.box, chunk.flips)
 
         n += 1
 
 
-# Rasterise the settled particles back into the store as terrain (fast, bin-hashed), then queue
-# the region for chunked announcement, and drop the particles.
+# Rasterise the settled particles back into the store as terrain (fast, bin-hashed), then announce
+# the region with the cells the write flipped, measured across it, and drop the particles.
 func _freeze() -> void:
     var region: Dictionary = _sim.rasterize_to_store(_store, 1.0, FREEZE_RADIUS, _material_index)
 
     if not region.is_empty():
-        var origin: Vector3 = region["origin"]
-        var dim:    int     = region["dim"]
+        var origin: Vector3   = region["origin"]
+        var dim:    int       = region["dim"]
+        var flips:  CellFlips = CellFlips.measured(region)
 
         if dim <= SINGLE_EMIT_MAX:
             # Small settled clump → one box, meshed in a single splice (watertight, no chunk seams).
-            _announce_freeze(AABB(origin, Vector3.ONE * float(dim)))
+            _announce_freeze(AABB(origin, Vector3.ONE * float(dim)), flips)
         else:
-            _queue_freeze_chunks(origin, dim)
+            _queue_freeze_chunks(origin, dim, flips)
 
     _sim.clear()
     _settled_frames = 0
@@ -243,11 +240,8 @@ func _freeze() -> void:
         _mm.instance_count = 0
 
 
-# MpmSim.rasterize_to_store writes without measuring, so a freeze reports its box with no flips:
-# subscribers learn of its cells only by re-scanning the box
-# (docs/bugs/mpm-freeze-flips-unmeasured.md).
-func _announce_freeze(box: AABB) -> void:
-    TerrainSdfChangedEvent.announce(EditSource.Kind.MPM, box, CellFlips.new())
+func _announce_freeze(box: AABB, flips: CellFlips) -> void:
+    TerrainSdfChangedEvent.announce(EditSource.Kind.MPM, box, flips)
 
 
 # Split the rasterised region into CHUNK³ boxes, in an order fixed by position: bottom layer first,
@@ -255,11 +249,47 @@ func _announce_freeze(box: AABB) -> void:
 # world, not of where the camera happens to be; any fixed order would do, and bottom-up puts a pile's
 # footing before what rests on it. Appended, so a freeze landing while an earlier one is still being
 # announced doesn't drop the rest of the earlier one.
-func _queue_freeze_chunks(origin: Vector3, dim: int) -> void:
+#
+# Each chunk carries the flips inside its own box, so every event means one thing: a box, and the
+# cells flipped within it. The write reports only cells between its lattice points (origin +
+# [0, dim-2] per axis), each inside some chunk here, so the chunks' flips partition the freeze's. `changed` is the write's, which a chunk can't narrow to its own box.
+func _queue_freeze_chunks(origin: Vector3, dim: int, flips: CellFlips) -> void:
+    var by_chunk := _flips_by_chunk(flips, origin)
+
     for cy in range(0, dim, CHUNK):
         for cz in range(0, dim, CHUNK):
             for cx in range(0, dim, CHUNK):
-                _pending_chunks.append(origin + Vector3(cx, cy, cz))
+                var corner := Vector3i(cx, cy, cz)
+                var box    := AABB(origin + Vector3(corner), Vector3.ONE * float(CHUNK))
+                var within: CellFlips = by_chunk.get(corner, CellFlips.new())
+
+                within.changed = flips.changed
+                _pending_chunks.append(FreezeChunk.new(box, within))
+
+
+# The flips keyed by the corner, relative to `origin`, of the CHUNK³ box each cell falls in.
+static func _flips_by_chunk(flips: CellFlips, origin: Vector3) -> Dictionary:
+    var out := {}
+
+    for cell in flips.solid:
+        _chunk_of(out, cell, origin).solid.append(cell)
+
+    for i in flips.air.size():
+        var chunk := _chunk_of(out, flips.air[i], origin)
+
+        chunk.air.append(flips.air[i])
+        chunk.air_materials.append(flips.air_materials[i])
+
+    return out
+
+
+static func _chunk_of(chunks: Dictionary, cell: Vector3i, origin: Vector3) -> CellFlips:
+    var corner := Vector3i(((Vector3(cell) - origin) / float(CHUNK)).floor()) * CHUNK
+
+    if not chunks.has(corner):
+        chunks[corner] = CellFlips.new()
+
+    return chunks[corner]
 
 
 func _process(_dt: float) -> void:

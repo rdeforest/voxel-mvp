@@ -4,42 +4,14 @@ extends GutTest
 # toward bedrock; a detached component is thawed into MPM. Two cases: a floating block (no ground
 # beneath) gets thawed; grounded terrain is left alone. Also pins the cascade guard, by the source
 # each event carries: the scout seeds from its own thaw only where that thaw flipped cells outside
-# the component it thawed, ignores MPM's freezes, and resolves an edit made while material is in
-# flight only once it has settled.
+# the component it thawed, ignores MPM's freezes (flips and all), and resolves an edit made while
+# material is in flight only once it has settled.
 
 const MatterLog := preload("res://test/support/matter_log.gd")
+const Scenario  := preload("res://test/support/scenario.gd")
 
 
-# A thaw whose carve can't empty its plan but still rewrites the field there, as
-# docs/bugs/mpm-thaw-carve-leaves-planned-cells.md describes: every corner inside the plan (all 8
-# of its cells planned) is pushed further solid. Nothing leaves the store and no cell flips, MPM
-# stays idle, and the write still changes samples, so it is announced. Pushing a corner an
-# unplanned cell shares would grow the piece instead, which is collateral the scout rightly
-# re-checks. Counts the thaws the scout asks for.
-class StubbornMpm:
-    extends MpmStructure
-
-    var thaws := 0
-
-    func _carve_corners(planned: Dictionary) -> Array[LatticeEdit]:
-        thaws += 1
-        var work: Array[LatticeEdit] = []
-        var seen := {}
-        for cell: Vector3i in planned:
-            for k in 8:
-                var corner := cell + Vector3i(CubeGeometry.corner(k))
-                if seen.has(corner) or not _inside(corner, planned):
-                    continue
-
-                seen[corner] = true
-                work.append(LatticeEdit.new(corner, _store.sample(Vector3(corner)) - 0.05))
-        return work
-
-    func _inside(corner: Vector3i, planned: Dictionary) -> bool:
-        for k in 8:
-            if not planned.has(corner - Vector3i(CubeGeometry.corner(k))):
-                return false
-        return true
+const RefusingMpm := preload("res://test/support/refusing_mpm.gd")
 
 const BASE    := 30.0
 const AMP     := 140.0
@@ -184,12 +156,13 @@ func test_scout_and_mpm_edits_do_not_seed_from_their_box() -> void:
             "%s edits %s" % [EditSource.Kind.keys()[source], "seed nothing" if ignored else "seed the scout"])
 
 
-# The B4 loop (7e6c225): a detachment thaw that empties nothing leaves MPM idle but still
-# announces its rewrite. Judged by timing (MPM idle = not MPM's edit) the scout re-seeded onto the
-# same piece and thawed it again, forever; judged by source it hears its own thaw and moves on.
-func test_a_thaw_that_empties_nothing_does_not_make_the_scout_reflood() -> void:
-    var stubborn := StubbornMpm.new()
-    var rig      := _rig(stubborn)
+# A detachment whose thaw is refused leaves the piece in place, still detached. The scout must not
+# re-flood it and ask again every frame: the refused thaw writes and announces nothing, and the flood
+# that found the piece consumed its seeds. (The B4 loop, 7e6c225, was the same shape with a thaw
+# that emptied nothing but still announced its rewrite.)
+func test_a_refused_thaw_is_not_retried() -> void:
+    var refusing = RefusingMpm.new()
+    var rig      := _rig(refusing)
     var matter   := MatterLog.new()
     var by       := _surface() + 60
     _stone_block(rig.store, Vector3(CX, float(by), CZ))
@@ -197,49 +170,117 @@ func test_a_thaw_that_empties_nothing_does_not_make_the_scout_reflood() -> void:
     _emit_edit(Vector3(CX - 4, float(by) - 4, CZ - 4), Vector3(8, 8, 8))
     _drive(rig.scout, 400)
 
-    assert_eq(stubborn.thaws, 1, "the floating block was detached once and not re-flooded")
-    assert_eq(stubborn.active_count(), 0, "precondition: the thaw emptied nothing, so MPM stayed idle")
-    var own := matter.events.filter(func(e: TerrainSdfChangedEvent) -> bool: return e.source == EditSource.Kind.SCOUT)
-    assert_eq(own.size(), 1, "precondition: the thaw's rewrite was announced, credited to the scout")
-    assert_true(own[0].flips.is_empty(), "precondition: and it flipped no cell")
+    assert_eq(refusing.solves, 1, "the floating block was detached once and not re-flooded")
+    assert_push_error("refused", "the refusal is logged")
+    assert_true(rig.scout.is_idle(), "the scout has nothing left to resolve")
+    assert_eq(rig.scout._thawing, {}, "the refused thaw's component isn't held as its collateral filter")
+    assert_eq(refusing.active_count(), 0, "nothing entered the sim")
+    assert_eq(matter.events.filter(func(e: TerrainSdfChangedEvent) -> bool: return e.source == EditSource.Kind.SCOUT),
+        [], "nothing was announced for the refused thaw")
+    assert_true(TerrainProbe.is_solid(rig.store, Vector3i(int(CX), by, int(CZ))), "the block is still there")
 
 
-# Provenance: test_mpm_structure's test_thaw_events_are_the_measured_flips. On the game's field
-# at this spot, rewriting the thaw's box flips a cell outside its plan to air. The flood proved
-# only the planned component detached, so that collateral cell's solid neighbours may have lost
-# support: the scout seeds from exactly them, and never from the component it thawed.
-func test_the_scouts_own_thaw_seeds_from_its_collateral_flips() -> void:
+# Provenance: the since-closed bug mpm-thaw-carve-leaves-planned-cells. At this spot (test_mpm_structure pins
+# it), re-encoding the thaw's box alone flips a cell outside its plan to air: collateral the scout
+# had to re-check under the corner carve. The solved carve keeps every unplanned cell on its side, so the scout's own thaw leaves
+# nothing to seed.
+func test_the_scouts_own_thaw_leaves_no_collateral_at_a_stray_flip_spot() -> void:
     var manager := EditStoreManager.new()
     manager.setup()
     var rig    := _wire(manager.store, MpmStructure.new())
     var matter := MatterLog.new()
-    var top    := EditStore.terrain_surface(15.0, -16.0, EditStoreManager.BASE, EditStoreManager.AMP,
-        EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
-
-    var flood := GroundFlood.new()
-    flood.state = GroundFlood.DETACHED
-    for cell in VoxelUtils.cells_in_sphere(Vector3(15.5, top, -15.5), 1.4):
-        if TerrainProbe.is_solid(manager.store, cell):
-            flood.visited[cell] = true
+    var flood  := _detached_ball(manager.store)
 
     rig.scout._finish(flood)
 
-    var collateral := matter.air.filter(func(c: Vector3i) -> bool: return not flood.visited.has(c))
     assert_eq(matter.sources(), [EditSource.Kind.SCOUT] as Array[EditSource.Kind], "precondition: one scout thaw")
-    assert_false(collateral.is_empty(), "precondition: the thaw flipped a cell outside its plan to air")
-    assert_eq(matter.solid.size(), 0, "precondition: it flipped nothing to solid")
+    assert_eq(_sorted(matter.air), _sorted(flood.visited.keys()), "it emptied exactly the component")
+    assert_eq(matter.solid.size(), 0, "and flipped nothing to solid")
+    assert_true(rig.scout._pending.is_empty(), "so there is no collateral to seed")
+
+
+# The seeding itself, for a SCOUT thaw whose measured flips do reach outside the component (the solve
+# is read back within float32 rounding where finer leaves sit in the box): the collateral cells' solid
+# neighbours are seeded, and nothing in the component.
+func test_the_scout_seeds_from_its_own_thaws_collateral_flips() -> void:
+    var manager := EditStoreManager.new()
+    manager.setup()
+    var rig   := _wire(manager.store, MpmStructure.new())
+    var flood := _detached_ball(manager.store)
+    var inside: Vector3i = flood.visited.keys()[0]
+    var outside := inside + Vector3i(0, -3, 0)
+    assert_false(flood.visited.has(outside), "precondition: the collateral cell is outside the component")
+
+    var flips := CellFlips.new()
+    flips.air = [inside, outside] as Array[Vector3i]
+    rig.scout._thawing = flood.visited
+    TerrainSdfChangedEvent.announce(EditSource.Kind.SCOUT, AABB(Vector3(inside), Vector3.ONE * 4.0), flips)
+    rig.scout._thawing = {}
 
     var expected := {}
-    for cell: Vector3i in collateral:
-        for n: Vector3i in GroundFlood.NEIGHBORS:
-            var c: Vector3i = cell + n
-            if not flood.visited.has(c) and TerrainProbe.is_solid(manager.store, c) \
-                    and not TerrainProbe.is_bedrock(manager.store, c):
-                expected[c] = true
+    for n: Vector3i in GroundFlood.NEIGHBORS:
+        var c: Vector3i = outside + n
+        if not flood.visited.has(c) and TerrainProbe.is_solid(manager.store, c) \
+                and not TerrainProbe.is_bedrock(manager.store, c):
+            expected[c] = true
 
-    assert_false(expected.is_empty(), "precondition: the collateral cell had solid neighbours")
+    assert_false(expected.is_empty(), "precondition: the collateral cell has solid neighbours")
     assert_eq(_sorted(rig.scout._pending.keys()), _sorted(expected.keys()),
-        "the scout seeds the collateral cells' solid neighbours, and nothing it thawed")
+        "the scout seeds the collateral cell's solid neighbours, and nothing it thawed")
+
+
+# (Drafted by Claude, overnight 2026-09-27.) A freeze is ignored even when it carries measured
+# flips, both a cell it emptied and one it made solid (docs/bugs/scout-ignores-freeze-flips.md).
+func test_a_freezes_flips_seed_nothing() -> void:
+    var rig     := _rig()
+    var top     := _surface()
+    var emptied := Vector3i(int(CX), top - 6, int(CZ))
+    var made    := emptied + Vector3i(4, 0, 0)
+    var flips   := CellFlips.new()
+    flips.air   = [emptied] as Array[Vector3i]
+    flips.solid = [made] as Array[Vector3i]
+    assert_true(TerrainProbe.is_solid(rig.store, made), "precondition: the made cell reads solid")
+
+    TerrainSdfChangedEvent.announce(EditSource.Kind.MPM, AABB(Vector3(emptied) - Vector3.ONE * 8.0, Vector3.ONE * 16.0), flips)
+
+    assert_true(rig.scout._pending.is_empty(), "the freeze seeds nothing")
+
+
+# (Drafted by Claude, overnight 2026-09-27.) The loop seeding from freezes would start: a 1 m post on
+# the cell grid reads air at every cell centre (SDF 0 is not solid), but the collider holds particles
+# on it. A voxel dropped on it is thawed once, falls, and freezes on the post; a scout that flooded
+# that pile would find it DETACHED and thaw it again, once per cell down the post.
+func test_a_pile_frozen_on_a_post_the_flood_cannot_see_is_not_thawed_again() -> void:
+    var s   := Scenario.new()
+    var top := _surface()
+    add_child(s)
+    assert_true(s.start_fresh(), "precondition: the scenario started")
+    s.player_at(Vector3(4000.5, 400.0, 4000.5))
+    s.csg(CsgBoxShape.new(Vector3(1, 12, 1)), Transform3D(Basis(), Vector3(CX + 0.5, top + 2.0, CZ + 0.5)),
+        CsgState.Op.ADD, &"Stone")
+    s.settle()
+    assert_false(TerrainProbe.is_solid(s.edit_store_ref(), Vector3i(int(CX), top + 6, int(CZ))),
+        "precondition: the post's cells read air")
+    var matter := MatterLog.new()
+
+    s.fill_voxel(Vector3i(int(CX), top + 14, int(CZ)), &"Wood")
+    s.settle()
+
+    assert_eq(s.error, "", "the world came to rest")
+    assert_eq(matter.sources().count(EditSource.Kind.MPM), 1, "the voxel froze once")
+    assert_eq(matter.sources().count(EditSource.Kind.SCOUT), 1, "and was thawed once")
+    s.free()
+
+
+func _detached_ball(store: EditStore) -> GroundFlood:
+    var top := EditStore.terrain_surface(-20.0, 14.0, EditStoreManager.BASE, EditStoreManager.AMP,
+        EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
+    var flood := GroundFlood.new()
+    flood.state = GroundFlood.DETACHED
+    for cell in VoxelUtils.cells_in_sphere(Vector3(-19.5, top, 14.5), 1.4):
+        if TerrainProbe.is_solid(store, cell):
+            flood.visited[cell] = true
+    return flood
 
 
 func _sorted(cells: Array) -> Array:

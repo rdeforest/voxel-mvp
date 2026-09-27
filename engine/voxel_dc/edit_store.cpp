@@ -294,6 +294,7 @@ void EditStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sample", "p"), &EditStore::sample);
 	ClassDB::bind_method(D_METHOD("sample_toward", "p", "toward"), &EditStore::sample_toward);
 	ClassDB::bind_method(D_METHOD("has_edit", "p"), &EditStore::has_edit);
+	ClassDB::bind_method(D_METHOD("leaf_info", "p"), &EditStore::leaf_info);
 	ClassDB::bind_method(D_METHOD("material_at", "p"), &EditStore::material_at);
 	ClassDB::bind_method(D_METHOD("leaf_count"), &EditStore::leaf_count);
 	ClassDB::bind_method(D_METHOD("duplicate"), &EditStore::duplicate);
@@ -303,4 +304,9 @@ void EditStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("deserialize", "bytes"), &EditStore::deserialize);
 	ClassDB::bind_static_method("EditStore", D_METHOD("blob_problem", "bytes"), &EditStore::blob_problem);
 	ClassDB::bind_static_method("EditStore", D_METHOD("terrain_surface", "x", "z", "base", "amp", "period", "octaves", "seed"), &EditStore::terrain_surface);
+
+	BIND_ENUM_CONSTANT(NO_FIELD);
+	BIND_ENUM_CONSTANT(OWN_FIELD);
+	BIND_ENUM_CONSTANT(INHERITED_FIELD);
+	BIND_ENUM_CONSTANT(FIELD_SOURCE);
 }
