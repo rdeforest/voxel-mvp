@@ -11,7 +11,7 @@ Place a part thinner than a cell that covers no cell's sample point (a 0.5 m log
 cell-centre planes). The imprint writes real geometry, but the part never appears in PartIndex.
 
 ## Cause
-PartIndex is cell-granular: a record owns the cells its imprint made solid (the voxel_added set) and
+PartIndex is cell-granular: a record owns the cells its imprint made solid (its solid flips) and
 dies when a carve flips the last one back to air (`scripts/structural/part_index.gd`). A placement
 that flips no cell has nothing to own and nothing a carve could release, so `_on_part_placed` makes
 no record. Before this, such a part was registered under its AABB footprint instead: it had a record,

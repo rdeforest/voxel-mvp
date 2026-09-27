@@ -1,6 +1,8 @@
 class_name Action
 extends RefCounted
 
+var source: EditSource.Kind   # who execute()'s matter-changed event credits (ActionContext.source)
+
 func validate() -> bool:
     push_warning("Action.validate() not implemented")
     return false

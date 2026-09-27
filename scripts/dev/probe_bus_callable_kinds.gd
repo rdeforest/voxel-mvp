@@ -23,7 +23,7 @@ class Rec:
 
 
 func _event() -> VoxelEvent:
-	return VoxelAddedEvent.new(0, Vector3i.ZERO, Materials.STONE)
+	return TerrainSdfChangedEvent.new(0, EditSource.Kind.PLAYER, AABB(Vector3.ZERO, Vector3.ONE), CellFlips.new())
 
 
 func _init() -> void:

@@ -83,7 +83,8 @@ func test_off_grid_lattice_is_refused() -> void:
 
     assert_true(StoreWrite.write(_store, lat, _work()).is_empty(), "write() refuses")
     assert_push_error("not a whole number", "write() says why")
-    assert_eq(StoreWrite.reshape(_store, lat), AABB(), "reshape() refuses")
+    var flips := StoreWrite.reshape(_store, lat)
+    assert_true(flips.is_empty() and not flips.changed, "reshape() refuses: nothing written, nothing flipped")
     assert_push_error("not a whole number", "reshape() says why")
     assert_eq(_store.serialize(), before, "the store is untouched")
 
@@ -122,3 +123,35 @@ func test_reshape_keeps_every_current_material() -> void:
     StoreWrite.reshape(_store, lat)
 
     assert_eq(_materials(lat), before, "no leaf's material changes")
+
+
+# Raise / Lower / Flatten write through reshape; it hands back the flips its write measured, so
+# their event can carry them. Truth: each rewritable cell's sign read before and after.
+func test_reshape_returns_the_flips_it_measured() -> void:
+    var lat := SdfLattice.predicted(_store.predict_bell(Vector3(_at) + Vector3(0.4, 0.0, 0.6), 3.0, 1.5))
+    assert_not_null(lat, "the lower writes")
+    var before := {}
+    for cell in lat.cells():
+        before[cell] = TerrainProbe.is_solid(_store, cell)
+
+    var flips := StoreWrite.reshape(_store, lat)
+
+    var went_air:   Array[Vector3i] = []
+    var went_solid: Array[Vector3i] = []
+    for cell: Vector3i in before:
+        var now := TerrainProbe.is_solid(_store, cell)
+        if before[cell] and not now:
+            went_air.append(cell)
+        elif now and not before[cell]:
+            went_solid.append(cell)
+    assert_false(went_air.is_empty(), "the lower empties cells (else this tests nothing)")
+    went_air.sort()
+    went_solid.sort()
+
+    var air   := flips.air.duplicate()
+    var solid := flips.solid.duplicate()
+    air.sort()
+    solid.sort()
+    assert_eq(air, went_air, "reshape's air flips are the cells that went air")
+    assert_eq(solid, went_solid, "and its solid flips the cells that went solid")
+    assert_true(flips.changed, "a write that moved samples says so")

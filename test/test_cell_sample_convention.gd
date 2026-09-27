@@ -1,7 +1,7 @@
 extends GutTest
 
 # Gate for the cell -> sample-point convention (a cell is read at its centre,
-# VoxelUtils.sample_point). An edit's preview ghost and its voxel_added / voxel_removed events
+# VoxelUtils.sample_point). An edit's preview ghost and the flips its matter-changed event carries
 # must name exactly the cells whose sample-point SDF sign the write actually flipped — not a
 # half-cell-shifted guess from testing cell corners against the analytic brush.
 #
@@ -17,28 +17,18 @@ const SEED    := 1337
 const COLUMN_X := 100.0
 const COLUMN_Z := 100.0
 
-var _added:   Array[Vector3i] = []
-var _added_material: Dictionary = {}   # cell -> Materials the voxel_added event carried
-var _removed: Array[Vector3i] = []
+const MatterLog := preload("res://test/support/matter_log.gd")
+
+var _matter:     MatterLog
+var _support: TerrainSupport   # tracks the latest _store(): the material a solid flip is tracked with
 
 
 func before_each() -> void:
-    _added.clear()
-    _added_material.clear()
-    _removed.clear()
-    VoxelEventBusSingleton.subscribe(VoxelAddedEvent.CHANNEL,   _on_added)
-    VoxelEventBusSingleton.subscribe(VoxelRemovedEvent.CHANNEL, _on_removed)
+    _matter = MatterLog.new()
 
 func after_each() -> void:
-    VoxelEventBusSingleton.unsubscribe(VoxelAddedEvent.CHANNEL,   _on_added)
-    VoxelEventBusSingleton.unsubscribe(VoxelRemovedEvent.CHANNEL, _on_removed)
-
-func _on_added(e: VoxelAddedEvent) -> void:
-    _added.append(e.pos)
-    _added_material[e.pos] = e.material
-
-func _on_removed(e: VoxelRemovedEvent) -> void:
-    _removed.append(e.pos)
+    _matter     = null
+    _support = null
 
 
 func _surface() -> float:
@@ -47,6 +37,8 @@ func _surface() -> float:
 func _store() -> EditStore:
     var store := EditStore.new()
     store.setup(Vector3(-128.0, -128.0, -128.0), 256.0, BASE, AMP, PERIOD, OCTAVES, SEED)
+    _support       = TerrainSupport.new()
+    _support.store = store
     return store
 
 func _ctx(store: EditStore) -> ActionContext:
@@ -85,19 +77,19 @@ func _sorted(cells: Array[Vector3i]) -> Array[Vector3i]:
     return out
 
 
-# Run `action` against the independent truth: its preview (taken first) and the events its
-# execute() emits must both equal the set of centres whose sign flipped.
-func _assert_matches_truth(store: EditStore, action: Action, around: Vector3, reach: int,
-        check_events: bool) -> Array:
+# Run `action` against the independent truth: its preview (taken first) and the flips of the one
+# event its execute() emits must both equal the set of centres whose sign flipped.
+func _assert_matches_truth(store: EditStore, action: Action, around: Vector3, reach: int) -> Array:
     var before  := _centres(store, around, reach)
     var preview := action.preview()
+    _matter.clear()
     action.execute()
     var truth := _flipped(before, _centres(store, around, reach))
     assert_eq(_sorted(preview.solid), truth[0], "preview.solid == cells whose centre became solid")
     assert_eq(_sorted(preview.air),   truth[1], "preview.air == cells whose centre became air")
-    if check_events:
-        assert_eq(_sorted(_added),   truth[0], "voxel_added fired for exactly the cells that became solid")
-        assert_eq(_sorted(_removed), truth[1], "voxel_removed fired for exactly the cells that became air")
+    assert_eq(_matter.events.size(), 1, "one matter-changed event for the one write")
+    assert_eq(_sorted(_matter.solid), truth[0], "its solid flips are exactly the cells that became solid")
+    assert_eq(_sorted(_matter.air),   truth[1], "its air flips are exactly the cells that became air")
     return truth
 
 
@@ -106,7 +98,7 @@ func _assert_matches_truth(store: EditStore, action: Action, around: Vector3, re
 func test_dig_events_equal_flipped_sample_points() -> void:
     var store  := _store()
     var center := Vector3(COLUMN_X + 0.37, _surface() - 0.8, COLUMN_Z + 0.71)
-    var truth  := _assert_matches_truth(store, DigAction.new(center, 2.6, _ctx(store)), center, 5, true)
+    var truth  := _assert_matches_truth(store, DigAction.new(center, 2.6, _ctx(store)), center, 5)
     assert_gt(truth[1].size(), 10, "the dig carved a real set of cells")
 
 
@@ -114,17 +106,25 @@ func test_fill_events_equal_flipped_sample_points() -> void:
     var store  := _store()
     var center := Vector3(COLUMN_X + 0.62, _surface() + 0.9, COLUMN_Z + 0.23)
     var truth  := _assert_matches_truth(
-        store, FillAction.new(center, 2.6, _ctx(store), &"Wood"), center, 5, true)
+        store, FillAction.new(center, 2.6, _ctx(store), &"Wood"), center, 5)
     assert_gt(truth[0].size(), 10, "the fill added a real set of cells")
     _assert_event_materials_match_store(store)
 
 
-# Raise / Flatten write store lattice points; their ghosts must still name the CELLS that flip.
+# Raise / Lower / Flatten write store lattice points; their ghosts and events must still name the
+# CELLS that flip.
 func test_raise_preview_equals_flipped_sample_points() -> void:
     var store  := _store()
     var center := Vector3(COLUMN_X + 0.4, _surface(), COLUMN_Z + 0.6)
-    var truth  := _assert_matches_truth(store, RaiseAction.new(center, 3.0, _ctx(store)), center, 5, false)
+    var truth  := _assert_matches_truth(store, RaiseAction.new(center, 3.0, _ctx(store)), center, 5)
     assert_false(truth[0].is_empty(), "the raise lifted some cells to solid")
+
+
+func test_lower_events_equal_flipped_sample_points() -> void:
+    var store  := _store()
+    var center := Vector3(COLUMN_X + 0.7, _surface(), COLUMN_Z + 0.2)
+    var truth  := _assert_matches_truth(store, LowerAction.new(center, 3.0, _ctx(store)), center, 5)
+    assert_false(truth[1].is_empty(), "the lower sank some cells to air")
 
 
 func test_flatten_preview_equals_flipped_sample_points() -> void:
@@ -132,7 +132,7 @@ func test_flatten_preview_equals_flipped_sample_points() -> void:
     var point  := Vector3(COLUMN_X + 0.3, _surface() - 0.6, COLUMN_Z + 0.8)
     var normal := Vector3(0.3, 1.0, 0.1).normalized()
     var truth  := _assert_matches_truth(
-        store, FlattenAction.new(point, normal, 3.0, _ctx(store)), point, 5, false)
+        store, FlattenAction.new(point, normal, 3.0, _ctx(store)), point, 5)
     assert_false(truth[0].is_empty() and truth[1].is_empty(), "the flatten changed some cells")
 
 
@@ -141,7 +141,7 @@ func test_fill_voxel_flips_exactly_its_cell() -> void:
     var store := _store()
     var cell  := Vector3i(int(COLUMN_X), int(_surface()) + 8, int(COLUMN_Z))
     var truth := _assert_matches_truth(
-        store, FillVoxelAction.new(cell, _ctx(store), &"Stone"), Vector3(cell), 3, true)
+        store, FillVoxelAction.new(cell, _ctx(store), &"Stone"), Vector3(cell), 3)
     assert_eq(truth[0], [cell] as Array[Vector3i], "only the targeted cell became solid")
     assert_eq(store.material_at(Vector3(cell) + VoxelConstants.VOXEL_CENTER_OFFSET), MaterialPalette.index_of(&"Stone"),
         "the cell carries its material at its sample point")
@@ -150,7 +150,7 @@ func test_fill_voxel_flips_exactly_its_cell() -> void:
 func test_empty_voxel_flips_exactly_its_cell() -> void:
     var store := _store()
     var cell  := Vector3i(int(COLUMN_X), int(_surface()) - 6, int(COLUMN_Z))
-    var truth := _assert_matches_truth(store, EmptyVoxelAction.new(cell, _ctx(store)), Vector3(cell), 3, true)
+    var truth := _assert_matches_truth(store, EmptyVoxelAction.new(cell, _ctx(store)), Vector3(cell), 3)
     assert_eq(truth[1], [cell] as Array[Vector3i], "only the targeted cell became air")
 
 
@@ -165,12 +165,12 @@ func test_cells_in_sphere_is_symmetric_on_the_boundary() -> void:
     assert_false(cells.has(Vector3i( 3, 0, 0)), "past the boundary excluded")
 
 
-# Every voxel_added event carries the material the store holds for that cell at its sample point.
+# Every cell the event flipped solid is tracked with the material the store holds at its sample point.
 func _assert_event_materials_match_store(store: EditStore) -> void:
-    for cell: Vector3i in _added_material:
+    for cell: Vector3i in _matter.solid:
         var held := store.material_at(Vector3(cell) + VoxelConstants.VOXEL_CENTER_OFFSET)
-        assert_eq(_added_material[cell], Materials.from_name(MaterialPalette.name_of(held)),
-            "voxel_added material for %s matches the store (index %d)" % [cell, held])
+        assert_eq(_support.voxel_data[cell].material, Materials.from_name(MaterialPalette.name_of(held)),
+            "tracked material for %s matches the store (index %d)" % [cell, held])
 
 
 # The in-game placement: FillVoxel aims at the air cell resting on the surface, EmptyVoxel at the
@@ -192,10 +192,7 @@ func test_single_voxel_edits_at_the_surface_flip_exactly_their_cell() -> void:
                 if not action.validate():
                     refused += 1
                     continue
-                _added.clear()
-                _added_material.clear()
-                _removed.clear()
-                var truth := _assert_matches_truth(store, action, Vector3(cell), 2, true)
+                var truth := _assert_matches_truth(store, action, Vector3(cell), 2)
                 assert_eq(truth[0] if solid else truth[1], [cell] as Array[Vector3i],
                     "%s at %s flips exactly its cell" % ["fill" if solid else "empty", cell])
                 assert_true((truth[1] if solid else truth[0]).is_empty(), "and nothing the other way")
@@ -228,14 +225,14 @@ func test_store_write_lands_on_finer_leaves() -> void:
         MaterialPalette.index_of(&"Stone"), 0.25)
     cell = _surface_cell(store, int(COLUMN_X), int(COLUMN_Z), true)
     var truth := _assert_matches_truth(
-        store, FillVoxelAction.new(cell, _ctx(store), &"Wood"), Vector3(cell), 2, true)
+        store, FillVoxelAction.new(cell, _ctx(store), &"Wood"), Vector3(cell), 2)
     assert_eq(truth[0], [cell] as Array[Vector3i], "the fill landed on the 0.25 m leaves, and only there")
 
     store = _store()
     var point := Vector3(COLUMN_X + 0.3, _surface() - 0.6, COLUMN_Z + 0.8)
     store.stamp_sphere(point + Vector3(0.5, 0.5, -0.4), 2.2, VoxelConstants.STORE_OP_SUBTRACT, 0, 0.25)
     var flat := _assert_matches_truth(store,
-        FlattenAction.new(point, Vector3(0.3, 1.0, 0.1).normalized(), 3.0, _ctx(store)), point, 5, false)
+        FlattenAction.new(point, Vector3(0.3, 1.0, 0.1).normalized(), 3.0, _ctx(store)), point, 5)
     assert_false(flat[0].is_empty() and flat[1].is_empty(), "the flatten over refined leaves changed cells")
 
 
@@ -257,7 +254,7 @@ func test_thin_csg_brush_is_placed() -> void:
 
 # --- One work set per action: preview == events == write (Construction, CSG) ---
 #
-# Construction and CSG write the VoxelImprint field; their ghost and their voxel events must both
+# Construction and CSG write the VoxelImprint field; their ghost and their event's flips must both
 # name the cells that write flips (player safety reads the field itself — tests below). Truth is the measured sign diff.
 
 func _beam() -> Part:
@@ -271,6 +268,7 @@ func _log() -> Part:
 func _assert_imprint_sets_agree(store: EditStore, action: Action, around: Vector3, reach: int) -> Array:
     var before  := _centres(store, around, reach)
     var preview := action.preview()
+    _matter.clear()
     action.execute()
     var truth := _flipped(before, _centres(store, around, reach))
     var ghost_solid := preview.part if action is ConstructionAction else preview.solid
@@ -278,8 +276,8 @@ func _assert_imprint_sets_agree(store: EditStore, action: Action, around: Vector
         assert_true(preview.solid.is_empty(), "construction's ghost is all in the part list")
     assert_eq(_sorted(ghost_solid), truth[0], "ghost == cells the write made solid")
     assert_eq(_sorted(preview.air), truth[1], "ghost air == cells the write emptied")
-    assert_eq(_sorted(_added),      truth[0], "voxel_added == cells the write made solid")
-    assert_eq(_sorted(_removed),    truth[1], "voxel_removed == cells the write emptied")
+    assert_eq(_sorted(_matter.solid),  truth[0], "the event's solid flips == cells the write made solid")
+    assert_eq(_sorted(_matter.air),    truth[1], "the event's air flips == cells the write emptied")
     return truth
 
 

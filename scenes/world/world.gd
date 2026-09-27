@@ -28,7 +28,7 @@ func _ready() -> void:
     # The EditStore is the authoritative terrain (SDF + material). Build it, restore the save,
     # then hand it to everything that reads or writes terrain: render, collision, the
     # structural tracking, and (lazily, via edit_store_ref) the player's actions.
-    _part_index = PartIndex.new()   # identity sidecar; subscribes to part_placed / voxel_removed
+    _part_index = PartIndex.new()   # identity sidecar; subscribes to part_placed / terrain_sdf_changed
     _edit_store = EditStoreManager.new()
     _edit_store.setup()
     _restore_save()

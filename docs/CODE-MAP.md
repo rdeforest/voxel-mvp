@@ -143,10 +143,14 @@ VoxelEventBusSingleton.emit(channel, event)
 
 **Channel taxonomy** (`scripts/events/*_event.gd`):
 
-- **Primitive**, emitted by actions: `terrain_sdf_changed`, `voxel_added`,
-  `voxel_removed`. (`part_added`/`part_removed` were deleted with
-  `PartSupport` in parts-as-voxels S4; a placement now emits `part_placed` for
-  the `PartIndex` sidecar.)
+- **Matter changed**: `terrain_sdf_changed` (`TerrainSdfChangedEvent`), emitted
+  once by every write to the store: actions, the MPM thaw and freeze. It
+  carries the rewritten box, the cells the write flipped (`CellFlips`, measured
+  across it) and its `EditSource` (player, instrument, MPM, scout, replay).
+  The per-cell `voxel_added`/`voxel_removed` events were folded into it
+  (2026-09-27). A placement also emits `part_placed` for the `PartIndex`
+  sidecar. (`part_added`/`part_removed` were deleted with `PartSupport` in
+  parts-as-voxels S4.)
 - **Derived**, emitted by integrity components: `region_collapsing`.
   (`voxel_support_changed` was removed in Phase 6 with its only consumer,
   `CollapseDetector`.)
@@ -217,8 +221,9 @@ facade.
 
 **`TerrainSupport`** (`scripts/structural/terrain_support.gd`) owns
 `voxel_data: Dictionary[Vector3i, VoxelRecord]`, `dirty_queue` and
-`_lowest_registered_y`. Subscribes channel-wide in `_init` to `voxel_added`,
-`voxel_removed` and `terrain_sdf_changed`. A worklist fixpoint drains
+`_lowest_registered_y`. Subscribes channel-wide in `_init` to
+`terrain_sdf_changed`: it tracks the event's solid flips (with the material the
+store holds there), drops its air flips, then scans the box. A worklist fixpoint drains
 `dirty_queue` (FIFO, BFS-order) at `PROPAGATION_BUDGET` (200) cells per physics
 frame via `process_dirty_queue()`. `is_natural_terrain(pos)` requires both
 untracked-solid AND bedrock — the combination grants `FULL_SUPPORT` to
@@ -237,17 +242,21 @@ the fall. Fully retiring the scalar means replacing that expansion with a
 detachment-native criterion — a deliberate future task.
 
 **Terrain collapse (PB-MPM).** The trigger is **`DetachmentScout`**
-(`scripts/structural/detachment_scout.gd`): on a terrain edit made while MPM is
-idle, it gathers freshly-exposed solid cells as seeds and floods each connected
+(`scripts/structural/detachment_scout.gd`): on a matter change, it gathers freshly-exposed solid cells as seeds and floods each connected
 component **downward toward bedrock** via **`GroundFlood`** (`ground_flood.gd`
 — non-blocking, a budget of cells per frame, capped at `MAX_DETACH` 700). A
 component that drains without reaching bedrock under the cap is **DETACHED**
 and handed to `MpmStructure.thaw_cells(...)`.
 
-The scout only considers edits made while MPM is idle and pauses while material
-is in flight, so detachment proceeds in settled waves. MPM's own thaw/freeze
-edits, which fire with particles active, are ignored. That's what breaks the
-runaway cascade the old scalar trigger risked.
+The scout tells edits apart by source: for its own detachment thaw (`SCOUT`)
+it seeds only from the cells the thaw flipped outside the component it thawed
+(the box rewrite can flip unplanned cells), and it ignores `MPM` freezes, whose
+flips aren't measured yet (`docs/bugs/mpm-freeze-flips-unmeasured.md`). It
+pauses resolving while material is in flight, so
+detachment proceeds in settled waves; edits made during flight are queued, not
+dropped. That's what breaks the runaway cascade the old scalar trigger risked.
+Terraforming (raise, lower, flatten) is a matter change like any other, so it
+releases parts from `PartIndex` and can detach what it undercuts.
 
 **MPM thaw/freeze lifecycle.** `MpmStructure`
 (`scripts/structural/mpm_structure.gd`) wraps the C++ `MpmSim`. `thaw_cells`

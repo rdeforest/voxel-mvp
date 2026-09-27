@@ -24,8 +24,9 @@ teal = world-ready gate.
 
 1. **Click → Action.** A click asks `ActionFactories` for the right `Action`
    (Dig, Fill, Construction, …); the Action `validate()`s (refuse-don't-deform),
-   then `execute()`s, mutating the terrain SDF and **emitting primitive events**
-   (`terrain_sdf_changed`, `voxel_added/removed`, `part_added/removed`).
+   then `execute()`s, mutating the terrain SDF and **emitting one matter-changed
+   event** (`terrain_sdf_changed`: box, measured cell flips, source). *(Updated
+   2026-09-27 by Claude; the PBD steps below predate PB-MPM and are stale.)*
 2. **Bus fan-out.** The `VoxelEventBus` dispatches each event to its subscribers
    (spatially, by cell). Nobody is called directly — this is what lets a collapse
    re-enter the same pipeline later.
@@ -44,12 +45,12 @@ teal = world-ready gate.
 5. **Break → detach → collapse.** When a break leaves a component with no path to
    an anchor, it's falling: terrain cells get **carved out of the SDF** and handed
    to `FallingBodyFactory` (a `RigidBody3D`); a part with a detached cell **drops
-   whole** via `collapse_part`. The carve emits `voxel_removed` /
-   `terrain_sdf_changed` — **back onto the bus** — so the rest of the world
+   whole** via `collapse_part`. The carve emits its matter-changed event
+   (`terrain_sdf_changed`) — **back onto the bus** — so the rest of the world
    reacts, and PBD rebuilds without those cells.
 6. **Falling bodies re-integrate.** `_tick_falling_bodies` watches each debris
-   body: fully buried → dissolve back into the SDF as tracked terrain (emit
-   `voxel_added`); free → leave it to physics.
+   body: fully buried → dissolve back into the SDF as tracked terrain (a
+   matter-changed event); free → leave it to physics.
 7. **Terrain is rendered twice.** The SDF is meshed by `DCOctreeMesher` for the
    crack-free LOD *visual* and by `VoxelMesherDC` per-block for *collision*.
 8. **Nothing runs early.** On startup/reset every gameplay+physics system sits

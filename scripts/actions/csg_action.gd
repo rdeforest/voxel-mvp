@@ -39,6 +39,7 @@ func _init(
     material_name = p_material
     store         = p_ctx.store
     player        = p_ctx.player
+    source        = p_ctx.source
 
 
 func validate() -> bool:
@@ -63,7 +64,7 @@ func execute() -> void:
     _ensure_work()
     if op == CsgState.Op.ADD:
         _freeze_bodies_in_volume()
-    VoxelImprint.apply(store, material_name, shape, xform, op)
+    VoxelImprint.apply(store, source, material_name, shape, xform, op)
 
 
 # --- Internals ---

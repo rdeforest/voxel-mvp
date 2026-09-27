@@ -23,6 +23,7 @@ func _init(
     radius      = p_radius
     store       = p_ctx.store
     player      = p_ctx.player
+    source      = p_ctx.source
 
 
 func validate() -> bool:
@@ -44,10 +45,11 @@ func execute() -> void:
     _ensure_lattice()
     if _lattice == null:
         return
-    var box := StoreWrite.reshape(store, _lattice)
-    VoxelEventBusSingleton.emit(
-        TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box.position, box.size))
+
+    # A refused write (off-grid lattice) or one that moved no sample changed no matter to announce.
+    var flips := StoreWrite.reshape(store, _lattice)
+    if flips.changed:
+        TerrainSdfChangedEvent.announce(source, _lattice.region(), flips)
 
 
 # --- Internals ---

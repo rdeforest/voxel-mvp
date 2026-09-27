@@ -62,20 +62,21 @@ func setup(store: EditStore) -> void:
 
 
 # Thaw the solid terrain cells within `radius` of `center` (the `mpmthaw` console path).
-func thaw_sphere(center: Vector3, radius: float, material_index := 1) -> int:
-    return thaw_cells(VoxelUtils.cells_in_sphere(center, radius), material_index)
+func thaw_sphere(center: Vector3, radius: float, source: EditSource.Kind, material_index := 1) -> int:
+    return thaw_cells(VoxelUtils.cells_in_sphere(center, radius), source, material_index)
 
 
 # Thaw a set of (presumed solid) terrain cells into MPM particles: carve them from the store (a
 # hole opens, DC re-meshes) and seed 8 particles per cell the carve actually turned to air. Air
-# cells are skipped. Returns the count thawed. This is what the loss-of-support auto-trigger feeds.
+# cells are skipped. Returns the count thawed. This is what the loss-of-support auto-trigger feeds;
+# the carve's event is credited to `source` (SCOUT for a detachment, INSTRUMENT for `mpmthaw`).
 #
 # The planned cells are only the carve's input. A planned cell can survive it (every corner it has
 # is shared with kept solid, so none may clear), and rewriting the box re-encodes the field there,
-# which can flip cells the plan never named. So the events and the particles both follow the flips
+# which can flip cells the plan never named. So the event and the particles both follow the flips
 # measured across the write, as VoxelImprint.apply does: matter leaves the store exactly where it
 # enters the sim.
-func thaw_cells(cells: Array, material_index := 1) -> int:
+func thaw_cells(cells: Array, source: EditSource.Kind, material_index := 1) -> int:
     _material_index = material_index   # freeze fallback only; each particle carries its own material
 
     var work := _carve_corners(_plan_thaw(cells))
@@ -86,19 +87,13 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
     var lat   := StoreWrite.lattice(_store, work)
     var flips := StoreWrite.write(_store, lat, work)
 
-    # Particles go in before any event: DetachmentScout ignores edits made while MPM is active,
-    # and that is how it tells this carve from a player's.
     _seed_particles(flips)
     _settled_frames = 0
     _mm.instance_count = _sim.particle_count()
 
-    flips.emit(_store)
-
-    # A rewrite that changed nothing needs no re-mesh. Skipping it also stops a thaw that empties
-    # no cell (so MPM stays idle) from re-seeding the scout onto the same piece forever.
+    # A rewrite that changed nothing needs no re-mesh and has no flips to report.
     if flips.changed:
-        VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL,
-            TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, lat.region_lo, lat.region_hi - lat.region_lo))
+        TerrainSdfChangedEvent.announce(source, lat.region(), flips)
 
     return flips.air.size()
 
@@ -220,8 +215,7 @@ func _emit_pending_chunks() -> void:
     while not _pending_chunks.is_empty() and n < CHUNKS_PER_FRAME:
         var box: Vector3 = _pending_chunks.pop_front()
 
-        VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL,
-            TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box, Vector3.ONE * float(CHUNK)))
+        _announce_freeze(AABB(box, Vector3.ONE * float(CHUNK)))
 
         n += 1
 
@@ -237,8 +231,7 @@ func _freeze() -> void:
 
         if dim <= SINGLE_EMIT_MAX:
             # Small settled clump → one box, meshed in a single splice (watertight, no chunk seams).
-            VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL,
-                TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, origin, Vector3.ONE * float(dim)))
+            _announce_freeze(AABB(origin, Vector3.ONE * float(dim)))
         else:
             _queue_freeze_chunks(origin, dim)
 
@@ -247,6 +240,13 @@ func _freeze() -> void:
 
     if _mm:
         _mm.instance_count = 0
+
+
+# MpmSim.rasterize_to_store writes without measuring, so a freeze reports its box with no flips:
+# subscribers learn of its cells only by re-scanning the box
+# (docs/bugs/mpm-freeze-flips-unmeasured.md).
+func _announce_freeze(box: AABB) -> void:
+    TerrainSdfChangedEvent.announce(EditSource.Kind.MPM, box, CellFlips.new())
 
 
 # Split the rasterised region into CHUNK³ boxes and sort them nearest-camera-first.

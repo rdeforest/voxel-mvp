@@ -11,7 +11,16 @@
 - [ ] E4 — RAM cell arena with a budget cap; mmap removed (Q4)
 - [ ] E5 — C++ solver for the exact thaw carve (Q2, Q3) (stretch)
 - [x] G1 — fold the 2026-09-26 answers into the bug files and docs
-- [ ] G2 — edit events carry their source; raise/lower/flatten emit measured flips (Q1)
+- [x] G2 — edit events carry their source; raise/lower/flatten emit measured flips (Q1). One
+  matter-changed event per write (`terrain_sdf_changed` + `EditSource` + measured `CellFlips`);
+  `voxel_added`/`voxel_removed` folded into it. **Behaviour change:** terraforming now releases
+  parts from PartIndex and registers its cells in TerrainSupport with their real material; the scout
+  now keeps edits made while MPM is in flight (it used to drop them), floods after a console
+  `mpmthaw` (INSTRUMENT), seeds from its own thaw's collateral flips (cells the box rewrite
+  flipped outside the thawed component; it used to ignore them), and ignores MPM freezes by source,
+  including the chunked freeze path (regions over 24 m) it used to react to. The scout already
+  flooded after terraforming while MPM was idle; that isn't new. New bug:
+  `mpm-freeze-flips-unmeasured` (C++; also blocks the scout hearing freezes).
 - [ ] G3 — save-pair integrity; single save format (Q5)
 - [ ] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments
 - [ ] R1 — research: what the refine frontier spends its effort on + perceptual LOD survey

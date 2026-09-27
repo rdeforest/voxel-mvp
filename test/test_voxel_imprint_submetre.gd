@@ -22,7 +22,7 @@ func test_submetre_log_imprints_at_its_true_thickness() -> void:
     var pos := Vector3(0, s0 + 30.0, 0)         # in open air
     var shape := CsgBoxShape.new(Vector3(0.5, 0.5, 4.0))   # a 0.5m-thick, 4m-long log
     var xform := Transform3D(Basis(), pos)
-    VoxelImprint.apply(es, &"Wood", shape, xform, CsgState.Op.ADD)
+    VoxelImprint.apply(es, EditSource.Kind.PLAYER, &"Wood", shape, xform, CsgState.Op.ADD)
 
     assert_lt(es.sample(pos), 0.0, "log core is solid")
     assert_lt(es.sample(pos + Vector3(0.1, 0, 0)), 0.0, "within the 0.25m half-thickness is solid")

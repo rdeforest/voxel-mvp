@@ -4,9 +4,10 @@ extends RefCounted
 # Identity sidecar (manifesto #7): the voxel field carries only SDF + material; this index
 # carries part identity — who placed what, its live cells, and ancestry — so queries like
 # "every part derived from ancestor X" work without polluting the field. The mesher and the
-# structural sim never see it. Built at imprint (PartPlacedEvent) and kept consistent as cells are carved
-# (VoxelRemovedEvent). A later refinement uses _cell_to_part so a new part placed over an
-# existing one keeps the older part's material on the cells it still owns.
+# structural sim never see it. Built at imprint (PartPlacedEvent) and kept consistent as writes of
+# any kind empty cells (the air flips of TerrainSdfChangedEvent, whoever made them). A later
+# refinement uses _cell_to_part so a new part placed over an existing one keeps the older part's
+# material on the cells it still owns.
 
 var _records:      Dictionary[int, PartRecord] = {}
 var _cell_to_part: Dictionary[Vector3i, int]   = {}
@@ -14,8 +15,8 @@ var _next_id:      int                          = 1
 
 
 func _init() -> void:
-    VoxelEventBusSingleton.subscribe(PartPlacedEvent.CHANNEL,   _on_part_placed)
-    VoxelEventBusSingleton.subscribe(VoxelRemovedEvent.CHANNEL, _on_voxel_removed)
+    VoxelEventBusSingleton.subscribe(PartPlacedEvent.CHANNEL,        _on_part_placed)
+    VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_matter_changed)
 
 
 # --- bus handlers ---
@@ -35,9 +36,10 @@ func _on_part_placed(event: PartPlacedEvent) -> void:
         _release_cell(cell)            # the newest part claims overlapped cells
         _cell_to_part[cell] = id
 
-# A carved cell leaves its part; a part with no cells left is gone.
-func _on_voxel_removed(event: VoxelRemovedEvent) -> void:
-    _release_cell(event.pos)
+# An emptied cell leaves its part; a part with no cells left is gone.
+func _on_matter_changed(event: TerrainSdfChangedEvent) -> void:
+    for cell in event.flips.air:
+        _release_cell(cell)
 
 
 func _release_cell(cell: Vector3i) -> void:

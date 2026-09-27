@@ -37,7 +37,7 @@ func _store() -> EditStore:
 
 func _action_ctx() -> ActionContext:
     if _ctx_ref == null:
-        _ctx_ref = ActionContext.new(_store(), _player, _integrity)
+        _ctx_ref = ActionContext.new(_store(), _player, _integrity, EditSource.Kind.PLAYER)
     return _ctx_ref
 
 

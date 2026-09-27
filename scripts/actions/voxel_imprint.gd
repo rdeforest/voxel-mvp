@@ -17,21 +17,18 @@ static func world_box(shape: CsgShape, xform: Transform3D) -> AABB:
 
 
 # Imprint the brush into the store at RENDER_BASE_CELL leaves (sub-metre once RENDER_SUBDIV_LOG2 > 0;
-# 1 m at the current 0), then emit the structural events for the cells whose sample point the write
-# actually flipped (measured across it — the same lattice() field CsgAction predicts from), plus terrain_sdf_changed over
-# the rewritten box for the render/collision re-mesh. What the brush makes solid takes the part
-# material; existing terrain keeps its material; air is 0 (matches the freeze union rule).
+# 1 m at the current 0), then announce the matter change, credited to `source`: the rewritten box
+# and the cells whose sample point the write actually flipped (measured across it — the same
+# lattice() field CsgAction predicts from). What the brush makes solid takes the part material;
+# existing terrain keeps its material; air is 0 (matches the freeze union rule).
 # Returns those measured flips, so a caller that tracks what the write did (PartIndex, via
-# ConstructionAction) reads the very set the events carried instead of measuring it again.
-static func apply(store: EditStore, material_name: StringName,
+# ConstructionAction) reads the very set the event carried instead of measuring it again.
+static func apply(store: EditStore, source: EditSource.Kind, material_name: StringName,
         shape: CsgShape, xform: Transform3D, op: int) -> CellFlips:
-    var lat := lattice(store, shape, xform, op)
-    var part := MaterialPalette.index_of(material_name) if op == CsgState.Op.ADD else -1
+    var lat   := lattice(store, shape, xform, op)
+    var part  := MaterialPalette.index_of(material_name) if op == CsgState.Op.ADD else -1
     var flips := lat.write(store, lat.materials(store, part, false))
-    flips.emit(store)
-    VoxelEventBusSingleton.emit(
-        TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, lat.region_lo, lat.region_hi - lat.region_lo))
+    TerrainSdfChangedEvent.announce(source, lat.region(), flips)
     return flips
 
 

@@ -43,6 +43,7 @@ func _init(
     material_name = p_material
     store         = p_ctx.store
     player        = p_ctx.player
+    source        = p_ctx.source
 
 
 func validate() -> bool:
@@ -72,9 +73,9 @@ func execute() -> void:
         push_error("ConstructionAction.execute(): no store")
         return
     var xform := _xform()
-    var flips := VoxelImprint.apply(store, material_name, _shape(), xform, CsgState.Op.ADD)
-    # PartIndex releases a cell only when a carve flips it back to air, so the part is registered
-    # under exactly the cells the write made solid (the voxel_added set apply just emitted).
+    var flips := VoxelImprint.apply(store, source, material_name, _shape(), xform, CsgState.Op.ADD)
+    # PartIndex releases a cell only when a write flips it back to air, so the part is registered
+    # under exactly the cells this write made solid (the flips apply's event just carried).
     VoxelEventBusSingleton.emit(
         PartPlacedEvent.CHANNEL,
         PartPlacedEvent.new(VoxelConstants.GRID_ID, flips.solid, material_name, part.dimensions, xform))

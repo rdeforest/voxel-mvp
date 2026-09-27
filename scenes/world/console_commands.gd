@@ -334,7 +334,7 @@ func mpmthaw(radius := 3.0) -> void:
         return
     # Thaw into the world's wired MpmStructure (the same one save-gating + DetachmentScout see), not a
     # private console instance — otherwise the in-flight material is invisible to is_quiescent.
-    var n := integrity.mpm.thaw_sphere(rc.get_collision_point(), radius)
+    var n := integrity.mpm.thaw_sphere(rc.get_collision_point(), radius, EditSource.Kind.INSTRUMENT)
     LimboConsole.info("mpmthaw: thawed %d cells (r=%.1f) into MPM" % [n, radius])
 
 # Debug-flood connected solid terrain from the cell behind the player's aim, biased downward,

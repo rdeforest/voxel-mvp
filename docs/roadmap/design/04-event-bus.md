@@ -37,6 +37,9 @@ payload carries a `grid_id`) even though only one grid exists.
 
 ## Event taxonomy
 
+*The table is the 5.5a design. What ships since 2026-09-27 is under "Matter changed" below (drafted
+by Claude).*
+
 | Channel                 | Tier      | Payload fields                                          | Emitter                              |
 | ----------------------- | --------- | ------------------------------------------------------- | ------------------------------------ |
 | `terrain_sdf_changed`   | primitive | `grid_id, box_origin, box_size`                         | DigAction, FillAction, FlattenAction |
@@ -54,6 +57,37 @@ no longer knows this is a thing.
 
 `notify_terrain_changed` was replaced by `terrain_sdf_changed`.
 Subscribers compute their own staleness from the box.
+
+### Matter changed (2026-09-27)
+
+Every write to the store emits exactly one `terrain_sdf_changed`
+(`TerrainSdfChangedEvent`), whoever made it: every Action, the MPM thaw
+and the MPM freeze. Its payload:
+
+- `source`: an `EditSource.Kind`: `PLAYER`, `INSTRUMENT` (console and
+  debug writes), `MPM` (the freeze), `SCOUT` (a detachment thaw) or
+  `REPLAY`. Actions take it from their `ActionContext`.
+- `box_origin`, `box_size`: the rewritten box, for re-meshing and
+  re-scanning. The dispatch footprint (`cells`) is every cell in it.
+- `flips`: the `CellFlips` the write measured, cells that went solid and
+  cells that went air (with what they were made of).
+
+`voxel_added` and `voxel_removed` were folded into it. One write is one
+fact, so subscribers can't see its cells and its box out of order, and
+there's no per-cell event storm. Raise, Lower and Flatten no longer
+differ from the other writers, and a subscriber tells writers apart by
+the source they report, not by guessing from world state. The box
+footprint lets a per-cell subscriber resting on the ground (Robert's fence
+on a hill) hear a change that moved the surface under it without flipping
+a cell. The class keeps its old name because `scripts/dc` subscribes by
+it; the rename goes with the terrain→matter rename.
+
+Subscribers: `TerrainSupport` (tracks the flips, scans the box),
+`PartIndex` (releases the air flips, from any source), `DetachmentScout`
+(seeds from the box; for its own `SCOUT` thaw only from the flips outside
+the component it thawed; ignores `MPM`), and the DC render and
+collision (the box). The freeze doesn't measure its flips yet
+(`docs/bugs/mpm-freeze-flips-unmeasured.md`).
 
 ## Bus API
 
