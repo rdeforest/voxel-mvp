@@ -46,6 +46,36 @@ func _init(
     source        = p_ctx.source
 
 
+# The part by file and by size: a replay rebuilds it from the file, and the size shows whether the
+# file still describes the part that was placed. A part with no file is whole in its size.
+func to_step() -> Dictionary:
+    return {
+        "part":       part.resource_path,
+        "dimensions": StepFields.encode_vec3(part.dimensions),
+        "position":   StepFields.encode_vec3(placement_pos),
+        "rotation":   StepFields.encode_vec3(rotation),
+        "material":   material_name,
+    }
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    var path  := f.text("part")
+    var dims  := f.vec3("dimensions")
+    var built := _part_for_step(f, path, dims)
+    return ConstructionAction.new(built, f.vec3("position"), f.vec3("rotation"), f.material("material"), ctx)
+
+static func _part_for_step(f: StepFields, path: String, dims: Vector3) -> Part:
+    if path.is_empty():
+        var inline := Part.new()
+        inline.dimensions = dims
+        return inline
+    var loaded := load(path) as Part if ResourceLoader.exists(path) else null
+    if loaded == null:
+        f.fail("part: %s is not a Part" % path)
+    elif loaded.dimensions != dims:
+        f.fail("part: %s is now %s; the step was recorded with %s" % [path, loaded.dimensions, dims])
+    return loaded
+
+
 func validate() -> bool:
     if store == null:
         return false

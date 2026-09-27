@@ -27,6 +27,18 @@ func _init(
     store    = p_ctx.store
     source   = p_ctx.source
 
+
+func to_step() -> Dictionary:
+    return {
+        "position": StepFields.encode_vec3(position),
+        "radius":   radius,
+        "shape":    StepFields.enum_name(Shape, shape),
+    }
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    return DigAction.new(f.vec3("position"), f.number("radius"), ctx, f.enum_value("shape", Shape))
+
+
 func validate() -> bool:
     if store == null:
         return false

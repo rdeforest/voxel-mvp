@@ -28,6 +28,11 @@ func _init(p_position: Vector3, p_radius: float, p_ctx: ActionContext, p_sign: f
     _sign    = p_sign
 
 
+# Which of raise and lower this is lives in the step's op, not a field (StepRegistry).
+func to_step() -> Dictionary:
+    return {"position": StepFields.encode_vec3(position), "radius": radius}
+
+
 func validate() -> bool:
     _ensure_lattice()
     return _lattice != null and not endangered_by(_lattice, store)

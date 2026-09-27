@@ -26,6 +26,20 @@ func _init(
     source        = p_ctx.source
     material_name = p_material
 
+
+func to_step() -> Dictionary:
+    return {
+        "position": StepFields.encode_vec3(position),
+        "radius":   radius,
+        "material": material_name,
+        "shape":    StepFields.enum_name(Shape, shape),
+    }
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    return FillAction.new(f.vec3("position"), f.number("radius"), ctx, f.material("material"),
+        f.enum_value("shape", Shape))
+
+
 func validate() -> bool:
     if store == null:
         return false

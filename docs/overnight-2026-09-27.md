@@ -35,6 +35,13 @@
     (only separable inside DcWorldPreview, Track E's); dead `MpmStructure.reset()` removed.
     **Found:** `var_to_str` and JSON `full_precision` don't round-trip ~31%/~24% of doubles on this
     engine; G4.1's step format needs an exact number encoding.
+  - [x] G4.1 — serializable steps: `to_step()`/`from_step()` on every action, `StepRegistry`,
+    `StepDocument` (format/version/units header, a step per line), exact JSON numbers
+    (`StepJson`/`ExactDecimal`: the engine's writer is exact, its reader isn't, so numbers are
+    re-read from their text with correct rounding; `-0.0` keeps its sign; any duplicate key is
+    refused, after review found one that silently swapped numbers). **Unilateral:** a part
+    with no file is recorded whole by its dimensions; flatten records the normal as given (a third
+    of unit normals move an ulp on renormalizing); unit strings deferred to the phase-3 evaluator.
 - [ ] R1 — research: what the refine frontier spends its effort on + perceptual LOD survey
 - [ ] Integration review of the merged result; morning brief at the bottom of this doc
 

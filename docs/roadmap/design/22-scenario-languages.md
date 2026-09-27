@@ -123,6 +123,14 @@ Lisp syntax.
   found works), and a recording that built the walls in any order still validates against the method.
 - **Repetition:** parameters come from generators (`each seg in wall_segments(...)`), or from
   recursion when the count depends on world state ("keep clearing until `area_clear`").
+- **Step shape** (phase 1, 2026-09-27): `{"op": <name>, ...the action's resolved constructor
+  arguments}`, one step per line of a file headed `{"format": "voxel-mvp/steps", "version": 1,
+  "units": {"length": "meter", "angle": "degree"}}`. Vectors are `[x, y, z]`, transforms
+  `{"basis": [x, y, z], "origin": [...]}` (Godot's basis vectors), enums and materials by name.
+  A CSG step holds the shape by value (`shape` + `dims`); a build step holds the part's file *and*
+  its dimensions, and a file whose part changed size is refused rather than replayed. Recorded
+  numbers are the engine's own metres and degrees; the unit strings above are for quantities a
+  person writes and arrive with the phase-3 evaluator.
 - **Recordings store bound values**, so replays are exact. The same generator can be re-run to check
   it still produces those bindings, a separate regression gate.
 - **JSON numbers:** `JSON.stringify` defaults to about 14 significant digits (lossy for doubles) and
@@ -131,6 +139,21 @@ Lisp syntax.
   `full_precision` still reads 24% of random doubles back an ulp off, and `var_to_str` 31%;
   `var_to_bytes` is exact (100,000 samples each, `scripts/dev/probe_var_to_str_precision.gd`). The
   step format needs an exact number encoding before G4.1 can gate on the round trip.*
+  *Resolved 2026-09-27 (Claude, G4.1): the loss is all on the reading side. The `full_precision`
+  text is the engine's Grisu2 output, which a correctly rounding parser reads back exactly (Python,
+  200,000 doubles over every exponent including subnormals, `scripts/dev/probe_grisu_vs_python.gd`);
+  the engine's `String::to_float`, shared by JSON and GDScript literals, is off by an ulp on about
+  a quarter of them and reads `2.2250738585072014e-308` as zero. So step files stay plain JSON with
+  shortest-round-trip numbers, which any correct reader (Python, Node) takes exactly, and
+  `StepJson` reads each number from its own text: the engine's value when its own Grisu2 text
+  matches, otherwise correct rounding by exact big-integer comparison (`ExactDecimal`). `-0.0` is
+  written with its sign. Reading costs about 10–20 µs per number at game magnitudes
+  (`scripts/dev/probe_exact_decimal_cost.gd`). The alternatives were worse for a file people trim
+  by hand: `var_to_bytes` is exact but not text, and hex floats are text nobody reads.
+  A duplicate key anywhere is refused: the engine keeps a duplicate at its first position with its
+  last value, so numbers re-read in document order would land on the wrong keys. GDScript folds a
+  literal `-0.0` to `+0.0` in some expressions (`[-0.0][0]`, a function argument), so tests build
+  it from bits.*
 - **Four uses of one format:**
   1. Hand-written test scenarios.
   2. Recordings of play.

@@ -22,6 +22,17 @@ func _init(p_hit_pos: Vector3, p_hit_normal: Vector3, p_offset: Vector3, p_ctx: 
     integrity  = p_ctx.integrity
 
 
+func to_step() -> Dictionary:
+    return {
+        "hit_pos":    StepFields.encode_vec3(hit_pos),
+        "hit_normal": StepFields.encode_vec3(hit_normal),
+        "offset":     StepFields.encode_vec3(offset),
+    }
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    return ProbeAction.new(f.vec3("hit_pos"), f.vec3("hit_normal"), f.vec3("offset"), ctx)
+
+
 func validate() -> bool:
     return store != null
 

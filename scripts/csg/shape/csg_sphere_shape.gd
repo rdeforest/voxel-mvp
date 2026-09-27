@@ -8,6 +8,9 @@ var radius: float
 func _init(p_radius := 3.0) -> void:
     radius = p_radius
 
+static func from_dims(dims: PackedFloat64Array) -> CsgShape:
+    return CsgSphereShape.new(dims[0]) if dims.size() == 1 else null
+
 func mesh() -> Mesh:
     var m := SphereMesh.new()
     m.radius = radius

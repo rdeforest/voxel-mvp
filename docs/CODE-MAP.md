@@ -113,8 +113,28 @@ calls `current_activity().make_action.call(hit_pos, hit_normal)`, then
 placement) lives inside `ActionFactories`, not inside the Action.
 
 **Adding an Action:** extend `Action`, implement `validate()` / `execute()` /
-`preview()`, add a `make_*` factory to `ActionFactories`, and a new `EditMode`
-entry under the appropriate tool in `ToolCatalog._build_catalog()`.
+`preview()` / `to_step()` and a static `from_step()`, give it an op name in
+`StepRegistry.ops()`, add a `make_*` factory to `ActionFactories`, and a new
+`EditMode` entry under the appropriate tool in `ToolCatalog._build_catalog()`.
+`test_step_registry.gd` round-trips every op; add yours there.
+
+### Steps (`scripts/scenario/`)
+
+An action as data, for recordings and hand-written scenarios (doc 22, Format 2).
+*(Section drafted by Claude, 2026-09-27.)*
+
+- `to_step()` returns the resolved constructor arguments; `StepRegistry.step_of()`
+  adds the op name, and `StepRegistry.action_of(StepFields.new(step), ctx)`
+  rebuilds the action in a context (a replay's store, player stand-in, source).
+  The player's position is not in a step; the step stream carries it.
+- `StepFields` owns the JSON shapes (vectors, cells, transforms, enum names,
+  materials) and reads strictly: a missing, mistyped or extra field refuses.
+- `StepDocument` is the file: a `format` / `version` / `units` header and one
+  step per line.
+- `StepJson` + `ExactDecimal` + `BigNat`: JSON whose doubles read back bit for
+  bit. The engine's JSON reader is off by an ulp for about a quarter of doubles
+  and drops `-0.0`'s sign, so numbers are read from their own text with correct
+  rounding.
 
 ---
 

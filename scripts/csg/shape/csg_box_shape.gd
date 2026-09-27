@@ -6,6 +6,9 @@ var size: Vector3
 func _init(p_size := Vector3(4.0, 4.0, 4.0)) -> void:
     size = p_size
 
+static func from_dims(dims: PackedFloat64Array) -> CsgShape:
+    return CsgBoxShape.new(Vector3(dims[0], dims[1], dims[2])) if dims.size() == 3 else null
+
 func mesh() -> Mesh:
     var m := BoxMesh.new()
     m.size = size

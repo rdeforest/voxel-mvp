@@ -10,6 +10,9 @@ func _init(p_radius := 2.0, p_height := 5.0) -> void:
     radius = p_radius
     height = p_height
 
+static func from_dims(dims: PackedFloat64Array) -> CsgShape:
+    return CsgCylinderShape.new(dims[0], dims[1]) if dims.size() == 2 else null
+
 func mesh() -> Mesh:
     var m := CylinderMesh.new()
     m.top_radius    = radius

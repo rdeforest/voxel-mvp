@@ -15,6 +15,14 @@ func _init(p_cell: Vector3i, p_ctx: ActionContext) -> void:
     player = p_ctx.player
     source = p_ctx.source
 
+
+func to_step() -> Dictionary:
+    return {"cell": StepFields.encode_cell(cell)}
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    return EmptyVoxelAction.new(f.cell("cell"), ctx)
+
+
 func validate() -> bool:
     if store == null:
         return false

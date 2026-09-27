@@ -19,6 +19,13 @@ func _init(p_cell: Vector3i, p_ctx: ActionContext, p_material: StringName = &"St
     material_name = p_material
 
 
+func to_step() -> Dictionary:
+    return {"cell": StepFields.encode_cell(cell), "material": material_name}
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    return FillVoxelAction.new(f.cell("cell"), ctx, f.material("material"))
+
+
 func validate() -> bool:
     if store == null:
         return false
