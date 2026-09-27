@@ -14,7 +14,11 @@
 - [ ] G2 — edit events carry their source; raise/lower/flatten emit measured flips (Q1)
 - [ ] G3 — save-pair integrity; single save format (Q5)
 - [ ] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments
-- [ ] R1 — research: what the refine frontier spends its effort on + perceptual LOD survey
+- [x] R1 — research: what the refine frontier spends its effort on + perceptual LOD survey.
+  Headline: the stones never enter the frontier. Their error comes from the 1 m scalar
+  reconstruction (linear crossings, h = 1 m normals); exact Hermite data fixes it at 1 m cost. The
+  drain refines already-under-eps cells to the floor (0.47 M → 3.46 M cells for +13% triangles).
+  Doc `reference/09`.
 - [ ] Integration review of the merged result; morning brief at the bottom of this doc
 
 "Q" numbers refer to [`overnight-2026-09-26-questions.md`](overnight-2026-09-26-questions.md);

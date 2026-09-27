@@ -25,3 +25,8 @@ exists*, not what it contains.
 - [`08-scenario-languages-research/`](08-scenario-languages-research/00_INDEX.md) — the
   prior-art research behind design doc 22: HTN languages, parametric assembly formats, field
   captures and Blender/VDB, and command-level record/replay.
+- [`09-perceptual-lod-research.md`](09-perceptual-lod-research.md) — measured evidence (where the
+  DC refine budget and triangles go, how wrong the mesh is at placed stones compared with a distant
+  ridge, and why: scalar reconstruction versus exact Hermite data), a perceptual-LOD and
+  shader-detail survey, and options for the "compelling, not accurate" design session. Research
+  only; no decisions.
