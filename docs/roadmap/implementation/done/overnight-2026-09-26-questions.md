@@ -45,7 +45,7 @@ the measured cell flips and the source, so raise, lower and flatten stop being t
 
 ## 2. A thaw plan the corner carve can't carve
 
-**Where:** [`mpm-thaw-carve-leaves-planned-cells`](../../../bugs/mpm-thaw-carve-leaves-planned-cells.md)
+**Where:** `mpm-thaw-carve-leaves-planned-cells` (fixed; design in [doc 12, "The thaw carve"](../../design/12-mpm-structural-substrate.md))
 
 **Context.** Thawing a sphere of buried terrain leaves part of it in the ground: radius 5 plans 176
 cells and empties 143, and a single buried cell empties none. The carve can only clear lattice
@@ -69,7 +69,7 @@ Agreed, for the same reason.
 
 ## 3. StoreWrite's box rewrite flips cells nobody edited
 
-**Where:** [`mpm-thaw-carve-leaves-planned-cells`](../../../bugs/mpm-thaw-carve-leaves-planned-cells.md),
+**Where:** `mpm-thaw-carve-leaves-planned-cells` (fixed; design in [doc 12, "The thaw carve"](../../design/12-mpm-structural-substrate.md)),
 "Separate effect".
 
 **Context.** `StoreWrite.cells` rewrites its whole box, which flips some cells nobody asked to change:

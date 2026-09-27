@@ -74,6 +74,7 @@ func _wire_structural_sims() -> void:
     _mpm_structure.name = "MpmStructure"
     add_child(_mpm_structure)
     _mpm_structure.setup(_edit_store.store)
+    _mpm_structure.thaw_refused.connect(_on_thaw_refused)
     _integrity.mpm = _mpm_structure
 
     # The loss-of-support trigger: floods edits toward bedrock and thaws detached chunks into MPM.
@@ -152,6 +153,11 @@ func edit_store_ref() -> EditStore:
 # Part identity, which the save carries beside the field (WorldSnapshot).
 func part_index() -> PartIndex:
     return _part_index
+
+# Both on screen and in the console history, so a refused `mpmthaw` isn't read as a thaw of nothing.
+func _on_thaw_refused(message: String) -> void:
+    Toast.failure("MPM " + message)
+    LimboConsole.error("MPM " + message)
 
 func _exit_tree() -> void:
     # Drop our console commands before this world is freed (scene reload / quit)

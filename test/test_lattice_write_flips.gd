@@ -134,15 +134,23 @@ func _same_work(label: String, work: Array[LatticeEdit]) -> void:
     _same(label, lat, indices, func(store: EditStore) -> CellFlips: return StoreWrite.write(store, lat, work))
 
 
-# MpmStructure.thaw_cells' carve, over balls of cells through the edit history and the surface.
+# MpmStructure.thaw_cells' carve (the solved lattice, written keeping each leaf's material), over
+# balls of cells through the edit history and the surface.
 func test_thaw_flips_match_oracle() -> void:
     var ms: MpmStructure = autofree(MpmStructure.new())
     ms.setup(_store)
     for p in _fixture.positions():
         for radius: float in [0.9, 2.2, 3.5]:
-            var work := ms._carve_corners(ms._plan_thaw(VoxelUtils.cells_in_sphere(p, radius)))
-            if not work.is_empty():
-                _same_work("thaw %s r%s" % [p, radius], work)
+            var planned := ms._plan_thaw(VoxelUtils.cells_in_sphere(p, radius))
+            if planned.is_empty():
+                continue
+
+            var carve := ms._solve_carve(planned)
+            assert_true(carve.has("sdf"), "thaw %s r%s is carveable: %s" % [p, radius, carve])
+            if carve.has("sdf"):
+                var lat := SdfLattice.predicted(carve)
+                _same("thaw %s r%s" % [p, radius], lat, StoreWrite._current_materials(_store, lat),
+                    func(store: EditStore) -> CellFlips: return StoreWrite.reshape(store, lat))
     _assert_all_same({"air": 500, "air_material": 500, "unchanged": 20})
 
 

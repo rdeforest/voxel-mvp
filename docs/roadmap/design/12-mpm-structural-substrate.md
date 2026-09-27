@@ -218,6 +218,63 @@ material renders from its particles** — surfaced the same way `VoxelChunkBody`
 DC-meshes a chunk, but updated each frame from the live particle set (or a small
 per-region field the particles rasterize into).
 
+### The thaw carve (as built)
+
+*Drafted by Claude (agent), 2026-09-27, from the closed bug `mpm-thaw-carve-leaves-planned-cells`.*
+
+A thaw must take out of the store exactly the cells it puts into the sim. The store is corner-sampled
+(a cell reads the mean of its 8 corners), so "empty these cells" is a choice of corner values, and
+the obvious rule — clear every corner of a planned cell that no kept-solid cell touches — fails: a
+planned cell against kept terrain keeps the corners it shares with it and usually still reads solid.
+That rule emptied 52 of a terrain r=3 sphere's 63 planned cells, 143 of r=5's 176, and none of a lone
+buried cell. Separately, rewriting the box re-encodes the generator's field at the corners, and the
+generator's value at a cell centre is not the trilerp of its corners, so the rewrite alone flipped
+cells nobody planned (matter from nowhere, or matter metres from the thaw entering the sim).
+
+`MpmStructure.thaw_cells` therefore solves the carve (`EditStore.predict_carve`,
+`engine/voxel_dc/edit_store_carve.cpp`, solver in `carve_solver.cpp`), per Robert's call (Q2/Q3 of
+the 2026-09-26 questions): solve exactly, keep every unplanned cell on its side, refuse loudly only
+where no solution exists.
+
+- **The problem.** The rewrite box is the plan's box plus a margin, squared to a cube. Each cell in
+  it is one sparse row: a planned cell must read ≥ `CELL_EDIT_SDF`, every other cell must stay on the
+  side it reads now by `CELL_KEEP_SDF`. Corners on the cube's faces are held (the leaves beyond keep
+  them; moving one opens a seam); interior corners range over `[SDF_SOLID, SDF_AIR]`, widened to take
+  in their current value.
+- **The target.** The solve heads for the least-squares projection of the old corner carve
+  (`SDF_AIR` at each planned corner no kept-solid cell touches, the current value elsewhere) and stops
+  at the first feasible iterate; where that carve already meets every cell it is returned unchanged.
+  It is not the minimal corner change: that would park the carved interior just past
+  `+CELL_EDIT_SDF`, and the zero crossing the mesher draws as the hole's wall would sit inside the
+  planned cells rather than between them and the kept terrain. Heading for the clean carve keeps the
+  wall where the old carve put it wherever the old carve was already right. (Open question for Robert
+  whether that is the look he wants; the wall has not been looked at on the GPU.)
+- **The solver.** Dual coordinate ascent on that projection (Hildreth), bounds folded into the
+  primal: O(cells) per sweep, O(corners) memory. A dense simplex (as `StoreWrite.one_cell` uses for 9
+  unknowns) would take minutes at a thaw's size (~27,000 unknowns at the particle cap). Each cell aims
+  at twice its margin; the solve stops once the float32 values meet the true margins, read back as
+  the store reads them.
+- **Refusal.** When no field exists, the conflicting cells' multipliers grow along a Farkas ray, and
+  every 256 sweeps that growth is checked as a certificate, so a refusal carries a proof naming the
+  cells (`proven`); an exhausted sweep budget says so instead (`proven = false`). A proof that leans
+  on the held faces (`pinned`) may be the box's fault, so the margin grows a cell and the solve reruns,
+  up to `EditStore::CARVE_MAX_MARGIN`. When the 2x aim is provably impossible but the true margins may
+  not be, the aim steps down toward 1x rather than burning the budget.
+- **On refusal the whole thaw is refused**: nothing is written or announced, no particles are seeded,
+  `push_error` logs it and `thaw_refused` reaches the player as a Toast (world.gd). A refused scout
+  thaw can't loop: the flood that found the piece consumed its seeds and no event re-seeds them.
+
+Measured on the game's field: r=3 and r=5 spheres, a lone buried cell and a 9³ block empty completely
+with zero unplanned flips, each solve under 1 ms; no refusal across 25,600 near-surface r=1.4 plans
+(`scripts/dev/bench_carve.gd`, `scripts/dev/find_reencode_flip.gd`). No plan a thaw makes on the
+game's field has been found that the solve refuses, so the refusal path is tested with a stand-in
+(`test/support/refusing_mpm.gd`). The whole `thaw_cells` got faster (r=5: ~2.1 → ~1.7 ms; a floating
+729-cell block ~5.3 → ~3.0 ms, `scripts/dev/bench_mpm_thaw.gd`): the solve replaced per-corner
+GDScript probing.
+
+Inherited debt: the rewrite is a cube, so a flat plan rewrites far more than its span, and a 1 m write
+flattens finer leaves inside it ([edit-store-1m-write-flattens-finer-leaves](../../bugs/edit-store-1m-write-flattens-finer-leaves.md)).
+
 ## Material models (depth we can dial)
 
 - **Elastic solids (wood, stone, built parts):** fixed-corotated or Neo-Hookean. Stiff;

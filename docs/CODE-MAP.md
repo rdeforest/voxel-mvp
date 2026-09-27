@@ -305,7 +305,8 @@ and handed to `MpmStructure.thaw_cells(...)`.
 
 The scout tells edits apart by source: for its own detachment thaw (`SCOUT`)
 it seeds only from the cells the thaw flipped outside the component it thawed
-(the box rewrite can flip unplanned cells), and it ignores `MPM` freezes, whose
+(the carve is solved to flip none, but the seeding follows measured flips, not the
+promise), and it ignores `MPM` freezes, whose
 flips aren't measured yet (`docs/bugs/mpm-freeze-flips-unmeasured.md`). It
 pauses resolving while material is in flight, so
 detachment proceeds in settled waves; edits made during flight are queued, not

@@ -97,7 +97,10 @@
   restores the default (C++ `get_octree_live_cell_count`); DcWorldPreview `cell_limit()` /
   `cell_stats()` shared by the status line, recorder marks and `/stats`, which skips mesher fields
   mid-job; dangling bug links, extras-11 pointer, GLOSSARY
-- [ ] F1 — wire the exact carve (`predict_carve`) into the MPM thaw (follow-up)
+- [x] F1 — wire the exact carve (`predict_carve`) into the MPM thaw (follow-up): `thaw_cells` writes
+  the solved lattice (r=3 / r=5 spheres empty 63/63 and 176/176, a lone buried cell empties, zero
+  stray flips); a refused carve refuses the whole thaw (push_error + `thaw_refused` → Toast); the
+  conditioning gauge resets per thaw. Bug closed; design in doc 12 "The thaw carve"
 - [ ] F2 — `EditStore.leaf_info` binding; probe shows the owning leaf (completes G4.4) (follow-up)
 - [ ] F3 — the MPM freeze reports its measured flips (follow-up)
 - [ ] Morning brief at the bottom of this doc
