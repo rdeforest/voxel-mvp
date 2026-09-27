@@ -30,3 +30,7 @@ exists*, not what it contains.
   ridge, and why: scalar reconstruction versus exact Hermite data), a perceptual-LOD and
   shader-detail survey, and options for the "compelling, not accurate" design session. Research
   only; no decisions.
+- [`10-godot-float-parsing.md`](10-godot-float-parsing.md) — why Godot's number reader
+  (`String::to_float`, used by GDScript literals, `JSON.parse` and `str_to_var`) is not correctly
+  rounded and reads tiny values as 0, the upstream state (issue #123700), and our options. The
+  evidence behind `bugs/godot-float-parse-inexact.md`.

@@ -27,7 +27,7 @@
   is finished by the next load or F5. Lone, mismatched or older halves are refused and kept.
   **Unilateral:** a refused save still blocks F5 until console `reset` (not moved aside); named
   saves (G4.4) soften that. Q5 left the choice open.
-- [ ] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments (G4.0–G4.4 done; G4.4's leaf read-out finished by F2, overlay and assembly export/import not built)
+- [x] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments. G4.0–G4.4 done, and F2 finished G4.4's leaf read-out. Not built: the probe overlay, which waits on Robert (question 22), and assembly export/import, which is doc 22 phase 3.
   - [x] G4.0 — gaps: PartIndex saved (snapshot v9, bit-exact bytes; a snapshot whose parts break
     one-owner/unique-id is refused); scout pending work and MPM's unannounced freeze chunks gate
     `is_quiescent()`; MPM freeze chunks announced bottom-up by position, appended (a second freeze
@@ -113,7 +113,7 @@
   voxel on a 1 m grid post froze and was thawed 8 times), so per the brief the scout still ignores
   freezes; re-scoped to scout-ignores-freeze-flips. Also filed mpm-chunked-freeze-flips-arrive-late
   (a stale chunk flip releases a live part, pending test). Design in doc 12 "The freeze (as built)"
-- [ ] Morning brief at the bottom of this doc
+- [x] Morning brief at the bottom of this doc
 
 "Q" numbers refer to [`overnight-2026-09-26-questions.md`](roadmap/implementation/done/overnight-2026-09-26-questions.md);
 Robert's answers are inline there.
@@ -294,5 +294,98 @@ Robert is asleep for about eight hours. Work the whole window; don't stop and wa
 
 ## Morning brief
 
-*Filled in at the end of the session: decisions made unilaterally, open questions, what got skipped and
-why, and a short play-test list.*
+*Drafted by Claude at the end of the session. Everything is merged to `master` and pushed.*
+
+### Needs you first
+
+Answer inline in [`overnight-2026-09-27-questions.md`](overnight-2026-09-27-questions.md). The top
+four:
+1. **Post our findings on Godot's float-parsing issue #123700?** A draft comment is in the
+   questions doc. Posting is outward-facing, so I didn't.
+2. **A grid-aligned 1 m post renders and collides, but the structural code sees air.** This is the
+   cell-centre solidity rule again, the one behind your single-voxel surprise. It blocks the scout
+   from reacting to freezes. It needs a short design discussion.
+3. **Should every box writer keep unplanned cells on their side,** as the thaw now does?
+4. **Look at carved walls and stamp paint on a GPU.** See the play-test list below.
+
+The other 20 questions are small, and most have a recommendation you can answer with "yes".
+
+### What landed
+
+All 5 tracks and 18 chunks, in 20 commits:
+- **Engine:** the SVD rank fix; stamps paint only what they made; lazy frontier invalidation; a RAM
+  cell arena capped at 16 GiB with mmap gone (builds about 30 % faster); the exact thaw carve,
+  wired in (spheres now empty 63/63 and 176/176 planned cells, the 729-cell block thaws in 2.9 ms
+  instead of 5.2 ms, with zero stray flips).
+- **Game:**
+  - One matter-changed event per write, carrying its source, so terraforming now reaches PartIndex
+    and support.
+  - Consistent save pairs in a single format, with PartIndex saved.
+  - Doc 22 phase 1: exact serializable steps, a headless replay runner, the in-game recorder
+    (`rec` / `mark`), and the instrument layer (probe with leaf info, exact console writes, fly
+    rescue, named saves).
+- **Follow-ups after the merge:**
+  - Freezes report measured flips (+0.5 ms per freeze).
+  - `leaf_info` for the probe.
+  - The integration review's fixes.
+  - A GUT test that fails if any `scripts/dev/` harness stops compiling.
+- **Research:** reference note 09. The stones you saw badly drawn weren't waiting for refinement.
+  They sit at the 1 m floor, and the damage is surface reconstruction. Exact surface (Hermite) data
+  at 1 m would fix them at no extra cell cost. Seven options, none chosen, for your "compelling,
+  not accurate" session.
+
+GUT went from 318 tests / 314 passing / 4 pending to **484 / 479 / 5**, with 0 failing throughout.
+The new pending test is the gate for `scout-ignores-freeze-flips`.
+
+### Decided without you, overrule freely
+
+- **Carve policy:** an infeasible thaw plan is refused whole and loudly (0 of 25,600 realistic
+  plans refused). The solve aims for a clean carve at the boundary with kept terrain, not the
+  smallest change to corners.
+- **Freeze events:** a chunked freeze gives each chunk event the flips inside its box. The scout
+  still ignores freezes, because enabling it loops (question 2).
+- **Behaviour changes to know about:**
+  - Terraforming releases parts and registers support with the real material.
+  - A console `mpmthaw` counts as an instrument edit, so detachment follows it.
+  - A part whose support is flattened away falls rather than sags (question 14).
+- **Saves:** an unreadable save still blocks F5 until `reset` (named saves soften that). The
+  snapshot's floats are stored as bytes (v10), because Godot's float parser loses an ulp.
+- **Steps:** our own exact number reader (`ExactDecimal`) works around the parser. Steps are in
+  metres; units come with the phase 3 evaluator.
+- **Engine:** no zeroing `Mat3` constructor (1.5 % cost; the defect is fixed at its cause).
+  `max_cells 0` now means "capacity". `sizeof(Cell)` is pinned by an assert, because a larger
+  layout measured 15–25 % slower.
+- **Tests and parallel runs:** tests write fixed `user://` file names, so parallel GUT runs
+  collided. Every track ran with its own `XDG_DATA_HOME`. **Not fixed at the source:** tests should
+  use unique temp names.
+- **Bug records:** two "not a bug" verdicts (`edit-store-noop-write-reports-changed`,
+  `dig-action-no-validate-no-safety`) went to `closed/`. Everything fixed was deleted.
+
+### Not done, and why
+
+- **The probe overlay:** it's visual, and what it looks like is your call (question 22).
+- **Scout seeding from freezes:** it loops (question 2).
+- **Stray-flip protection for the other writers:** waiting on question 3.
+- **A per-process cell counter, the unexplained 12 % drain slowdown, and the MPM friction slide:**
+  queued pending your answers (questions 6–8).
+- **Nothing was checked on a GPU.**
+
+### Environment
+
+- Pushes worked all night with `GIT_SSH_COMMAND='ssh -o IdentitiesOnly=yes -i ~/.ssh/id_rsa'`.
+- The main checkout is back on `master`, and the worktrees are removed.
+
+### Play-test list
+
+1. `mpmthaw 3` and `mpmthaw 5` into a hillside: the whole planned volume should come out. Look at
+   the carved wall and the debris.
+2. `stamp` (console) a box next to a different material: only the new solid takes the new
+   material.
+3. Place a beam on a slope, then flatten under it: it detaches and falls. `parts` drops its record.
+4. Probe a cell: leaf origin, size, field state, 8 corners and the sign test.
+5. `save test1`, change things, `load test1`. Truncate a copy of a save and load it: you get a loud
+   refusal, and the file is untouched.
+6. `rec fresh`, do a few edits and a `mark note`, then `rec stop`. Look in
+   `user://scenarios/<name>/`.
+7. `dcmaxcells`: the help quotes the capacity, and the status line shows live cells.
+8. Aim previews and place beams: still smooth (a regression check on last night's work).

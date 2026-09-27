@@ -10,46 +10,53 @@
 
 # Resumption Brief
 
-*Last rewritten: 2026-09-26, by Claude, at the end of the overnight session.*
+*Last rewritten: 2026-09-27, by Claude, at the end of the second overnight session.*
 
 
 ## Where things stand right now
 
-`master` holds everything and was pushed on 2026-09-26.
-The overnight run (plan, results, open questions and play-test list) is
-[`overnight-2026-09-26.md`](roadmap/implementation/done/overnight-2026-09-26.md). Its **Morning brief** has been
-answered and folded into the bug files (2026-09-27, Track G1).
+`master` holds everything and is pushed. Start with the **morning brief** at the bottom of
+[`overnight-2026-09-27.md`](overnight-2026-09-27.md), then answer
+[`overnight-2026-09-27-questions.md`](overnight-2026-09-27-questions.md) inline. Both move to
+`roadmap/implementation/done/` once they've been reviewed. The 2026-09-26 session's docs are
+already there.
 
-What changed, in one breath:
-- Every action lattice runs in C++, for preview and write alike, with the GDScript originals kept as
-  a bit-exact oracle in `test/support/lattice_oracle.gd`. That covers build, flips, safety, the
-  "writes anything" dry run, material paint, measured write flips and the construction attach scan.
-  Previews are back under their pre-`f11d284` times; a placement click costs ~0.7 ms, down from ~6.3.
-- Safety, events and part records come from the field each action writes: EmptyVoxel/Fill safety,
-  PartIndex registration and the MPM thaw's events and particles.
-- Also fixed: event-bus re-entrancy, honest save failures (a corrupt save is refused, not crashed on), the mmap-arena crash fallback and the
-  DC mesher's argument traps. The SVD sign convention is pinned by tests.
+What the last two nights built:
+- **Every action lattice runs in C++,** gated bit-exact against the GDScript oracle. Previews are
+  back under their pre-regression times, and a placement click costs about 0.7 ms.
+- **One matter-changed event per write, carrying its source** (`EditSource`), with measured cell
+  flips from every writer, including terraforming, the MPM thaw (now an exact carve) and the freeze.
+- **Saves are a consistent pair in a single format,** with PartIndex saved; corrupt saves are
+  refused, not crashed on.
+- **Doc 22 phase 1 (test instruments):** exact serializable steps, a headless replay runner
+  (`test/support/scenario.gd`), the in-game recorder (`rec` / `mark`), exact console writes,
+  `leaf_info` in the probe, and named saves.
+- **The DC cell arena is plain RAM,** capped by `DC_CELL_RAM_BUDGET` (16 GiB); mmap is gone.
+- **Research:** reference note 09 (what the refine budget buys, and options) and note 10 (Godot's
+  inexact float parser).
 
 **Run `tools/build` after pulling** (engine changes), then the class-cache pass
-(`bin/godot --path . --headless --editor --quit`); new `class_name`s landed.
+(`bin/godot --path . --headless --editor --quit`).
 
-GUT: **318 tests, 314 passing, 4 pending**, 0 failing. The 4 pending tests are known gates (see `docs/bugs/00_INDEX.md`).
+GUT: **484 tests, 479 passing, 5 pending**, 0 failing. The pending tests are gates for filed bugs.
+When running GUT in parallel checkouts, give each its own `XDG_DATA_HOME`, because the tests use
+fixed `user://` file names.
 
-The per-change loop that ran all night: an Opus author, an Opus correctness reviewer and a Sonnet
-completeness reviewer (a different model family on purpose), then an Opus fixer. A Fable tiebreak
-settled real disagreements. Reviewers see only the diff; any question they raise gets its own
-researcher.
+The per-change loop: an Opus author, an Opus correctness reviewer and a Sonnet completeness reviewer,
+a Fable tiebreak on disputes, and an Opus fixer who commits only on green GUT. After merges, an
+integration review of the combined result. It has caught real cross-track bugs both nights.
 
 
-## The active thread: test instruments and scenario languages, then FEAT089
+## The active thread
 
-1. **Overnight 2026-09-27** ([plan](overnight-2026-09-27.md)): doc 22 phase 1 (instrument layer,
-   step language, recorder, replay runner), plus the fixes decided in the
-   [2026-09-26 questions](roadmap/implementation/done/overnight-2026-09-26-questions.md) and research on perceptual LOD.
-2. **Design session to come:** "compelling, not accurate" rendering. Refinement should follow the
-   eye (edits, sharp features, foreground) rather than uniform screen error.
-3. **FEAT089, parts look like parts**, which blocks the rest of 5.5g. Volumetric worldgen tier 1
-   (`planned/18`) is independent and can run alongside.
+1. **Answer the questions.** The top ones: the cell-centre solidity rule (a grid-aligned post is
+   invisible to the structural code), stray-flip protection for every writer, and whether to post on
+   Godot issue #123700.
+2. **Design session: "compelling, not accurate" rendering.** Reference note 09 found that the badly
+   drawn stones are a reconstruction problem (exact Hermite data fixes them at 1 m), not a
+   refinement-priority one.
+3. **Doc 22 phase 2 (field captures) and phase 3 (the C++ evaluator and assemblies),** then
+   **FEAT089, parts look like parts.**
 
 *Section drafted by Claude.*
 
@@ -139,9 +146,10 @@ recolours the overlap — use `PartIndex`.
 
 ## Immediate next actions
 
-1. Push `master` (and the merged branches, if you want them on origin).
-2. Morning brief in `docs/roadmap/implementation/done/overnight-2026-09-26.md`: questions, then the play-test list on a GPU.
-3. FEAT089, with worldgen tier 1 alongside.
+1. Play-test on a GPU, using the list in the 2026-09-27 morning brief.
+2. Answer `overnight-2026-09-27-questions.md` inline.
+3. Pick the next night's work from the answers: stray-flip protection, the solidity rule, doc 22
+   phase 2.
 
 
 ---

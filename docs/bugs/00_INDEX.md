@@ -13,6 +13,7 @@ When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a 
 
 | Bug | Area | Severity | Notes |
 |-----|------|----------|-------|
+| [godot-float-parse-inexact](godot-float-parse-inexact.md) | engine (Godot core) | low-med (upstream) | Godot's text→double reader is off by an ulp on ~24 % of 17-digit doubles and reads values below ~1e-308 as 0. Worked around in steps and saves; upstream issue #123700. |
 | [store-write-reencode-flips-unplanned-cells](store-write-reencode-flips-unplanned-cells.md) | actions (StoreWrite box writers) | low (needs a call) | A box rewrite re-encodes the field and can flip cells the edit never named. Fixed for the thaw (predict_carve) and one_cell; Bell/Flatten/Fill/Dig/CSG/VoxelImprint/instruments/freeze still do it. |
 | [scout-ignores-freeze-flips](scout-ignores-freeze-flips.md) | structural (DetachmentScout) | low (needs a call) | The scout drops MPM freeze events, so a cell a freeze empties never re-checks its neighbours. Seeding from the freeze's measured flips loops (probe: a voxel on a 1 m grid post, 8 freeze/thaw cycles): the flood reads SDF-0 geometry as air, the collider holds particles on it. |
 | [mpm-chunked-freeze-flips-arrive-late](mpm-chunked-freeze-flips-arrive-late.md) | MPM freeze (events) | low (needs a call) | A chunked freeze (region over 24 m) announces each chunk's measured flips frames after its write, so a write in between can make them stale. A part placed on a cell the freeze emptied is then released (pending test reproduces it). |
