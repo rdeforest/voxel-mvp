@@ -93,8 +93,14 @@ time.
 **Context.** E1's probe saw thawed blocks land and then slide steadily down the slope near the
 origin: about 130 m of drop over 3000 ticks with contact friction 0.35, and they never settle.
 
-**My take:** that looks like a physics bug rather than a real slope effect. I'd investigate MPM
-contact friction next session unless you know that slope is steep enough.
+**Diagnosed after the brief** (`bugs/mpm-contact-friction-and-damping.md`). The slide itself is
+expected: the origin is a 66° cone peak, far past the friction angle of 19.3°. But the contact model
+has four real defects: friction is viscous rather than Coulomb (blocks creep on any slope), damping
+acts in free flight, the non-unit SDF is used as a distance (2.46× contact overshoot), and the settle
+rule freezes slow sliders mid-slide.
+
+**My take:** fix all four as one physics chunk with the tilted-gravity regression test, then look at
+thaws and debris on a GPU, since it changes how MPM feels. Okay to schedule?
 
 **Robert:**
 
@@ -115,7 +121,13 @@ process.
 **Context.** E4 made builds about 30 % faster and moves the same or faster, but at radius 256 a
 series of drains costs about 12 % more per cell refined. It isn't explained yet.
 
-**My take:** worth a measurement pass next session; it's cheap.
+**Diagnosed after the brief:** not a regression. At an equal number of refined cells the cost is
+unchanged (1.84 vs 1.86 µs per cell); the "12 %" compared runs that refined different numbers of
+cells. **But it found a real problem:** a "20 ms" drain takes 32–76 ms of wall time, because
+collapse and emit after the budgeted refine have no budget (`bugs/dc-drain-collapse-emit-unbudgeted.md`).
+
+**My take:** that belongs in the "compelling, not accurate" session, since it's the mesher's frame
+cost.
 
 **Robert:**
 
