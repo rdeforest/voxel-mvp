@@ -31,13 +31,24 @@ const _REFUSALS := {
 # A thaw was refused and wrote nothing (why, for the player).
 signal thaw_refused(message: String)
 
+
+# One CHUNK³ box of a freeze still to be announced, and the freeze's flips that fall inside it.
+class FreezeChunk:
+    var box:   AABB
+    var flips: CellFlips
+
+    func _init(p_box: AABB, p_flips: CellFlips) -> void:
+        box   = p_box
+        flips = p_flips
+
+
 var _sim:   MpmSim
 var _store: EditStore
 var _mm:    MultiMesh
 
 var _settled_frames := 0
 var _material_index := 1        # Stone — the material the frozen-back terrain takes
-var _pending_chunks: Array = [] # freeze re-mesh boxes still to emit, bottom layer first
+var _pending_chunks: Array[FreezeChunk] = []   # still to announce, bottom layer first
 
 
 func setup(store: EditStore) -> void:
@@ -199,27 +210,28 @@ func _emit_pending_chunks() -> void:
     var n := 0
 
     while not _pending_chunks.is_empty() and n < CHUNKS_PER_FRAME:
-        var box: Vector3 = _pending_chunks.pop_front()
+        var chunk: FreezeChunk = _pending_chunks.pop_front()
 
-        _announce_freeze(AABB(box, Vector3.ONE * float(CHUNK)))
+        _announce_freeze(chunk.box, chunk.flips)
 
         n += 1
 
 
-# Rasterise the settled particles back into the store as terrain (fast, bin-hashed), then queue
-# the region for chunked announcement, and drop the particles.
+# Rasterise the settled particles back into the store as terrain (fast, bin-hashed), then announce
+# the region with the cells the write flipped, measured across it, and drop the particles.
 func _freeze() -> void:
     var region: Dictionary = _sim.rasterize_to_store(_store, 1.0, FREEZE_RADIUS, _material_index)
 
     if not region.is_empty():
-        var origin: Vector3 = region["origin"]
-        var dim:    int     = region["dim"]
+        var origin: Vector3   = region["origin"]
+        var dim:    int       = region["dim"]
+        var flips:  CellFlips = CellFlips.measured(region)
 
         if dim <= SINGLE_EMIT_MAX:
             # Small settled clump → one box, meshed in a single splice (watertight, no chunk seams).
-            _announce_freeze(AABB(origin, Vector3.ONE * float(dim)))
+            _announce_freeze(AABB(origin, Vector3.ONE * float(dim)), flips)
         else:
-            _queue_freeze_chunks(origin, dim)
+            _queue_freeze_chunks(origin, dim, flips)
 
     _sim.clear()
     _settled_frames = 0
@@ -228,11 +240,8 @@ func _freeze() -> void:
         _mm.instance_count = 0
 
 
-# MpmSim.rasterize_to_store writes without measuring, so a freeze reports its box with no flips:
-# subscribers learn of its cells only by re-scanning the box
-# (docs/bugs/mpm-freeze-flips-unmeasured.md).
-func _announce_freeze(box: AABB) -> void:
-    TerrainSdfChangedEvent.announce(EditSource.Kind.MPM, box, CellFlips.new())
+func _announce_freeze(box: AABB, flips: CellFlips) -> void:
+    TerrainSdfChangedEvent.announce(EditSource.Kind.MPM, box, flips)
 
 
 # Split the rasterised region into CHUNK³ boxes, in an order fixed by position: bottom layer first,
@@ -240,11 +249,47 @@ func _announce_freeze(box: AABB) -> void:
 # world, not of where the camera happens to be; any fixed order would do, and bottom-up puts a pile's
 # footing before what rests on it. Appended, so a freeze landing while an earlier one is still being
 # announced doesn't drop the rest of the earlier one.
-func _queue_freeze_chunks(origin: Vector3, dim: int) -> void:
+#
+# Each chunk carries the flips inside its own box, so every event means one thing: a box, and the
+# cells flipped within it. The write reports only cells between its lattice points (origin +
+# [0, dim-2] per axis), each inside some chunk here, so the chunks' flips partition the freeze's. `changed` is the write's, which a chunk can't narrow to its own box.
+func _queue_freeze_chunks(origin: Vector3, dim: int, flips: CellFlips) -> void:
+    var by_chunk := _flips_by_chunk(flips, origin)
+
     for cy in range(0, dim, CHUNK):
         for cz in range(0, dim, CHUNK):
             for cx in range(0, dim, CHUNK):
-                _pending_chunks.append(origin + Vector3(cx, cy, cz))
+                var corner := Vector3i(cx, cy, cz)
+                var box    := AABB(origin + Vector3(corner), Vector3.ONE * float(CHUNK))
+                var within: CellFlips = by_chunk.get(corner, CellFlips.new())
+
+                within.changed = flips.changed
+                _pending_chunks.append(FreezeChunk.new(box, within))
+
+
+# The flips keyed by the corner, relative to `origin`, of the CHUNK³ box each cell falls in.
+static func _flips_by_chunk(flips: CellFlips, origin: Vector3) -> Dictionary:
+    var out := {}
+
+    for cell in flips.solid:
+        _chunk_of(out, cell, origin).solid.append(cell)
+
+    for i in flips.air.size():
+        var chunk := _chunk_of(out, flips.air[i], origin)
+
+        chunk.air.append(flips.air[i])
+        chunk.air_materials.append(flips.air_materials[i])
+
+    return out
+
+
+static func _chunk_of(chunks: Dictionary, cell: Vector3i, origin: Vector3) -> CellFlips:
+    var corner := Vector3i(((Vector3(cell) - origin) / float(CHUNK)).floor()) * CHUNK
+
+    if not chunks.has(corner):
+        chunks[corner] = CellFlips.new()
+
+    return chunks[corner]
 
 
 func _process(_dt: float) -> void:

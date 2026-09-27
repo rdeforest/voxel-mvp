@@ -4,10 +4,11 @@ extends GutTest
 # toward bedrock; a detached component is thawed into MPM. Two cases: a floating block (no ground
 # beneath) gets thawed; grounded terrain is left alone. Also pins the cascade guard, by the source
 # each event carries: the scout seeds from its own thaw only where that thaw flipped cells outside
-# the component it thawed, ignores MPM's freezes, and resolves an edit made while material is in
-# flight only once it has settled.
+# the component it thawed, ignores MPM's freezes (flips and all), and resolves an edit made while
+# material is in flight only once it has settled.
 
 const MatterLog := preload("res://test/support/matter_log.gd")
+const Scenario  := preload("res://test/support/scenario.gd")
 
 
 const RefusingMpm := preload("res://test/support/refusing_mpm.gd")
@@ -226,6 +227,49 @@ func test_the_scout_seeds_from_its_own_thaws_collateral_flips() -> void:
     assert_false(expected.is_empty(), "precondition: the collateral cell has solid neighbours")
     assert_eq(_sorted(rig.scout._pending.keys()), _sorted(expected.keys()),
         "the scout seeds the collateral cell's solid neighbours, and nothing it thawed")
+
+
+# (Drafted by Claude, overnight 2026-09-27.) A freeze is ignored even when it carries measured
+# flips, both a cell it emptied and one it made solid (docs/bugs/scout-ignores-freeze-flips.md).
+func test_a_freezes_flips_seed_nothing() -> void:
+    var rig     := _rig()
+    var top     := _surface()
+    var emptied := Vector3i(int(CX), top - 6, int(CZ))
+    var made    := emptied + Vector3i(4, 0, 0)
+    var flips   := CellFlips.new()
+    flips.air   = [emptied] as Array[Vector3i]
+    flips.solid = [made] as Array[Vector3i]
+    assert_true(TerrainProbe.is_solid(rig.store, made), "precondition: the made cell reads solid")
+
+    TerrainSdfChangedEvent.announce(EditSource.Kind.MPM, AABB(Vector3(emptied) - Vector3.ONE * 8.0, Vector3.ONE * 16.0), flips)
+
+    assert_true(rig.scout._pending.is_empty(), "the freeze seeds nothing")
+
+
+# (Drafted by Claude, overnight 2026-09-27.) The loop seeding from freezes would start: a 1 m post on
+# the cell grid reads air at every cell centre (SDF 0 is not solid), but the collider holds particles
+# on it. A voxel dropped on it is thawed once, falls, and freezes on the post; a scout that flooded
+# that pile would find it DETACHED and thaw it again, once per cell down the post.
+func test_a_pile_frozen_on_a_post_the_flood_cannot_see_is_not_thawed_again() -> void:
+    var s   := Scenario.new()
+    var top := _surface()
+    add_child(s)
+    assert_true(s.start_fresh(), "precondition: the scenario started")
+    s.player_at(Vector3(4000.5, 400.0, 4000.5))
+    s.csg(CsgBoxShape.new(Vector3(1, 12, 1)), Transform3D(Basis(), Vector3(CX + 0.5, top + 2.0, CZ + 0.5)),
+        CsgState.Op.ADD, &"Stone")
+    s.settle()
+    assert_false(TerrainProbe.is_solid(s.edit_store_ref(), Vector3i(int(CX), top + 6, int(CZ))),
+        "precondition: the post's cells read air")
+    var matter := MatterLog.new()
+
+    s.fill_voxel(Vector3i(int(CX), top + 14, int(CZ)), &"Wood")
+    s.settle()
+
+    assert_eq(s.error, "", "the world came to rest")
+    assert_eq(matter.sources().count(EditSource.Kind.MPM), 1, "the voxel froze once")
+    assert_eq(matter.sources().count(EditSource.Kind.SCOUT), 1, "and was thawed once")
+    s.free()
 
 
 func _detached_ball(store: EditStore) -> GroundFlood:

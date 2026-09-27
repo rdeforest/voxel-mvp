@@ -20,7 +20,8 @@ and announced, so nothing is hidden, but matter moves that nobody asked to move.
 - **Still exposed:** Bell and Flatten (`StoreWrite.reshape` on the predicted lattice); Fill, Dig,
   CSG and `VoxelImprint` (`SdfLattice.write`); the instruments SetCorners and SetMaterial
   (`StoreWrite.lattice`/`write`), whose comments describe it as accepted behaviour; and the MPM
-  freeze's 1 m rewrite (whose flips aren't even measured yet: `mpm-freeze-flips-unmeasured`).
+  freeze's 1 m rewrite (its flips are measured now; freezing the 9³ buried-block thaw empties 2
+  cells, doc 12 "The freeze (as built)").
 
 ## Decision so far
 Robert agreed (Q3 of the 2026-09-26 questions) to "repair it, inside the same solve as question 2".

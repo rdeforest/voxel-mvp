@@ -46,7 +46,7 @@ func test_the_save_gate_waits_for_freeze_announcements() -> void:
     var integrity := _integrity_with(TerrainSupport.new())
     integrity.mpm = ms
 
-    ms._queue_freeze_chunks(Vector3(0, 40, 0), 3 * MpmStructure.CHUNK)
+    ms._queue_freeze_chunks(Vector3(0, 40, 0), 3 * MpmStructure.CHUNK, CellFlips.new())
     assert_eq(ms.active_count(), 0, "precondition: nothing in flight")
     assert_false(integrity.is_quiescent(), "not quiescent while the freeze is still being announced")
 

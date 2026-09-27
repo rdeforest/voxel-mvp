@@ -362,7 +362,7 @@ func test_freeze_announcement_order_ignores_the_camera() -> void:
         cam.global_position = eye
         assert_eq(get_viewport().get_camera_3d(), cam, "precondition: the camera MpmStructure would see")
         _log.clear()
-        ms._queue_freeze_chunks(origin, dim)
+        ms._queue_freeze_chunks(origin, dim, CellFlips.new())
         while not ms._pending_chunks.is_empty():
             ms.tick(1.0 / 60.0)
         orders.append(_log.events.map(func(e: TerrainSdfChangedEvent) -> Vector3: return e.box_origin))
@@ -385,9 +385,9 @@ func test_a_freeze_during_announcement_keeps_the_earlier_chunks() -> void:
     ms.setup(manager.store)
     var dim := 3 * MpmStructure.CHUNK
 
-    ms._queue_freeze_chunks(Vector3(0, 40, 0), dim)
+    ms._queue_freeze_chunks(Vector3(0, 40, 0), dim, CellFlips.new())
     ms.tick(1.0 / 60.0)
-    ms._queue_freeze_chunks(Vector3(100, 40, 0), dim)
+    ms._queue_freeze_chunks(Vector3(100, 40, 0), dim, CellFlips.new())
     while not ms._pending_chunks.is_empty():
         ms.tick(1.0 / 60.0)
 

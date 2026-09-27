@@ -97,7 +97,9 @@ static void rasterize_region(Ref<EditStore> store, const Vector3 &origin, double
 }
 
 // Rasterise the current particles into the EditStore over their bounding box (union deposit — see
-// rasterize_region). A spatial bin-hash makes it O(grid + particles); returns {origin, dim} written.
+// rasterize_region). A spatial bin-hash makes it O(grid + particles). Returns the region written,
+// {origin, dim}, beside the cells the write flipped, measured across it (write_region_flips's
+// solid, air, air_materials, changed): the freeze's matter-changed events carry them.
 Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double radius, int material_index) {
 	Dictionary out;
 	if (store.is_null() || _x.is_empty()) {
@@ -123,7 +125,7 @@ Dictionary MpmSim::rasterize_to_store(Ref<EditStore> store, double cell, double 
 	idx.resize(dim * dim * dim);
 	rasterize_region(store, origin, cell, radius, dim, R, bins, _x, _pmat, material_index, sdf.ptrw(), idx.ptrw());
 
-	store->write_region(sdf, idx, dim, origin, cell);
+	out = store->write_region_flips(sdf, idx, dim, origin, cell);
 	out["origin"] = origin;
 	out["dim"] = dim;
 	return out;

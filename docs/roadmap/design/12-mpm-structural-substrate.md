@@ -275,6 +275,42 @@ GDScript probing.
 Inherited debt: the rewrite is a cube, so a flat plan rewrites far more than its span, and a 1 m write
 flattens finer leaves inside it ([edit-store-1m-write-flattens-finer-leaves](../../bugs/edit-store-1m-write-flattens-finer-leaves.md)).
 
+### The freeze (as built)
+
+*Drafted by Claude (agent), 2026-09-27, from the fixed bug `mpm-freeze-flips-unmeasured`.*
+
+`MpmSim.rasterize_to_store` deposits the settled cloud as a union with the existing field, rewriting
+the cloud's bounding cube at 1 m through `EditStore.write_region_flips`. It returns the cells that
+write flipped, measured across it, beside `origin` and `dim`, and `MpmStructure._freeze` announces them
+as it announces any write. The freeze is not purely additive: rewriting at 1 m flattens a finer
+leaf inside the cube (a sliver solid only through sub-metre leaves goes air) and re-encodes the field
+elsewhere, so the measured flips can include air cells. Freezing the 9³ buried-block thaw emptied 2.
+
+- **Cost.** Measuring reads every rewritten cell before and after the write. On the game's field
+  (`scripts/dev/bench_mpm_freeze.gd`, best of 5), the 674-cell buried-block pile (dim 15) went from
+  3.6 to 4.1 ms and the 729-cell floating block, which slides about 100 m before it settles (dim 19),
+  from 6.7 to 7.3 ms: about +0.5 ms, or 9 to 13%. No bench freeze reaches the chunked path.
+- **Chunked freezes.** A region wider than `SINGLE_EMIT_MAX` is announced as `CHUNK`³ boxes over
+  several frames. Each chunk's event carries only the flips inside its own box, so every event means
+  one thing: a box, and the cells flipped within it. The write reports only the cells between its
+  lattice points (origin + [0, dim-2] per axis), all inside the region's chunks, so the chunks' flips
+  partition the freeze's. `changed` is the whole write's. (Claude's call; the
+  alternative was one flips-only event for the region beside box-only re-mesh events.) The flips are
+  measured at the write and delivered as late as the last chunk. A write that lands between the
+  freeze and a chunk's announcement is announced first, so the chunk's flips can be stale.
+  TerrainSupport's box scan corrects a stale solid flip (below) but only partly a stale air flip, and
+  PartIndex releases a part placed on a cell the freeze emptied
+  ([mpm-chunked-freeze-flips-arrive-late](../../bugs/mpm-chunked-freeze-flips-arrive-late.md)).
+- **The scout.** `DetachmentScout` still ignores freeze events. Seeding from a freeze's flips (the
+  solid neighbours of each air flip, and each solid flip, as it does for its own thaw) was built and
+  measured with `scripts/dev/probe_freeze_reflood.gd`, and it loops: a voxel dropped on a 1 m post
+  aligned to the cell grid, whose cell centres read SDF 0 (air to the flood, ground to the collider),
+  froze, was found detached and thawed 8 times, one post cell lower each time. The 15 other falls
+  measured did not loop. Details and the fix options:
+  [scout-ignores-freeze-flips](../../bugs/scout-ignores-freeze-flips.md).
+- **TerrainSupport's box scan** still drops a tracked cell it finds air. No writer is unmeasured any
+  more, so this is a consistency check. It stays because of the late chunk flips described above.
+
 ## Material models (depth we can dial)
 
 - **Elastic solids (wood, stone, built parts):** fixed-corotated or Neo-Hookean. Stiff;

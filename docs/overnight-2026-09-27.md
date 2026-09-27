@@ -106,7 +106,13 @@
   an inherited leaf's source. GUT on the real store: generator root, own-field, inherited next to a
   finer write (its stored corners = float32 of what the store reads there), unedited sibling. Overlay
   not built. Filed edit-store-blob-inherited-corners-unchecked (load never checks those stored corners)
-- [ ] F3 — the MPM freeze reports its measured flips (follow-up)
+- [x] F3 — the MPM freeze reports its measured flips (follow-up): `rasterize_to_store` writes via
+  `write_region_flips` (+0.5 ms on the 674- and 729-cell freezes, 3.6→4.1 / 6.7→7.3 ms); a chunked
+  freeze gives each chunk the flips inside its box (**unilateral**); TerrainSupport's phantom branch
+  kept as a check. Part (3), scout seeding from freeze flips, NOT enabled: the probe found a loop (a
+  voxel on a 1 m grid post froze and was thawed 8 times), so per the brief the scout still ignores
+  freezes; re-scoped to scout-ignores-freeze-flips. Also filed mpm-chunked-freeze-flips-arrive-late
+  (a stale chunk flip releases a live part, pending test). Design in doc 12 "The freeze (as built)"
 - [ ] Morning brief at the bottom of this doc
 
 "Q" numbers refer to [`overnight-2026-09-26-questions.md`](roadmap/implementation/done/overnight-2026-09-26-questions.md);
