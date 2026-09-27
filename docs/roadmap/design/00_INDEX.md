@@ -88,3 +88,7 @@ or condensed.
   language (with units) and generator registry: field captures (the bitmap) and HTN-style methods
   (the commands). An assembly is a method plus a product description, built by demonstration.
   Also covers the record → GUT-test loop.
+- [`23-thin-features.md`](23-thin-features.md) — **discussion brief, 2026-09-27; nothing decided.**
+  Thin features versus the ~2-voxel Nyquist limit, and the goal that a player can't tell how a
+  part sits against the grid. History of parts-as-objects → parts-as-voxels, measurements, the
+  limits separated, principles in play, eight options with their costs, questions for the chat.
