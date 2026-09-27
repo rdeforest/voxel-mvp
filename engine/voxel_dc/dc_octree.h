@@ -7,7 +7,7 @@
 // case). The incremental grow/reconcile/edit paths (doc 16/17/20) live here too.
 
 #include "dc_mesh_common.h"  // to_v3, QUERY_EPS, g_mesh_threads, parallel_for
-#include "dc_mmap_arena.h"   // MmapArena — the cell arena, disk-paged (M2)
+#include "dc_cell_arena.h"   // CellArena — the block-allocated cell storage
 #include "dc_qef.h"          // voxel_dc::Qef
 #include "dc_sdf_source.h"   // SdfSource
 #include "octree_geometry.h" // voxel_dc::CB / EDGES / RING
@@ -17,6 +17,7 @@
 #include "core/variant/variant.h" // PackedVector3Array / PackedColorArray / PackedInt32Array / Color
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 
 namespace voxel_dc {
@@ -29,11 +30,11 @@ struct Cell {
 	int parent = -1;       // c2 (doc 20): up-link, so a refine can mark its ancestor path dirty for the
 	                       // incremental reaccumulate/collapse (skip the clean subtrees a drain didn't touch).
 	bool path_dirty = false; // a descendant changed this grow → reaccumulate/recollapse must descend here
-	int vertex = -1;
 	bool leaf = true;
 	bool absent = false; // window_mode: a leaf OUTSIDE the resident window — no QEF, no vertex, not
 	                     // meshed. The window boundary is the resident mesh's open rim (like the clipmap's
 	                     // outer edge). Distinct from a splice's build-box-miss leaf, which IS meshed.
+	int vertex = -1;     // after the three bools so their padding absorbs `gen` (Cell stays 124 B)
 	// Hot/cold split: the QEF (the big, ~120 B cold field) lives in the parallel `qefs` arena, NOT here — the
 	// full-arena hot passes (reconcile / reset_leaves / collapse) never read it, so keeping it out of the hot
 	// Cell shrinks what they stream from disk (296→256→~136 B/cell). Indexed by the same cell index. See `qefs`.
@@ -57,7 +58,34 @@ struct Cell {
 	// so a drain tombstones the old range + appends the new one instead of rebuilding the whole mesh.
 	int tri_at = 0;                 // first triangle index into the persistent owner/index arrays
 	int tri_n  = 0;                 // number of triangles this leaf currently owns (0 = not emitting)
+	// Per-SLOT generation: a frontier entry is valid only while its cell's gen equals the gen it was queued
+	// with — the heap's lazy deletion. See Octree::retire. alloc_cell/build() reuse never resets it; only
+	// init_cell zeroes it, and only on a fresh Octree (asserted in build_bottomup_parallel).
+	uint32_t gen = 0;
 };
+// The hot passes stream the whole cell arena; +4 B (to 128) measured 15-25% slower move reconcile at 65M
+// cells (doc 20 "Frontier lazy invalidation"). Growing Cell is a perf decision — re-measure, then update this.
+static_assert(sizeof(Cell) == 124, "Cell size changed: re-measure bench_grow_split before accepting");
+
+// Q4 (2026-09-27): development runs on a 32 GB RAM budget. Cell storage gets half of it (the split is a
+// judgement call, not part of Q4). The other half covers the emitted mesh and its GPU staging copy, the
+// EditStore, godot_voxel, MPM, the engine and the OS. Refinement stops gracefully when the cells fill it
+// (Octree::cell_room), so running out of detail is a hardware limit rather than an OOM. See doc 20, "M".
+inline constexpr int64_t DC_CELL_RAM_BUDGET = int64_t(16) << 30;
+// Qef sets the capacity as much as Cell does: a size change must re-derive the budget arithmetic.
+static_assert(sizeof(Qef) == 128, "Qef size changed: re-check DC_CELL_CAPACITY against the RAM budget");
+inline constexpr int64_t DC_CELL_BYTES      = int64_t(sizeof(Cell) + sizeof(Qef));
+inline constexpr int64_t DC_CELL_CAPACITY   = DC_CELL_RAM_BUDGET / DC_CELL_BYTES;
+static_assert(DC_CELL_CAPACITY < (int64_t(1) << 31), "cell indices are int");
+
+// Loud, once per process: the in-game message is the caller's (DCOctreeMesher::get_cell_limit_hit).
+inline void dc_warn_cell_limit(int64_t limit) {
+	static std::atomic<bool> warned{ false };
+	if (!warned.exchange(true)) {
+		WARN_PRINT(vformat("DC octree reached its cell limit (%d cells, %.1f GiB): refinement stops at the current detail.",
+				limit, double(limit * DC_CELL_BYTES) / double(int64_t(1) << 30)));
+	}
+}
 
 // Builds + meshes one octree over a clipmap: subdivide to the clipmap's
 // per-position target size (the data-resolution floor), then — when error_driven —
@@ -70,7 +98,9 @@ struct Octree {
 	const SdfSource *src = nullptr;  // field source (Clipmap or EditStoreSource); set by the caller, must outlive run()
 	int root_size = 0;
 	int max_depth = 0;
-	int64_t cell_budget = 0;  // memory budget (cells): build stops descending past this (0 = arena cap only).
+	int64_t cell_budget = 0;  // memory budget (cells) below the arena capacity; 0 = the capacity alone.
+	int64_t cell_reserved = 0; // slots promised to a descent (build/grow_subtree) and not yet allocated
+	bool cell_limit_hit = false; // a refinement was refused for lack of room since the caller last cleared it
 	Vector3 camera;          // viewpoint in root-local lattice space (screen-error LOD)
 	double proj = 0.0;       // viewport_height / (2*tan(fov/2)) — px per world unit at unit distance
 	double eps_px = 0.0;     // screen-space error threshold (px): collapse when we*proj/dist <= eps_px
@@ -108,9 +138,10 @@ struct Octree {
 	                               // this proves the retained interior was NOT resampled (the B1 win).
 	int  refine_budget = -1;       // C/P (doc 20): wall-clock µs cap for refine_selected; -1 = unbudgeted (a move).
 	bool refine_pending = false;   // a budgeted reconcile deferred some refinement → caller drains over frames.
-	struct RefineCand { double err; int idx; }; // P: a floor-refine candidate keyed by its error `we` (camera-indep)
+	struct RefineCand { double err; int idx; uint32_t gen; }; // P: a floor-refine candidate keyed by its error `we` (camera-indep); gen = its cell's gen when queued
 	LocalVector<RefineCand> refine_cands;        // c1 (doc 20): PERSISTENT frontier heap — drained across grows, rebuilt on change
 	int  refine_heap_end = 0;                    // live heap size in refine_cands[0, refine_heap_end); pops shrink it
+	int  refine_retired  = 0;                    // entries refine_selected popped and dropped as retired (caller resets)
 
 	// c3 tier 1 (doc 20): persistent incremental emit. verts/indices/etc. survive across grows; a drain
 	// tombstones changed leaves' triangles (degenerate them in place) and appends the new ones, then a full
@@ -143,9 +174,10 @@ struct Octree {
 	uint64_t last_pass2_us = 0;    // recollapse sub-phase: edge scan + parallel emit + concat
 	uint64_t last_reconcile_us = 0; // grow sub-phase: reconcile() the O(tree) graft/evict/collect walk (c4 target)
 	uint64_t last_reaccum_us   = 0; // grow sub-phase: reaccumulate() the O(tree-or-changed) QEF re-sum (c4 target)
-	MmapArena<Cell> cells; // M2: disk-paged cell arena — hot (visible) cells in RAM, cold (retained) on disk
-	MmapArena<Qef>  qefs;  // hot/cold split: per-cell QEF, parallel to `cells` (same index). Grown in lockstep
-	                       // (alloc_cell / resize_uninitialized mirror to both) so qefs[i] is the QEF of cells[i].
+	CellArena<Cell> cells{ DC_CELL_CAPACITY };
+	CellArena<Qef>  qefs{ DC_CELL_CAPACITY };  // hot/cold split: per-cell QEF, parallel to `cells` (same index).
+	                                           // Grown in lockstep (alloc_cell / resize_uninitialized mirror to
+	                                           // both) so qefs[i] is the QEF of cells[i].
 	LocalVector<int> free_list;    // (B1b) indices of cells killed by eviction, reused by the next grow so
 	                               // `cells` stays bounded across a long traverse instead of leaking.
 	PackedVector3Array verts;
@@ -190,10 +222,19 @@ struct Octree {
 					to_v3(origin), to_v3(origin) + Vector3(1, 1, 1) * double(size)));
 	}
 
+	// Invalidate every frontier entry naming this slot. Called wherever a cell stops being the refinable
+	// leaf it was when queued — freed, regrown, evicted, or re-sampled (its key changed) — so an edit or
+	// eviction never has to find and remove entries: refine_selected drops them as they surface (lazy
+	// deletion). Wrap-around would need 2^32 retirements of one slot between a queue and its pop.
+	void retire(int idx) {
+		++cells[idx].gen;
+	}
+
 	// Assign this leaf's Hermite data from its own edges and charge the build counter.
 	// Call sites that are transitioning an absent leaf to present must set absent=false
 	// themselves (the extra step stays inline so this helper stays narrowly scoped).
 	void sample_leaf(int idx) {
+		retire(idx); // the queued key `we` was this cell's old qef's residual
 		qefs[idx] = leaf_qef(idx);
 		cells[idx].dirty = true; // qef changed → ancestors re-sum, this leaf's solve caches invalidate (grow path)
 		++build_samples;
@@ -427,9 +468,36 @@ struct Octree {
 		return d;
 	}
 
+	// The cell limit: the arena's capacity, or the caller's smaller budget (max_cells).
+	int64_t cell_limit() const {
+		return (cell_budget > 0 && cell_budget < cells.capacity()) ? cell_budget : cells.capacity();
+	}
+
+	// Slots a new descent may still claim: fresh ones under the limit plus freed ones, less those
+	// already promised to a descent in progress.
+	int64_t cell_room() const {
+		return cell_limit() - cells.size() + int64_t(free_list.size()) - cell_reserved;
+	}
+
+	// Promise n slots to a descent, or refuse (and flag the limit) when they don't fit. A descent in
+	// build() allocates a child's whole subtree before its next sibling, so without the promise the
+	// first child could use up the room its siblings were counted against.
+	bool reserve_cells(int64_t n) {
+		if (n > cell_room()) {
+			cell_limit_hit = true;
+			dc_warn_cell_limit(cell_limit());
+			return false;
+		}
+		cell_reserved += n;
+		return true;
+	}
+
 	// Allocate a cell slot — reusing one freed by eviction (B1b) before growing `cells`, so a long
 	// traverse churns slots in place instead of leaking. The returned slot is reset by build().
+	// Every call spends a slot promised by reserve_cells.
 	int alloc_cell() {
+		DEV_ASSERT(cell_reserved > 0);
+		--cell_reserved;
 		if (!free_list.is_empty()) {
 			int i = free_list[free_list.size() - 1];
 			free_list.resize(free_list.size() - 1);
@@ -475,8 +543,11 @@ struct Octree {
 		// Always build down to the data floor; error-driven coarsening happens bottom-up
 		// in accumulate() (build fine, then collapse where the fine data fits one vertex),
 		// which measures the real surface instead of undersampling at coarse corners.
+		if (!reserve_cells(8)) {
+			return idx; // cell limit: stays a coarse leaf, sampled like any other
+		}
 		int half = size >> 1;
-		cells[idx].leaf = false; // index-access only; cells may reallocate during recursion
+		cells[idx].leaf = false;
 		for (int i = 0; i < 8; ++i) {
 			Vector3i co = origin + Vector3i(CB[i][0], CB[i][1], CB[i][2]) * half;
 			int child = build(co, half, depth + 1);
@@ -501,6 +572,7 @@ struct Octree {
 		c.path_dirty = false;
 		c.parent = -1; // set by the caller's build/grow loop after this returns; root stays -1
 		c.tri_n = 0;   // c3: not emitting yet (no cached triangle range)
+		c.gen = 0;     // resize_uninitialized slot; only run() builds this way, into a fresh Octree with no frontier
 		for (int i = 0; i < 8; ++i) {
 			c.children[i] = -1;
 		}
@@ -512,7 +584,9 @@ struct Octree {
 	// and collapse can walk by level too. Cell layout is frontier-ordered (a different order than build()'s
 	// DFS) but the SAME SET of cells → identical surface, only vertex NUMBERING differs.
 	void build_bottomup_parallel() {
+		DEV_ASSERT(refine_cands.is_empty() && free_list.is_empty()); // init_cell zeroes gen: no live entry may name a slot
 		level_start.clear();
+		reserve_cells(1); // cell_limit() >= 1, so the root always fits
 		int root = alloc_cell();
 		init_cell(root, Vector3i(0, 0, 0), root_size);
 		level_start.push_back(0);
@@ -550,17 +624,13 @@ struct Octree {
 				break;
 			}
 			const int base = int(cells.size());
-			// Memory budget: stop descending if the next level would exceed it. The arena cap is the hard
-			// int-index-safety ceiling; cell_budget (from max_cells) is the softer user bound. Without this a
-			// re-root into dense terrain at LOG2=4 builds past the cap and resize_uninitialized hard-aborts.
-			const int64_t cap = cells.capacity();
-			const int64_t budget = (cell_budget > 0 && cell_budget < cap) ? cell_budget : cap;
-			if (int64_t(base) + int64_t(d_count) * 8 > budget) {
+			if (!reserve_cells(int64_t(d_count) * 8)) {
 				for (int j = 0; j < d_count; ++j) {
-					cells[descenders[j]].leaf = true; // budget hit → keep these coarse (valid leaves, no children)
+					cells[descenders[j]].leaf = true; // cell limit → keep these coarse (valid leaves, no children)
 				}
 				break;
 			}
+			cell_reserved -= int64_t(d_count) * 8; // spent right here, not through alloc_cell
 			cells.resize_uninitialized(base + int64_t(d_count) * 8); // init_cell fills every new slot in parallel below
 			qefs.resize_uninitialized(base + int64_t(d_count) * 8);  // hot/cold split: same slots in the QEF arena
 			level_start.push_back(base);
@@ -1399,19 +1469,48 @@ struct Octree {
 	// Expand an existing absent leaf into a full subtree at its place in the tree, building children with
 	// the current window box (so in-window descendants reach the floor, out-of-window ones are absent) —
 	// identical structure to what a from-scratch windowed build() would produce for this node.
-	void grow_subtree(int idx) {
+	// False, with the cell untouched, when the cell limit has no room for its children.
+	bool grow_subtree(int idx) {
+		if (!reserve_cells(8)) {
+			return false;
+		}
 		Vector3i origin = cells[idx].origin;
 		int size = cells[idx].size;
 		int half = size >> 1;
 		int d = cell_depth(size) + 1;
+		retire(idx);
 		cells[idx].leaf = false;
 		cells[idx].absent = false;
 		for (int i = 0; i < 8; ++i) {
 			Vector3i co = origin + Vector3i(CB[i][0], CB[i][1], CB[i][2]) * half;
-			int child = build(co, half, d); // build() may reallocate cells — re-index after each call
+			int child = build(co, half, d);
 			cells[idx].children[i] = child;
 			cells[child].parent = idx;
 		}
+		return true;
+	}
+
+	// The cell limit refused this cell's refinement: it stays a coarse leaf. An absent one (a window graft
+	// that wanted children) becomes present and sampled, so the window has no hole where it would have been.
+	void hold_coarse(int idx) {
+		if (cells[idx].absent) {
+			cells[idx].absent = false;
+			sample_leaf(idx);
+			mark_path_dirty(idx);
+		}
+	}
+
+	// The cell limit stopped refine_selected: nothing on the frontier can refine until slots are freed (an
+	// eviction on a later move, which also re-collects the frontier). Hold every live entry coarse and drop
+	// the rest of the heap, so the window is covered and the caller stops draining.
+	void hold_frontier_coarse() {
+		for (int k = 0; k < refine_heap_end; ++k) {
+			const RefineCand &e = refine_cands[k];
+			if (e.gen == cells[e.idx].gen) {
+				hold_coarse(e.idx);
+			}
+		}
+		refine_heap_end = 0;
 	}
 
 	// Clear an orphaned subtree and return every slot to the free-list (B1b) for the next grow to reuse.
@@ -1426,6 +1525,7 @@ struct Octree {
 			cells[idx].children[i] = -1;
 		}
 		qefs[idx] = Qef();
+		retire(idx);
 		cells[idx].vertex = -1;
 		cells[idx].leaf = true;
 		cells[idx].absent = true;
@@ -1454,6 +1554,7 @@ struct Octree {
 			// cells are a no-op; only a NEWLY evicted cell changed its qef (→ empty), so only it dirties.
 			if (!cells[idx].absent) {
 				discard_children(idx);
+				retire(idx);
 				cells[idx].leaf = true;
 				cells[idx].absent = true;
 				cells[idx].dirty = true;
@@ -1486,11 +1587,12 @@ struct Octree {
 			Vector3 cmin = to_v3(cells[idx].origin);
 			Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
 			double we = Math::sqrt(qefs[idx].residual(qefs[idx].solve(cmin, cmax)));
-			refine_cands.push_back(RefineCand{ we, idx });
-		} else {
-			grow_subtree(idx);   // unbudgeted (a move): subdivide to the (finer) floor — full window coverage
+			refine_cands.push_back(RefineCand{ we, idx, cells[idx].gen });
+		} else if (grow_subtree(idx)) { // unbudgeted (a move): subdivide to the (finer) floor — full window coverage
 			accumulate_qef(idx);
 			mark_path_dirty(idx); // c4: so incremental reaccumulate descends to this newly-refined subtree
+		} else {
+			hold_coarse(idx);
 		}
 	}
 
@@ -1527,12 +1629,19 @@ struct Octree {
 			std::pop_heap(base, base + refine_heap_end, worse);  // worst candidate → slot refine_heap_end-1
 			--refine_heap_end;
 			int x = base[refine_heap_end].idx;
-			grow_subtree(x);                                     // at least one per call → always makes progress
-			accumulate_qef(x);                                   // x.qef now current (leaf → accumulated)
-			cells[x].we_valid = false;                           // x's cached solve/residual belonged to its old
-			cells[x].vtx_valid = false;                          // leaf qef — stale now
-			mark_path_dirty(x);                                  // mark x + ancestors: incremental reaccum re-sums
-			                                                     // the path, recollapse_dirty re-collapse-tests x
+			if (base[refine_heap_end].gen != cells[x].gen) {
+				++refine_retired;                                // retired since queued (an edit freed/regrew/resampled
+			} else if (!grow_subtree(x)) {                       // it); still charged to the budget below
+				++refine_heap_end;                               // x stays on the frontier for the hold below
+				hold_frontier_coarse();
+				break;
+			} else {                                             // at least one pop per call → always makes progress
+				accumulate_qef(x);                               // x.qef now current (leaf → accumulated)
+				cells[x].we_valid = false;                       // x's cached solve/residual belonged to its old
+				cells[x].vtx_valid = false;                      // leaf qef — stale now
+				mark_path_dirty(x);                              // mark x + ancestors: incremental reaccum re-sums
+				                                                 // the path, recollapse_dirty re-collapse-tests x
+			}
 
 			if (budget_us >= 0 && int64_t(OS::get_singleton()->get_ticks_usec() - t0) >= int64_t(budget_us)) {
 				break;
@@ -1569,9 +1678,11 @@ struct Octree {
 			for (int i = 0; i < 8; ++i) {
 				reconcile_edit(cells[idx].children[i]);
 			}
-		} else {
-			grow_subtree(idx);   // edit added surface → subdivide to the floor (samples only this band)
+		} else if (grow_subtree(idx)) { // edit added surface → subdivide to the floor (samples only this band)
 			accumulate_qef(idx);
+		} else {
+			cells[idx].absent = false; // cell limit: the edited field is resampled at this coarse size
+			sample_leaf(idx);
 		}
 	}
 

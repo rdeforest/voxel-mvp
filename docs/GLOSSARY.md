@@ -52,11 +52,10 @@ Add terms as they come up.*
   rebuilding everything (`mesh_clipmap_splice`). → `roadmap/design/13-incremental-lod-splice.md`
 - **Clipmap.** The retired camera-centred render. `mesh_clipmap` survives as a meshing harness and
   for collision.
-- **Arena (cell arena, `MmapArena`).** The storage for the octree's cells: a growable array backed by
-  a memory-mapped temp file, so cold pages go to disk under memory pressure instead of triggering the
-  out-of-memory killer. If no disk-backed file can be had, it falls back to plain RAM and an in-game
-  pop-up says so. A *full* disk is the open problem (`bugs/mmap-arena-disk-full-sigbus.md`).
-  → `engine/voxel_dc/dc_mmap_arena.h`
+- **Arena (cell arena, `CellArena`).** The storage for the octree's cells: fixed-size RAM blocks that
+  grow without copying, capped by a RAM budget (`DC_CELL_RAM_BUDGET`, 16 GiB ≈ 68 M cells). At the cap,
+  refinement stops at the current detail with a one-time warning. The earlier disk-backed (mmap)
+  arena was removed on 2026-09-27 (Q4). → `engine/voxel_dc/dc_cell_arena.h`
 - **Collision (`DCCollisionManager`).** A collision mesh built just in time around the player,
   separate from the render.
 

@@ -71,6 +71,45 @@ func test_fill_over_generator_paints_material() -> void:
     assert_eq(es.material_at(center), 5, "fill paints its material")
 
 
+# The stamps pad their region by one leaf, so the leaf just past the brush face is rewritten with
+# no corner inside the brush. Leaf edges here are integers in x/z and s0 + k in y (the root origin);
+# every brush face sits off the leaf grid so no corner reads exactly 0.
+func test_union_stamp_keeps_adjacent_edited_material() -> void:
+    var es   := _store()
+    var y    := _surface() + 20.5               # a leaf centre, in air above the surface
+    var edge := Vector3(CX + 2.5, y, CZ + 0.5)  # leaf [CX+2, CX+3]: solid from the first box only
+    var near := edge + Vector3(0.4, 0, 0)       # reads the leaf's x = CX+3 corners, which box 2 lowers
+    es.stamp_box(Vector3(CX, y, CZ), Vector3(5, 5, 5), UNION, 3, 1.0)        # x in [CX-2.5, CX+2.5]
+    var untouched := es.sample(near)
+    es.stamp_box(Vector3(CX + 4.7, y, CZ), Vector3(3, 3, 3), UNION, 5, 1.0)  # x in [CX+3.2, CX+6.2]
+    assert_lt(es.sample(near), untouched, "precondition: the second stamp's padding rewrote the edge leaf")
+    assert_lt(es.sample(edge - Vector3(0.5, 0, 0)), 0.0, "precondition: the first box's corner is solid")
+    assert_eq(es.material_at(edge), 3, "a leaf the second brush never made solid keeps its material")
+    assert_eq(es.material_at(Vector3(CX + 4.5, y, CZ + 0.5)), 5, "the leaves the brush made take its material")
+
+
+func test_union_stamp_keeps_adjacent_generator_material() -> void:
+    var es   := _store()
+    var y    := _surface() - 79.5               # a leaf centre, deep in generator Bedrock
+    var edge := Vector3(CX + 2.5, y, CZ + 0.5)  # leaf [CX+2, CX+3], past the box's x face
+    assert_eq(es.material_at(edge), MaterialPalette.BEDROCK, "precondition: Bedrock at the edge leaf")
+    var wood := MaterialPalette.index_of(&"Wood")
+    var box  := Vector3(2.4, 2.4, 2.4)          # x in [CX-0.7, CX+1.7]
+    es.stamp_box(Vector3(CX + 0.5, y, CZ + 0.5), box, UNION, wood, 1.0)
+    assert_true(es.has_edit(edge), "precondition: the padded region rewrote the edge leaf")
+    assert_eq(es.material_at(edge), MaterialPalette.BEDROCK, "terrain the brush didn't make keeps Bedrock")
+    assert_eq(es.material_at(Vector3(CX + 0.5, y, CZ + 0.5)), wood, "the brush-made solid is Wood")
+
+
+func test_subtract_stamp_keeps_generator_material() -> void:
+    var es   := _store()
+    var y    := _surface() - 79.5
+    var edge := Vector3(CX + 2.5, y, CZ + 0.5)
+    es.stamp_sphere(Vector3(CX + 0.5, y, CZ + 0.5), 1.2, SUBTRACT, 0, 1.0)
+    assert_true(es.has_edit(edge), "precondition: the padded region rewrote the edge leaf")
+    assert_eq(es.material_at(edge), MaterialPalette.BEDROCK, "a carve's first write keeps generator Bedrock")
+
+
 func test_reedit_combines_with_stored_not_generator() -> void:
     var es := _store()
     var s0 := _surface()

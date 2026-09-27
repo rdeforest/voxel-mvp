@@ -329,6 +329,17 @@ bool MpmSim::is_finite() const {
 	return true;
 }
 
+static double frobenius_distance(const Mat3 &a, const Mat3 &b) {
+	double sum = 0.0;
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			const double d = a.m[i][j] - b.m[i][j];
+			sum += d * d;
+		}
+	}
+	return Math::sqrt(sum);
+}
+
 Dictionary MpmSim::debug_svd(Basis m) const {
 	Mat3 f;
 	for (int i = 0; i < 3; i++) {
@@ -346,22 +357,14 @@ Dictionary MpmSim::debug_svd(Basis m) const {
 	sig.m[1][1] = s[1];
 	sig.m[2][2] = s[2];
 
-	const Mat3 recon = u * sig * v.transposed();
-	double err = 0.0;
-	for (int i = 0; i < 3; i++) {
-		for (int j = 0; j < 3; j++) {
-			const double d = recon.m[i][j] - f.m[i][j];
-			err += d * d;
-		}
-	}
-
 	Dictionary out;
-	out["error"] = Math::sqrt(err);
-	out["det_u"] = u.determinant();
-	out["det_v"] = v.determinant();
-	out["s0"]    = s[0];
-	out["s1"]    = s[1];
-	out["s2"]    = s[2];
+	out["error"]  = frobenius_distance(u * sig * v.transposed(), f);
+	out["orth_u"] = frobenius_distance(u.transposed() * u, Mat3::identity());
+	out["det_u"]  = u.determinant();
+	out["det_v"]  = v.determinant();
+	out["s0"]     = s[0];
+	out["s1"]     = s[1];
+	out["s2"]     = s[2];
 
 	return out;
 }
@@ -380,6 +383,8 @@ void MpmSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_sleeping",         "on"),                                                  &MpmSim::set_sleeping);
 	ClassDB::bind_method(D_METHOD("set_sleep_params",     "speed", "after", "wake_speed"),                        &MpmSim::set_sleep_params);
 	ClassDB::bind_method(D_METHOD("debug_svd",            "m"),                                                   &MpmSim::debug_svd);
+	ClassDB::bind_method(D_METHOD("get_min_sigma_ratio"),                                                          &MpmSim::get_min_sigma_ratio);
+	ClassDB::bind_method(D_METHOD("reset_min_sigma_ratio"),                                                        &MpmSim::reset_min_sigma_ratio);
 	ClassDB::bind_method(D_METHOD("rasterize_to_store",   "store", "cell", "radius", "material_index"),           &MpmSim::rasterize_to_store);
 	ClassDB::bind_method(D_METHOD("thaw_from_store",      "store", "origin", "dim", "cell", "ppa", "mass", "volume"), &MpmSim::thaw_from_store);
 	ClassDB::bind_method(D_METHOD("add_particle",         "pos", "mass", "volume", "material"),                   &MpmSim::add_particle, DEFVAL(0));

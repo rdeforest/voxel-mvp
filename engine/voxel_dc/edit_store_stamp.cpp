@@ -7,8 +7,12 @@
 // EditStore's brush stamps (stamp_sphere / stamp_box), split from edit_store.cpp.
 
 using namespace voxel_dc;
+using edit_store_lattice::brush_leaf_material;
+using edit_store_lattice::brush_made_solid;
 using edit_store_lattice::is_write_leaf;
+using edit_store_lattice::OP_UNION;
 using edit_store_lattice::overlaps;
+using edit_store_lattice::SOLID_THRESHOLD;
 
 void EditStore::stamp_sphere(Vector3 center, double radius, int op, int material, double min_leaf) {
 	const voxel_dc::SphereField brush(center, radius);
@@ -45,20 +49,22 @@ void EditStore::_stamp_region(int idx, const voxel_dc::Field &brush, const Vecto
 	if (is_write_leaf(s, min_leaf) && nodes[idx].is_leaf()) {
 		Node &n = nodes[idx];
 		const bool was_edited = n.is_edited();
-		bool any_solid = false;
+		const Vector3 centre = o + Vector3(1, 1, 1) * (s * 0.5);
+		bool made = false;
+		bool solid = false;
 		for (int i = 0; i < 8; ++i) {
 			const Vector3 c = corner(o, s, i);
 			const double before = was_edited ? double(n.corners[i]) : _gen.sample(c);
 			const double b = brush.sample(c);
-			const double after = op == 0 ? MIN(before, b) : MAX(before, -b);
-			n.corners[i] = float(after);
-			any_solid = any_solid || after < 0.0;
+			const float after = float(op == OP_UNION ? MIN(before, b) : MAX(before, -b));
+			n.corners[i] = after;
+			made = made || brush_made_solid(after, b);
+			solid = solid || after < SOLID_THRESHOLD;
 		}
 		n.field = OWN_FIELD;
 		n.source = idx;
-		if (any_solid && op == 0) {
-			n.material = uint8_t(material); // a UNION (add) paints its material; a carve keeps existing
-		}
+		n.material = uint8_t(brush_leaf_material(made, solid, material, true,
+				[&] { return was_edited ? int(n.material) : _gen.material(centre); }));
 		return;
 	}
 	if (nodes[idx].is_leaf()) {

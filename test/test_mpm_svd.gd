@@ -32,6 +32,7 @@ func _assert_signed_svd(f: Basis, label: String) -> Dictionary:
     var det := f.determinant()
 
     assert_almost_eq(r["error"], 0.0, TOL, "%s: U·Σ·Vᵀ reconstructs F" % label)
+    assert_almost_eq(r["orth_u"], 0.0, TOL, "%s: UᵀU = I" % label)
     assert_almost_eq(r["det_u"], 1.0, TOL, "%s: det U = +1" % label)
     assert_almost_eq(r["det_v"], 1.0, TOL, "%s: det V = +1" % label)
     assert_eq(signf(r["s2"]), signf(det), "%s: sign(σ₂) = sign(det F) (σ₂ %s, det %s)" % [label, r["s2"], det])
@@ -108,8 +109,39 @@ func test_moderately_near_singular() -> void:
     _assert_rotation_part(r * _stretch(1.0, 1e-3, 1e-3) * rt, "σ = (1, 1e-3, 1e-3)", false)
 
 
-func test_severely_near_singular_and_rank_deficient() -> void:
-    pending("docs/bugs/mpm-svd-ill-conditioned-u.md: U loses orthonormality below σ_min/σ_max ≈ 1e-4 and is singular at rank ≤ 1")
+# Exactly rank-deficient inputs: σ has exact zeros, so F gives those columns of U no direction
+# and the routine has to complete U to a rotation. At rank ≤ 1 it used to build them from columns
+# it hadn't written yet (docs/bugs/mpm-svd-ill-conditioned-u.md).
+func _assert_rank_deficient(f: Basis, label: String, sigma: Vector3) -> void:
+    var r := MpmSim.new().debug_svd(f)
+
+    assert_almost_eq(r["error"], 0.0, TOL, "%s: U·Σ·Vᵀ reconstructs F" % label)
+    assert_almost_eq(r["orth_u"], 0.0, TOL, "%s: UᵀU = I" % label)
+    assert_almost_eq(r["det_u"], 1.0, TOL, "%s: det U = +1" % label)
+    assert_almost_eq(r["det_v"], 1.0, TOL, "%s: det V = +1" % label)
+    assert_almost_eq(Vector3(r["s0"], r["s1"], absf(r["s2"])), sigma, Vector3.ONE * TOL, "%s: σ" % label)
+
+
+func test_rank_two() -> void:
+    _assert_rank_deficient(_stretch(1.0, 1.0, 0.0), "diag(1, 1, 0)", Vector3(1, 1, 0))
+    _assert_rank_deficient(_stretch(0.0, 2.0, 1.0), "diag(0, 2, 1)", Vector3(2, 1, 0))
+
+
+func test_rank_one() -> void:
+    var tilted := Vector3(0.6, 0.8, 0.0)
+
+    _assert_rank_deficient(_stretch(1.0, 0.0, 0.0), "diag(1, 0, 0)", Vector3(1, 0, 0))
+    _assert_rank_deficient(_stretch(0.0, 0.0, 3.0), "diag(0, 0, 3)", Vector3(3, 0, 0))
+    _assert_rank_deficient(Basis(Vector3.ZERO, Vector3.ZERO, Vector3.RIGHT), "z ↦ x", Vector3(1, 0, 0))
+    _assert_rank_deficient(Basis(tilted * 2.0, Vector3.ZERO, Vector3.ZERO), "x ↦ 2·(0.6, 0.8, 0)", Vector3(2, 0, 0))
+
+
+func test_rank_zero() -> void:
+    _assert_rank_deficient(Basis(Vector3.ZERO, Vector3.ZERO, Vector3.ZERO), "zero", Vector3.ZERO)
+
+
+func test_severely_near_singular() -> void:
+    pending("docs/bugs/mpm-svd-ill-conditioned-u.md: U loses orthonormality below σ_min/σ_max ≈ 1e-4 (awaits the McAdams rewrite)")
 
 
 # --- seeded random ---

@@ -32,6 +32,28 @@ inline bool is_write_leaf(double s, double cell) {
 constexpr double CELL_SAMPLE_OFFSET = 0.5; // VoxelConstants.VOXEL_CENTER_OFFSET (VoxelUtils.sample_point)
 constexpr double SOLID_THRESHOLD = 0.0;    // VoxelConstants.SDF_SOLID_THRESHOLD
 constexpr int OP_UNION = 0;                // STORE_OP_UNION == CsgState.Op.ADD
+constexpr double SDF_BAND = 5.0;           // VoxelConstants.SDF_AIR == -SDF_SOLID
+
+// SdfLattice.materials's paint rule, shared by every brush write (the lattice builder's `made` and
+// EditStore's stamps) so the same brush paints the same leaves whichever path writes it. A point is
+// `made` when the write leaves it solid and the brush is solid there. The GDScript rule also counted
+// a point the write turned from air to solid; under a brush combine (union = min(before, brush),
+// subtract = max(before, -brush)) that point is always one the brush is solid at, and a subtract
+// never makes one, so the clause adds nothing and is left out.
+inline bool brush_made_solid(float after, double brush) {
+	return after < SOLID_THRESHOLD && brush < SOLID_THRESHOLD;
+}
+
+// A rewritten leaf takes `material` iff the write made one of its corners solid (`material` < 0
+// never repaints: a carve); otherwise it keeps what it was made of (`held()`, the material_at its
+// centre before the write) while it keeps a solid corner or `air_keeps`, else 0.
+template <typename Held>
+int brush_leaf_material(bool made, bool solid, int material, bool air_keeps, Held held) {
+	if (made && material >= 0) {
+		return material;
+	}
+	return solid || air_keeps ? held() : 0;
+}
 
 // The region a lattice rewrites is always its whole cube: write_region rewrites every leaf
 // overlapping the array it is handed.
@@ -164,11 +186,8 @@ void fill(const EditStore &store, Lattice &lat, Combine combine) {
 }
 
 // A brush combined into the field: union = min(before, brush(p)), subtract = max(before, -brush(p)),
-// brush(p) < SOLID_THRESHOLD being the brush's inside. `made` is SdfLattice.materials's paint rule,
-// taken here because the brush value and the owner leaf's "before" are both in hand: a point the
-// write leaves solid that the brush is solid at. The GDScript rule also counted a point the write
-// turned from air to solid; under this combine that point is always one the brush is solid at
-// (a subtract never makes solid), so the clause adds nothing and is left out.
+// brush(p) < SOLID_THRESHOLD being the brush's inside. `made` (brush_made_solid) is taken here
+// because the brush value and the owner leaf's "before" are both in hand.
 template <typename Brush>
 void fill_brush(const EditStore &store, Lattice &lat, int op, Brush brush) {
 	lat.made.resize(lat.sdf.size());
@@ -176,7 +195,7 @@ void fill_brush(const EditStore &store, Lattice &lat, int op, Brush brush) {
 	fill(store, lat, [&](int i, const Vector3 &p, double before) {
 		const double b = brush(p);
 		const double after = op == OP_UNION ? MIN(before, b) : MAX(before, -b);
-		made[i] = float(after) < SOLID_THRESHOLD && b < SOLID_THRESHOLD;
+		made[i] = brush_made_solid(float(after), b);
 		return after;
 	});
 }

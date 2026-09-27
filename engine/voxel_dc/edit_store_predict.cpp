@@ -15,7 +15,6 @@ using namespace edit_store_lattice;
 namespace {
 
 constexpr double IMPRINT_MARGIN = 2.0; // VoxelImprint.MARGIN
-constexpr double SDF_BAND = 5.0;       // VoxelConstants.SDF_AIR == -SDF_SOLID
 
 enum CsgShapeKind { // CsgSdf.Shape
 	CSG_BOX,
@@ -201,9 +200,7 @@ bool EditStore::imprint_near_solid(int shape, const PackedFloat64Array &dims, Tr
 	return false;
 }
 
-// SdfLattice.materials: a leaf takes `material` iff the write made one of its corners solid (`made`,
-// from fill_brush); otherwise it keeps its current material (read at its centre) if it keeps a solid
-// corner or `air_keeps`, else 0. `material` < 0 never repaints (a carve).
+// SdfLattice.materials: brush_leaf_material over each leaf, `made` coming from fill_brush.
 PackedByteArray EditStore::lattice_materials(const PackedFloat32Array &sdf, const PackedByteArray &made, int dim,
 		Vector3 origin, double cell, int material, bool air_keeps) const {
 	const Lattice lat(sdf, dim, origin, cell);
@@ -226,12 +223,9 @@ PackedByteArray EditStore::lattice_materials(const PackedFloat32Array &sdf, cons
 					painted = painted || m[j] == 1;
 					solid = solid || values[j] < SOLID_THRESHOLD;
 				}
-				const int i = voxel_dc::flat_index(x, y, z, dim);
-				if (painted && material >= 0) {
-					w[i] = uint8_t(material);
-				} else if (solid || air_keeps) {
-					w[i] = uint8_t(material_at(lat.point(x, y, z) + half));
-				}
+				const Vector3 centre = lat.point(x, y, z) + half;
+				w[voxel_dc::flat_index(x, y, z, dim)] = uint8_t(brush_leaf_material(painted, solid, material, air_keeps,
+						[&] { return material_at(centre); }));
 			}
 		}
 	}

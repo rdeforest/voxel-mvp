@@ -286,7 +286,7 @@ Array DCOctreeMesher::mesh_world(
 	oct.palette = palette;
 	oct.root_size = 1 << depth;
 	oct.max_depth = depth;
-	oct.cell_budget = max_cells; // memory budget: build stops descending past this (0 = arena cap only)
+	oct.cell_budget = max_cells; // kept for this octree's life: grow_world and edit_world stop at it too
 	oct.verify_emit_on = _verify_emit; // debug self-check survives this rebuild
 	oct.emit_diff_on = _emit_diff;     // debug drop catcher survives this rebuild
 	oct.camera = camera;
@@ -347,6 +347,7 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 		return Array();
 	}
 	Octree &oct = _persist->oct;
+	oct.cell_limit_hit = false;
 	oct.build_box = true;
 	oct.window_mode = true;
 	oct.build_min = win_min;   // M (doc 20): RESIDENCY box — sampled + kept (can be larger than the view).
@@ -404,10 +405,12 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 		oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge; collect refines
 	}
 	oct.last_reconcile_us = OS::get_singleton()->get_ticks_usec() - tb0; // c4: isolate the O(tree) walk cost
+	oct.refine_retired = 0;
 	if (refine_budget >= 0 || reuse_frontier) {
 		oct.refine_selected(refine_budget, reuse_frontier); // worst-error first for up to refine_budget us; defer the rest
 	}
 	_last_refine_queue = oct.refine_heap_end; // remaining backlog after this grow's drain
+	_last_refine_retired = oct.refine_retired;
 	uint64_t tra0 = OS::get_singleton()->get_ticks_usec();
 	// c4: incremental ALWAYS. reconcile now marks path_dirty at every qef change (graft/evict/unbudgeted-refine),
 	// so a move prunes the re-sum to the changed paths just like a drain — O(changed), not O(tree). reset_leaves
@@ -462,6 +465,7 @@ Array DCOctreeMesher::edit_world(Ref<EditStore> store, Vector3 camera, double pr
 		_persist->world_src.bake_accel(_persist->world_src.accel_win_lo, _persist->world_src.accel_win_hi, camera, floor_k);
 		_last_accel_ms = double(OS::get_singleton()->get_ticks_usec() - ta0) / 1000.0;
 	}
+	oct.cell_limit_hit = false;
 	oct.field_dirty = true;
 	// Pad by one cell: a DC cell's QEF samples its 12 edges' CORNERS, so a cell whose body sits just outside
 	// the changed-field box still has a corner ON the box face that moved — its QEF changed and it must be
@@ -495,22 +499,59 @@ int DCOctreeMesher::get_octree_cell_count() const {
 	return _persist != nullptr ? int(_persist->oct.cells.size()) : 0;
 }
 
-// M2: total cell-arena bytes (size on disk) vs resident bytes (in RAM, via mincore) — the page-in/page-out
-// split. resident == total means everything's cached; resident << total means cold cells paged to disk.
 int64_t DCOctreeMesher::get_cell_arena_bytes() const {
 	if (_persist == nullptr) {
 		return 0;
 	}
 	const Octree &o = _persist->oct; // hot/cold split: sum both arenas (hot Cell + cold Qef)
-	return o.cells.size() * int64_t(sizeof(*o.cells.base)) + o.qefs.size() * int64_t(sizeof(*o.qefs.base));
+	return o.cells.allocated_bytes() + o.qefs.allocated_bytes();
 }
 
-int64_t DCOctreeMesher::get_cell_resident_bytes() const {
-	if (_persist == nullptr) {
-		return 0;
+int64_t DCOctreeMesher::get_cell_capacity() {
+	return voxel_dc::dc_mesh::DC_CELL_CAPACITY;
+}
+
+bool DCOctreeMesher::get_cell_limit_hit() const {
+	return _persist != nullptr && _persist->oct.cell_limit_hit;
+}
+
+bool DCOctreeMesher::is_at_cell_limit() const {
+	return _persist != nullptr && _persist->oct.cell_room() < 8;
+}
+
+// The octree owns the limit: its room counts freed slots, so lowering the budget below the slots in use
+// closes refinement until evictions bring the live count under it, rather than latching it shut.
+void DCOctreeMesher::set_cell_budget(int64_t max_cells) {
+	ERR_FAIL_COND_MSG(max_cells < 0, "set_cell_budget: max_cells must be >= 0");
+	if (_persist != nullptr) {
+		_persist->oct.cell_budget = max_cells;
 	}
-	const Octree &o = _persist->oct;
-	return o.cells.resident_bytes() + o.qefs.resident_bytes();
+}
+
+Dictionary DCOctreeMesher::check_cell_arena(int64_t count, int64_t capacity) {
+	ERR_FAIL_COND_V_MSG(count < 2 || count > capacity, Dictionary(), "check_cell_arena: need 2 <= count <= capacity");
+	voxel_dc::dc_mesh::CellArena<int64_t> arena(capacity);
+	const int64_t half = count / 2;
+	for (int64_t i = 0; i < half; ++i) {
+		arena.push_back(i);
+	}
+	const int64_t *first = &arena[0];
+	const int64_t *last = &arena[half - 1];
+	arena.resize_uninitialized(count);
+	for (int64_t i = half; i < count; ++i) {
+		arena[i] = i;
+	}
+	bool values_kept = true;
+	for (int64_t i = 0; i < count; ++i) {
+		values_kept = values_kept && arena[i] == i;
+	}
+	Dictionary out;
+	out["values_kept"] = values_kept;
+	out["addresses_kept"] = first == &arena[0] && last == &arena[half - 1];
+	out["size"] = arena.size();
+	out["room"] = arena.room();
+	out["block"] = voxel_dc::dc_mesh::CellArena<int64_t>::BLOCK;
+	return out;
 }
 
 void DCOctreeMesher::set_verify_emit(bool on) {
@@ -559,11 +600,6 @@ String DCOctreeMesher::get_last_drop_info() const {
 	return _persist != nullptr ? _persist->oct.last_drop_info : String();
 }
 
-// M2: false if any cell arena failed to get a disk-backed temp file and fell back to anonymous RAM (OOM risk).
-bool DCOctreeMesher::is_arena_disk_backed() const {
-	return !voxel_dc::dc_mesh::g_arena_anon_fallback;
-}
-
 bool DCOctreeMesher::get_refine_pending() const {
 	return _persist != nullptr && _persist->oct.refine_pending;
 }
@@ -609,10 +645,14 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remesh", "camera", "proj", "eps_px"), &DCOctreeMesher::remesh);
 	ClassDB::bind_method(D_METHOD("get_last_build_sample_count"), &DCOctreeMesher::get_last_build_sample_count);
 	ClassDB::bind_method(D_METHOD("get_last_refine_queue_size"), &DCOctreeMesher::get_last_refine_queue_size);
+	ClassDB::bind_method(D_METHOD("get_last_refine_retired_count"), &DCOctreeMesher::get_last_refine_retired_count);
 	ClassDB::bind_method(D_METHOD("get_octree_cell_count"),      &DCOctreeMesher::get_octree_cell_count);
 	ClassDB::bind_method(D_METHOD("get_cell_arena_bytes"),      &DCOctreeMesher::get_cell_arena_bytes);
-	ClassDB::bind_method(D_METHOD("get_cell_resident_bytes"),   &DCOctreeMesher::get_cell_resident_bytes);
-	ClassDB::bind_method(D_METHOD("is_arena_disk_backed"),      &DCOctreeMesher::is_arena_disk_backed);
+	ClassDB::bind_static_method("DCOctreeMesher", D_METHOD("get_cell_capacity"), &DCOctreeMesher::get_cell_capacity);
+	ClassDB::bind_method(D_METHOD("get_cell_limit_hit"),        &DCOctreeMesher::get_cell_limit_hit);
+	ClassDB::bind_method(D_METHOD("is_at_cell_limit"),          &DCOctreeMesher::is_at_cell_limit);
+	ClassDB::bind_method(D_METHOD("set_cell_budget", "max_cells"), &DCOctreeMesher::set_cell_budget);
+	ClassDB::bind_static_method("DCOctreeMesher", D_METHOD("check_cell_arena", "count", "capacity"), &DCOctreeMesher::check_cell_arena);
 	ClassDB::bind_method(D_METHOD("set_verify_emit", "on"),     &DCOctreeMesher::set_verify_emit);
 	ClassDB::bind_method(D_METHOD("get_last_bad_tri_count"),    &DCOctreeMesher::get_last_bad_tri_count);
 	ClassDB::bind_method(D_METHOD("get_last_bad_tri_pos"),      &DCOctreeMesher::get_last_bad_tri_pos);

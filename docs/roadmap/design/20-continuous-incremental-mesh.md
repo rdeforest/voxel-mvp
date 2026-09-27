@@ -254,6 +254,21 @@ window (and by M below, by RAM / the page cache).
 
 ## M — Retain everything; spill to a memory-mapped file
 
+> **2026-09-27 (Q4), drafted by Claude:** the mmap-backed arena (M2) has been removed. A full disk
+> killed it with SIGBUS, it needed Linux-specific handling to fail cleanly, and Robert chose a fixed
+> development budget over disk paging: 32 GB RAM in total. Giving the cells 16 GiB of that
+> (`DC_CELL_RAM_BUDGET` in `dc_octree.h`) was Claude's call, pending Robert's review. At 252 B per cell (124 B hot `Cell` plus a 128 B `Qef`)
+> that is about 68 M cells. The cells live in `CellArena` (`dc_cell_arena.h`): 64 K-element RAM
+> blocks behind a block table sized for the full capacity. Growth never copies or moves a cell. The
+> cell limit is min(`max_cells`, capacity). The level-sync build, moves, drains and edits all stop
+> there, and cells that were refused refinement stay coarse and are sampled so the window has no
+> holes. The octree owns the limit: a mid-session `dcmaxcells` reaches it through `set_cell_budget`,
+> and its room counts freed slots, so an eviction reopens refinement. Known debt: the level-sync
+> build refines a whole level or none of it, so a build whose next level doesn't fit leaves up to
+> ~7/8 of the budget for the drains to fill (worst error first, over frames) instead of refining the
+> nearest descenders at once. The rest of this section is the original plan; spilling to disk is not
+> scheduled.
+
 The thesis (`docs/MANIFESTO.md`, [[no-half-measures]]): hardware is effectively
 free, so **don't throw out anything reusable.** Today a re-root or a window
 eviction discards built cells; a far edit rebuilds from scratch. The endgame is
@@ -345,6 +360,53 @@ by `we` (a heap + `cell → heap-pos` map for O(log n) delete/decrease-key), or 
 pops the worst-`we` cells until the µs budget; the rest stay queued (no re-walk, no
 re-sort). Removes `reconcile`'s O(tree) collect for stationary refine.
 
+#### Frontier lazy invalidation (2026-09-27, overnight Q10)
+
+*Drafted by Claude.*
+
+What shipped is the plain heap, not the indexed one, so a cell leaving the frontier
+can't be deleted in place. Entries are invalidated **lazily** instead, the standard
+heap technique. Each `Cell` slot carries a generation `gen` that slot reuse
+(`alloc_cell` + `build`) never resets; only `init_cell` zeroes it, on a fresh `Octree`
+with an empty frontier and free list (a `DEV_ASSERT` in `build_bottomup_parallel`).
+Each `RefineCand` records its cell's `gen` when queued.
+`Octree::retire` bumps `gen` wherever a cell stops being the refinable leaf it was:
+freed (`kill_subtree`), regrown (`grow_subtree`), evicted (`reconcile`), or
+re-sampled (`sample_leaf`, since its key `we` came from the old QEF).
+`refine_selected` drops a popped entry whose `gen` no longer matches. The key of a
+live entry never changes, so stale entries don't break the heap order. A dropped pop
+is charged to the µs budget like a refine, so a large edit's retired backlog drains
+across frames instead of in one unchecked call.
+
+`gen` sits in padding that was already there: moving `vertex` after the `leaf`/`absent`
+bools keeps `Cell` at 124 B. The first cut appended it and grew `Cell` to 128 B. On
+`scripts/dev/bench_grow_split.gd` (65 M cells), that made the move-grow reconcile 15–25%
+slower across interleaved A/B runs, well past the 3% size change. The 124 B layout
+measures level with the old code. Cell size is load-bearing at this scale, so a
+`static_assert` pins it: growing `Cell` means re-measuring and updating the assert.
+
+This is what lets `edit_world` run between a budgeted grow and its `reuse_frontier`
+drains without clearing the frontier. The edit retires the entries it made obsolete,
+and entries outside the edit stay queued. The edit band needs no fresh candidates:
+`reconcile_edit` refines every refinable leaf it walks straight to the floor, so it
+leaves none behind. Before this change, popping a stale entry regrew internal nodes
+(their orphaned subtrees kept emitting) or freed slots: with only the `gen` check
+disabled, `scripts/dev/probe_dc_edit_stale_frontier.gd` drained to 1.8–3.1× a fresh
+build's triangles in all 8 cases, and both gate tests fail their surface assertions.
+
+The preview (`dc_world_preview.gd`) now keeps draining after an edit job. Its eps
+controller ORs into `_eps_dirty` rather than assigning it: an edit job doesn't consume
+the flag, and an eps change made just before the edit must still force the next grow
+to re-collect the frontier at the new floor rather than drain one collected at the old.
+Gated by `test_edit_world_between_budgeted_grows_retires_stale_frontier` and
+`test_edit_world_whole_window_retires_whole_frontier`.
+
+A side observation bears on the §E structural mismatch: with the same localized edit
+box, budgeted grow → edit → drain reaches a fresh build of the edited store exactly,
+while unbudgeted grow → edit does not. The difference is that the drain refines the
+cells outside the box **after** the edit, against the re-baked accel. That supports
+the prune-decision-footprint explanation there.
+
 ### c2 — Incremental collapse (scope to the dirty set)
 
 At a fixed eps + camera, only the cells whose QEF changed this grow (the refined
@@ -433,7 +495,8 @@ to allocate child blocks contiguously too (the free-list path isn't). c4 first, 
 5. **M — retain-everything / mmap spill.** A memory-management swap under the
    rest; build on the in-RAM arena, page to disk only when the resident set
    exceeds RAM. Keep the cell arena pointer-free so the swap stays an allocator
-   change.
+   change. *(2026-09-27: the mmap arena was built (M2) and then removed in favour of a capped RAM
+   arena; see the note under "M".)*
 6. **Re-root incremental — deferred.** The root snap shifts the whole lattice
    frame, so every cell "moves" — the doc-13-B3 problem, now in the world-octree.
    Rare (only on leaving the root box). M largely dissolves it (the cells already

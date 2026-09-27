@@ -152,6 +152,46 @@ static void symmetric_eigen(const Mat3 &s_in, Mat3 &v, double eval[3]) {
 	eval[2] = a.m[2][2];
 }
 
+static Vector3 column(const Mat3 &a, int i) {
+	return Vector3(a.m[0][i], a.m[1][i], a.m[2][i]);
+}
+
+static void set_column(Mat3 &a, int i, const Vector3 &c) {
+	a.m[0][i] = c.x;
+	a.m[1][i] = c.y;
+	a.m[2][i] = c.z;
+}
+
+// Crossing with the coordinate axis `a` is least aligned with keeps |a × axis| ≥ sqrt(2/3),
+// so the result is well-conditioned for any unit `a`.
+static Vector3 any_orthogonal(const Vector3 &a) {
+	const Vector3 m = a.abs();
+	const Vector3::Axis least = m.x <= m.y && m.x <= m.z ? Vector3::AXIS_X : (m.y <= m.z ? Vector3::AXIS_Y : Vector3::AXIS_Z);
+	Vector3 axis;
+	axis[least] = 1.0;
+	return a.cross(axis).normalized();
+}
+
+// U = F V Σ⁻¹ column by column (F·v_i = σ_i u_i). σ is sorted, so the columns with a
+// (near-)zero σ are a suffix; F gives them no direction, and any orthonormal completion still
+// reconstructs F, so they complete U to a right-handed basis.
+static void fill_u(const Mat3 &fv, const double ss[3], Mat3 &u) {
+	int rank = 0;
+	while (rank < 3 && ss[rank] > 1e-12) {
+		set_column(u, rank, column(fv, rank) / ss[rank]);
+		rank++;
+	}
+	if (rank == 0) {
+		set_column(u, 0, Vector3(1, 0, 0));
+	}
+	if (rank <= 1) {
+		set_column(u, 1, any_orthogonal(column(u, 0)));
+	}
+	if (rank <= 2) {
+		set_column(u, 2, column(u, 0).cross(column(u, 1)).normalized());
+	}
+}
+
 void Mat3::svd(Mat3 &u, double sigma[3], Mat3 &v) const {
 	double eval[3];
 	symmetric_eigen(transposed() * (*this), v, eval); // V, σ² from FᵀF
@@ -179,24 +219,7 @@ void Mat3::svd(Mat3 &u, double sigma[3], Mat3 &v) const {
 	}
 	v = vs;
 
-	// U = F V Σ⁻¹ column by column (F·v_i = σ_i u_i). A (near-)zero σ leaves an undefined
-	// column — fill it with the cross product of the other two to keep U orthonormal.
-	const Mat3 fv = (*this) * v;
-	for (int i = 0; i < 3; i++) {
-		if (ss[i] > 1e-12) {
-			for (int r = 0; r < 3; r++) {
-				u.m[r][i] = fv.m[r][i] / ss[i];
-			}
-		} else {
-			const int a = (i + 1) % 3, b = (i + 2) % 3;
-			const Vector3 ca(u.m[0][a], u.m[1][a], u.m[2][a]);
-			const Vector3 cb(u.m[0][b], u.m[1][b], u.m[2][b]);
-			const Vector3 cr = ca.cross(cb).normalized();
-			u.m[0][i] = cr.x;
-			u.m[1][i] = cr.y;
-			u.m[2][i] = cr.z;
-		}
-	}
+	fill_u((*this) * v, ss, u);
 
 	// Make U and V proper rotations; absorb any reflection into the smallest singular value.
 	if (v.determinant() < 0.0) {

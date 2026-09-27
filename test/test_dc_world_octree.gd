@@ -475,6 +475,79 @@ func test_grow_world_unbudgeted_rebuild_empties_frontier():
     assert_eq(_tri_sigs(again), _tri_sigs(full), "a reuse drain over an empty frontier changes nothing")
 
 
+# An edit between a budgeted grow and its reuse drains leaves frontier entries naming cells the edit freed,
+# regrew or re-sampled (docs/roadmap/design/20-continuous-incremental-mesh.md, "Frontier lazy invalidation").
+# The drain must drop those, keep the rest, and settle on a fresh build of the edited store. Popping them
+# instead regrows internal nodes (orphaned subtrees keep emitting) and freed slots: ~2x the triangles.
+func _drain_after_edit(s: EditStore, origin: Vector3i, edit: Callable, dmin: Vector3i, dmax: Vector3i) -> Dictionary:
+    var cam := Vector3(16, 16, 120)
+    var lo := origin
+    var hi := origin + WIN_FULL
+
+    var m := DCOctreeMesher.new()
+    m.mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 32.0, true, PackedColorArray(), lo, hi)
+    m.grow_world(cam, 500.0, 2.0, lo, hi, 0, Vector3i(), Vector3i(), false)
+    var queued := m.get_last_refine_queue_size()
+
+    edit.call()
+    m.edit_world(s, cam, 500.0, 2.0, dmin, dmax)
+
+    var drained: Array = []
+    var retired := 0
+    var drains := 0
+    while m.get_refine_pending() and drains < 20000:
+        drained = m.grow_world(cam, 500.0, 2.0, lo, hi, 100, Vector3i(), Vector3i(), true)
+        retired += m.get_last_refine_retired_count()
+        drains += 1
+
+    var fresh: Array = DCOctreeMesher.new().mesh_world(s, origin, DEPTH, 1.0, cam, 500.0, 2.0, true, PackedColorArray(), lo, hi)
+
+    return {
+        "queued":   queued,
+        "retired":  retired,
+        "pending":  m.get_refine_pending(),
+        "drained":  _tri_sigs(drained),
+        "remeshed": _tri_sigs(m.remesh(cam, 500.0, 2.0)),
+        "fresh":    _tri_sigs(fresh),
+    }
+
+
+# A localized fill: the box turns the surface band solid, so the edit coarsens queued leaves' ancestors
+# (freeing the queued slots) and regrows queued leaves it overlaps; entries outside it stay live.
+func test_edit_world_between_budgeted_grows_retires_stale_frontier():
+    var s := _store()
+    var origin := _region_origin(s)
+    var ctr := Vector3(origin.x + 16, origin.y + 16, origin.z + 16)
+    var fill := func() -> void: s.stamp_box(ctr, Vector3.ONE * 12.0, VoxelConstants.STORE_OP_UNION, 0, 1.0)
+    var dmin := Vector3i((ctr - Vector3.ONE * 7.0).floor())
+    var dmax := Vector3i((ctr + Vector3.ONE * 7.0).ceil())
+
+    var r := _drain_after_edit(s, origin, fill, dmin, dmax)
+
+    assert_gt(r.queued, 0, "the budgeted grow left a frontier (test isn't vacuous)")
+    assert_gt(r.retired, 0, "the edit retired queued entries and the drain dropped them")
+    assert_lt(r.retired, r.queued, "entries outside the edit stayed live (nothing cleared wholesale)")
+    assert_false(r.pending, "the drain converged")
+    assert_eq(r.remeshed, r.fresh, "drained tree == fresh build of the edited store")
+    assert_eq(r.drained, r.fresh, "the drain's incremental emit draws that surface too")
+
+
+# A whole-window dirty box refines every queued leaf inside the edit, so every entry is retired.
+func test_edit_world_whole_window_retires_whole_frontier():
+    var s := _store()
+    var origin := _region_origin(s)
+    var ctr := Vector3(origin.x + 16, origin.y + 16, origin.z + 16)
+    var carve := func() -> void: s.stamp_sphere(ctr, 3.0, VoxelConstants.STORE_OP_SUBTRACT, 0, 1.0)
+
+    var r := _drain_after_edit(s, origin, carve, origin, origin + WIN_FULL)
+
+    assert_gt(r.queued, 0, "the budgeted grow left a frontier (test isn't vacuous)")
+    assert_eq(r.retired, r.queued, "every queued entry was retired by the whole-window edit")
+    assert_false(r.pending, "the drain converged")
+    assert_eq(r.remeshed, r.fresh, "drained tree == fresh build of the edited store")
+    assert_eq(r.drained, r.fresh, "the drain's incremental emit draws that surface too")
+
+
 # Stage M (doc 20) — residency / visible split: the residency box (build_box) can be larger than the VISIBLE
 # window (emit filter). Moving only the visible window over a fixed resident region re-samples NOTHING — the M
 # win (no re-bloom on a turn/backtrack) — and the visible window draws a strict subset of the resident surface.

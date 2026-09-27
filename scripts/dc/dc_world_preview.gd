@@ -39,8 +39,8 @@ var frame_budget := 16.0      # ms — frame-gen (render) budget; the `dcframebu
 # a fixed count can't. Tunable; `dcrefine` console knob.
 var refine_us := 8000                 # per-grow refine budget (µs); `dcrefine` knob. With the incremental emit a
                                       # grow is O(refined), so this is just a latency target, not overhead to amortize.
-var max_cells := 80_000_000           # memory budget: stop refining past this many octree cells (296 B each ≈
-                                      # 24 GB). At LOG2=4 max-detail the arena would otherwise exhaust RAM. `dcmaxcells`.
+var max_cells := DCOctreeMesher.get_cell_capacity()  # refinement stops past this many octree cells; can only
+                                                     # lower the RAM-budget capacity (Q4, dc_octree.h). `dcmaxcells`.
 
 # M (doc 20): residency extends this far (metres) beyond the VISIBLE window — kept resident + pre-baked so a
 # turn or backtrack re-samples nothing, and the edge ahead is ready before you reach it. 0 = pre-M (residency
@@ -51,9 +51,7 @@ var base_cell    := VoxelConstants.RENDER_BASE_CELL  # metres per lattice unit (
 var win_radius_m := 128.0                            # resident window half-extent (m) — graded floor + budget make it affordable
 var _eps_px      := EPS_START                        # the single operating point; floor + collapse both derive from it
 var _frame_ms    := 0.0                              # smoothed frame time (render-cost signal)
-var _mem_status  := ""                               # M2: cells/RAM/arena readout, refreshed by the worker in _run_job
-var _ram_throttle := 0                               # M2: the RAM-resident scan (mincore) is the costly part —
-var _ram_gb := 0.0                                   # refresh it only every Nth job, not every job
+var _mem_status  := ""                               # cells/RAM readout, refreshed by the worker in _run_job
 var _eps_dirty   := false                            # the controller changed eps → re-mesh to apply it
 
 var _follow:     Node3D
@@ -63,7 +61,7 @@ var _enabled := false
 var _mesher := DCOctreeMesher.new()  # persistent — holds the retained octree across frames
 var _root_origin_i := Vector3i.ZERO  # LATTICE coords of the root's (0,0,0) corner
 var _built := false
-var _arena_checked := false          # M2: one-shot — did we pop the "arena not disk-backed" warning yet?
+var _cell_limit_warned := false      # one-shot — did we tell the player refinement hit the cell limit?
 var _verify_tripped := false         # dcverify: one-shot Toast on the first bad emit (rest streams via REST)
 var _dirty := false                  # an edit happened → full rebuild to pick it up
 var _last_center := Vector3.INF
@@ -233,6 +231,7 @@ func _process(_dt: float) -> void:
         if WorkerThreadPool.is_task_completed(_task_id):
             _finish()
         return
+    _mesher.set_cell_budget(max_cells)   # no job in flight: a `dcmaxcells` change reaches the octree's limit now
     var p := _follow.global_position
     # Full rebuild only when the field or frame changes: first build, an edit, or a re-root. A plain move or
     # an eps change (the controller re-grading) goes through grow_world — it re-meshes just the changed band
@@ -249,15 +248,19 @@ func _process(_dt: float) -> void:
         # band to the eps floor in one shot and retention kept all of it, so a walk grew the tree without bound
         # (max_cells gated only the stationary drain, not moves). Budgeted, the move's deferred refinement
         # drains through the gated path below, so the whole system respects the cell budget.
-        var move_budget := refine_us if _mesher.get_octree_cell_count() < max_cells else 0
+        var move_budget := refine_us if _under_cell_limit() else 0
         _dispatch_grow(p, move_budget, false)
-    elif (_eps_dirty or _refine_pending) and _mesher.get_octree_cell_count() < max_cells:
+    elif (_eps_dirty or _refine_pending) and _under_cell_limit():
         # c1 (doc 20): a pure DRAIN (refine_pending, eps unchanged) reuses the persistent frontier — skip the
         # reconcile re-walk. An eps change rebuilds it (the floor moved, so the candidate set changed).
-        # Memory budget: stop refining past max_cells — at LOG2=4 max-detail the cell arena would exhaust RAM
-        # (296 bytes/cell). The world holds at the detail that fit; a move still evicts + refines. mmap is the
-        # real ceiling-raiser (M2); this is the honest "max detail until RAM is full" hardware-limit behaviour.
+        # Past the cell limit the world holds at the detail that fit; a move still evicts + refines.
         _dispatch_grow(p, refine_us, not _eps_dirty)
+
+
+# The octree owns the limit (max_cells reaches it via set_cell_budget). Its room counts freed slots, so an
+# eviction reopens refinement; the slot count never shrinks and must not gate this, or it latches shut.
+func _under_cell_limit() -> bool:
+    return not _mesher.is_at_cell_limit()
 
 
 # Root origin (LATTICE) snapped to the ROOT_SNAP grid, centred on the player — cells never shift
@@ -385,19 +388,15 @@ func _run_job() -> void:
     # the GPU upload command is marshalled safely; _finish then just assigns the finished mesh (a cheap swap).
     _job_mesh = _arrays_to_mesh(_job_arrays)
     _job_work_ms = (Time.get_ticks_usec() - t0) / 1000.0   # mesh lag = the controller's primary signal
-    _refresh_mem_status()   # M2 telemetry computed HERE (worker owns _persist this job) — never on the main thread
+    _refresh_mem_status()   # telemetry computed HERE (worker owns _persist this job) — never on the main thread
 
 
-# M2 readout: cells (O(1)) + arena bytes (O(1)) every job; the RAM-resident mincore scan (O(resident pages),
-# a real hitch at hundreds of GB) only every Nth job. Runs on the worker at the end of _run_job — _persist is
-# stable (this thread just built it) and the main thread never touches it, so there's no race and no stall.
+# Runs on the worker at the end of _run_job — _persist is stable (this thread just built it) and the main
+# thread never touches it mid-job, so there's no race and no stall.
 func _refresh_mem_status() -> void:
-    _ram_throttle += 1
-    if _ram_throttle >= 10:
-        _ram_throttle = 0
-        _ram_gb = _mesher.get_cell_resident_bytes() / 1073741824.0
-    var disk := _mesher.get_cell_arena_bytes() / 1073741824.0
-    _mem_status = "%.1fM cells   RAM %.1f GB / arena %.1f GB" % [_mesher.get_octree_cell_count() / 1.0e6, _ram_gb, disk]
+    var cap_m := mini(max_cells, DCOctreeMesher.get_cell_capacity()) / 1.0e6
+    _mem_status = "%.1fM / %.1fM cells   RAM %.1f GB" % [
+            _mesher.get_octree_cell_count() / 1.0e6, cap_m, _mesher.get_cell_arena_bytes() / 1073741824.0]
 
 
 func _finish() -> void:
@@ -416,9 +415,11 @@ func _finish() -> void:
     Perf.mark_event()
     if _inval != null and _inval.is_enabled():
         _emit_diagnostic()   # refresh the dcinval LOD overlay for this mesh
-    _refine_pending = _job_is_grow and _mesher.get_refine_pending()   # C: more refinement deferred → keep draining
-    Perf.report_queue(_mesher.get_last_refine_queue_size() if _job_is_grow else 0)   # backlog graph in the perf window
-    _check_arena_backing()   # M2: first build done → the cell arena has initialised; warn if it isn't disk-backed
+    # C: more refinement deferred → keep draining. An edit keeps the frontier (it retires only the entries it
+    # made obsolete — doc 20 "Frontier lazy invalidation"), so the drain resumes after it; a build starts empty.
+    _refine_pending = (_job_is_grow or _job_is_edit) and _mesher.get_refine_pending()
+    Perf.report_queue(_mesher.get_last_refine_queue_size() if (_job_is_grow or _job_is_edit) else 0)   # backlog graph in the perf window
+    _warn_cell_limit()
     # Debug: when `dcverify` is on, the worker self-checks each emit for dangling-slot triangles. Toast ONCE on
     # the first trip (no per-frame spam); after that the full diagnostic streams over REST (/stats → "verify").
     if _mesher.get_last_bad_tri_count() > 0 and not _verify_tripped:
@@ -427,31 +428,17 @@ func _finish() -> void:
     _control()
 
 
-# M2: the cell arena initialises lazily on the first build. If it couldn't create a disk-backed temp file (no
-# writable ./tmp or $DC_ARENA_DIR, or only tmpfs available) it falls back to anonymous RAM and the OOM-killer is
-# back in play at high detail. That must never be a silent surprise, so pop a modal the moment we detect it.
-# DC_ARENA_FAIL_DISK_MMAP (a test knob, live in every build) forces the same fallback on purpose.
-func _check_arena_backing() -> void:
-    if _arena_checked:
+# Loud, once per session: terrain has stopped sharpening because the cells filled their RAM budget (or the
+# lower dcmaxcells). The C++ side logs its own one-time warning with the numbers.
+func _warn_cell_limit() -> void:
+    if _cell_limit_warned or not _mesher.get_cell_limit_hit():
         return
-    _arena_checked = true
-    if _mesher.is_arena_disk_backed():
-        return
-    push_warning("DC cell arena fell back to anonymous RAM (no disk-backed temp file) — OOM risk at high detail.")
-    if DisplayServer.get_name() == "headless":
-        return
-    var dlg := AcceptDialog.new()
-    dlg.title = "⚠  Cell arena: no disk paging"
-    dlg.dialog_text = ("The DC cell arena could not create a disk-backed temp file\n" +
-            "(tried $DC_ARENA_DIR, ./tmp, /var/tmp) and fell back to RAM.\n\n" +
-            "Cold cells can no longer page to disk, so the OOM-killer can\n" +
-            "strike at high detail. Set DC_ARENA_DIR to a writable path on\n" +
-            "a real (non-tmpfs) disk and relaunch.")
-    dlg.process_mode = Node.PROCESS_MODE_ALWAYS
-    get_tree().root.add_child(dlg)
-    dlg.confirmed.connect(dlg.queue_free)
-    dlg.canceled.connect(dlg.queue_free)
-    dlg.popup_centered()
+
+    _cell_limit_warned = true
+    var msg := "Terrain detail hit the cell limit (%.1fM cells): refinement stopped at the current detail." % [
+            mini(max_cells, DCOctreeMesher.get_cell_capacity()) / 1.0e6]
+    push_warning(msg)
+    Toast.failure(msg)
 
 
 # Budget controller (doc 20): MAX DETAIL until the GPU complains. eps is the detail TARGET, driven toward the
@@ -466,13 +453,15 @@ func _check_arena_backing() -> void:
 func _control() -> void:
     var prev := _eps_px
     var over := _frame_ms > frame_budget
-    # Don't drive finer than the memory budget can hold (the refine dispatch is gated on max_cells too).
-    var under := _frame_ms < frame_budget * 0.8 and _mesher.get_octree_cell_count() < max_cells
+    # Don't drive finer than the cell limit can hold (the refine dispatch is gated on it too).
+    var under := _frame_ms < frame_budget * 0.8 and _under_cell_limit()
     if over:
         _eps_px = minf(_eps_px * 1.4, EPS_MAX)
     elif under:
         _eps_px = maxf(_eps_px * 0.9, EPS_MIN)
-    _eps_dirty = absf(_eps_px - prev) > 0.01
+    # OR, not assign: an edit job doesn't consume the flag, so a change made before it must survive to force
+    # the next grow to re-collect the frontier at the new floor instead of draining the stale one.
+    _eps_dirty = _eps_dirty or absf(_eps_px - prev) > 0.01
 
 
 func set_frame_budget(ms: float) -> void:

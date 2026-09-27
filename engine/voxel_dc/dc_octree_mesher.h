@@ -47,6 +47,9 @@ class DCOctreeMesher : public RefCounted {
 	// drained it): how many leaves still want sharpening at the current eps. The perf overlay graphs it draining.
 	int _last_refine_queue = 0;
 
+	// Frontier entries the last grow_world popped and dropped because an edit had since retired their cell.
+	int _last_refine_retired = 0;
+
 	// Phase timing for the last mesh_world or grow_world call (milliseconds).
 	// _last_accel_ms  = time spent in bake_accel (0 when the accel was reused in grow_world).
 	// _last_build_ms  = time spent in the build/reconcile + reaccumulate pass (field sampling).
@@ -177,7 +180,7 @@ public:
 			const PackedColorArray &palette = PackedColorArray(),
 			Vector3i win_min = Vector3i(), // resident window (WORLD lattice); win_min == win_max ⇒ whole root
 			Vector3i win_max = Vector3i(), // graded data floor (eps_px/proj) is derived internally — one knob
-			int64_t max_cells = 0);        // memory budget: build stops descending past this (0 = arena cap only)
+			int64_t max_cells = 0);        // cell budget below the arena capacity, kept by later grows (0 = capacity)
 
 	// Incremental window growth (doc 16 Stage B): re-window the RETAINED world octree (from a prior
 	// mesh_world) — graft cells newly in [win_min, win_max), sampling only them; evict cells that left;
@@ -193,6 +196,8 @@ public:
 	// rebuild grow collected (valid only while camera floor, eps and window are unchanged). A reuse grow
 	// always refines: refine_budget caps it as usual, -1 drains the whole retained frontier. A rebuild grow
 	// that is unbudgeted refines inline and leaves the frontier empty, so a reuse after it is a no-op.
+	// An edit_world in between keeps the frontier valid: entries for cells the edit freed, regrew or
+	// re-sampled are skipped when popped, and the edited band itself is refined to the floor by the edit.
 	Array grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max, int refine_budget = -1, Vector3i emit_min = Vector3i(), Vector3i emit_max = Vector3i(), bool reuse_frontier = false);
 
 	// True if the last grow_world left refinement deferred by its budget — drain by growing again (same eps).
@@ -210,11 +215,22 @@ public:
 	// Outstanding refine work the last grow found (leaves still wanting sharpening at the current eps).
 	int get_last_refine_queue_size() const { return _last_refine_queue; }
 
+	// Frontier entries the last grow dropped as retired (freed, regrown or re-sampled since queued).
+	int get_last_refine_retired_count() const { return _last_refine_retired; }
+
 	// Total slots in the retained octree's cell array (live + free-list). Bounded across a traverse (B1b).
 	int get_octree_cell_count() const;
-	int64_t get_cell_arena_bytes() const;    // M2: total cell-arena size (disk)
-	int64_t get_cell_resident_bytes() const; // M2: cells currently in RAM (mincore)
-	bool is_arena_disk_backed() const;       // M2: false = fell back to anon RAM (OOM risk) → game warns
+	int64_t get_cell_arena_bytes() const;    // RAM held by the cell arenas (whole blocks)
+
+	// The cell limit (Q4): refinement stops gracefully at min(max_cells, get_cell_capacity()).
+	static int64_t get_cell_capacity();      // cells the RAM budget holds (DC_CELL_RAM_BUDGET)
+	bool get_cell_limit_hit() const;         // the last build/grow/edit left some refinement undone for lack of room
+	bool is_at_cell_limit() const;           // no room left for another subdivision (8 cells)
+	void set_cell_budget(int64_t max_cells); // a mid-session max_cells for the retained octree (0 = capacity)
+
+	// Test hook: grow a CellArena of `capacity` int64 slots to `count` across block boundaries and report
+	// whether values and element addresses survived the growth.
+	static Dictionary check_cell_arena(int64_t count, int64_t capacity);
 
 	// Debug: enable a post-emit self-check that flags dangling-slot triangles (the "unrelated vertices" bug).
 	void    set_verify_emit(bool on);
