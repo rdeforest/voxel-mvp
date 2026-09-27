@@ -89,6 +89,10 @@ class MpmSim : public RefCounted {
 	int                  _sleep_after   = 80;
 	double               _wake_speed    = 0.2;
 
+	// Smallest |σ₂|/σ₀ any SVD in the sim has seen since the last reset: how close to singular the
+	// deformations get, which bounds Mat3::svd's accuracy (docs/bugs/mpm-svd-ill-conditioned-u.md).
+	double _min_sigma_ratio = 1.0;
+
 	int _grid_count() const { return _dim * _dim * _dim; }
 
 	// PB-MPM timestep phases.
@@ -101,7 +105,9 @@ class MpmSim : public RefCounted {
 	void _apply_collider(const Vector3 &node_world, Vector3 &disp) const;
 	Vector3 _collider_normal(const Vector3 &p) const; // outward = normalized SDF gradient
 	void _stencil(const Vector3 &pos, int base[3], Vector3 &fx, double w[3][3]) const;
-	Mat3 _constraint_target(const Mat3 &f) const;    // elastic α·R + (1−α)·vol-preserving
+	Mat3 _constraint_target(const Mat3 &f);          // elastic α·R + (1−α)·vol-preserving
+	Mat3 _sand_target(const Mat3 &f, double logjp);  // volume-clamped shape + compression-only volume
+	void _svd(const Mat3 &f, Mat3 &u, double s[3], Mat3 &v); // Mat3::svd, recording its conditioning
 	void _drucker_prager(double s[3], double &logjp) const; // sand plasticity on the singular values
 
 public:
@@ -129,7 +135,10 @@ public:
 	void wake_all();
 	void wake_region(Vector3 center, double radius);
 
-	// Test hook: SVD a matrix and report {error, det_u, det_v, s0, s1, s2}. Pins the SVD.
+	double get_min_sigma_ratio() const { return _min_sigma_ratio; }
+	void reset_min_sigma_ratio() { _min_sigma_ratio = 1.0; }
+
+	// Test hook: SVD a matrix and report {error, orth_u, det_u, det_v, s0, s1, s2}. Pins the SVD.
 	Dictionary debug_svd(Basis m) const;
 
 	// Thaw/freeze coupling (mpm_couple.cpp).

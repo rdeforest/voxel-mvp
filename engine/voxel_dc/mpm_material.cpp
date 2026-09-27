@@ -20,10 +20,10 @@ static Mat3 diag3(double a, double b, double c) {
 
 // Elastic constraint target for a candidate F*: blend the rotation (shape preservation, α→1)
 // with the closest volume-preserving matrix (α→0), per elasticity_ratio.
-Mat3 MpmSim::_constraint_target(const Mat3 &fstar) const {
+Mat3 MpmSim::_constraint_target(const Mat3 &fstar) {
 	Mat3 u, v;
 	double s[3];
-	fstar.svd(u, s, v);
+	_svd(fstar, u, s, v);
 	const double df = fstar.determinant();
 	const double cdf = CLAMP(Math::abs(df), 0.1, 1000.0);
 	const Mat3 Q = fstar.scaled(1.0 / (sgn(df) * Math::sqrt(cdf)));
@@ -34,10 +34,10 @@ Mat3 MpmSim::_constraint_target(const Mat3 &fstar) const {
 
 // Sand constraint target: like elastic but the shape target is the (volume-clamped) candidate
 // itself rather than a pure rotation, and the volume target only resists compression (cdf ≤ 1).
-static Mat3 sand_target(const Mat3 &fstar, double logjp, double ratio) {
+Mat3 MpmSim::_sand_target(const Mat3 &fstar, double logjp) {
 	Mat3 u, v;
 	double s[3];
-	fstar.svd(u, s, v);
+	_svd(fstar, u, s, v);
 	if (logjp == 0.0) {
 		for (int i = 0; i < 3; i++) {
 			s[i] = CLAMP(s[i], 1.0, 1000.0);
@@ -47,7 +47,13 @@ static Mat3 sand_target(const Mat3 &fstar, double logjp, double ratio) {
 	const double cdf = CLAMP(Math::abs(df), 0.1, 1.0);
 	const Mat3 Q = fstar.scaled(1.0 / (sgn(df) * Math::sqrt(cdf)));
 	const Mat3 shape = u * diag3(s[0], s[1], s[2]) * v.transposed();
-	return shape.scaled(ratio) + Q.scaled(1.0 - ratio);
+	return shape.scaled(_elasticity_ratio) + Q.scaled(1.0 - _elasticity_ratio);
+}
+
+void MpmSim::_svd(const Mat3 &f, Mat3 &u, double s[3], Mat3 &v) {
+	f.svd(u, s, v);
+	const double ratio = s[0] > 0.0 ? Math::abs(s[2]) / s[0] : 0.0;
+	_min_sigma_ratio = MIN(_min_sigma_ratio, ratio);
 }
 
 void MpmSim::_solve_constraints() {
@@ -57,7 +63,7 @@ void MpmSim::_solve_constraints() {
 			continue;
 		}
 		const Mat3 fstar = (Mat3::identity() + _D[p]) * _F[p];
-		const Mat3 tgt = (_material == 2) ? sand_target(fstar, _logJp[p], _elasticity_ratio) : _constraint_target(fstar);
+		const Mat3 tgt = (_material == 2) ? _sand_target(fstar, _logJp[p]) : _constraint_target(fstar);
 		const Mat3 diff = (tgt * _F[p].inverse() - Mat3::identity()) - _D[p];
 		_D[p] = _D[p] + diff.scaled(_elastic_relaxation);
 		if (_material == 2 && _viscosity > 0.0) {
@@ -111,7 +117,7 @@ void MpmSim::_integrate(double dt) {
 		_F[p] = (Mat3::identity() + _D[p]) * _F[p];
 		Mat3 u, v;
 		double s[3];
-		_F[p].svd(u, s, v);
+		_svd(_F[p], u, s, v);
 		for (int a = 0; a < 3; a++) {
 			s[a] = CLAMP(s[a], 0.2, 10000.0); // safety: stop force blow-ups from a degenerate F
 		}

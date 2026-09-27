@@ -72,6 +72,24 @@ func test_block_holds_together_doesnt_shatter() -> void:
     assert_lt(_extent(sim), start_extent * 2.0, "the block held together (didn't shatter/explode)")
 
 
+# The conditioning gauge for docs/bugs/mpm-svd-ill-conditioned-u.md: the smallest |σ₂|/σ₀ any SVD
+# in the sim has seen. A block squashes on landing, so it must drop below 1, and at this dt it stays
+# clear of the 1e-4 where Mat3::svd starts to drift.
+func test_min_sigma_ratio_records_the_landing_squash_and_resets() -> void:
+    var sim := _elastic_block(Vector3i(-2, 4, -2), Vector3i(2, 6, 2))
+    assert_eq(sim.get_min_sigma_ratio(), 1.0, "nothing solved yet, nothing recorded")
+
+    for _i in 200:
+        sim.step(DT)
+
+    var ratio := sim.get_min_sigma_ratio()
+    assert_lt(ratio, 0.99, "the landing deformed the block (min |σ₂|/σ₀ %s)" % ratio)
+    assert_gt(ratio, 1e-4, "a dt = %s landing stays clear of the SVD's bad region" % DT)
+
+    sim.reset_min_sigma_ratio()
+    assert_eq(sim.get_min_sigma_ratio(), 1.0, "reset forgets the history")
+
+
 func _extent(sim: MpmSim) -> float:
     var c := sim.average_position()
     var e := 0.0
