@@ -42,6 +42,18 @@
     refused, after review found one that silently swapped numbers). **Unilateral:** a part
     with no file is recorded whole by its dimensions; flatten records the normal as given (a third
     of unit normals move an ulp on renormalizing); unit strings deferred to the phase-3 evaluator.
+  - [x] G4.2 — replay runner + builder (`test/support/scenario.gd`): a headless world (store,
+    support, PartIndex, MPM, scout, player stub) whose sims tick only through `advance(n)`/`settle()`
+    at 1/60 s, in the live frame order; `tick()` seams on DetachmentScout and StructuralIntegrity.
+    Builder calls write a step, read it back from its JSON and run that, so builder and replay are
+    one path; a replay stops at the first step whose `validate()` differs (or that won't decode or
+    settle) and names its index. World steps (`player_at`, `advance`, `settle`, `mark`, `thaw`) are
+    encoded in `StepRegistry`. **Found and fixed:** the snapshot stored tracked support and the
+    player as `var_to_str` text, so a world loaded from a save was an ulp off (a replay from the pair
+    diverged in `capture()`); they are bytes now, snapshot v10. **Unilateral:** a scenario starts
+    from a save *pair* (`start_save`), not a lone blob: a blob alone drops part identity and
+    tracked support, the gaps G4.0 closed. One scenario is live at a time, because the event bus
+    is global and its events carry no world.
 - [ ] R1 — research: what the refine frontier spends its effort on + perceptual LOD survey
 - [ ] Integration review of the merged result; morning brief at the bottom of this doc
 

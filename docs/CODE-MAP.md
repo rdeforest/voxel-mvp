@@ -135,6 +135,15 @@ An action as data, for recordings and hand-written scenarios (doc 22, Format 2).
   bit. The engine's JSON reader is off by an ulp for about a quarter of doubles
   and drops `-0.0`'s sign, so numbers are read from their own text with correct
   rounding.
+- `StepRegistry` also encodes the steps that aren't actions (`WORLD_OPS`):
+  `player_at`, `advance`, `settle`, `mark`, `thaw` (the console's `mpmthaw`).
+- The replay runner and builder is `test/support/scenario.gd`: a headless world
+  whose simulations tick only when it says (`advance`/`settle`, through the
+  `tick()` seams on StructuralIntegrity, MpmStructure and DetachmentScout). A
+  builder call (`s.dig(...)`) runs the step read back from its own JSON, the path
+  `s.replay(text)` takes; replay stops at the first step whose `validate()`
+  differs from its `expect_valid`. `s.capture()` is the world as bytes for
+  comparing runs. The event bus is global, so one scenario is live at a time.
 
 ---
 

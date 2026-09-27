@@ -3,8 +3,14 @@ extends RefCounted
 
 # One save format until there are play testers: a snapshot of any other version is refused, not
 # migrated. V8 added the save id shared with the EditStore blob (SavedWorld pairs the two); V9 the
-# PartIndex, so part identity survives a reload.
-const VERSION := 9
+# PartIndex, so part identity survives a reload; V10 stores the player and the tracked voxels exactly.
+#
+# The file is var_to_str text, which doesn't round-trip doubles (about a third come back an ulp off;
+# scripts/dev/probe_var_to_str_precision.gd). So the world's state (player, tracked voxels, parts)
+# is stored as var_to_bytes inside it: a replay started from a save (test/support/scenario.gd) must
+# start from exactly the world that was saved. Tunables and window fractions stay text: the GPU reads
+# the tunables as float32 and the fractions place HUD windows; neither is world state.
+const VERSION := 10
 
 # Survives scene reloads (static var on a loaded script). Set by the `reset`
 # console command and consumed by world.gd on the next _ready. When true: the saved
@@ -44,6 +50,10 @@ static func refusal(snap: Dictionary) -> String:
         return "world snapshot is format v%d; this build reads only v%d" % [v, VERSION]
     if not (snap.get("save_id") is int):
         return "world snapshot has no save id"
+    if not (snap.get("player") is PackedByteArray and bytes_to_var(snap["player"]) is Dictionary):
+        return "world snapshot has no player"
+    if not (snap.get("voxels") is PackedByteArray and bytes_to_var(snap["voxels"]) is Array):
+        return "world snapshot has no tracked voxels"
     if not (snap.get("parts") is PackedByteArray):
         return "world snapshot has no part index"
     return PartIndex.refusal(bytes_to_var(snap["parts"]))
@@ -57,8 +67,8 @@ static func encode(world: Node, save_id: int) -> Dictionary:
     return {
         "version":  VERSION,
         "save_id":  save_id,
-        "player":   _encode_player(player),
-        "voxels":   _encode_voxels(integrity.terrain_support),
+        "player":   var_to_bytes(_encode_player(player)),
+        "voxels":   var_to_bytes(_encode_voxels(integrity.terrain_support)),
         "parts":    _encode_parts(world.part_index()),
         "tunables": _encode_tunables(),
         "windows":  _encode_windows(world),
@@ -103,9 +113,8 @@ static func _encode_player(player: CharacterBody3D) -> Dictionary:
         "build_rotation":   bs.rotation,
     }
 
-# Stored as bytes: var_to_str/str_to_var don't round-trip doubles exactly (about a third come back
-# an ulp off; scripts/dev/probe_var_to_str_precision.gd), and a part's transform is identity, not a
-# display value.
+# A part's transform is identity, not a display value, so it is stored as bytes like the rest of the
+# world's state (see VERSION).
 static func _encode_parts(index: PartIndex) -> PackedByteArray:
     return var_to_bytes(index.encode())
 
@@ -126,9 +135,9 @@ static func _encode_voxels(ts: TerrainSupport) -> Array:
 static func apply(snap: Dictionary, world: Node) -> void:
     var integrity := world.get_node("StructuralIntegrity") as StructuralIntegrity
     var player    := world.get_node("Player") as CharacterBody3D
-    _apply_voxels(integrity, snap.get("voxels", []))
+    _apply_voxels(integrity, bytes_to_var(snap["voxels"]))
     _apply_parts(world.part_index(), snap["parts"])
-    _apply_player(player, snap.get("player", {}))
+    _apply_player(player, bytes_to_var(snap["player"]))
     _apply_tunables(snap.get("tunables", {}))
     _apply_windows(world, snap.get("windows", {}))
 

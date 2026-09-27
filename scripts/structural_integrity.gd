@@ -29,14 +29,20 @@ func set_store(p_store: EditStore) -> void:
 
 
 func _physics_process(_delta: float) -> void:
+    var t0 := Time.get_ticks_usec()
+    tick()
+    Perf.report("Structural", (Time.get_ticks_usec() - t0) / 1000.0)
+
+
+# One physics frame of work. Support propagation + cell registration maintain the tracked voxel set
+# the probe read-out and suspended-mass discovery rely on, drained at
+# TerrainSupport.PROPAGATION_BUDGET per frame; the frame is that budget's unit, so a replay steps it
+# on its own clock by calling this (test/support/scenario.gd), never on wall-clock time.
+func tick() -> void:
     if not _active:
         return
-    var t0 := Time.get_ticks_usec()
-    # Support propagation + cell registration: maintains the tracked voxel set the probe read-out
-    # and suspended-mass discovery rely on, drained at TerrainSupport.PROPAGATION_BUDGET per frame.
     if not terrain_support.dirty_queue.is_empty():
         terrain_support.process_dirty_queue()
-    Perf.report("Structural", (Time.get_ticks_usec() - t0) / 1000.0)
 
 
 # --- Bus handlers ---

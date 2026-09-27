@@ -26,8 +26,8 @@ func after_each() -> void:
 
 func _write_snapshot(version: int, save_id: int, path := SNAPSHOT) -> void:
     var file := FileAccess.open(path, FileAccess.WRITE)
-    file.store_string(var_to_str({"version": version, "save_id": save_id, "player": {}, "voxels": [],
-        "parts": _no_parts()}))
+    file.store_string(var_to_str({"version": version, "save_id": save_id, "player": var_to_bytes({}),
+        "voxels": var_to_bytes([]), "parts": _no_parts()}))
 
 func _no_parts() -> PackedByteArray:
     return var_to_bytes({"next_id": 1, "records": []})
@@ -154,8 +154,8 @@ func _fresh_manager() -> EditStoreManager:
 func test_readable_pair_applies_both_halves() -> void:
     var voxel := Vector3i(4, 5, 6)
     var file  := FileAccess.open(SNAPSHOT, FileAccess.WRITE)
-    file.store_string(var_to_str({"version": WorldSnapshot.VERSION, "save_id": SAVE_ID, "player": {},
-        "voxels": [{"pos": voxel, "material": "Stone", "support": 0.75}], "parts": _no_parts()}))
+    file.store_string(var_to_str({"version": WorldSnapshot.VERSION, "save_id": SAVE_ID, "player": var_to_bytes({}),
+        "voxels": var_to_bytes([{"pos": voxel, "material": "Stone", "support": 0.75}]), "parts": _no_parts()}))
     file.close()
     assert_eq(_edited_manager().save_to(EDITSTORE, SAVE_ID), OK)
 
@@ -200,6 +200,48 @@ func test_save_writes_a_matching_pair_and_no_temporaries() -> void:
     assert_true(reread.load_into(world, reloaded), "and loads")
     assert_eq(world.get_node("Player").tool_index, 5, "the snapshot half applied")
     assert_true(reloaded.store.has_edit(_dig_center()), "the blob half loaded")
+
+
+# (Drafted by Claude, overnight 2026-09-27.) A replay started from a save must start from the world
+# that was saved. The snapshot is var_to_str text, which reads some doubles back an ulp off (a real
+# tracked support did, in test_scenario), so the player and the tracked voxels are stored as bytes.
+func test_tracked_support_and_the_player_come_back_exactly() -> void:
+    var awkward := _text_inexact_doubles(4)
+    var source  := _world_stub()
+    var voxel   := Vector3i(4, 5, 6)
+    var at      := Vector3(awkward[1], awkward[2], awkward[3])
+    assert_ne(str_to_var(var_to_str(at)), at, "precondition: text would move the player")
+    source.get_node("StructuralIntegrity").terrain_support.restore_voxel(voxel, Materials.from_name(&"Wood"), awkward[0])
+    source.get_node("Player").global_position = at
+    assert_eq(_read().save(source, _edited_manager()), "", "the pair saves")
+
+    var world := _world_stub()
+    assert_true(_read().load_into(world, _fresh_manager()), "and loads")
+    assert_eq(world.get_node("StructuralIntegrity").terrain_support.voxel_data[voxel].support, awkward[0],
+        "the support, to the last bit")
+    assert_eq(world.get_node("Player").global_position, at, "the player's position, to the last bit")
+
+# Doubles in [0, 1) that var_to_str/str_to_var don't round-trip. A literal can't be used: GDScript
+# parses it with the same reader that gets them wrong.
+func _text_inexact_doubles(count: int) -> Array[float]:
+    var out: Array[float] = []
+    var k := 1
+    while out.size() < count:
+        var x := k / 997.0
+        if str_to_var(var_to_str(x)) != x:
+            out.append(x)
+        k += 1
+    return out
+
+
+func test_snapshot_whose_voxels_are_text_is_refused() -> void:
+    var file := FileAccess.open(SNAPSHOT, FileAccess.WRITE)
+    file.store_string(var_to_str({"version": WorldSnapshot.VERSION, "save_id": SAVE_ID, "player": var_to_bytes({}),
+        "voxels": [], "parts": _no_parts()}))
+    file.close()
+    assert_eq(_edited_manager().save_to(EDITSTORE, SAVE_ID), OK)
+
+    _assert_refused_and_kept(_read(), "world snapshot has no tracked voxels")
 
 
 func test_each_save_gets_its_own_id() -> void:

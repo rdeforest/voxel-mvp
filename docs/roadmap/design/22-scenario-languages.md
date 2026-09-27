@@ -48,7 +48,8 @@ Methods, assemblies and generators share **one expression language and one regis
 and predicates.** A battlement repeat in an assembly and a "place each merlon" step call the same
 generator. This is the design's central commitment.
 
-- **Values:** number, length, angle, point, frame, material, part type, enum, bool, cell.
+- **Values:** number, length, angle, point, frame, material, part type, enum, bool, cell, count
+  (a whole number of at least zero, e.g. `advance`'s frames; added by Claude, G4.2).
 - **Units are kept as authored.** A quantity is a string, `"#{number} #{unit}"`, with the number
   kept as the decimal text the author typed (never passed through a binary float) and only the
   unit's spelling canonicalized: `"5.5 foot"`, `"9.8 meter / second ** 2"`. No normalization to a
@@ -249,6 +250,16 @@ assembly 'gatehouse',
    never on wall-clock time, and replay **stops at the first step whose result differs from the
    recording**, the lesson from Riot's determinism work. This needs tick functions on DetachmentScout
    and StructuralIntegrity.
+   *Built 2026-09-27 (Claude, G4.2): `test/support/scenario.gd`. Its builder (`s.dig(...)`,
+   `s.player_at(...)`, `s.advance(n)`, `s.settle()`, `s.mark(note)`, ...) writes each step, reads it
+   back from its JSON and runs what it read, so a built scenario and its replay take one path. An
+   action step carries `expect_valid`; the other steps are `{"op": "player_at", "position"}`,
+   `{"op": "advance", "frames"}`, `{"op": "settle"}` (frame by frame until `is_quiescent()`),
+   `{"op": "mark", "note"}` and `{"op": "thaw", "center", "radius"}`. A scenario starts from the
+   generator or from a save pair, not a lone blob, which would drop part identity and tracked
+   support. Building it found the snapshot storing support and the player as lossy text; both are
+   exact bytes now (snapshot v10). The event bus is global and events carry no world, so two live
+   scenarios would hear each other: the runner allows one at a time.*
 5. **Trim** by deleting steps; once an assertion exists, an automatic delta-debugging (ddmin) pass can
    shrink it. A new scenario test starts `pending` and must fail on the buggy code before the fix goes
    in. Recordings are never used as approval snapshots, because that would lock in the bug.

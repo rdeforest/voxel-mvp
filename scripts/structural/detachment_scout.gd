@@ -100,6 +100,12 @@ func _gather_seeds(event: TerrainSdfChangedEvent) -> void:
 
 
 func _physics_process(_delta: float) -> void:
+    tick()
+
+
+# One physics frame of work. The frame is the unit of the flood budget, so a replay steps the scout
+# on its own clock by calling this (test/support/scenario.gd), never on wall-clock time.
+func tick() -> void:
     if not _active:
         return
     if _flood != null:

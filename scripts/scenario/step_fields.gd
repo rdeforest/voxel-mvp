@@ -12,6 +12,8 @@ extends RefCounted
 #               Godot's basis.x/.y/.z, the images of the local axes (the matrix's columns)
 #   enum value  its key, lower case ("box", "subtract")
 #   material    its MaterialPalette name ("Stone")
+#   count       a whole number >= 0 (frames)
+#   flag        true / false
 
 const _CELL_MIN := -(1 << 31)
 const _CELL_MAX := (1 << 31) - 1
@@ -55,6 +57,21 @@ func number(key: String) -> float:
         _fail("%s: expected a number, got %s" % [key, v])
         return 0.0
     return float(v)
+
+# A whole number of at least zero (a frame count); JSON reads every number as a double.
+func count(key: String) -> int:
+    var v: Variant = _take(key)
+    if (typeof(v) != TYPE_FLOAT and typeof(v) != TYPE_INT) or v != floorf(v) or v < 0 or v > _CELL_MAX:
+        _fail("%s: expected a count, got %s" % [key, v])
+        return 0
+    return int(v)
+
+func flag(key: String) -> bool:
+    var v: Variant = _take(key)
+    if typeof(v) != TYPE_BOOL:
+        _fail("%s: expected true or false, got %s" % [key, v])
+        return false
+    return v
 
 func text(key: String) -> String:
     var v: Variant = _take(key)
@@ -128,10 +145,10 @@ func _vec3_of(key: String, v: Variant) -> Vector3:
     var f := _floats_of(key, v, 3)
     return Vector3(f[0], f[1], f[2]) if f.size() == 3 else Vector3.ZERO
 
-# `count` -1 accepts any length.
-func _floats_of(key: String, v: Variant, count: int) -> PackedFloat64Array:
-    if typeof(v) != TYPE_ARRAY or (count >= 0 and v.size() != count):
-        _fail("%s: expected %s numbers, got %s" % [key, "a list of" if count < 0 else str(count), v])
+# `length` -1 accepts any length.
+func _floats_of(key: String, v: Variant, length: int) -> PackedFloat64Array:
+    if typeof(v) != TYPE_ARRAY or (length >= 0 and v.size() != length):
+        _fail("%s: expected %s numbers, got %s" % [key, "a list of" if length < 0 else str(length), v])
         return PackedFloat64Array()
     var out := PackedFloat64Array()
     for x: Variant in v:
