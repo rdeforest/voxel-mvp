@@ -1,7 +1,7 @@
 # Scenario Languages: Captures and Methods
 
-*Drafted by Claude, 2026-09-26, from design chats with Robert. **Draft for review:** nothing here is
-built. Prior art and sources are in
+*Drafted by Claude, 2026-09-26, from design chats with Robert. **Accepted 2026-09-26**; the open
+questions at the end remain. Phase 1 is scheduled for the 2026-09-27 overnight session. Prior art and sources are in
 [`../reference/08-scenario-languages-research/`](../reference/08-scenario-languages-research/00_INDEX.md).
 The manifesto wins if this disagrees with it.*
 

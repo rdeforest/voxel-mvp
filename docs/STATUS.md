@@ -41,12 +41,14 @@ settled real disagreements. Reviewers see only the diff; any question they raise
 researcher.
 
 
-## The active thread: answers, then FEAT089
+## The active thread: test instruments and scenario languages, then FEAT089
 
-1. **Answer the morning brief's four "needs you" questions**: single-voxel edits, whether
-   terraforming emits cell events, how player safety judges generator ground (it misses sub-cell
-   burials today), and Dig's safety guard.
-2. **FEAT089, parts look like parts**, which blocks the rest of 5.5g. Volumetric worldgen tier 1
+1. **Overnight 2026-09-27** ([plan](overnight-2026-09-27.md)): doc 22 phase 1 (instrument layer,
+   step language, recorder, replay runner), plus the fixes decided in the
+   [2026-09-26 questions](overnight-2026-09-26-questions.md) and research on perceptual LOD.
+2. **Design session to come:** "compelling, not accurate" rendering. Refinement should follow the
+   eye (edits, sharp features, foreground) rather than uniform screen error.
+3. **FEAT089, parts look like parts**, which blocks the rest of 5.5g. Volumetric worldgen tier 1
    (`planned/18`) is independent and can run alongside.
 
 *Section drafted by Claude.*
