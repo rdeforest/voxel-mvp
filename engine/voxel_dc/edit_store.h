@@ -34,7 +34,9 @@ public:
 	void setup(Vector3 origin, double size, double base, double amp, double period, int octaves, int seed);
 
 	// Copy-on-write brush stamps: materialise the generator under the brush, fold the brush
-	// in (op 0 = UNION add, 1 = SUBTRACT carve), store the result down to `min_leaf`.
+	// in (op 0 = UNION add, 1 = SUBTRACT carve), store the result down to `min_leaf`. They paint as
+	// FillAction / DigAction do (SdfLattice.materials with air_keeps): a leaf takes `material` only
+	// where the UNION made a corner solid; every other leaf keeps what it was made of.
 	void stamp_sphere(Vector3 center, double radius, int op, int material, double min_leaf);
 	void stamp_box(Vector3 center, Vector3 size, int op, int material, double min_leaf);
 

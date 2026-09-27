@@ -6,7 +6,7 @@
 ## Progress
 
 - [x] E1 — `Mat3` zero-init + MPM conditioning log (Q9)
-- [ ] E2 — stamp paint rule matches `materials()` (Q6)
+- [x] E2 — stamp paint rule matches `materials()` (Q6)
 - [ ] E3 — frontier lazy invalidation on edit (Q10)
 - [ ] E4 — RAM cell arena with a budget cap; mmap removed (Q4)
 - [ ] E5 — C++ solver for the exact thaw carve (Q2, Q3) (stretch)
