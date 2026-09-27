@@ -14,7 +14,7 @@ visible:**
   first GPU eyes on the path.
 - Tests: `test/test_dc_world_octree.gd` (9 cases). GUT green throughout.
 
-**What this doc did NOT finish — moved to [doc 17](../started/17-world-octree-to-production.md):** the surface-sparse
+**What this doc did NOT finish — moved to [doc 17](17-world-octree-to-production.md):** the surface-sparse
 prune over direct sampling (the O(volume) wall → coverage is a small bubble), the graded data floor for
 horizon coverage, and **making it the live render / retiring the clipmap** (this doc's Stage C). Those are
 the productionization phase, split out so this doc closes on its achieved deliverable: the substrate.

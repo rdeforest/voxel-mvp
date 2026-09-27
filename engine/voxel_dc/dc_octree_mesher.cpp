@@ -499,6 +499,10 @@ int DCOctreeMesher::get_octree_cell_count() const {
 	return _persist != nullptr ? int(_persist->oct.cells.size()) : 0;
 }
 
+int DCOctreeMesher::get_octree_live_cell_count() const {
+	return _persist != nullptr ? int(_persist->oct.cells.size() - _persist->oct.free_list.size()) : 0;
+}
+
 int64_t DCOctreeMesher::get_cell_arena_bytes() const {
 	if (_persist == nullptr) {
 		return 0;
@@ -647,6 +651,7 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_last_refine_queue_size"), &DCOctreeMesher::get_last_refine_queue_size);
 	ClassDB::bind_method(D_METHOD("get_last_refine_retired_count"), &DCOctreeMesher::get_last_refine_retired_count);
 	ClassDB::bind_method(D_METHOD("get_octree_cell_count"),      &DCOctreeMesher::get_octree_cell_count);
+	ClassDB::bind_method(D_METHOD("get_octree_live_cell_count"), &DCOctreeMesher::get_octree_live_cell_count);
 	ClassDB::bind_method(D_METHOD("get_cell_arena_bytes"),      &DCOctreeMesher::get_cell_arena_bytes);
 	ClassDB::bind_static_method("DCOctreeMesher", D_METHOD("get_cell_capacity"), &DCOctreeMesher::get_cell_capacity);
 	ClassDB::bind_method(D_METHOD("get_cell_limit_hit"),        &DCOctreeMesher::get_cell_limit_hit);

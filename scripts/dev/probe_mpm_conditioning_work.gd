@@ -13,18 +13,18 @@ static func run() -> void:
         var mgr := _terrain()
         var top := _surface(0.0, 0.0)
         _thaw("sphere r=%s" % radius, mgr, func(ms: MpmStructure) -> int:
-            return ms.thaw_sphere(Vector3(0.5, top - 3.0, 0.5), radius))
+            return ms.thaw_sphere(Vector3(0.5, top - 3.0, 0.5), radius, EditSource.Kind.INSTRUMENT))
 
     var slope := _terrain()
     var slope_top := _surface(15.0, -16.0)
     _thaw("sphere r=3 at (15,-16)", slope, func(ms: MpmStructure) -> int:
-        return ms.thaw_sphere(Vector3(15.5, slope_top - 2.0, -15.5), 3.0))
+        return ms.thaw_sphere(Vector3(15.5, slope_top - 2.0, -15.5), 3.0, EditSource.Kind.INSTRUMENT))
 
     for spec in [[10, 30], [4, 30], [4, 80]]:
         var block := _terrain()
         var cells := _floating_block(block.store, spec[0], spec[1])
         _thaw("floating box stamp %d, %d m up" % spec, block, func(ms: MpmStructure) -> int:
-            return ms.thaw_cells(cells))
+            return ms.thaw_cells(cells, EditSource.Kind.SCOUT))
 
     _stepped("elastic drop dt=0.02 (8x4x8 cells)", _elastic_drop(Vector3i(4, 2, 4)), 0.02, 300)
 

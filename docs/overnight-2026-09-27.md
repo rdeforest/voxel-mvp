@@ -91,7 +91,12 @@
   drain refines already-under-eps cells to the floor (0.47 M → 3.46 M cells for +13% triangles).
   Doc `reference/09`.
 - [x] Integration review of the merged result (7 real findings, all small; fixed in F4)
-- [ ] F4 — integration-review fixes + dev-harness parse check (follow-up, after the merge)
+- [x] F4 — integration-review fixes + dev-harness parse check (follow-up, after the merge):
+  `test_dev_harnesses_parse` compiles every `scripts/dev/*.gd` (failed on the stale MPM probe, now
+  fixed); `dcmaxcells` help/status built from the capacity, reports live cells vs slots, `0`
+  restores the default (C++ `get_octree_live_cell_count`); DcWorldPreview `cell_limit()` /
+  `cell_stats()` shared by the status line, recorder marks and `/stats`, which skips mesher fields
+  mid-job; dangling bug links, extras-11 pointer, GLOSSARY
 - [ ] F1 — wire the exact carve (`predict_carve`) into the MPM thaw (follow-up)
 - [ ] F2 — `EditStore.leaf_info` binding; probe shows the owning leaf (completes G4.4) (follow-up)
 - [ ] F3 — the MPM freeze reports its measured flips (follow-up)

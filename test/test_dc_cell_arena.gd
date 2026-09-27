@@ -229,3 +229,24 @@ func test_lowered_budget_reopens_after_eviction():
 
     assert_gte(m.get_octree_cell_count(), budget, "the slot count still exceeds the budget")
     assert_false(m.is_at_cell_limit(), "the eviction freed room, so refinement reopens")
+
+
+# The limit counts live cells: evicted slots wait on the free list and are room, not use. So a
+# status reporting slots overstates how close the tree is to the limit once anything was evicted.
+func test_live_count_is_what_the_limit_counts():
+    var s := _store()
+    var origin := _region_origin(s)
+    var m := _build(s, origin, WIN_FULL, FINE, 0)
+
+    assert_eq(m.get_octree_live_cell_count(), m.get_octree_cell_count(), "a fresh build has no freed slots")
+
+    m.grow_world(CAM, PROJ, FINE, origin, origin + WIN_SLIVER)
+    var live := m.get_octree_live_cell_count()
+
+    assert_lt(live, m.get_octree_cell_count(), "the evicted cells stay slots but are not live")
+
+    m.set_cell_budget(live + 8)
+    assert_false(m.is_at_cell_limit(), "a budget with room for one subdivision past the live cells is open")
+
+    m.set_cell_budget(live + 7)
+    assert_true(m.is_at_cell_limit(), "one cell less and it is closed")

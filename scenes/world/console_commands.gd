@@ -63,7 +63,7 @@ func _table() -> Array:
         [dcworld,         "dcworld",   "doc 17: the WORLD-FIXED octree render. `dcworld on|off` toggles; `dcworld <radius_m>` sets coverage + turns on (default 128); no args prints live eps_px + job ms."],
         [dcrefine,        "dcrefine",  "doc 20 C/P: wall-clock cap (ms) on refine work per grow while the world blooms in — do as much as fits in X ms, worst-on-screen first. Higher = faster bloom, longer per-job latency. Usage: dcrefine [ms] (default 8)"],
         [dcretain,        "dcretain",  "doc 20 M: metres kept resident BEYOND the visible window — a turn or backtrack within it re-samples nothing (no re-bloom), and the edge ahead is pre-baked. Higher = more retention + cost. Usage: dcretain [m] (default 128)"],
-        [dcmaxcells,      "dcmaxcells", "Memory budget: stop refining past this many octree cells (~350 B each). At LOG2=4 max-detail the arena would otherwise exhaust RAM. Usage: dcmaxcells [millions] (default 80)"],
+        [dcmaxcells,      "dcmaxcells", "Cell budget: refinement holds once this many octree cells are live. It can only lower the cap the cell RAM budget sets, %.1fM cells, which is also the default. Usage: dcmaxcells [millions] (0 = default)" % (DCOctreeMesher.get_cell_capacity() / 1.0e6)],
         [dcframebudget,   "dcframebudget", "Per-frame render budget (ms) the controller refines toward — refines while render cost < half this, backs off above it. Higher = more detail, lower fps. Usage: dcframebudget [ms] (default 16)"],
         [dcthreads,       "dcthreads", "Parallel accel-bake workers: `dcthreads <n>` sets the thread count; no args prints the phase timing (accel + build + collapse ms). Usage: dcthreads [n]"],
         [dcverify,        "dcverify",  "Debug: toggle the post-emit self-check for dangling-slot triangles (the 'unrelated vertices' bug). When on, a Toast fires the moment an emit produces a bad triangle, naming the op + location. Costs an O(tris) scan per emit. Usage: dcverify [on|off]"],
@@ -261,11 +261,24 @@ func dcrefine(ms := 0.0) -> void:
     LimboConsole.info("dcrefine: %.1f ms refine budget per grow" % (world_preview.refine_us / 1000.0))
 
 
-func dcmaxcells(millions := 0.0) -> void:
-    if millions > 0.0:
-        world_preview.max_cells = int(millions * 1_000_000.0)
-    LimboConsole.info("dcmaxcells: %.0fM cell budget (now %.1fM live) — refinement holds past this to spare RAM" % [
-        world_preview.max_cells / 1_000_000.0, world_preview._mesher.get_octree_cell_count() / 1_000_000.0])
+func dcmaxcells(millions := -1.0) -> void:
+    if millions >= 0.0:
+        world_preview.set_max_cells(int(millions * 1_000_000.0))
+
+    var report := dcmaxcells_report(world_preview.max_cells, world_preview.cell_stats())
+
+    if world_preview.is_job_running():
+        report += " (counts are from before the running job; the new limit applies after it)"
+
+    LimboConsole.info(report)
+
+
+static func dcmaxcells_report(max_cells: int, cells: Dictionary) -> String:
+    var clamped := " (%.1fM asked; the RAM budget caps it)" % (max_cells / 1.0e6) if max_cells > cells.capacity else ""
+    var state   := "at the limit: refinement holds" if cells.at_limit else "refining under the limit"
+
+    return "dcmaxcells: limit %.1fM cells%s; %.1fM live in %.1fM slots, %s" % [
+        cells.limit / 1.0e6, clamped, cells.live / 1.0e6, cells.slots / 1.0e6, state]
 
 
 func dcretain(m := -1.0) -> void:

@@ -14,7 +14,7 @@ terrain render**, smooth + sharp on one mesher, crack-free across LOD.
   stitches any LOD jump crack-free via point-location. The `dc_seam` loop-extraction/zipper it produced is
   kept as reusable record.
 - The world-fixed octree successor (the cleaner substrate that dissolves the LOD-size-step residual) is
-  [doc 16](16-persistent-octree-substrate.md) → its productionization is [doc 17](../started/17-world-octree-to-production.md).
+  [doc 16](16-persistent-octree-substrate.md) → its productionization is [doc 17](17-world-octree-to-production.md).
 
 **Deferred (conditional, logged):** Bite E's *storage* half — godot_voxel stores scalar SDF only, so crisp
 creases need point+normal at crossings stored/recomputed; the C++ mesher uses field-gradient normals (no

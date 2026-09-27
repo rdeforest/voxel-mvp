@@ -53,9 +53,12 @@ Add terms as they come up.*
 - **Clipmap.** The retired camera-centred render. `mesh_clipmap` survives as a meshing harness and
   for collision.
 - **Arena (cell arena, `CellArena`).** The storage for the octree's cells: fixed-size RAM blocks that
-  grow without copying, capped by a RAM budget (`DC_CELL_RAM_BUDGET`, 16 GiB ≈ 68 M cells). At the cap,
-  refinement stops at the current detail with a one-time warning. The earlier disk-backed (mmap)
-  arena was removed on 2026-09-27 (Q4). → `engine/voxel_dc/dc_cell_arena.h`
+  grow without copying or moving an element. Two run in lockstep, the hot `Cell` and the cold `Qef`,
+  and their capacity comes from a RAM budget (`DC_CELL_RAM_BUDGET`, 16 GiB, about 68 M cells).
+  **Cell limit:** `min(max_cells, capacity)` (`dcmaxcells` can only lower it), counted in live cells:
+  slots freed by eviction go on a free list and are reused. At the limit, refinement stops at the
+  current detail with a one-time warning. The earlier disk-backed (mmap) arena was removed on
+  2026-09-27 (Q4). → `engine/voxel_dc/dc_cell_arena.h`, `dc_octree.h`
 - **Collision (`DCCollisionManager`).** A collision mesh built just in time around the player,
   separate from the render.
 
@@ -69,6 +72,12 @@ Add terms as they come up.*
   `predict_*` methods), with the old GDScript kept as a bit-exact test oracle.
 - **Flips (`CellFlips`).** The cells whose centre crosses between solid and air across a write,
   measured in C++. They drive events, ghosts and safety checks.
+- **Matter-changed event (`TerrainSdfChangedEvent`).** The one event every write to the store emits,
+  once per write: its source, the rewritten box and the flips. The per-cell `voxel_added` /
+  `voxel_removed` events were folded into it on 2026-09-27. → `roadmap/design/04-event-bus.md`
+- **Edit source (`EditSource.Kind`).** Who made an edit: `PLAYER`, `INSTRUMENT` (console and debug
+  tools), `MPM` (freeze), `SCOUT` (a detached thaw) or `REPLAY`. Every matter-changed event and
+  every thaw carries one, so subscribers react to a fact instead of guessing from world state.
 - **CSG.** The add and subtract stamps of box, cylinder and sphere shapes.
 - **Imprint (`VoxelImprint`).** Writing a part's or CSG shape's field and material into the store.
 - **Part / `PartIndex`.** A placed construction piece (beam, log, plank); PartIndex is the sidecar that
@@ -115,7 +124,13 @@ Add terms as they come up.*
   **directives** for play ("make this space empty"). → `roadmap/design/22-scenario-languages.md`
 - **Instrument layer.** The test tools: an extended probe, exact console writes, named saves.
 - **Field capture.** A raster `.npz` of SDF plus material over a region; bit-exact test fixture.
-  Not "snapshot".
+  Not "snapshot". Designed, not built yet.
+- **Recording (`ScenarioRecorder`).** The live game recorded as a scenario: the console's `rec`
+  writes `steps.json` (plus the starting save pair when it began from a saved world) under
+  `user://scenarios/<name>/`, and the headless replay runner (`test/support/scenario.gd`) plays it
+  back. A **mark** (`mark` command) saves the view beside the steps: camera, `dcworld` settings,
+  the aimed cell's probe report and a screenshot. The mark step's `capture` field names that file;
+  it is not a field capture.
 - **WorldSnapshot.** The F5 save of player, parts and tunables (the snapshot half of a save).
 - **Method / step.** An HTN-style description of how to do something: tasks decompose into steps
   (resolved actions). Recordings, test scenarios and assembly processes are all methods.

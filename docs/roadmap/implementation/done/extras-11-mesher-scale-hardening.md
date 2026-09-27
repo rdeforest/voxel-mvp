@@ -17,6 +17,10 @@ under motion (that's c4, still pending — see
   dirs in order (skipping tmpfs via `statfs`), flags any fallback, and the game raises a modal
   `AcceptDialog`. `is_arena_disk_backed()` exposes the flag. (`dc_mmap_arena.h`,
   `dc_octree_mesher.*`, `dc_world_preview.gd`.)
+  *Superseded 2026-09-27 (Q4): the mmap arena and this pop-up are gone; cells live in the RAM
+  `CellArena` (`dc_cell_arena.h`) under a budget cap. See
+  [doc 20 §M](../../design/20-continuous-incremental-mesh.md#m--retain-everything-spill-to-a-memory-mapped-file).
+  (Note drafted by Claude.)*
 
 - **Build cell-budget (the SIGILL fix).** `mesh_world` grew the arena level-by-level with **no
   budget** — only grow-refinement was gated by `max_cells`. A re-root into dense LOG2=4 terrain

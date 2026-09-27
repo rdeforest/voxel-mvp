@@ -214,9 +214,11 @@ func _capture() -> Dictionary:
 
 
 # What `dcworld`, `dcrefine`, `dcretain`, `dcmaxcells`, `dcframebudget` and `dcthreads` read, plus
-# the controller's operating point: what decides how the terrain was drawn at the mark.
+# the controller's operating point and the cell limit: what decides how the terrain was drawn at the mark.
 func _dcworld_settings() -> Dictionary:
-    var wp := console.world_preview
+    var wp    := console.world_preview
+    var cells := wp.cell_stats()
+
     return {
         "enabled":           wp.is_enabled(),
         "radius_m":          wp.win_radius_m,
@@ -224,9 +226,16 @@ func _dcworld_settings() -> Dictionary:
         "eps_px":            wp._eps_px,
         "frame_budget_ms":   wp.frame_budget,
         "refine_us":         wp.refine_us,
+        "refine_pending":    wp._refine_pending,
         "retain_m":          wp.retain_margin_m,
         "max_cells":         wp.max_cells,
-        "cells":             wp._mesher.get_octree_cell_count(),
+        "cell_capacity":     cells.capacity,
+        "cell_limit":        cells.limit,
+        "cells":             cells.slots,
+        "live_cells":        cells.live,
+        "cell_limit_hit":    cells.limit_hit,
+        "at_cell_limit":     cells.at_limit,
+        "mesher_busy":       wp.is_job_running(),
         "threads":           wp._mesher.get_thread_count(),
         "incremental_edits": wp.incremental_edits,
     }
