@@ -34,3 +34,7 @@ exists*, not what it contains.
   (`String::to_float`, used by GDScript literals, `JSON.parse` and `str_to_var`) is not correctly
   rounded and reads tiny values as 0, the upstream state (issue #123700), and our options. The
   evidence behind `bugs/godot-float-parse-inexact.md`.
+- [`11-voxel-farm-thin-features.md`](11-voxel-farm-thin-features.md) — how Voxel Farm (Miguel
+  Cepero) handled features near two voxel sizes: he stated the Nyquist limit outright and worked
+  around it (finer voxels, content aligned to the grid, textures at distance) rather than solving it.
+  Background for reference note 09 and the "compelling, not accurate" session.
