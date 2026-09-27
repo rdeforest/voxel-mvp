@@ -1,7 +1,7 @@
 extends SceneTree
 
 # How far from the player's feet a player-safety refusal on make_dig's brush would reach, on the
-# game's field (docs/bugs/closed/dig-action-no-validate-no-safety.md). The work loads after the first
+# game's field (https://github.com/rdeforest/voxel-mvp/issues/24). The work loads after the first
 # frame so the actions can see the VoxelEventBusSingleton autoload.
 #
 #   godot --path . --headless -s res://scripts/dev/probe_dig_safety_reach.gd

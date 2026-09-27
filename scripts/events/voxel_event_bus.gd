@@ -22,7 +22,7 @@ extends Node
 # lambda or a `.bind()`ed callable. A subscription keeps only the object and
 # the method name, so a lambda's method can't be found and bound arguments are
 # lost: either fails at its first delivery
-# (docs/bugs/event-bus-lambda-and-bound-callables.md).
+# (https://github.com/rdeforest/voxel-mvp/issues/12).
 #
 # Re-entrancy: handlers may emit, subscribe and unsubscribe mid-dispatch, on
 # any channel. Semantics in docs/roadmap/design/04-event-bus.md.

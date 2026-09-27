@@ -2,7 +2,7 @@ extends SceneTree
 
 # Throwaway: what the event bus does with callables that aren't a plain bound method (a lambda, a
 # .bind()'d method), for docs/roadmap/design/04-event-bus.md "Lifetime & cleanup".
-# Findings in docs/bugs/event-bus-lambda-and-bound-callables.md. (Drafted by Claude, overnight 2026-09-27.)
+# Findings in https://github.com/rdeforest/voxel-mvp/issues/12. (Drafted by Claude, overnight 2026-09-27.)
 
 const BusScript := preload("res://scripts/events/voxel_event_bus.gd")
 

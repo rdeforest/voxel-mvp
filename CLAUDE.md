@@ -20,7 +20,7 @@ at, the doc wins.
 
 Also useful: `docs/roadmap.md` (version strategy and the immovable
 architectural commitments), `docs/roadmap/design/architecture.md` (mechanism
-rationale), `docs/bugs/00_INDEX.md` (open defects),
+rationale), the GitHub issues (`gh issue list --label bug`; open defects),
 `docs/roadmap/vision/06-what-the-game-is.md` (what the game is for a player).
 
 ## The one stance to internalize

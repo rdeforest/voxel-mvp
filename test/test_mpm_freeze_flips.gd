@@ -53,7 +53,7 @@ func _particles(ms: MpmStructure, lo: Vector3i, size: Vector3i, material: int) -
 
 # A cell solid only through sub-metre leaves: a small ball around its sample point, every 1 m
 # lattice point around it air. A freeze whose region covers it re-reads the field at 1 m and
-# rewrites it there, so the cell goes air (docs/bugs/edit-store-1m-write-flattens-finer-leaves.md).
+# rewrites it there, so the cell goes air (https://github.com/rdeforest/voxel-mvp/issues/10).
 func _sliver(cell: Vector3i) -> void:
     _store.store.stamp_sphere(VoxelUtils.sample_point(cell), 0.35, VoxelConstants.STORE_OP_UNION,
         MaterialPalette.index_of(&"Wood"), 0.25)
@@ -212,7 +212,7 @@ func test_terrain_support_tracks_the_frozen_cells_as_what_they_are() -> void:
 
 # A chunked freeze announces its flips frames after its write. A part placed in between on a cell
 # the freeze emptied is released when that chunk's air flip arrives
-# (docs/bugs/mpm-chunked-freeze-flips-arrive-late.md). Pending while it reproduces; it then asserts.
+# (https://github.com/rdeforest/voxel-mvp/issues/14). Pending while it reproduces; it then asserts.
 func test_a_part_placed_before_a_chunked_freeze_is_announced_keeps_its_cell() -> void:
     var index  := PartIndex.new()
     var ms     := _mpm()
@@ -234,7 +234,7 @@ func test_a_part_placed_before_a_chunked_freeze_is_announced_keeps_its_cell() ->
     if index.count() == 0:
         var late := _mpm_events().filter(func(e: TerrainSdfChangedEvent) -> bool: return e.flips.air.has(sliver))
         assert_eq(late.size(), 1, "the release came with the freeze chunk carrying the cell's air flip")
-        pending("docs/bugs/mpm-chunked-freeze-flips-arrive-late.md: the late air flip released a live part cell")
+        pending("https://github.com/rdeforest/voxel-mvp/issues/14: the late air flip released a live part cell")
         return
     assert_true(TerrainProbe.is_solid(_store.store, sliver), "the cell is solid")
     assert_eq(index.count(), 1, "and still the part's")

@@ -3,7 +3,7 @@ extends RefCounted
 # Validates single_voxel_mesh_diff.gd's +y ray-parity occupancy against the field's own sign, on the
 # same targets probe_single_voxel.gd measures (pristine terrain and dug hollows), before and after
 # the edit, for both render modes. Parity is the basis of every volume figure in the
-# Characterization section of docs/bugs/single-voxel-edits-unexpected.md.
+# Characterization section of https://github.com/rdeforest/voxel-mvp/issues/22.
 # DC places its surface by QEF, not at the field's zero, so mismatch is expected within a small
 # band of the surface; FAR counts only points at least that far from zero in field units.
 

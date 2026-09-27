@@ -15,7 +15,7 @@ extends RefCounted
 # `changed` means some rewritten cell's sample moved, by any amount. It is not "the corners
 # differ": re-representing a coarse or inherited leaf moves samples by ~1e-8, so `changed` can be
 # true for a lattice whose SdfLattice.writes is false
-# (docs/bugs/closed/edit-store-noop-write-reports-changed.md).
+# (https://github.com/rdeforest/voxel-mvp/issues/26).
 
 var solid:         Array[Vector3i] = []                  # was air, now solid
 var air:           Array[Vector3i] = []                  # was solid, now air

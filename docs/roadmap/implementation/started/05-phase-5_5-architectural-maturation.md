@@ -98,14 +98,14 @@ in a collapse read as a programmer-art prototype; mesh-extraction-
 along-a-computed-failure-surface reads as a real world. This is
 upgrade-as-gameplay, not upgrade-as-polish.
 
-- **FEAT025**: Mesh-extraction-along-computed-failure-surface — when
+- **FEAT025** ([#51](https://github.com/rdeforest/voxel-mvp/issues/51)): Mesh-extraction-along-computed-failure-surface — when
   structural integrity decides a region has failed, extract that region
   from the voxel grid as a rigid-body mesh along a *computed failure
   surface*, not voxel-aligned cubes. Re-integrate into voxels when it
   comes to rest, or stay as a mesh prop if it doesn't. This is what
   unlocks sub-meter fracture precision without sub-meter voxels —
   Teardown's trick.
-- **FEAT026**: Localised FEM-style stress tensor — for determining
+- **FEAT026** ([#52](https://github.com/rdeforest/voxel-mvp/issues/52)): Localised FEM-style stress tensor — for determining
   fracture direction (in the affected region only, not globally). See
   the FEM note in
   [`../../design/07-known-hard-problems.md`](../../design/07-known-hard-problems.md).
@@ -174,16 +174,16 @@ arise). Kept as the acceptance criteria MPM's material model must hit.
 Destruction has to *feel* right for the fun question to land — the criteria below
 are how we judge MPM's material behaviour:
 
-- **FEAT027**: Material-specific break locations:
+- **FEAT027** ([#53](https://github.com/rdeforest/voxel-mvp/issues/53)): Material-specific break locations:
   - Stone breaks where strain is greatest (uses FEAT026's stress
     tensor).
   - Dirt breaks where insufficiently supported (current threshold-based
     behaviour; keep).
   - Wood breaks at the bend / attachment point (cantilever stress).
-- **FEAT028**: Falling damage — impacts crumble dirt further, splinter
+- **FEAT028** ([#54](https://github.com/rdeforest/voxel-mvp/issues/54)): Falling damage — impacts crumble dirt further, splinter
   wood, chip stone. Pairs with FEAT025 (the broken pieces are mesh
   extractions, not cubes).
-- **FEAT029**: Hinge-at-boundary collapse — material with one strong
+- **FEAT029** ([#55](https://github.com/rdeforest/voxel-mvp/issues/55)): Hinge-at-boundary collapse — material with one strong
   attachment slumps rather than flies off. Stops the "spinning beam"
   gyroscope class of physics weirdness.
 
@@ -200,28 +200,28 @@ than one part at a time.
 work below isn't worth doing while a placed part reads as a raw voxel box.
 FEAT089 comes before all of it.
 
-- **FEAT089**: Parts look like parts — make a placed wooden beam read as a
+- **FEAT089** ([#56](https://github.com/rdeforest/voxel-mvp/issues/56)): Parts look like parts — make a placed wooden beam read as a
   *log* (and each part type look like its material/shape), not a voxel-aligned
   box. Parts are imprinted voxels (parts-as-voxels), so this is a
   render/material concern on the part's cells, not a separate part-mesh
   system. Prerequisite for the rest of 5.5g.
-- **FEAT030**: Welding / joining — intersecting parts (cross beams)
+- **FEAT030** ([#57](https://github.com/rdeforest/voxel-mvp/issues/57)): Welding / joining — intersecting parts (cross beams)
   mutually support. Closes the known "vertical beam on cantilever
   isn't supported" limit. **Note (MPM):** parts are imprinted voxels and
   MPM simulates them as continuum, so mutual support across an
   intersection is largely *emergent* (contact + shared material) rather
   than a joint model — re-scope this to whatever MPM doesn't give for
   free (e.g. a deliberate rigid weld vs. loose contact) once MPM lands.
-- **FEAT031**: Snap-modifier hotkeys — opt-in grid alignment on top of
+- **FEAT031** ([#58](https://github.com/rdeforest/voxel-mvp/issues/58)): Snap-modifier hotkeys — opt-in grid alignment on top of
   the free placement we already have.
-- **FEAT032**: Rotation snap — finer-than-90° rotations with a snap
+- **FEAT032** ([#59](https://github.com/rdeforest/voxel-mvp/issues/59)): Rotation snap — finer-than-90° rotations with a snap
   modifier.
-- **FEAT033**: In-game parametric part resize (KSP-style) — drag
+- **FEAT033** ([#60](https://github.com/rdeforest/voxel-mvp/issues/60)): In-game parametric part resize (KSP-style) — drag
   handles or chord keys to change a part's dimensions.
-- **FEAT034**: Pick-and-stamp plane orientation — click an example
+- **FEAT034** ([#61](https://github.com/rdeforest/voxel-mvp/issues/61)): Pick-and-stamp plane orientation — click an example
   wall to capture its plane; reuse for vertical flatten elsewhere;
   supports "make a ramp, keep that plane for the next clicks."
-- **FEAT035**: Sub-assemblies + planning mode (DF-queue) — define a
+- **FEAT035** ([#62](https://github.com/rdeforest/voxel-mvp/issues/62)): Sub-assemblies + planning mode (DF-queue) — define a
   multi-part assembly, then place or queue many copies. (Initial scope:
   hotbar + queue. Full DF-style planning overlay deferred to v0.9.)
 
@@ -229,40 +229,40 @@ FEAT089 comes before all of it.
 
 **Status: pending (v0.1).**
 
-- **FEAT036**: Slow-step movement / stop-at-edge toggle — don't run off
+- **FEAT036** ([#63](https://github.com/rdeforest/voxel-mvp/issues/63)): Slow-step movement / stop-at-edge toggle — don't run off
   your construction.
-- **FEAT037**: First-person hands — visible at edit time; per-tool
+- **FEAT037** ([#64](https://github.com/rdeforest/voxel-mvp/issues/64)): First-person hands — visible at edit time; per-tool
   animation. (Avatar art; pairs with the HUD-icon pass.)
-- **FEAT038**: HUD icons — replace text labels for tools/activities/
+- **FEAT038** ([#65](https://github.com/rdeforest/voxel-mvp/issues/65)): HUD icons — replace text labels for tools/activities/
   parts/materials. (Art-dependent; see `../../vision/art-wishlist.md`.)
-- **FEAT039**: Crosshair — mode-aware reticle. (Art.)
-- **FEAT040**: Imperial units display option — user preference.
-- **FEAT041**: Stress-overlay on SDF surface — color the terrain surface
+- **FEAT039** ([#66](https://github.com/rdeforest/voxel-mvp/issues/66)): Crosshair — mode-aware reticle. (Art.)
+- **FEAT040** ([#67](https://github.com/rdeforest/voxel-mvp/issues/67)): Imperial units display option — user preference.
+- **FEAT041** ([#68](https://github.com/rdeforest/voxel-mvp/issues/68)): Stress-overlay on SDF surface — color the terrain surface
   via the terrain shader instead of floating wireframes. (Stale detail:
   "Transvoxel" → it's our DC render now; the stress source is MPM/PBD,
   not the old strain layer.)
-- **FEAT042**: Per-material strain duration / nature-of-change reset
+- **FEAT042** ([#69](https://github.com/rdeforest/voxel-mvp/issues/69)): Per-material strain duration / nature-of-change reset
   scaling — tuning pass. (MPM material params, post-MPM.)
-- **FEAT043**: Budget-consumption telemetry — gather frame-time-by-
+- **FEAT043** ([#70](https://github.com/rdeforest/voxel-mvp/issues/70)): Budget-consumption telemetry — gather frame-time-by-
   system so the perf budget table becomes verifiable. **Partly landed:**
   the `Perf` overlay reports per-subsystem ms + true frame-gen time
   (CPU/GPU, cap-independent); what remains is logging/aggregation.
-- **FEAT044**: Perf baseline instrumentation — `Time.get_ticks_usec`
+- **FEAT044** ([#71](https://github.com/rdeforest/voxel-mvp/issues/71)): Perf baseline instrumentation — `Time.get_ticks_usec`
   deltas on action.execute. Cheap regression detector. (Perf overlay
   covers the live view; this is the saved-baseline half.)
-- **FEAT045**: Replay harness + collapse-detector state machine —
+- **FEAT045** ([#72](https://github.com/rdeforest/voxel-mvp/issues/72)): Replay harness + collapse-detector state machine —
   deterministic replay against a saved snapshot; natural home for
   catching collapse-detector edge cases.
 
 Bugs to close in v0.1:
 
-- **FEAT046**: Vertical-on-horizontal beam support — coordinate-snap
+- **FEAT046** ([#73](https://github.com/rdeforest/voxel-mvp/issues/73)): Vertical-on-horizontal beam support — coordinate-snap
   edge in `_direct_part_supporter`. **DONE.** Mooted not by MPM but by
   **parts-as-voxels**: a placed part is now imprinted voxels, not a tracked
   mesh with its own support spine, so `_direct_part_supporter` and the
   coordinate-snap edge are gone. Support across an intersection is ordinary
   voxel adjacency.
-- **FEAT047**: Spinning-beam physics quirk — the gyroscope behaviour was
+- **FEAT047** ([#74](https://github.com/rdeforest/voxel-mvp/issues/74)): Spinning-beam physics quirk — the gyroscope behaviour was
   a freed-rigid-body artifact. **DONE.** Mooted by **parts-as-voxels**: a
   part is no longer a freed `RigidBody3D` that can spin off as a gyroscope;
   it's voxels in the field. The freed-rigid-body class can't arise.

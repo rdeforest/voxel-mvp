@@ -33,7 +33,7 @@ exists*, not what it contains.
 - [`10-godot-float-parsing.md`](10-godot-float-parsing.md) — why Godot's number reader
   (`String::to_float`, used by GDScript literals, `JSON.parse` and `str_to_var`) is not correctly
   rounded and reads tiny values as 0, the upstream state (issue #123700), and our options. The
-  evidence behind `bugs/godot-float-parse-inexact.md`.
+  evidence behind [#13](https://github.com/rdeforest/voxel-mvp/issues/13) (`godot-float-parse-inexact`).
 - [`11-voxel-farm-thin-features.md`](11-voxel-farm-thin-features.md) — how Voxel Farm (Miguel
   Cepero) handled features near two voxel sizes: he stated the Nyquist limit outright and worked
   around it (finer voxels, content aligned to the grid, textures at distance) rather than solving it.

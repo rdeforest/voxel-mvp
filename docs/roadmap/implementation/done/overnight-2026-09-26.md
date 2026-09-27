@@ -131,7 +131,7 @@ available to unblock anything. Work the whole window; do not stop and wait.
 ### Needs you first
 
 1. **Single-voxel edits** — the characterization is done. Answer its questions and the fix can be
-   designed: [`single-voxel-edits-unexpected`](../../../bugs/single-voxel-edits-unexpected.md).
+   designed: [`single-voxel-edits-unexpected`](https://github.com/rdeforest/voxel-mvp/issues/22).
    In short: Fill makes a ~2.5 m³ smooth mound, 83 % of it outside the target, and the target ends
    about half full. 0 of 982 edits read as a cube. Empty refuses "already air" on 48 % of first
    clicks and can't dig down (a second click refuses 36 of 39 times). Did you expect a crisp 1 m
@@ -177,7 +177,7 @@ system handles this sort of thing?
 3. **Player safety misses sub-cell burials** (found tonight, med). A raise or carve that moves the
    surface less than half a cell inside your capsule goes unrefused; a probe reproduces it. An exact
    fix needs your call on how an unedited leaf's generator field is judged:
-   [`player-safety-misses-sub-cell-burial`](../../../bugs/player-safety-misses-sub-cell-burial.md).
+   [`player-safety-misses-sub-cell-burial`](https://github.com/rdeforest/voxel-mvp/issues/19).
 
 I believe you're asking if such edits should be refused, or something else
 should happen. In the interest of consistency, I'd like such changes to be
@@ -189,7 +189,7 @@ about the options in chat until I understand the question better. :)
 
 4. **Dig under your own feet:** guard it the way Lower is guarded, or keep Dig as "dig anywhere"?
    The guard would refuse digs aimed within ~4.5 m of your feet:
-   [`dig-action-no-validate-no-safety`](../../../bugs/closed/dig-action-no-validate-no-safety.md).
+   [`dig-action-no-validate-no-safety`](https://github.com/rdeforest/voxel-mvp/issues/24).
 
 I think users will reasonably expect to be able to dig under themselves. When
 we do this in real life, we're actually digging around ourselves and moving to

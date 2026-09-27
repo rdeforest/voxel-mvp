@@ -90,7 +90,7 @@ class MpmSim : public RefCounted {
 	double               _wake_speed    = 0.2;
 
 	// Smallest |σ₂|/σ₀ any SVD in the sim has seen since the last reset: how close to singular the
-	// deformations get, which bounds Mat3::svd's accuracy (docs/bugs/mpm-svd-ill-conditioned-u.md).
+	// deformations get, which bounds Mat3::svd's accuracy (https://github.com/rdeforest/voxel-mvp/issues/17).
 	double _min_sigma_ratio = 1.0;
 
 	int _grid_count() const { return _dim * _dim * _dim; }

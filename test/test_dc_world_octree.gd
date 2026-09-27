@@ -416,7 +416,7 @@ func test_grow_world_reuse_unbudgeted_drains_whole_frontier():
 
 # A drain that refines the whole frontier in ONE grow must emit incrementally what a full re-emit of the
 # same tree does. Budgeted drains of ~100 us converge (test_grow_world_persistent_frontier_drains_with_reuse);
-# a one-shot drain does not — docs/bugs/dc-incremental-emit-ring-insufficient.md.
+# a one-shot drain does not — https://github.com/rdeforest/voxel-mvp/issues/5.
 func test_grow_world_one_shot_drain_incremental_emit_is_complete():
     var s := _store()
     var origin := _region_origin(s)
@@ -433,7 +433,7 @@ func test_grow_world_one_shot_drain_incremental_emit_is_complete():
     var missing := _missing_sigs(_tri_sigs(reemitted), _tri_sigs(drained))
     assert_lte(missing, MAX_ONE_SHOT_DROPS, "one-shot drain drops no more than the recorded 89 (ratchet)")
     if missing > 0:
-        pending("one-shot drain's incremental emit drops triangles vs a full re-emit — docs/bugs/dc-incremental-emit-ring-insufficient.md")
+        pending("one-shot drain's incremental emit drops triangles vs a full re-emit — https://github.com/rdeforest/voxel-mvp/issues/5")
         return
     assert_eq(_tri_sigs(drained), _tri_sigs(reemitted), "incremental emit == full re-emit of the same tree")
 

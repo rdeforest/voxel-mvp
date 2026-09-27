@@ -1,7 +1,7 @@
 extends SceneTree
 
 # Characterizes FillVoxel / EmptyVoxel on the game's own field and render
-# (docs/bugs/single-voxel-edits-unexpected.md, Characterization): an EditStore set up exactly as
+# (https://github.com/rdeforest/voxel-mvp/issues/22, Characterization): an EditStore set up exactly as
 # EditStoreManager does, aimed with TerrainRaymarch the way player.gd aims, targeted with
 # ActionFactories' cell formulas, executed through the real actions, and meshed before/after with
 # DCOctreeMesher.mesh_world as DcWorldPreview calls it. Writes one TSV row per edit step, and a

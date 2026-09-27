@@ -2,7 +2,7 @@ class_name DigAction
 extends Action
 
 # Not a PlayerSafeAction on purpose: players expect to dig under themselves, and directives will
-# replace this verb (docs/bugs/closed/dig-action-no-validate-no-safety.md).
+# replace this verb (https://github.com/rdeforest/voxel-mvp/issues/24).
 
 enum Shape { SPHERE }
 

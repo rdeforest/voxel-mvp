@@ -2,7 +2,7 @@ extends SceneTree
 
 # Measures MpmSim.debug_svd as F approaches singular: det U, σ₂ and reconstruction for
 # R·diag(1, 1, ±ε)·Rᵀ and diag(1, 1, ±ε), plus rank ≤ 1. Evidence for
-# docs/bugs/mpm-svd-ill-conditioned-u.md.
+# https://github.com/rdeforest/voxel-mvp/issues/17.
 #
 #   godot --path . --headless -s res://scripts/dev/probe_svd_cases.gd
 

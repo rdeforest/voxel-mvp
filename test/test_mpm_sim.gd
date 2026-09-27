@@ -72,7 +72,7 @@ func test_block_holds_together_doesnt_shatter() -> void:
     assert_lt(_extent(sim), start_extent * 2.0, "the block held together (didn't shatter/explode)")
 
 
-# The conditioning gauge for docs/bugs/mpm-svd-ill-conditioned-u.md: the smallest |σ₂|/σ₀ any SVD
+# The conditioning gauge for https://github.com/rdeforest/voxel-mvp/issues/17: the smallest |σ₂|/σ₀ any SVD
 # in the sim has seen. A block squashes on landing, so it must drop below 1, and at this dt it stays
 # clear of the 1e-4 where Mat3::svd starts to drift.
 func test_min_sigma_ratio_records_the_landing_squash_and_resets() -> void:

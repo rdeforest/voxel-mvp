@@ -6,18 +6,18 @@
 
 ## Tasks
 
-- **FEAT001**: Biome system — temperature/moisture noise maps → biome
+- **FEAT001** ([#75](https://github.com/rdeforest/voxel-mvp/issues/75)): Biome system — temperature/moisture noise maps → biome
   selection.
-- **FEAT002**: Minimum 4 biomes — Meadow, Forest, Mountain, Swamp.
-- **FEAT003**: Per-biome terrain parameters (amplitude, frequency,
+- **FEAT002** ([#76](https://github.com/rdeforest/voxel-mvp/issues/76)): Minimum 4 biomes — Meadow, Forest, Mountain, Swamp.
+- **FEAT003** ([#77](https://github.com/rdeforest/voxel-mvp/issues/77)): Per-biome terrain parameters (amplitude, frequency,
   base height, cave density).
-- **FEAT004**: Cave generation using 3D worm noise (continuous with
+- **FEAT004** ([#78](https://github.com/rdeforest/voxel-mvp/issues/78)): Cave generation using 3D worm noise (continuous with
   surface — no loading screens).
-- **FEAT005**: Water plane with basic shader (flat plane at sea level
+- **FEAT005** ([#79](https://github.com/rdeforest/voxel-mvp/issues/79)): Water plane with basic shader (flat plane at sea level
   for MVP).
-- **FEAT006**: Scatter system — trees, rocks, bushes as instanced
+- **FEAT006** ([#80](https://github.com/rdeforest/voxel-mvp/issues/80)): Scatter system — trees, rocks, bushes as instanced
   MultiMeshes.
-- **FEAT007**: Biome-appropriate vegetation distribution.
+- **FEAT007** ([#81](https://github.com/rdeforest/voxel-mvp/issues/81)): Biome-appropriate vegetation distribution.
 
 ## Key decisions
 

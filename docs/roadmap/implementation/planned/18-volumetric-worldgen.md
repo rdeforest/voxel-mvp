@@ -115,7 +115,7 @@ boundary seeding) — a research-grade task, scheduled only when justified.
   overhang; the edit-driven overhangs it handles come through the EditStore. The
   carve boolean is the first *generated* non-monotone field. Watch for the
   known crack/prune classes ([[dc-thin-feature-collapse-bug]], inside-coverage
-  cracks in `docs/bugs/`).
+  cracks, [#6](https://github.com/rdeforest/voxel-mvp/issues/6)).
 - **Build = rebuild.** `terrain_field.h` is compiled into the module; changes
   need `tools/build` and the field re-evaluates everywhere (no migration — the
   generator is the source of truth, EditStore edits ride on top).

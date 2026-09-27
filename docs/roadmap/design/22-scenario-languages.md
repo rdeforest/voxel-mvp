@@ -214,7 +214,7 @@ defaults match the original. The hard part, and the area for experiment, is capt
 
 **Evaluation** re-runs the process with bound parameters and yields a flat list of
 `(path, part, material, transform, size)` to imprint. **PartIndex can key parts by path**, which may
-answer [`part-index-sub-cell-parts-untracked`](../../bugs/part-index-sub-cell-parts-untracked.md):
+answer [`part-index-sub-cell-parts-untracked`](https://github.com/rdeforest/voxel-mvp/issues/18):
 identity by path, not by cells. **Doc 17's concept library is this format on the play side**: a
 named build is an assembly, and sharing one means exporting its JSON.
 

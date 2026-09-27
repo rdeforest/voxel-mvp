@@ -24,7 +24,7 @@ _Research notes drafted by Claude (agent), 2026-09-26. Tags: [V] = verified (rea
   - `%.17g` uniform over (-1e6, 1e6): **15.6%** are off.
   - Examples: `1.8143934130161599` → `…601`; `1.5e-300` → `1.4999999999999998e-300`; `00000000000000000001.5` → 0.
 
-  The 24% you measured falls inside this range and depends on the value distribution.
+  The 24% a Claude agent measured in-engine in Track G4.0 (2026-09-27, `scripts/dev/probe_var_to_str_precision.gd`, JSON `full_precision`) falls inside this range and depends on the value distribution.
 - [V] The writer (`num_scientific`) uses `thirdparty/grisu2` (`ustring.cpp:1611`). [I] Grisu2 always round-trips but is not guaranteed to give the *shortest* output. Don't assert "shortest" in docs.
 - [V] Master is unchanged. The local `origin/master` was fetched 2026-09-26 and is 5965 commits past 4.6. Its `built_in_strtod` is identical except for parameter renames. There is no `fast_float`, `from_chars` or new `thirdparty/` entry, and no master commit mentions strtod, fast_float or from_chars.
 

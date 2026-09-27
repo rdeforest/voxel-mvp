@@ -9,11 +9,11 @@ into things playtesters would want changed.
 
 ## Tasks
 
-- **FEAT048**: Linux + macOS binary builds via GitHub Actions
+- **FEAT048** ([#99](https://github.com/rdeforest/voxel-mvp/issues/99)): Linux + macOS binary builds via GitHub Actions
   (cross-platform pipeline gated by this milestone, not v1.0).
-- **FEAT049**: Brief onboarding text — not a full tutorial, just enough
+- **FEAT049** ([#100](https://github.com/rdeforest/voxel-mvp/issues/100)): Brief onboarding text — not a full tutorial, just enough
   to communicate the verbs.
-- **FEAT050**: "Programmer art intentional, focus on play feel"
+- **FEAT050** ([#101](https://github.com/rdeforest/voxel-mvp/issues/101)): "Programmer art intentional, focus on play feel"
   disclaimer baked into the build.
 
 ## Why this is its own milestone

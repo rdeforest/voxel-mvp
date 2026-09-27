@@ -375,10 +375,10 @@ The new pending test is the gate for `scout-ignores-freeze-flips`.
 - **A per-process cell counter:** waiting on question 7.
 - **Diagnosed after the brief, not fixed:**
   - The "12 % drain slowdown" is a measurement artefact. But a "20 ms" drain really takes 32–76 ms,
-    because collapse and emit have no budget (`bugs/dc-drain-collapse-emit-unbudgeted.md`).
+    because collapse and emit have no budget ([#4](https://github.com/rdeforest/voxel-mvp/issues/4) (`dc-drain-collapse-emit-unbudgeted`)).
   - The slide is expected on that 66° peak, but MPM contact has four real defects: viscous
     friction, damping in free flight, the SDF used as a distance, and a settle rule that hides creep
-    (`bugs/mpm-contact-friction-and-damping.md`).
+    ([#15](https://github.com/rdeforest/voxel-mvp/issues/15) (`mpm-contact-friction-and-damping`)).
 
   Both are in questions 6 and 8.
 - **Nothing was checked on a GPU.**

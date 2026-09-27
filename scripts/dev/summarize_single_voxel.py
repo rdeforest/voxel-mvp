@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Every table and figure in the Characterization section of
-docs/bugs/single-voxel-edits-unexpected.md, from probe_single_voxel.gd's output.
+https://github.com/rdeforest/voxel-mvp/issues/22, from probe_single_voxel.gd's output.
 
 Usage: scripts/dev/summarize_single_voxel.py out.tsv
 Reads out.tsv, and out.census.tsv / out.occupancy.tsv beside it when present.

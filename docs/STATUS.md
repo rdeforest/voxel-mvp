@@ -136,7 +136,7 @@ cell→point read goes through `VoxelUtils.sample_point`.)
 coupling (the remaining research risk). PBD is already removed on master.
 The SVD reflection handling was re-verified correct and is now pinned by
 `test/test_mpm_svd.gd` (all four reflection rows). The rewrite must also fix
-`docs/bugs/mpm-svd-ill-conditioned-u.md` (U degrades below σ₂/σ₀ ≈ 1e-4;
+[#17](https://github.com/rdeforest/voxel-mvp/issues/17) (`mpm-svd-ill-conditioned-u`) (U degrades below σ₂/σ₀ ≈ 1e-4;
 pending test waiting for it).
 
 **Parts-as-voxels, stages 1–5 — done.** Stage 6 (merge-back) is parked; it
@@ -171,7 +171,7 @@ Rather than duplicating them here:
 | What's in the v0.1 backlog? | `docs/roadmap/implementation/started/05-phase-5_5-architectural-maturation.md` (FEAT030–047) |
 | What's deferred and why? | `docs/roadmap/implementation/planned/`; shipped work in `implementation/done/` |
 | Which commitments are immovable? | `docs/roadmap/design/02-architectural-commitments.md` |
-| What defects are open? | `docs/bugs/00_INDEX.md` |
+| What defects are open? | [GitHub issues](https://github.com/rdeforest/voxel-mvp/issues) (`gh issue list --label bug`) |
 | Where does the code live? | `docs/CODE-MAP.md` |
 
 Git log is the authoritative narrative of what shipped.
@@ -179,8 +179,8 @@ Git log is the authoritative narrative of what shipped.
 
 ## Known limits — recorded, not fixed
 
-These are design and tuning *limits*, not defects. Defects live in
-`docs/bugs/`.
+These are design and tuning *limits*, not defects. Defects are
+[GitHub issues](https://github.com/rdeforest/voxel-mvp/issues).
 
 - **A sub-cell part's ghost falls back to its footprint cells.** A part that
   flips no cell centre, like a 0.5 m log, still shows its refusal on the coarse
