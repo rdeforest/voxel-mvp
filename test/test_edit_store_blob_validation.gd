@@ -3,7 +3,7 @@ extends GutTest
 # EditStore.deserialize refuses a blob that isn't a tree serialize could have written, before it
 # touches the store: a child index out of range, pointing back up the tree or shared by two parents,
 # a child that isn't its parent's octant, a state its place in the tree can't hold, or a blob cut
-# short (save_to writes in place, so a crash mid-save truncates it). Each used to crash the engine
+# short (a crash mid-write truncates it). Each used to crash the engine
 # inside deserialize (LocalVector's index check, or recursion round a cycle until the stack ran
 # out) or read zeros past the end. It also refuses non-finite corners and generator params
 # TerrainField can't sample, which used to load and then mesh NaN or freeze the first sample.

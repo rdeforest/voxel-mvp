@@ -1,11 +1,9 @@
 class_name WorldSnapshot
 extends RefCounted
 
-# V6: parts dissolved into the EditStore (imprinted voxels) — the snapshot no longer
-# encodes Node3D parts or snap points. Parts now persist via the EditStore blob (their
-# SDF) + the tracked-voxel array (their support). Older saves load with `parts` ignored.
-# V7: HUD tool-window layout (id -> viewport fraction). Older saves load with windows at default.
-const VERSION := 7
+# One save format until there are play testers: a snapshot of any other version is refused, not
+# migrated. V8 added the save id shared with the EditStore blob (SavedWorld pairs the two).
+const VERSION := 8
 
 # Survives scene reloads (static var on a loaded script). Set by the `reset`
 # console command and consumed by world.gd on the next _ready. When true: the saved
@@ -16,12 +14,13 @@ static var reset_pending: bool = false
 
 # --- public API ---
 
-static func save(path: String, world: Node) -> Error:
+# `save_id` ties this snapshot to the EditStore blob written beside it.
+static func save(path: String, world: Node, save_id: int) -> Error:
     var file := FileAccess.open(path, FileAccess.WRITE)
     if file == null:
         return FileAccess.get_open_error()
-    file.store_string(var_to_str(encode(world)))
-    return OK
+
+    return OK if file.store_string(var_to_str(encode(world, save_id))) else ERR_FILE_CANT_WRITE
 
 # The parsed snapshot at `path`; empty when it can't be opened or isn't a snapshot.
 static func read(path: String) -> Dictionary:
@@ -31,25 +30,27 @@ static func read(path: String) -> Dictionary:
     var snap = str_to_var(file.get_as_text())
     return snap if snap is Dictionary else {}
 
-# Why this build won't apply `snap`, or "" when it will. Older versions apply (missing keys
-# default, e.g. V2 saves lack tunables); newer ones are refused.
+# Why this build won't apply `snap`, or "" when it will.
 static func refusal(snap: Dictionary) -> String:
     if snap.is_empty():
         return "world snapshot is unreadable"
 
     var v: int = snap.get("version", 0)
-    if v > VERSION:
-        return "world snapshot is format v%d; this build reads up to v%d" % [v, VERSION]
+    if v != VERSION:
+        return "world snapshot is format v%d; this build reads only v%d" % [v, VERSION]
+    if not (snap.get("save_id") is int):
+        return "world snapshot has no save id"
     return ""
 
 
 # --- encode ---
 
-static func encode(world: Node) -> Dictionary:
+static func encode(world: Node, save_id: int) -> Dictionary:
     var integrity := world.get_node("StructuralIntegrity") as StructuralIntegrity
     var player    := world.get_node("Player") as CharacterBody3D
     return {
         "version":  VERSION,
+        "save_id":  save_id,
         "player":   _encode_player(player),
         "voxels":   _encode_voxels(integrity.terrain_support),
         "tunables": _encode_tunables(),
@@ -145,14 +146,12 @@ static func _apply_player(player: CharacterBody3D, data: Dictionary) -> void:
     player.rotation.y      = data["body_rotation_y"]
     var head: Node3D = player.get_node("Head")
     head.rotation.x  = data["head_rotation_x"]
-    # tool_index + activity_indices replace the old V3 edit_mode_index.
-    # Old saves without these keys: default to the None tool, activity 0.
-    if data.has("tool_index"):
-        player.tool_index = data["tool_index"]
-    if data.has("activity_indices"):
-        var raw: Array = data["activity_indices"]
-        for i in mini(raw.size(), player._activity_indices.size()):
-            player._activity_indices[i] = raw[i]
+    player.tool_index = data["tool_index"]
+
+    var raw: Array = data["activity_indices"]
+    for i in mini(raw.size(), player._activity_indices.size()):
+        player._activity_indices[i] = raw[i]
+
     player.build_state.restore(
         data["build_part_path"],
         StringName(data["build_material"]),

@@ -58,9 +58,9 @@ class TestSnapshotFileIO:
         assert_eq(parsed["voxels"][0]["pos"], Vector3i(5, 6, 7))
 
 
-# WorldSnapshot.refusal() must accept older schemas (missing fields default) and
-# reject newer-than-known ones. Tests at the file-IO + parse level —
-# the apply() leg needs a real terrain so we don't go that far.
+# WorldSnapshot.refusal() accepts only the current schema: one save format until there are play
+# testers. Tests at the file-IO + parse level — the apply() leg needs a real terrain so we don't go
+# that far.
 class TestSnapshotVersionCompat:
     extends GutTest
 
@@ -73,29 +73,15 @@ class TestSnapshotVersionCompat:
         var file := FileAccess.open(TMP_PATH, FileAccess.WRITE)
         file.store_string(var_to_str(snap))
 
-    func test_older_version_loads_ok():
-        # A V2-shaped snapshot — no tunables (V3+), no tool_index (V4+).
-        _write({
-            "version": 2,
-            "player": {
-                "position":        Vector3(0, 80, 0),
-                "body_rotation_y": 0.0,
-                "head_rotation_x": 0.0,
-                "edit_mode_index": 0,
-                "build_part_path": "res://assets/parts/beam/beam.tres",
-                "build_material":  "Wood",
-                "build_rotation":  Vector3i.ZERO,
-            },
-            "voxels": [],
-            "parts":  [],
-        })
-        var file := FileAccess.open(TMP_PATH, FileAccess.READ)
-        var parsed = str_to_var(file.get_as_text())
-        assert_eq(parsed["version"], 2)
-        # The refusal() version check accepts anything ≤ VERSION; the
-        # apply() path tolerates missing tunables / activity_indices
-        # by `.has()`-guarding their reads.
-        assert_true(parsed["version"] <= WorldSnapshot.VERSION)
+    func test_current_version_is_accepted():
+        _write({"version": WorldSnapshot.VERSION, "save_id": 1, "player": {}, "voxels": []})
+        assert_eq(WorldSnapshot.refusal(WorldSnapshot.read(TMP_PATH)), "")
+
+    func test_older_version_rejected():
+        for version in [2, WorldSnapshot.VERSION - 1]:
+            _write({"version": version, "player": {}, "voxels": [], "parts": []})
+            assert_eq(WorldSnapshot.refusal(WorldSnapshot.read(TMP_PATH)),
+                "world snapshot is format v%d; this build reads only v%d" % [version, WorldSnapshot.VERSION])
 
     func test_newer_version_rejected():
         _write({"version": WorldSnapshot.VERSION + 1, "player": {}, "voxels": [], "parts": []})

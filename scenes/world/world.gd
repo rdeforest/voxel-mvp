@@ -107,12 +107,12 @@ func _restore_save() -> void:
         return
 
     _saved = SavedWorld.read(SavePaths.SNAPSHOT_FILE, SavePaths.EDITSTORE_FILE)
-    if not _saved.refusal.is_empty():
+    if _saved.load_into(self, _edit_store):
+        Toast.success("Loaded save.")
+    elif not _saved.refusal.is_empty():
         push_error("Save not loaded: %s" % _saved.refusal)
         Toast.failure("Save not loaded: %s. Files kept; F5 won't overwrite them (console `reset` starts over)."
             % _saved.refusal)
-    elif _saved.load_into(self, _edit_store):
-        Toast.success("Loaded save.")
 
 # The player's F5: both halves of the save. "" on success, otherwise the reason it didn't save.
 func save_game() -> String:

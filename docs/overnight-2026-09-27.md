@@ -21,7 +21,12 @@
   including the chunked freeze path (regions over 24 m) it used to react to. The scout already
   flooded after terraforming while MPM was idle; that isn't new. New bug:
   `mpm-freeze-flips-unmeasured` (C++; also blocks the scout hearing freezes).
-- [ ] G3 — save-pair integrity; single save format (Q5)
+- [x] G3 — save-pair integrity; single save format (Q5). Shared save id in both halves (snapshot
+  v8, blob header v3); temporaries are renamed in only after both read back whole (FileAccess drops
+  a failure flushing a file's tail at close); a committed save a crash or failed rename interrupted
+  is finished by the next load or F5. Lone, mismatched or older halves are refused and kept.
+  **Unilateral:** a refused save still blocks F5 until console `reset` (not moved aside); named
+  saves (G4.4) soften that. Q5 left the choice open.
 - [ ] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments
 - [ ] R1 — research: what the refine frontier spends its effort on + perceptual LOD survey
 - [ ] Integration review of the merged result; morning brief at the bottom of this doc

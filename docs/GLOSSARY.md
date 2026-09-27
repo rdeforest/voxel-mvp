@@ -27,7 +27,8 @@ Add terms as they come up.*
 - **Field state.** What a node's field is (since `c0292ac`): `NO_FIELD` (reads the generator),
   `OWN_FIELD` (its own corners), `INHERITED_FIELD` (reads the field of the coarser leaf it was split
   from, unchanged), `FIELD_SOURCE` (an internal node that was split and still supplies that field).
-- **Blob.** The EditStore's binary save file (`world.editstore`). `SAVE_VERSION` 2.
+- **Blob.** The EditStore's binary save file (`world.editstore`). `SAVE_VERSION` 3; its header carries
+  the save id it shares with the WorldSnapshot, and a save loads only as a matching pair.
 
 ## Rendering
 

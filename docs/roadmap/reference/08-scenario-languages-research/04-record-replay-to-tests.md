@@ -120,8 +120,10 @@ Not saved:
   examine state. Needed for **render** assertions, not store ones.
 - Generator code version. A change to `terrain_field.h` silently changes unedited ground under a
   recorded scenario. [V that it isn't stored]
-- Save pair can mismatch across saves undetected (`saved_world.gd:10`,
-  `docs/bugs/save-pair-consistency.md`). [V]
+- Save pair can mismatch across saves undetected (`saved_world.gd:10`, the since-closed
+  `save-pair-consistency` bug). [V] *Fixed 2026-09-27 (Claude, overnight G3): both halves carry one
+  save id, the pair is written under temporary names and renamed in, and a lone or mismatched half
+  is refused.*
 
 Prior art in-repo: action-journal/replay was explicitly deferred as the network-sync primitive
 (`docs/roadmap/implementation/done/extras-01-persistence.md:44-52`, design doc 05 "Replication
