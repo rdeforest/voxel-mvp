@@ -27,7 +27,7 @@
   is finished by the next load or F5. Lone, mismatched or older halves are refused and kept.
   **Unilateral:** a refused save still blocks F5 until console `reset` (not moved aside); named
   saves (G4.4) soften that. Q5 left the choice open.
-- [ ] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments (G4.0–G4.4 done; G4.4 partial, see below)
+- [ ] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments (G4.0–G4.4 done; G4.4's leaf read-out finished by F2, overlay and assembly export/import not built)
   - [x] G4.0 — gaps: PartIndex saved (snapshot v9, bit-exact bytes; a snapshot whose parts break
     one-owner/unique-id is refused); scout pending work and MPM's unannounced freeze chunks gate
     `is_quiescent()`; MPM freeze chunks announced bottom-up by position, appended (a second freeze
@@ -77,14 +77,13 @@
     recording; a name defaults to the date-time; an existing directory is refused. **Not verified
     live:** `mpmthaw`'s step (the console aims with the physics raycast, which never hit terrain
     in the headless World; covered in GUT) and the screenshot (headless has no rendered viewport).
-  - [x] G4.4 — instrument layer, **partial**: the probe adds edited/generator leaf, the 8 corners
+  - [x] G4.4 — instrument layer (leaf read-out completed by F2): the probe adds edited/generator leaf, the 8 corners
     the mesher samples, its sign test and seams; console `setcorners`/`setmaterial`/`stamp` write
     exactly (ExactDecimal) through StoreWrite/VoxelImprint as INSTRUMENT, recorded as steps
     (`set_corners`/`set_material`/`stamp`); a write that buries the player or drops their ground
     puts them in fly (noclip when buried); `save <name>`/`load <name>` slots under
     `user://saves/<name>/`. Tested through LimboConsole's own dispatcher. **Not built:** the
-    owning leaf's origin/size/field state (needs C++ `EditStore.leaf_info`, question for Robert),
-    the leaf/sign overlay, assembly export/import (phase 3).
+    leaf/sign overlay (visual, question for Robert), assembly export/import (phase 3).
 - [x] R1 — research: what the refine frontier spends its effort on + perceptual LOD survey.
   Headline: the stones never enter the frontier. Their error comes from the 1 m scalar
   reconstruction (linear crossings, h = 1 m normals); exact Hermite data fixes it at 1 m cost. The
@@ -101,7 +100,12 @@
   the solved lattice (r=3 / r=5 spheres empty 63/63 and 176/176, a lone buried cell empties, zero
   stray flips); a refused carve refuses the whole thaw (push_error + `thaw_refused` → Toast); the
   conditioning gauge resets per thaw. Bug closed; design in doc 12 "The thaw carve"
-- [ ] F2 — `EditStore.leaf_info` binding; probe shows the owning leaf (completes G4.4) (follow-up)
+- [x] F2 — `EditStore.leaf_info` binding; probe shows the owning leaf (completes G4.4) (follow-up):
+  `leaf_info(p)` = { origin, size, field (`EditStore.FieldState`, now bound), corners } + material
+  (edited) + source_origin/size (inherited); the probe prints the leaf's state, size and origin, and
+  an inherited leaf's source. GUT on the real store: generator root, own-field, inherited next to a
+  finer write (its stored corners = float32 of what the store reads there), unedited sibling. Overlay
+  not built. Filed edit-store-blob-inherited-corners-unchecked (load never checks those stored corners)
 - [ ] F3 — the MPM freeze reports its measured flips (follow-up)
 - [ ] Morning brief at the bottom of this doc
 

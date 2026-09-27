@@ -331,11 +331,15 @@ func test_the_probe_reports_corners_and_the_mesher_sign_test() -> void:
     var cell := _far_cell()
     var probe := ProbeAction.new(Vector3(cell) + Vector3(0.5, 0.5, 0.5), Vector3.ZERO, Vector3.ZERO, _s.context())
     assert_eq(probe.target_cell(), cell, "precondition: the probe aims at the cell")
-    assert_true(Array(probe.report()).has("  leaf     unedited (the generator's)"), "before: the generator's")
+    var root := "  leaf     unedited (the generator's), %s m at %s" % [ProbeAction._num(EditStoreManager.ROOT_SIZE),
+        ProbeAction._vec(EditStoreManager.ROOT_ORIGIN)]
+    assert_true(Array(probe.report()).has(root),
+        "before: the generator's root: %s" % [probe.report()])
 
     _ic.setcorners("%d %d %d -1 0.5 0.5 0.5 0.5 0.5 0.5 0.25" % [cell.x, cell.y, cell.z])
     var lines := Array(probe.report())
-    assert_true(lines.has("  leaf     edited (the store holds it)"), "after: the store's")
+    assert_true(lines.has("  leaf     edited, its own field, 1 m at (%d, %d, %d)" % [cell.x, cell.y, cell.z]),
+        "after: the store's 1 m leaf: %s" % [lines])
     assert_true(lines.has("  corners  z=0  -1.0000   0.5000   0.5000   0.5000"), "the z=0 corners: %s" % [lines])
     assert_true(lines.has("           z=1   0.5000   0.5000   0.5000   0.2500"), "the z=1 corners")
     assert_true(lines.has("  sign     1/8 solid, 3/12 edges cross: the mesher puts a surface here"),
@@ -360,6 +364,20 @@ func test_the_probe_reports_a_seam_between_disagreeing_leaves() -> void:
     var edge := Array(_probe_at(o + Vector3i(1, 0, 0)).report())
     assert_true(edge.has("  seam     corner 1: this cell's leaf holds -1.0000"),
         "corner 1 lies on the 1 m leaf, which holds +1: %s" % [edge])
+
+# A 1 m write in a 2 m edited leaf subdivides it: the probe names the inherited 1 m leaf beside the
+# write and the 2 m leaf whose field it reads.
+func test_the_probe_reports_an_inherited_leaf_and_its_source() -> void:
+    var o := Vector3i(128, -64, 128)
+    var paint := PackedByteArray([2])
+    _store().write_region(_filled(8, -1.0), paint, 2, Vector3(o), 2.0)
+    _store().write_region(_filled(8, 1.0), paint, 2, Vector3(o), 1.0)
+
+    var lines := Array(_probe_at(o + Vector3i(1, 0, 0)).report())
+    assert_true(lines.has("  leaf     edited, inherited, 1 m at (129, -64, 128)"), "the inherited leaf: %s" % [lines])
+    assert_true(lines.has("           from the 2 m leaf at (128, -64, 128)"), "and its source")
+    assert_true(Array(_probe_at(o).report()).has("  leaf     edited, its own field, 1 m at (128, -64, 128)"),
+        "the written leaf holds its own field")
 
 func _probe_at(cell: Vector3i) -> ProbeAction:
     return ProbeAction.new(Vector3(cell) + Vector3(0.5, 0.5, 0.5), Vector3.ZERO, Vector3.ZERO, _s.context())

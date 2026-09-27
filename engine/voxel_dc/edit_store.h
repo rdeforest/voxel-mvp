@@ -30,6 +30,21 @@ class EditStore : public RefCounted {
 	GDCLASS(EditStore, RefCounted)
 
 public:
+	// Where a node's field comes from. Subdividing an edited leaf must leave its field exactly as it
+	// was (a trilerp re-rounded to float32 at the children's corners moves samples a write never
+	// touched), so its children read the subdivided leaf's own corners over its own cube: they are
+	// INHERITED leaves of that FIELD_SOURCE (`Node::source`). An inherited leaf also holds that field
+	// at its corners, rounded to float32 (what a write or stamp compares or combines with).
+	// Serialized as the byte that was `has_corners` (0 / 1), so older blobs read unchanged; `source`
+	// is not serialized but relinked on load (_link_sources) from the FIELD_SOURCE ancestors. The
+	// states 2 / 3 make it SAVE_VERSION 2 (EditStoreManager); v1 blobs hold only 0 / 1.
+	enum FieldState : uint8_t {
+		NO_FIELD,        // internal, or an unedited leaf (-> generator)
+		OWN_FIELD,       // an edited leaf: its corners over its cube
+		INHERITED_FIELD, // an edited leaf: its FIELD_SOURCE's field
+		FIELD_SOURCE,    // internal: a subdivided edited leaf, its corners the field its inheritors read
+	};
+
 	// World root the edits live in (must bound them) + the generator params edits defer to.
 	void setup(Vector3 origin, double size, double base, double amp, double period, int octaves, int seed);
 
@@ -111,6 +126,13 @@ public:
 	// takes the upper side), so a point on a region's max face can be read from inside the region.
 	double sample_toward(Vector3 p, Vector3 toward) const;
 	bool has_edit(Vector3 p) const;  // true where the player has edited (stored), false = generator
+	// The leaf holding `p` (upper side of a boundary, as sample() reads): { origin, size, field (a
+	// FieldState), corners } — its 8 stored corners (CB order; what a write or stamp combines with,
+	// not recomputed from an inherited leaf's source), or the generator's samples there for an
+	// unedited leaf — plus `material` for an edited leaf and { source_origin, source_size } for an
+	// INHERITED_FIELD one. Empty outside the root, where no leaf exists.
+	// The probe's leaf read-out (doc 22, the instrument layer).
+	Dictionary leaf_info(Vector3 p) const;
 	Ref<EditStore> duplicate() const; // immutable snapshot for a worker thread (the store is sparse, so cheap)
 
 	// Sample a dense cubic region of the field (generator + edits), REUSING a previous
@@ -138,21 +160,6 @@ protected:
 	static void _bind_methods();
 
 private:
-	// Where a node's field comes from. Subdividing an edited leaf must leave its field exactly as it
-	// was (a trilerp re-rounded to float32 at the children's corners moves samples a write never
-	// touched), so its children read the subdivided leaf's own corners over its own cube: they are
-	// INHERITED leaves of that FIELD_SOURCE (`Node::source`). An inherited leaf also holds that field
-	// at its corners, rounded to float32 (what a write or stamp compares or combines with).
-	// Serialized as the byte that was `has_corners` (0 / 1), so older blobs read unchanged; `source`
-	// is not serialized but relinked on load (_link_sources) from the FIELD_SOURCE ancestors. The
-	// states 2 / 3 make it SAVE_VERSION 2 (EditStoreManager); v1 blobs hold only 0 / 1.
-	enum FieldState : uint8_t {
-		NO_FIELD,        // internal, or an unedited leaf (-> generator)
-		OWN_FIELD,       // an edited leaf: its corners over its cube
-		INHERITED_FIELD, // an edited leaf: its FIELD_SOURCE's field
-		FIELD_SOURCE,    // internal: a subdivided edited leaf, its corners the field its inheritors read
-	};
-
 	struct Node {
 		Vector3 origin;
 		double size = 0.0;
@@ -206,5 +213,7 @@ private:
 	float _held_corner(int field, const Vector3 &o, double s, int i) const;
 	bool _inside_root(const Vector3 &p) const;
 };
+
+VARIANT_ENUM_CAST(EditStore::FieldState);
 
 #endif // EDIT_STORE_H

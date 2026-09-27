@@ -297,16 +297,22 @@ instruments.
   Decisions).
 - **Named saves** (`save <name>` / `load <name>`), and commands to export and import assemblies.
 
-*Built 2026-09-27 (Claude, G4.4), except the probe's leaf read-out, the overlay, and assembly
-export/import (assemblies are phase 3, so that command waits for them):*
+*Built 2026-09-27 (Claude, G4.4 and F2), except the overlay and assembly export/import
+(assemblies are phase 3, so that command waits for them):*
 - *The probe (`ProbeAction.report()`, which the HUD, the click and `mark` share) adds whether the
   cell's leaf is edited or the generator's, the 8 corner values the mesher samples, its sign test
   (solid corners, and how many of the 12 edges cross zero, as `dc_octree.h` tests an edge), and
   any corner where the cell's own leaf holds a different value than the mesher reads (a seam).
-  **Not built: the owning leaf's origin, size and field state.** No EditStore binding exposes a
-  leaf, and this chunk can't touch C++; it needs `Dictionary EditStore::leaf_info(Vector3 p)`
-  (origin, size, `FieldState`, material, its 8 held corners, its field source). The overlay of
-  leaf boundaries and corner signs isn't built either.*
+  It also names the store's leaf that holds the cell's sample point, which can be far coarser than
+  the cell: its origin, size and field state (unedited, the generator's; edited with its own
+  field; or edited and inherited, with the origin and size of the subdivided leaf whose field it
+  reads). F2 added the C++ read it needs, `EditStore.leaf_info(p)`: { origin, size, field (an
+  `EditStore.FieldState`), corners } plus `material` for an edited leaf and { source_origin,
+  source_size } for an inherited one, empty outside the root. Its `corners` are the leaf's 8 as it
+  holds them (an inherited leaf's are its source's field rounded to float32), or the generator's
+  samples for an unedited leaf; the probe doesn't print them, since the corner lines above already
+  show what the mesher and the cell's own leaf read. **Not built: the overlay of leaf boundaries
+  and corner signs** (a visual call, left for Robert).*
 - *Exact writes: console `setcorners <x y z> <c0..c7>` (corner k at cell + (k&1, k>>1&1,
   k>>2&1); the store rounds each to float32), `setmaterial <x y z> <material>`, and
   `stamp <shape> <add|subtract> <material> <x y z> <dims> [<rx ry rz>]` (the CSG tool's dims and
