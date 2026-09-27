@@ -127,6 +127,10 @@ Lisp syntax.
   it still produces those bindings, a separate regression gate.
 - **JSON numbers:** `JSON.stringify` defaults to about 14 significant digits (lossy for doubles) and
   writes -0.0 as "0.0". Recordings use `full_precision = true`, and a round-trip test must pass first.
+  *Measured 2026-09-27 (Claude, G4.0), on this engine (4.6, double build): that test fails.
+  `full_precision` still reads 24% of random doubles back an ulp off, and `var_to_str` 31%;
+  `var_to_bytes` is exact (100,000 samples each, `scripts/dev/probe_var_to_str_precision.gd`). The
+  step format needs an exact number encoding before G4.1 can gate on the round trip.*
 - **Four uses of one format:**
   1. Hand-written test scenarios.
   2. Recordings of play.
@@ -227,9 +231,13 @@ assembly 'gatehouse',
    in. Recordings are never used as approval snapshots, because that would lock in the bug.
 
 **Gaps to close first:**
-- Saves don't keep PartIndex.
-- DetachmentScout's pending work is missing from `is_quiescent()`.
-- MPM orders its freeze by camera distance, which makes structural event order depend on the camera.
+- ~~Saves don't keep PartIndex.~~ Closed 2026-09-27 (G4.0): the snapshot carries the index
+  (records, ancestry, next id), bit-exact.
+- ~~DetachmentScout's pending work is missing from `is_quiescent()`.~~ Closed 2026-09-27 (G4.0),
+  along with MPM's not-yet-announced freeze chunks.
+- ~~MPM orders its freeze by camera distance, which makes structural event order depend on the
+  camera.~~ Closed 2026-09-27 (G4.0): bottom layer first, by position. Camera-first meshing, if
+  it's wanted back, belongs in the render's own scheduling, not in the event order.
 - A fresh `mesh_world` doesn't exercise the live incremental mesher, so render bugs in that path need a
   camera-path replay.
 

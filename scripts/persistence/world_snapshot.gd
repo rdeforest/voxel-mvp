@@ -2,8 +2,9 @@ class_name WorldSnapshot
 extends RefCounted
 
 # One save format until there are play testers: a snapshot of any other version is refused, not
-# migrated. V8 added the save id shared with the EditStore blob (SavedWorld pairs the two).
-const VERSION := 8
+# migrated. V8 added the save id shared with the EditStore blob (SavedWorld pairs the two); V9 the
+# PartIndex, so part identity survives a reload.
+const VERSION := 9
 
 # Survives scene reloads (static var on a loaded script). Set by the `reset`
 # console command and consumed by world.gd on the next _ready. When true: the saved
@@ -13,6 +14,9 @@ static var reset_pending: bool = false
 
 
 # --- public API ---
+
+# `world` is the World scene root: what's saved is read from its StructuralIntegrity and Player
+# children and its part_index().
 
 # `save_id` ties this snapshot to the EditStore blob written beside it.
 static func save(path: String, world: Node, save_id: int) -> Error:
@@ -40,7 +44,9 @@ static func refusal(snap: Dictionary) -> String:
         return "world snapshot is format v%d; this build reads only v%d" % [v, VERSION]
     if not (snap.get("save_id") is int):
         return "world snapshot has no save id"
-    return ""
+    if not (snap.get("parts") is PackedByteArray):
+        return "world snapshot has no part index"
+    return PartIndex.refusal(bytes_to_var(snap["parts"]))
 
 
 # --- encode ---
@@ -53,6 +59,7 @@ static func encode(world: Node, save_id: int) -> Dictionary:
         "save_id":  save_id,
         "player":   _encode_player(player),
         "voxels":   _encode_voxels(integrity.terrain_support),
+        "parts":    _encode_parts(world.part_index()),
         "tunables": _encode_tunables(),
         "windows":  _encode_windows(world),
     }
@@ -96,6 +103,12 @@ static func _encode_player(player: CharacterBody3D) -> Dictionary:
         "build_rotation":   bs.rotation,
     }
 
+# Stored as bytes: var_to_str/str_to_var don't round-trip doubles exactly (about a third come back
+# an ulp off; scripts/dev/probe_var_to_str_precision.gd), and a part's transform is identity, not a
+# display value.
+static func _encode_parts(index: PartIndex) -> PackedByteArray:
+    return var_to_bytes(index.encode())
+
 static func _encode_voxels(ts: TerrainSupport) -> Array:
     var out: Array = []
     for pos in ts.voxel_data:
@@ -114,6 +127,7 @@ static func apply(snap: Dictionary, world: Node) -> void:
     var integrity := world.get_node("StructuralIntegrity") as StructuralIntegrity
     var player    := world.get_node("Player") as CharacterBody3D
     _apply_voxels(integrity, snap.get("voxels", []))
+    _apply_parts(world.part_index(), snap["parts"])
     _apply_player(player, snap.get("player", {}))
     _apply_tunables(snap.get("tunables", {}))
     _apply_windows(world, snap.get("windows", {}))
@@ -138,6 +152,9 @@ static func _apply_voxels(integrity: StructuralIntegrity, voxels: Array) -> void
     for entry in voxels:
         var mat := Materials.from_name(StringName(entry["material"]))
         integrity.terrain_support.restore_voxel(entry["pos"], mat, entry["support"])
+
+static func _apply_parts(index: PartIndex, parts: PackedByteArray) -> void:
+    index.restore(bytes_to_var(parts))
 
 static func _apply_player(player: CharacterBody3D, data: Dictionary) -> void:
     if data.is_empty():

@@ -13,19 +13,7 @@ const SUBTRACT  := 1
 const SAVE_ID   := -4242   # negative on purpose: the blob stores it as an unsigned 64-bit field
 const OTHER_ID  := 77
 
-
-class PlayerStub:
-    extends CharacterBody3D
-
-    var build_state       := BuildState.new()
-    var tool_index        := 2
-    var _activity_indices: Array[int] = [1, 0, 3]
-
-
-    func _init() -> void:
-        var head := Node3D.new()
-        head.name = "Head"
-        add_child(head)
+const WorldStub := preload("res://test/support/world_stub.gd")
 
 
 func after_each() -> void:
@@ -38,7 +26,11 @@ func after_each() -> void:
 
 func _write_snapshot(version: int, save_id: int, path := SNAPSHOT) -> void:
     var file := FileAccess.open(path, FileAccess.WRITE)
-    file.store_string(var_to_str({"version": version, "save_id": save_id, "player": {}, "voxels": []}))
+    file.store_string(var_to_str({"version": version, "save_id": save_id, "player": {}, "voxels": [],
+        "parts": _no_parts()}))
+
+func _no_parts() -> PackedByteArray:
+    return var_to_bytes({"next_id": 1, "records": []})
 
 func _write_blob_header(magic: int, version: int, save_id := SAVE_ID) -> void:
     var file := FileAccess.open(EDITSTORE, FileAccess.WRITE)
@@ -138,13 +130,7 @@ func test_halves_from_different_saves_are_refused_and_kept() -> void:
 
 
 func _world_stub() -> Node:
-    var world     := Node.new()
-    var integrity := StructuralIntegrity.new()
-    var player    := PlayerStub.new()
-    integrity.name = "StructuralIntegrity"
-    player.name    = "Player"
-    world.add_child(integrity)
-    world.add_child(player)
+    var world := WorldStub.new()
     add_child_autofree(world)
     return world
 
@@ -169,7 +155,7 @@ func test_readable_pair_applies_both_halves() -> void:
     var voxel := Vector3i(4, 5, 6)
     var file  := FileAccess.open(SNAPSHOT, FileAccess.WRITE)
     file.store_string(var_to_str({"version": WorldSnapshot.VERSION, "save_id": SAVE_ID, "player": {},
-        "voxels": [{"pos": voxel, "material": "Stone", "support": 0.75}]}))
+        "voxels": [{"pos": voxel, "material": "Stone", "support": 0.75}], "parts": _no_parts()}))
     file.close()
     assert_eq(_edited_manager().save_to(EDITSTORE, SAVE_ID), OK)
 

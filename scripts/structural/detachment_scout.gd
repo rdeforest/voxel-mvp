@@ -35,9 +35,11 @@ var _active := false
 var _thawing := {}           # the component whose thaw is being announced (emit is synchronous)
 
 
+# Registers with `integrity`, whose quiescence gate must wait for this scout's pending work.
 func setup(store: EditStore, integrity: StructuralIntegrity) -> void:
     _store = store
     _integrity = integrity
+    _integrity.scout = self
     VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_edit)
     VoxelEventBusSingleton.subscribe(WorldReadyEvent.CHANNEL, _on_world_ready)
 
@@ -110,6 +112,12 @@ func _physics_process(_delta: float) -> void:
     if _integrity.mpm != null and _integrity.mpm.active_count() > 0:
         return
     _start_next()
+
+
+# No flood running and no seed waiting: every edit it has heard is resolved. The save and recording
+# gate (StructuralIntegrity.is_quiescent) waits for this, because pending seeds aren't saved.
+func is_idle() -> bool:
+    return _flood == null and _pending.is_empty()
 
 
 func _finish(flood: GroundFlood) -> void:

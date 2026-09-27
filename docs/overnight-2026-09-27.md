@@ -28,6 +28,13 @@
   **Unilateral:** a refused save still blocks F5 until console `reset` (not moved aside); named
   saves (G4.4) soften that. Q5 left the choice open.
 - [ ] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments
+  - [x] G4.0 — gaps: PartIndex saved (snapshot v9, bit-exact bytes; a snapshot whose parts break
+    one-owner/unique-id is refused); scout pending work and MPM's unannounced freeze chunks gate
+    `is_quiescent()`; MPM freeze chunks announced bottom-up by position, appended (a second freeze
+    no longer drops the first's). **Unilateral:** camera-nearest re-meshing of big freezes dropped
+    (only separable inside DcWorldPreview, Track E's); dead `MpmStructure.reset()` removed.
+    **Found:** `var_to_str` and JSON `full_precision` don't round-trip ~31%/~24% of doubles on this
+    engine; G4.1's step format needs an exact number encoding.
 - [ ] R1 — research: what the refine frontier spends its effort on + perceptual LOD survey
 - [ ] Integration review of the merged result; morning brief at the bottom of this doc
 

@@ -18,7 +18,7 @@ const SETTLE_FRAMES    := 30     # consecutive settled frames before freezing ba
 const FREEZE_RADIUS    := 0.6    # particle-skinning radius for the freeze rasterisation
 const MAX_PARTICLES    := 6000   # hard cap — beyond this a step costs too much (a runaway-thaw guard)
 const CHUNK            := 12     # freeze region is re-meshed in CHUNK³ boxes (keeps each edit small)
-const CHUNKS_PER_FRAME := 2      # bounded work/frame — the closest chunks re-mesh first
+const CHUNKS_PER_FRAME := 2      # bounded work/frame
 const SINGLE_EMIT_MAX  := 24     # a settled clump this small re-meshes in ONE watertight box (no chunk seams)
 
 const _UNIT_CUBE: Array[Vector3i] = [
@@ -32,7 +32,7 @@ var _mm:    MultiMesh
 
 var _settled_frames := 0
 var _material_index := 1        # Stone — the material the frozen-back terrain takes
-var _pending_chunks: Array = [] # freeze re-mesh boxes still to emit (closest-to-camera first)
+var _pending_chunks: Array = [] # freeze re-mesh boxes still to emit, bottom layer first
 
 
 func setup(store: EditStore) -> void:
@@ -175,15 +175,9 @@ func active_count() -> int:
     return _sim.particle_count() if _sim != null else 0
 
 
-# Drop all active material (no freeze-back). Called when leaving MPM mode so a large in-flight
-# set stops being stepped.
-func reset() -> void:
-    if _sim != null:
-        _sim.clear()
-    _settled_frames = 0
-    _pending_chunks.clear()
-    if _mm != null:
-        _mm.instance_count = 0
+# No material in flight and no frozen region still waiting to be announced.
+func is_idle() -> bool:
+    return active_count() == 0 and _pending_chunks.is_empty()
 
 
 func _physics_process(delta: float) -> void:
@@ -207,8 +201,8 @@ func tick(delta: float) -> void:
             _settled_frames = 0
 
 
-# Re-mesh the frozen region a few bounded boxes per frame, closest to the camera first, so each
-# terrain_sdf_changed stays small (no main-thread freeze) and the nearby change shows promptly.
+# Announce the frozen region a few bounded boxes per frame, so each terrain_sdf_changed (a re-mesh
+# and a structural re-scan) stays small: no main-thread freeze.
 func _emit_pending_chunks() -> void:
     var n := 0
 
@@ -221,7 +215,7 @@ func _emit_pending_chunks() -> void:
 
 
 # Rasterise the settled particles back into the store as terrain (fast, bin-hashed), then queue
-# the region for chunked re-meshing (closest first), and drop the particles.
+# the region for chunked announcement, and drop the particles.
 func _freeze() -> void:
     var region: Dictionary = _sim.rasterize_to_store(_store, 1.0, FREEZE_RADIUS, _material_index)
 
@@ -249,31 +243,16 @@ func _announce_freeze(box: AABB) -> void:
     TerrainSdfChangedEvent.announce(EditSource.Kind.MPM, box, CellFlips.new())
 
 
-# Split the rasterised region into CHUNK³ boxes and sort them nearest-camera-first.
+# Split the rasterised region into CHUNK³ boxes, in an order fixed by position: bottom layer first,
+# then z, then x. Structural subscribers hear the freeze in this order, so it must be part of the
+# world, not of where the camera happens to be; any fixed order would do, and bottom-up puts a pile's
+# footing before what rests on it. Appended, so a freeze landing while an earlier one is still being
+# announced doesn't drop the rest of the earlier one.
 func _queue_freeze_chunks(origin: Vector3, dim: int) -> void:
-    var boxes: Array = []
-
-    var vp  := get_viewport()
-    var cam := vp.get_camera_3d()  if vp  != null else null
-    var eye := cam.global_position if cam != null else origin
-    var cx  := 0
-
-    while cx < dim:
-        var cy := 0
-
-        while cy < dim:
-            var cz := 0
-
-            while cz < dim:
-                boxes.append(origin + Vector3(cx, cy, cz))
-                cz += CHUNK
-            cy += CHUNK
-        cx += CHUNK
-
-    boxes.sort_custom(func(a, b):
-        return eye.distance_squared_to(a + Vector3.ONE * (CHUNK * 0.5)) < eye.distance_squared_to(b + Vector3.ONE * (CHUNK * 0.5)))
-
-    _pending_chunks = boxes
+    for cy in range(0, dim, CHUNK):
+        for cz in range(0, dim, CHUNK):
+            for cx in range(0, dim, CHUNK):
+                _pending_chunks.append(origin + Vector3(cx, cy, cz))
 
 
 func _process(_dt: float) -> void:

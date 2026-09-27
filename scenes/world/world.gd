@@ -127,6 +127,10 @@ func save_refusal() -> String:
 func edit_store_ref() -> EditStore:
     return _edit_store.store
 
+# Part identity, which the save carries beside the field (WorldSnapshot).
+func part_index() -> PartIndex:
+    return _part_index
+
 func _exit_tree() -> void:
     # Drop our console commands before this world is freed (scene reload / quit)
     # so LimboConsole never holds a callable bound to a freed object.

@@ -74,7 +74,8 @@ class TestSnapshotVersionCompat:
         file.store_string(var_to_str(snap))
 
     func test_current_version_is_accepted():
-        _write({"version": WorldSnapshot.VERSION, "save_id": 1, "player": {}, "voxels": []})
+        _write({"version": WorldSnapshot.VERSION, "save_id": 1, "player": {}, "voxels": [],
+            "parts": var_to_bytes({"next_id": 1, "records": []})})
         assert_eq(WorldSnapshot.refusal(WorldSnapshot.read(TMP_PATH)), "")
 
     func test_older_version_rejected():

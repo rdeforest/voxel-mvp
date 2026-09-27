@@ -54,6 +54,66 @@ func _release_cell(cell: Vector3i) -> void:
             _records.erase(owner_id)
 
 
+# --- persistence ---
+
+# The index as saved beside the world (WorldSnapshot): every record, and the next id to hand out so
+# ids stay unique across a reload. Cell ownership isn't stored: each cell belongs to exactly one
+# record, so it is rebuilt from the records.
+func encode() -> Dictionary:
+    var records: Array = []
+    for id in _records:
+        var rec := _records[id]
+        records.append({
+            "id":         rec.id,
+            "cells":      rec.cells.duplicate(),
+            "material":   String(rec.material),
+            "dimensions": rec.dimensions,
+            "transform":  rec.transform,
+            "ancestry":   rec.ancestry,
+        })
+    return {"next_id": _next_id, "records": records}
+
+# Why `data` isn't an index encode() could have written, or "" when it is. restore() trusts what
+# this passes: a load that let two records claim one cell, or reissued a saved id, would quietly
+# break the one-owner and unique-id invariants the rest of the index relies on.
+static func refusal(data: Variant) -> String:
+    if not (data is Dictionary and data.get("next_id") is int and data.get("records") is Array):
+        return "part index is malformed"
+
+    var ids   := {}
+    var owned := {}
+    for entry in data["records"]:
+        if not (entry is Dictionary and entry.get("id") is int and entry.get("cells") is Array):
+            return "part index has a malformed record"
+        var id: int = entry["id"]
+        if ids.has(id) or id < 1 or id >= data["next_id"]:
+            return "part index reuses or pre-issues id %d" % id
+        if entry["cells"].is_empty():
+            return "part %d owns no cell" % id
+
+        ids[id] = true
+        for cell in entry["cells"]:
+            if owned.has(cell):
+                return "parts %d and %d both claim cell %s" % [owned[cell], id, cell]
+            owned[cell] = id
+    return ""
+
+# Replaces the whole index with a saved one that refusal() passed.
+func restore(data: Dictionary) -> void:
+    _records.clear()
+    _cell_to_part.clear()
+    _next_id = data["next_id"]
+
+    for entry: Dictionary in data["records"]:
+        var cells: Array[Vector3i] = []
+        cells.assign(entry["cells"])
+        var rec := PartRecord.new(entry["id"], cells, StringName(entry["material"]),
+            entry["dimensions"], entry["transform"], entry["ancestry"])
+        _records[rec.id] = rec
+        for cell in cells:
+            _cell_to_part[cell] = rec.id
+
+
 # --- queries ---
 
 func count() -> int:

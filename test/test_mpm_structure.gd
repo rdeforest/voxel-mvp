@@ -247,3 +247,55 @@ func test_thaw_that_changes_nothing_announces_no_edit() -> void:
 
     assert_eq(n, 0, "precondition: the repeat empties nothing")
     assert_eq(_log.events.size(), 0, "a rewrite that changed nothing announces no edit")
+
+
+# (Drafted by Claude, overnight 2026-09-27.) A large freeze is announced chunk by chunk, and the
+# order is the order structural subscribers hear it in, so it can't depend on where the camera is:
+# a replayed recording has a different camera (or none) and must see the same events.
+func test_freeze_announcement_order_ignores_the_camera() -> void:
+    var manager := EditStoreManager.new()
+    manager.setup()
+    var ms: MpmStructure = autofree(MpmStructure.new())
+    add_child(ms)
+    ms.setup(manager.store)
+    var cam: Camera3D = autofree(Camera3D.new())
+    add_child(cam)
+    cam.make_current()
+
+    var origin := Vector3(0, 40, 0)
+    var dim    := 3 * MpmStructure.CHUNK
+    var orders: Array = []
+    for eye in [origin, origin + Vector3.ONE * float(dim)]:
+        cam.global_position = eye
+        assert_eq(get_viewport().get_camera_3d(), cam, "precondition: the camera MpmStructure would see")
+        _log.clear()
+        ms._queue_freeze_chunks(origin, dim)
+        while not ms._pending_chunks.is_empty():
+            ms.tick(1.0 / 60.0)
+        orders.append(_log.events.map(func(e: TerrainSdfChangedEvent) -> Vector3: return e.box_origin))
+
+    assert_eq(orders[0].size(), 27, "precondition: a 3x3x3-chunk region")
+    assert_eq(orders[1], orders[0], "the same announcements in the same order from either corner")
+    var heights: Array = orders[0].map(func(o: Vector3) -> float: return o.y)
+    var sorted := heights.duplicate()
+    sorted.sort()
+    assert_eq(heights, sorted, "bottom layer first")
+
+
+# (Drafted by Claude, overnight 2026-09-27.) A second freeze landing while the first is still being
+# announced must not drop the first one's remaining chunks: those announcements are what register
+# the frozen pile with support.
+func test_a_freeze_during_announcement_keeps_the_earlier_chunks() -> void:
+    var manager := EditStoreManager.new()
+    manager.setup()
+    var ms: MpmStructure = autofree(MpmStructure.new())
+    ms.setup(manager.store)
+    var dim := 3 * MpmStructure.CHUNK
+
+    ms._queue_freeze_chunks(Vector3(0, 40, 0), dim)
+    ms.tick(1.0 / 60.0)
+    ms._queue_freeze_chunks(Vector3(100, 40, 0), dim)
+    while not ms._pending_chunks.is_empty():
+        ms.tick(1.0 / 60.0)
+
+    assert_eq(_log.events.size(), 54, "all 27 chunks of each freeze were announced")

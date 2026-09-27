@@ -93,6 +93,9 @@ Key facts:
     orders `TerrainSdfChangedEvent`s, which order DetachmentScout's `_pending` dict insertion,
     which orders floods. Camera-dependent event order → structural outcome. [V chain; I that it
     matters in practice]
+    *Fixed 2026-09-27 (Claude, overnight G4.0): chunks are announced bottom layer first, by
+    position; the camera plays no part. (G2 had already made the scout ignore MPM's events by
+    source, so by then the order reached TerrainSupport's dirty queue, not the scout's floods.)*
 - **Physics engine:** Jolt (`project.godot:87`). No RigidBodies are spawned any more (debris
   removed), so Jolt only moves the player. Player movement is *not* replayed at the action level
   (positions are recorded instead), so Jolt determinism isn't needed. Godot-Jolt explicitly
@@ -110,12 +113,15 @@ Saved [V] (`world_snapshot.gd:131-190`, `edit_store_manager.gd:36-56`):
 
 Not saved:
 - **PartIndex** (records, ancestry, `_next_id`) — created fresh in `world.gd:31`, never
-  persisted. A scenario starting from a save loses part identity for pre-existing parts. [V]
+  persisted. A scenario starting from a save loses part identity for pre-existing parts. [V] *Fixed
+  2026-09-27 (Claude, overnight G4.0): the snapshot (v9) carries it, bit-exact.*
 - CsgState (dims/op/rotation), placement_offset — irrelevant if steps record resolved args.
 - MPM particles and TerrainSupport dirty queue — save is gated on `is_quiescent()`
   (`structural_integrity.gd:73-79`). [V]
 - **DetachmentScout `_pending` / in-flight flood — not part of `is_quiescent()`**, so a save can
-  drop a pending detachment. [V from reading; I that it happens in practice]
+  drop a pending detachment. [V from reading; I that it happens in practice] *Fixed
+  2026-09-27 (Claude, overnight G4.0): the gate waits for the scout, and for MPM freeze chunks not
+  yet announced.*
 - Camera FOV, dcworld knobs (radius, eps, refine, retain, max cells, threads), fly/noclip,
   examine state. Needed for **render** assertions, not store ones.
 - Generator code version. A change to `terrain_field.h` silently changes unedited ground under a

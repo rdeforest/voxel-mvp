@@ -76,7 +76,7 @@ func _wire(es: EditStore, ms: MpmStructure) -> Dictionary:
     scout.setup(es, si)
 
     VoxelEventBusSingleton.emit(WorldReadyEvent.CHANNEL, WorldReadyEvent.new())   # arms _active
-    return {"store": es, "mpm": ms, "scout": scout}
+    return {"store": es, "mpm": ms, "scout": scout, "integrity": si}
 
 
 func _emit_edit(lo: Vector3, size: Vector3, source := EditSource.Kind.PLAYER) -> void:
@@ -114,6 +114,40 @@ func test_grounded_terrain_is_left_alone() -> void:
     _emit_edit(Vector3(CX - 4, float(top) - 8, CZ - 4), Vector3(8, 8, 8))
     _drive(rig.scout, 400)
     assert_eq(ms.active_count(), 0, "grounded terrain reaches bedrock — nothing detaches")
+
+
+# (Drafted by Claude, overnight 2026-09-27.) Pending seeds aren't saved, so a save (or a recording's
+# start) taken while the scout still has an edit to resolve would drop a detachment for good: the
+# gate waits for the scout as it waits for support and MPM.
+func test_the_save_gate_waits_for_the_scouts_pending_work() -> void:
+    var rig := _rig()
+    var si: StructuralIntegrity = rig.integrity
+    var top := _surface()
+    _emit_edit(Vector3(CX - 4, float(top) - 8, CZ - 4), Vector3(8, 8, 8))
+    assert_true(si.force_quiescent(), "precondition: support settles")
+    assert_false(rig.scout._pending.is_empty(), "precondition: the edit left seeds to resolve")
+
+    assert_false(si.is_quiescent(), "not quiescent while the scout has seeds pending")
+    _drive(rig.scout, 1)
+    assert_not_null(rig.scout._flood, "precondition: a flood is now in flight")
+    assert_false(si.is_quiescent(), "nor while its flood is in flight")
+
+    _drive(rig.scout, 400)
+    assert_true(si.force_quiescent(), "support settles")
+    assert_eq(rig.mpm.active_count(), 0, "precondition: grounded terrain, nothing detached")
+    assert_true(si.is_quiescent(), "quiescent once the scout has resolved everything")
+
+
+# (Drafted by Claude, overnight 2026-09-27.) A seed no flood will ever visit, because its cell went
+# air before the scout reached it, must still leave the queue, or it would hold the save gate shut.
+func test_a_seed_that_went_air_does_not_hold_the_gate() -> void:
+    var rig := _rig()
+    var sky := Vector3i(int(CX), _surface() + 60, int(CZ))
+    assert_false(TerrainProbe.is_solid(rig.store, sky), "precondition: the seed cell is air")
+    rig.scout._pending[sky] = true
+
+    _drive(rig.scout, 1)
+    assert_true(rig.scout.is_idle(), "the air seed is dropped without a flood")
 
 
 func test_edit_during_mpm_flight_waits_for_the_material_to_settle() -> void:
