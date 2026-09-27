@@ -404,10 +404,12 @@ Array DCOctreeMesher::grow_world(Vector3 camera, double proj, double eps_px, Vec
 		oct.reconcile(0);    // graft leading edge (samples only new cells) + evict trailing edge; collect refines
 	}
 	oct.last_reconcile_us = OS::get_singleton()->get_ticks_usec() - tb0; // c4: isolate the O(tree) walk cost
+	oct.refine_retired = 0;
 	if (refine_budget >= 0 || reuse_frontier) {
 		oct.refine_selected(refine_budget, reuse_frontier); // worst-error first for up to refine_budget us; defer the rest
 	}
 	_last_refine_queue = oct.refine_heap_end; // remaining backlog after this grow's drain
+	_last_refine_retired = oct.refine_retired;
 	uint64_t tra0 = OS::get_singleton()->get_ticks_usec();
 	// c4: incremental ALWAYS. reconcile now marks path_dirty at every qef change (graft/evict/unbudgeted-refine),
 	// so a move prunes the re-sum to the changed paths just like a drain — O(changed), not O(tree). reset_leaves
@@ -609,6 +611,7 @@ void DCOctreeMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remesh", "camera", "proj", "eps_px"), &DCOctreeMesher::remesh);
 	ClassDB::bind_method(D_METHOD("get_last_build_sample_count"), &DCOctreeMesher::get_last_build_sample_count);
 	ClassDB::bind_method(D_METHOD("get_last_refine_queue_size"), &DCOctreeMesher::get_last_refine_queue_size);
+	ClassDB::bind_method(D_METHOD("get_last_refine_retired_count"), &DCOctreeMesher::get_last_refine_retired_count);
 	ClassDB::bind_method(D_METHOD("get_octree_cell_count"),      &DCOctreeMesher::get_octree_cell_count);
 	ClassDB::bind_method(D_METHOD("get_cell_arena_bytes"),      &DCOctreeMesher::get_cell_arena_bytes);
 	ClassDB::bind_method(D_METHOD("get_cell_resident_bytes"),   &DCOctreeMesher::get_cell_resident_bytes);

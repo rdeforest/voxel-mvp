@@ -29,11 +29,11 @@ struct Cell {
 	int parent = -1;       // c2 (doc 20): up-link, so a refine can mark its ancestor path dirty for the
 	                       // incremental reaccumulate/collapse (skip the clean subtrees a drain didn't touch).
 	bool path_dirty = false; // a descendant changed this grow → reaccumulate/recollapse must descend here
-	int vertex = -1;
 	bool leaf = true;
 	bool absent = false; // window_mode: a leaf OUTSIDE the resident window — no QEF, no vertex, not
 	                     // meshed. The window boundary is the resident mesh's open rim (like the clipmap's
 	                     // outer edge). Distinct from a splice's build-box-miss leaf, which IS meshed.
+	int vertex = -1;     // after the three bools so their padding absorbs `gen` (Cell stays 124 B)
 	// Hot/cold split: the QEF (the big, ~120 B cold field) lives in the parallel `qefs` arena, NOT here — the
 	// full-arena hot passes (reconcile / reset_leaves / collapse) never read it, so keeping it out of the hot
 	// Cell shrinks what they stream from disk (296→256→~136 B/cell). Indexed by the same cell index. See `qefs`.
@@ -57,7 +57,14 @@ struct Cell {
 	// so a drain tombstones the old range + appends the new one instead of rebuilding the whole mesh.
 	int tri_at = 0;                 // first triangle index into the persistent owner/index arrays
 	int tri_n  = 0;                 // number of triangles this leaf currently owns (0 = not emitting)
+	// Per-SLOT generation: a frontier entry is valid only while its cell's gen equals the gen it was queued
+	// with — the heap's lazy deletion. See Octree::retire. alloc_cell/build() reuse never resets it; only
+	// init_cell zeroes it, and only on a fresh Octree (asserted in build_bottomup_parallel).
+	uint32_t gen = 0;
 };
+// The hot passes stream the whole cell arena; +4 B (to 128) measured 15-25% slower move reconcile at 65M
+// cells (doc 20 "Frontier lazy invalidation"). Growing Cell is a perf decision — re-measure, then update this.
+static_assert(sizeof(Cell) == 124, "Cell size changed: re-measure bench_grow_split before accepting");
 
 // Builds + meshes one octree over a clipmap: subdivide to the clipmap's
 // per-position target size (the data-resolution floor), then — when error_driven —
@@ -108,9 +115,10 @@ struct Octree {
 	                               // this proves the retained interior was NOT resampled (the B1 win).
 	int  refine_budget = -1;       // C/P (doc 20): wall-clock µs cap for refine_selected; -1 = unbudgeted (a move).
 	bool refine_pending = false;   // a budgeted reconcile deferred some refinement → caller drains over frames.
-	struct RefineCand { double err; int idx; }; // P: a floor-refine candidate keyed by its error `we` (camera-indep)
+	struct RefineCand { double err; int idx; uint32_t gen; }; // P: a floor-refine candidate keyed by its error `we` (camera-indep); gen = its cell's gen when queued
 	LocalVector<RefineCand> refine_cands;        // c1 (doc 20): PERSISTENT frontier heap — drained across grows, rebuilt on change
 	int  refine_heap_end = 0;                    // live heap size in refine_cands[0, refine_heap_end); pops shrink it
+	int  refine_retired  = 0;                    // entries refine_selected popped and dropped as retired (caller resets)
 
 	// c3 tier 1 (doc 20): persistent incremental emit. verts/indices/etc. survive across grows; a drain
 	// tombstones changed leaves' triangles (degenerate them in place) and appends the new ones, then a full
@@ -190,10 +198,19 @@ struct Octree {
 					to_v3(origin), to_v3(origin) + Vector3(1, 1, 1) * double(size)));
 	}
 
+	// Invalidate every frontier entry naming this slot. Called wherever a cell stops being the refinable
+	// leaf it was when queued — freed, regrown, evicted, or re-sampled (its key changed) — so an edit or
+	// eviction never has to find and remove entries: refine_selected drops them as they surface (lazy
+	// deletion). Wrap-around would need 2^32 retirements of one slot between a queue and its pop.
+	void retire(int idx) {
+		++cells[idx].gen;
+	}
+
 	// Assign this leaf's Hermite data from its own edges and charge the build counter.
 	// Call sites that are transitioning an absent leaf to present must set absent=false
 	// themselves (the extra step stays inline so this helper stays narrowly scoped).
 	void sample_leaf(int idx) {
+		retire(idx); // the queued key `we` was this cell's old qef's residual
 		qefs[idx] = leaf_qef(idx);
 		cells[idx].dirty = true; // qef changed → ancestors re-sum, this leaf's solve caches invalidate (grow path)
 		++build_samples;
@@ -501,6 +518,7 @@ struct Octree {
 		c.path_dirty = false;
 		c.parent = -1; // set by the caller's build/grow loop after this returns; root stays -1
 		c.tri_n = 0;   // c3: not emitting yet (no cached triangle range)
+		c.gen = 0;     // resize_uninitialized slot; only run() builds this way, into a fresh Octree with no frontier
 		for (int i = 0; i < 8; ++i) {
 			c.children[i] = -1;
 		}
@@ -512,6 +530,7 @@ struct Octree {
 	// and collapse can walk by level too. Cell layout is frontier-ordered (a different order than build()'s
 	// DFS) but the SAME SET of cells → identical surface, only vertex NUMBERING differs.
 	void build_bottomup_parallel() {
+		DEV_ASSERT(refine_cands.is_empty() && free_list.is_empty()); // init_cell zeroes gen: no live entry may name a slot
 		level_start.clear();
 		int root = alloc_cell();
 		init_cell(root, Vector3i(0, 0, 0), root_size);
@@ -1404,6 +1423,7 @@ struct Octree {
 		int size = cells[idx].size;
 		int half = size >> 1;
 		int d = cell_depth(size) + 1;
+		retire(idx);
 		cells[idx].leaf = false;
 		cells[idx].absent = false;
 		for (int i = 0; i < 8; ++i) {
@@ -1426,6 +1446,7 @@ struct Octree {
 			cells[idx].children[i] = -1;
 		}
 		qefs[idx] = Qef();
+		retire(idx);
 		cells[idx].vertex = -1;
 		cells[idx].leaf = true;
 		cells[idx].absent = true;
@@ -1454,6 +1475,7 @@ struct Octree {
 			// cells are a no-op; only a NEWLY evicted cell changed its qef (→ empty), so only it dirties.
 			if (!cells[idx].absent) {
 				discard_children(idx);
+				retire(idx);
 				cells[idx].leaf = true;
 				cells[idx].absent = true;
 				cells[idx].dirty = true;
@@ -1486,7 +1508,7 @@ struct Octree {
 			Vector3 cmin = to_v3(cells[idx].origin);
 			Vector3 cmax = cmin + Vector3(1, 1, 1) * double(cells[idx].size);
 			double we = Math::sqrt(qefs[idx].residual(qefs[idx].solve(cmin, cmax)));
-			refine_cands.push_back(RefineCand{ we, idx });
+			refine_cands.push_back(RefineCand{ we, idx, cells[idx].gen });
 		} else {
 			grow_subtree(idx);   // unbudgeted (a move): subdivide to the (finer) floor — full window coverage
 			accumulate_qef(idx);
@@ -1527,12 +1549,16 @@ struct Octree {
 			std::pop_heap(base, base + refine_heap_end, worse);  // worst candidate → slot refine_heap_end-1
 			--refine_heap_end;
 			int x = base[refine_heap_end].idx;
-			grow_subtree(x);                                     // at least one per call → always makes progress
-			accumulate_qef(x);                                   // x.qef now current (leaf → accumulated)
-			cells[x].we_valid = false;                           // x's cached solve/residual belonged to its old
-			cells[x].vtx_valid = false;                          // leaf qef — stale now
-			mark_path_dirty(x);                                  // mark x + ancestors: incremental reaccum re-sums
-			                                                     // the path, recollapse_dirty re-collapse-tests x
+			if (base[refine_heap_end].gen != cells[x].gen) {
+				++refine_retired;                                // retired since queued (an edit freed/regrew/resampled
+			} else {                                             // it); still charged to the budget below
+				grow_subtree(x);                                 // at least one pop per call → always makes progress
+				accumulate_qef(x);                               // x.qef now current (leaf → accumulated)
+				cells[x].we_valid = false;                       // x's cached solve/residual belonged to its old
+				cells[x].vtx_valid = false;                      // leaf qef — stale now
+				mark_path_dirty(x);                              // mark x + ancestors: incremental reaccum re-sums
+				                                                 // the path, recollapse_dirty re-collapse-tests x
+			}
 
 			if (budget_us >= 0 && int64_t(OS::get_singleton()->get_ticks_usec() - t0) >= int64_t(budget_us)) {
 				break;

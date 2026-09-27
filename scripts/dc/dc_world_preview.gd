@@ -416,8 +416,10 @@ func _finish() -> void:
     Perf.mark_event()
     if _inval != null and _inval.is_enabled():
         _emit_diagnostic()   # refresh the dcinval LOD overlay for this mesh
-    _refine_pending = _job_is_grow and _mesher.get_refine_pending()   # C: more refinement deferred → keep draining
-    Perf.report_queue(_mesher.get_last_refine_queue_size() if _job_is_grow else 0)   # backlog graph in the perf window
+    # C: more refinement deferred → keep draining. An edit keeps the frontier (it retires only the entries it
+    # made obsolete — doc 20 "Frontier lazy invalidation"), so the drain resumes after it; a build starts empty.
+    _refine_pending = (_job_is_grow or _job_is_edit) and _mesher.get_refine_pending()
+    Perf.report_queue(_mesher.get_last_refine_queue_size() if (_job_is_grow or _job_is_edit) else 0)   # backlog graph in the perf window
     _check_arena_backing()   # M2: first build done → the cell arena has initialised; warn if it isn't disk-backed
     # Debug: when `dcverify` is on, the worker self-checks each emit for dangling-slot triangles. Toast ONCE on
     # the first trip (no per-frame spam); after that the full diagnostic streams over REST (/stats → "verify").
@@ -472,7 +474,9 @@ func _control() -> void:
         _eps_px = minf(_eps_px * 1.4, EPS_MAX)
     elif under:
         _eps_px = maxf(_eps_px * 0.9, EPS_MIN)
-    _eps_dirty = absf(_eps_px - prev) > 0.01
+    # OR, not assign: an edit job doesn't consume the flag, so a change made before it must survive to force
+    # the next grow to re-collect the frontier at the new floor instead of draining the stale one.
+    _eps_dirty = _eps_dirty or absf(_eps_px - prev) > 0.01
 
 
 func set_frame_budget(ms: float) -> void:

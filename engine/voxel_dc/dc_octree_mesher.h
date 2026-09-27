@@ -47,6 +47,9 @@ class DCOctreeMesher : public RefCounted {
 	// drained it): how many leaves still want sharpening at the current eps. The perf overlay graphs it draining.
 	int _last_refine_queue = 0;
 
+	// Frontier entries the last grow_world popped and dropped because an edit had since retired their cell.
+	int _last_refine_retired = 0;
+
 	// Phase timing for the last mesh_world or grow_world call (milliseconds).
 	// _last_accel_ms  = time spent in bake_accel (0 when the accel was reused in grow_world).
 	// _last_build_ms  = time spent in the build/reconcile + reaccumulate pass (field sampling).
@@ -193,6 +196,8 @@ public:
 	// rebuild grow collected (valid only while camera floor, eps and window are unchanged). A reuse grow
 	// always refines: refine_budget caps it as usual, -1 drains the whole retained frontier. A rebuild grow
 	// that is unbudgeted refines inline and leaves the frontier empty, so a reuse after it is a no-op.
+	// An edit_world in between keeps the frontier valid: entries for cells the edit freed, regrew or
+	// re-sampled are skipped when popped, and the edited band itself is refined to the floor by the edit.
 	Array grow_world(Vector3 camera, double proj, double eps_px, Vector3i win_min, Vector3i win_max, int refine_budget = -1, Vector3i emit_min = Vector3i(), Vector3i emit_max = Vector3i(), bool reuse_frontier = false);
 
 	// True if the last grow_world left refinement deferred by its budget — drain by growing again (same eps).
@@ -209,6 +214,9 @@ public:
 
 	// Outstanding refine work the last grow found (leaves still wanting sharpening at the current eps).
 	int get_last_refine_queue_size() const { return _last_refine_queue; }
+
+	// Frontier entries the last grow dropped as retired (freed, regrown or re-sampled since queued).
+	int get_last_refine_retired_count() const { return _last_refine_retired; }
 
 	// Total slots in the retained octree's cell array (live + free-list). Bounded across a traverse (B1b).
 	int get_octree_cell_count() const;
