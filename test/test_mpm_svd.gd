@@ -9,7 +9,7 @@ extends GutTest
 # and the parity of the permutation that sorts the axis stretches by magnitude. With Jacobi+sort,
 # that parity is det V before the flips, so the axis-aligned inputs reach the none / both / U / V
 # reflection rows exactly; the rotated ones ride along. Mapping and the wrong fixes these catch:
-# docs/bugs/closed/mpm-svd-reflection-sign.md.
+# https://github.com/rdeforest/voxel-mvp/issues/28.
 
 const TOL := 1e-9
 
@@ -111,7 +111,7 @@ func test_moderately_near_singular() -> void:
 
 # Exactly rank-deficient inputs: σ has exact zeros, so F gives those columns of U no direction
 # and the routine has to complete U to a rotation. At rank ≤ 1 it used to build them from columns
-# it hadn't written yet (docs/bugs/mpm-svd-ill-conditioned-u.md).
+# it hadn't written yet (https://github.com/rdeforest/voxel-mvp/issues/17).
 func _assert_rank_deficient(f: Basis, label: String, sigma: Vector3) -> void:
     var r := MpmSim.new().debug_svd(f)
 
@@ -141,7 +141,7 @@ func test_rank_zero() -> void:
 
 
 func test_severely_near_singular() -> void:
-    pending("docs/bugs/mpm-svd-ill-conditioned-u.md: U loses orthonormality below σ_min/σ_max ≈ 1e-4 (awaits the McAdams rewrite)")
+    pending("https://github.com/rdeforest/voxel-mvp/issues/17: U loses orthonormality below σ_min/σ_max ≈ 1e-4 (awaits the McAdams rewrite)")
 
 
 # --- seeded random ---
@@ -176,7 +176,7 @@ func test_random_general_matrices() -> void:
     rng.seed = 1597
 
     # Nothing bounds these matrices' conditioning; this seed's worst is #10 at σ₂/σ₀ ≈ 6.8e-3, inside
-    # the 1e-3 floor TOL holds to (docs/bugs/mpm-svd-ill-conditioned-u.md). Re-check if it changes.
+    # the 1e-3 floor TOL holds to (https://github.com/rdeforest/voxel-mvp/issues/17). Re-check if it changes.
     for i in 32:
         var f := Basis()
         for c in 3:

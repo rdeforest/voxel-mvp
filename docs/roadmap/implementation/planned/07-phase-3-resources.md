@@ -9,19 +9,19 @@ Spec for the continuous-work-action UX at
 
 ## Tasks
 
-- **FEAT008**: Destructible resource nodes — trees, rocks, ore
+- **FEAT008** ([#82](https://github.com/rdeforest/voxel-mvp/issues/82)): Destructible resource nodes — trees, rocks, ore
   deposits, bushes.
-- **FEAT009**: Continuous work actions — state machine
+- **FEAT009** ([#83](https://github.com/rdeforest/voxel-mvp/issues/83)): Continuous work actions — state machine
   (IDLE → TARGETING → WORKING → INTERRUPTED → RESUMING), progress bar,
   speed depends on tool/material.
-- **FEAT010**: Directional tree felling — notch cut, choose fall
+- **FEAT010** ([#84](https://github.com/rdeforest/voxel-mvp/issues/84)): Directional tree felling — notch cut, choose fall
   direction; tree falling physics.
-- **FEAT011**: Resource drops as collectible items.
-- **FEAT012**: Item data model — ID, name, icon, stack size, category,
+- **FEAT011** ([#85](https://github.com/rdeforest/voxel-mvp/issues/85)): Resource drops as collectible items.
+- **FEAT012** ([#86](https://github.com/rdeforest/voxel-mvp/issues/86)): Item data model — ID, name, icon, stack size, category,
   weight.
-- **FEAT013**: Voxel material types for ore (copper voxel → drops
+- **FEAT013** ([#87](https://github.com/rdeforest/voxel-mvp/issues/87)): Voxel material types for ore (copper voxel → drops
   copper when mined).
-- **FEAT014**: Interaction system — raycast → detect → prompt →
+- **FEAT014** ([#88](https://github.com/rdeforest/voxel-mvp/issues/88)): Interaction system — raycast → detect → prompt →
   execute.
 
 ## Key decisions

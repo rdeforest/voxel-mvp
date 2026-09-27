@@ -55,8 +55,8 @@ Test coverage: `DCOctreeMesher` (`mesh_world`/`grow_world`) by
 uniform/two-level meshing core, still used as a meshing harness) by
 `test/test_dc_octree_mesher.gd` and `test/test_dc_real_terrain.gd`.
 
-Known render bugs live in `docs/bugs/` (inside-coverage cracks, reversed ridge
-triangles).
+Known render bugs are GitHub issues labelled `area:dc-mesher` (inside-coverage cracks
+[#6](https://github.com/rdeforest/voxel-mvp/issues/6), reversed ridge triangles [#8](https://github.com/rdeforest/voxel-mvp/issues/8)).
 
 **Retired.** The camera-centered clipmap render (`DCTerrainManager`, the
 `dcmanager` toggle), the `DcSubstratePreview`/`dcgen` substrate preview, the
@@ -307,7 +307,7 @@ The scout tells edits apart by source: for its own detachment thaw (`SCOUT`)
 it seeds only from the cells the thaw flipped outside the component it thawed
 (the carve is solved to flip none, but the seeding follows measured flips, not the
 promise), and it ignores `MPM` freezes: seeding from their measured flips
-was measured to loop (`docs/bugs/scout-ignores-freeze-flips.md`). It
+was measured to loop ([#20](https://github.com/rdeforest/voxel-mvp/issues/20) (`scout-ignores-freeze-flips`)). It
 pauses resolving while material is in flight, so
 detachment proceeds in settled waves; edits made during flight are queued, not
 dropped. That's what breaks the runaway cascade the old scalar trigger risked.
@@ -483,7 +483,7 @@ names.
   rewritten leaves is bit-identical before and after a write or stamp
   (`test_edit_store_subdivide_exact`). Inside, the field is the lattice's trilerp, even where it
   matches the old corners, so a write's `changed` can be true where `writes` is false
-  (`docs/bugs/closed/edit-store-noop-write-reports-changed.md`).
+  ([#26](https://github.com/rdeforest/voxel-mvp/issues/26) (`edit-store-noop-write-reports-changed`)).
 - **Lattice writes are typed.** `StoreWrite` takes `Array[LatticeEdit]` (lattice point, new
   SDF, leaf material or -1 to keep) — FillVoxel, EmptyVoxel and the MPM carve all hand it that;
   `StoreWrite.lattice(store, work).flips(store)` is what the work does to cells. Bell and Flatten
@@ -505,7 +505,7 @@ sculpts (Raise, Lower) ask `PlayerSafeAction.endangered_by` of the field they
 write: each refuses to turn any point of the player's capsule solid or of the
 support box under their feet air. Dig deliberately does not: players expect to
 dig under themselves, and directives will replace it
-(`docs/bugs/closed/dig-action-no-validate-no-safety.md`).
+([#24](https://github.com/rdeforest/voxel-mvp/issues/24) (`dig-action-no-validate-no-safety`)).
 `ConstructionAction.validate` requires a part cell to overlap existing solid OR
 rest directly on solid below — a part floating in air is refused, and one that
 would bury the player is refused. Where an edit can't refuse but might overlap a

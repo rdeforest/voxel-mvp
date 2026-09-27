@@ -12,7 +12,7 @@ without you. Evidence is in the named bug files and commits.*
 **Context.** Godot's text→double reader is off by an ulp on about 24 % of 17-digit doubles, and it
 reads every value below about 1e-308 as 0. Open issue
 [#123700](https://github.com/godotengine/godot/issues/123700) covers the rounding but not the
-underflow case. We work around both (`bugs/godot-float-parse-inexact.md`,
+underflow case. We work around both ([#13](https://github.com/rdeforest/voxel-mvp/issues/13) (`godot-float-parse-inexact`),
 `roadmap/reference/10-godot-float-parsing.md`). Posting is outward-facing, so I haven't.
 
 **Draft comment:**
@@ -30,7 +30,7 @@ underflow case. We work around both (`bugs/godot-float-parse-inexact.md`,
 
 ### 2. A grid-aligned 1 m post renders and collides, but the structural code can't see it
 
-**Where:** `bugs/scout-ignores-freeze-flips.md` (F3).
+**Where:** [#20](https://github.com/rdeforest/voxel-mvp/issues/20) (`scout-ignores-freeze-flips`) (F3).
 
 **Context.** F3 made freezes report their measured flips, but letting the detachment scout seed from
 them loops on one shape: a 1 m CSG post aligned to the cell grid. Its cell centres sit exactly at
@@ -54,7 +54,7 @@ solid" caller depends on it. Until then, (3).
 
 ### 3. Should every box writer keep unplanned cells on their side?
 
-**Where:** `bugs/store-write-reencode-flips-unplanned-cells.md` (F1).
+**Where:** [#23](https://github.com/rdeforest/voxel-mvp/issues/23) (`store-write-reencode-flips-unplanned-cells`) (F1).
 
 **Context.** Your Q3 answer ("repair it in the same solve") is now applied to the MPM thaw, which
 carves exactly with zero stray flips. The other box writers (raise/lower, flatten, fill, dig, CSG,
@@ -93,7 +93,7 @@ time.
 **Context.** E1's probe saw thawed blocks land and then slide steadily down the slope near the
 origin: about 130 m of drop over 3000 ticks with contact friction 0.35, and they never settle.
 
-**Diagnosed after the brief** (`bugs/mpm-contact-friction-and-damping.md`). The slide itself is
+**Diagnosed after the brief** ([#15](https://github.com/rdeforest/voxel-mvp/issues/15) (`mpm-contact-friction-and-damping`)). The slide itself is
 expected: the origin is a 66° cone peak, far past the friction angle of 19.3°. But the contact model
 has four real defects: friction is viscous rather than Coulomb (blocks creep on any slope), damping
 acts in free flight, the non-unit SDF is used as a distance (2.46× contact overshoot), and the settle
@@ -124,7 +124,7 @@ series of drains costs about 12 % more per cell refined. It isn't explained yet.
 **Diagnosed after the brief:** not a regression. At an equal number of refined cells the cost is
 unchanged (1.84 vs 1.86 µs per cell); the "12 %" compared runs that refined different numbers of
 cells. **But it found a real problem:** a "20 ms" drain takes 32–76 ms of wall time, because
-collapse and emit after the budgeted refine have no budget (`bugs/dc-drain-collapse-emit-unbudgeted.md`).
+collapse and emit after the budgeted refine have no budget ([#4](https://github.com/rdeforest/voxel-mvp/issues/4) (`dc-drain-collapse-emit-unbudgeted`)).
 
 **My take:** that belongs in the "compelling, not accurate" session, since it's the mesher's frame
 cost.
@@ -156,7 +156,7 @@ Park these for that session, since they're your area and interact with reference
 
 ### 11. Chunked freezes announce their flips over several frames
 
-**Where:** `bugs/mpm-chunked-freeze-flips-arrive-late.md` (F3).
+**Where:** [#14](https://github.com/rdeforest/voxel-mvp/issues/14) (`mpm-chunked-freeze-flips-arrive-late`) (F3).
 
 **Context.** Large freezes (over 24 m) re-mesh in chunks over several frames, and each chunk's event
 carries the flips inside it, so a listener can see a later event before a freeze's flips have all
@@ -193,7 +193,7 @@ needs parts to have their own physics response, which doesn't exist yet.
 
 ### 15. Lambda or `.bind()`ed subscriptions on the event bus
 
-**Where:** `bugs/event-bus-lambda-and-bound-callables.md`.
+**Where:** [#12](https://github.com/rdeforest/voxel-mvp/issues/12) (`event-bus-lambda-and-bound-callables`).
 
 **My take:** refuse them loudly at subscribe time. Today they fail silently at first delivery.
 
@@ -231,7 +231,7 @@ after most edits.
 
 ### 19. Check loaded inherited leaves against their source?
 
-**Where:** `bugs/edit-store-blob-inherited-corners-unchecked.md` (F2).
+**Where:** [#11](https://github.com/rdeforest/voxel-mvp/issues/11) (`edit-store-blob-inherited-corners-unchecked`) (F2).
 
 **My take:** yes. It's cheap, and it matches J1's "vet the whole blob before touching the store".
 

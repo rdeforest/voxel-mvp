@@ -180,7 +180,7 @@ Yes, make them match. Good call.
 
 ## 7. Sub-cell part identity in PartIndex
 
-**Where:** [`part-index-sub-cell-parts-untracked`](../../../bugs/part-index-sub-cell-parts-untracked.md)
+**Where:** [`part-index-sub-cell-parts-untracked`](https://github.com/rdeforest/voxel-mvp/issues/18)
 
 **Context.** A part thinner than a cell (a 0.5 m log between cell centres) makes no cell solid, so
 PartIndex has nothing to key it by and keeps no record.
@@ -216,7 +216,7 @@ Agreed, close it.
 
 ## 9. SVD ill-conditioning: fix now or wait for the rewrite?
 
-**Where:** [`mpm-svd-ill-conditioned-u`](../../../bugs/mpm-svd-ill-conditioned-u.md)
+**Where:** [`mpm-svd-ill-conditioned-u`](https://github.com/rdeforest/voxel-mvp/issues/17)
 
 **Context.** MPM's 3×3 SVD degrades as a deformation nears singular: U stops being a rotation at
 σ₂/σ₀ ≈ 1e-8, and at rank ≤ 1 it reads memory that was never written (undefined behaviour). Whether the
@@ -261,7 +261,7 @@ which has been made obsolete? Clearing the whole frontier seems .. dramatic.
 
 ## 11. One-shot frontier drain drops 89 triangles
 
-**Where:** [`dc-incremental-emit-ring-insufficient`](../../../bugs/dc-incremental-emit-ring-insufficient.md)
+**Where:** [`dc-incremental-emit-ring-insufficient`](https://github.com/rdeforest/voxel-mvp/issues/5)
 
 **Context.** H1 reproduced the incremental-emit drop headlessly. Draining the whole frontier in one
 grow drops 89 triangles (596 rendered against 684 from a full re-emit). A pending GUT test is ready as
@@ -280,7 +280,7 @@ improvements.
 
 ## 12. A no-op-looking write still reports `changed`
 
-**Where:** [`edit-store-noop-write-reports-changed`](../../../bugs/closed/edit-store-noop-write-reports-changed.md)
+**Where:** [`edit-store-noop-write-reports-changed`](https://github.com/rdeforest/voxel-mvp/issues/26)
 
 **Context.** Writing the store's own values back over a coarse or inherited leaf moves its samples by
 about 1e-8, and the write truthfully reports `changed = true`. Consequence today: at most one extra
@@ -302,7 +302,7 @@ Agreed, I suspect this is another item that will be mooted by bigger work.
 
 ## 13. Dry run reads the generator twice
 
-**Where:** [`actions-lattice-dry-run-double-generator`](../../../bugs/actions-lattice-dry-run-double-generator.md)
+**Where:** [`actions-lattice-dry-run-double-generator`](https://github.com/rdeforest/voxel-mvp/issues/1)
 
 **Context.** A refused CSG preview reads the terrain generator at the same 2,744 points twice, about
 0.045 ms of 0.34 ms.

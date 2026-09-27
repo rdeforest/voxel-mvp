@@ -16,7 +16,7 @@ extends Node
 #   - MPM freeze events are ignored entirely, flips and all. That is a known hole: the freeze's 1 m
 #     rewrite can empty a cell and leave a neighbour unsupported. Seeding from its flips was measured
 #     to loop: a pile frozen onto geometry the collider holds but GroundFlood reads as air floods
-#     DETACHED, thaws, and freezes again (docs/bugs/scout-ignores-freeze-flips.md).
+#     DETACHED, thaws, and freezes again (https://github.com/rdeforest/voxel-mvp/issues/20).
 #   - It pauses resolving while MPM has material in flight, so the next wave is judged against the
 #     post-fall world. Edits by anyone else during flight are queued, not dropped.
 # So detachment proceeds in settled waves, never a runaway feedback loop.

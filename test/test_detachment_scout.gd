@@ -230,7 +230,7 @@ func test_the_scout_seeds_from_its_own_thaws_collateral_flips() -> void:
 
 
 # (Drafted by Claude, overnight 2026-09-27.) A freeze is ignored even when it carries measured
-# flips, both a cell it emptied and one it made solid (docs/bugs/scout-ignores-freeze-flips.md).
+# flips, both a cell it emptied and one it made solid (https://github.com/rdeforest/voxel-mvp/issues/20).
 func test_a_freezes_flips_seed_nothing() -> void:
     var rig     := _rig()
     var top     := _surface()

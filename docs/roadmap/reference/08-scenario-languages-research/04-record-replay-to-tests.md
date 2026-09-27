@@ -24,7 +24,7 @@ Legend: **[V]** = verified by reading code / docs; **[I]** = inference, not veri
 **Recommended single hook:** replace lines 285-291 of `player.gd` with a call to a small
 `ActionJournal.run(action)` (or emit a signal just before `execute()`), passing the already-built
 action. Record validate result too — "I clicked and nothing happened" (a refusal) is a bug class
-worth replaying (cf. `docs/bugs/player-safety-misses-sub-cell-burial.md`).
+worth replaying (cf. [#19](https://github.com/rdeforest/voxel-mvp/issues/19) (`player-safety-misses-sub-cell-burial`)).
 
 ### 1.2 What each action captures (is it pure in ctor args + store?)
 

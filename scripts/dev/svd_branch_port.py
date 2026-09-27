@@ -9,7 +9,7 @@ reflection handling (the C++ can't be mutated from GDScript).
 
 Variants: current (the code), report (the 2026-06-22 rule as written), anyflip (negate sigma2 once
 whenever any column flips), noflip, v_only, u_only (a missing flip).
-See docs/bugs/closed/mpm-svd-reflection-sign.md.
+See https://github.com/rdeforest/voxel-mvp/issues/28.
 """
 import math, sys
 def mul(a,b): return [[sum(a[i][k]*b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]

@@ -2,7 +2,7 @@ extends SceneTree
 
 # Throwaway: does a reuse drain's rendered surface match the unbudgeted grow, by first-grow budget and drain
 # budget? With the drop catcher on, the returned arrays are its full re-emit and dropped_total counts what the
-# incremental emit lost (docs/bugs/dc-incremental-emit-ring-insufficient.md).
+# incremental emit lost (https://github.com/rdeforest/voxel-mvp/issues/5).
 
 const T := preload("res://test/test_dc_world_octree.gd")
 

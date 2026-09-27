@@ -11,12 +11,12 @@ infrastructure that's expensive to replicate.
 
 ## Tasks
 
-- **FEAT076**: Steam integration — cloud saves, achievements,
+- **FEAT076** ([#126](https://github.com/rdeforest/voxel-mvp/issues/126)): Steam integration — cloud saves, achievements,
   matchmaking.
-- **FEAT077**: Tutorial / onboarding (the full version; v0.5 has just
+- **FEAT077** ([#127](https://github.com/rdeforest/voxel-mvp/issues/127)): Tutorial / onboarding (the full version; v0.5 has just
   text).
-- **FEAT078**: Content depth — enough biomes/enemies/bosses for 40+
+- **FEAT078** ([#128](https://github.com/rdeforest/voxel-mvp/issues/128)): Content depth — enough biomes/enemies/bosses for 40+
   hours.
-- **FEAT079**: QA across Linux + macOS.
-- **FEAT080**: Open-source release of the game code (Steam keeps the
+- **FEAT079** ([#129](https://github.com/rdeforest/voxel-mvp/issues/129)): QA across Linux + macOS.
+- **FEAT080** ([#130](https://github.com/rdeforest/voxel-mvp/issues/130)): Open-source release of the game code (Steam keeps the
   value-added features).

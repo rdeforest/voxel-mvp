@@ -94,10 +94,10 @@ along (tracked in `docs/bugs/`, deferred to the bug bash; Robert: "they're a fea
 
 ## Known bugs (deferred → [`docs/bugs/`](../../../bugs/00_INDEX.md))
 
-- **[dc-inside-coverage-cracks](../../../bugs/dc-inside-coverage-cracks.md)** — graded-floor coarse leaves
+- **[dc-inside-coverage-cracks](https://github.com/rdeforest/voxel-mvp/issues/6)** — graded-floor coarse leaves
   place misaligned vertices → LOD-seam holes inside the coverage. Reproduced headlessly (6 @ eps=94);
   proactive accumulate-fine-QEF fix proposed. **Blocks P3** (retiring the clipmap needs a watertight render).
-- **[dc-reversed-triangles-ridges](../../../bugs/dc-reversed-triangles-ridges.md)** — rare back-facing
+- **[dc-reversed-triangles-ridges](https://github.com/rdeforest/voxel-mvp/issues/8)** — rare back-facing
   triangles on ridges; pre-existing, in the live render too.
 
 ## Future ideas (parked)

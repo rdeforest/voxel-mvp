@@ -273,7 +273,7 @@ game's field has been found that the solve refuses, so the refusal path is teste
 GDScript probing.
 
 Inherited debt: the rewrite is a cube, so a flat plan rewrites far more than its span, and a 1 m write
-flattens finer leaves inside it ([edit-store-1m-write-flattens-finer-leaves](../../bugs/edit-store-1m-write-flattens-finer-leaves.md)).
+flattens finer leaves inside it ([edit-store-1m-write-flattens-finer-leaves](https://github.com/rdeforest/voxel-mvp/issues/10)).
 
 ### The freeze (as built)
 
@@ -300,14 +300,14 @@ elsewhere, so the measured flips can include air cells. Freezing the 9³ buried-
   freeze and a chunk's announcement is announced first, so the chunk's flips can be stale.
   TerrainSupport's box scan corrects a stale solid flip (below) but only partly a stale air flip, and
   PartIndex releases a part placed on a cell the freeze emptied
-  ([mpm-chunked-freeze-flips-arrive-late](../../bugs/mpm-chunked-freeze-flips-arrive-late.md)).
+  ([mpm-chunked-freeze-flips-arrive-late](https://github.com/rdeforest/voxel-mvp/issues/14)).
 - **The scout.** `DetachmentScout` still ignores freeze events. Seeding from a freeze's flips (the
   solid neighbours of each air flip, and each solid flip, as it does for its own thaw) was built and
   measured with `scripts/dev/probe_freeze_reflood.gd`, and it loops: a voxel dropped on a 1 m post
   aligned to the cell grid, whose cell centres read SDF 0 (air to the flood, ground to the collider),
   froze, was found detached and thawed 8 times, one post cell lower each time. The 15 other falls
   measured did not loop. Details and the fix options:
-  [scout-ignores-freeze-flips](../../bugs/scout-ignores-freeze-flips.md).
+  [scout-ignores-freeze-flips](https://github.com/rdeforest/voxel-mvp/issues/20).
 - **TerrainSupport's box scan** still drops a tracked cell it finds air. No writer is unmeasured any
   more, so this is a consistency check. It stays because of the late chunk flips described above.
 

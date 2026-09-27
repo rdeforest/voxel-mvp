@@ -84,7 +84,7 @@ Add terms as they come up.*
   records which cells each part owns, since the field itself carries only SDF and material.
 - **Player safety (`endangered_by`).** The check that refuses an edit that would bury the player or
   remove the ground under them. It currently misses sub-cell burials
-  (`bugs/player-safety-misses-sub-cell-burial.md`).
+  ([#19](https://github.com/rdeforest/voxel-mvp/issues/19) (`player-safety-misses-sub-cell-burial`)).
 
 ## Structure and physics
 

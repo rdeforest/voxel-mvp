@@ -85,10 +85,10 @@ it; the rename goes with the terrain→matter rename.
 Subscribers: `TerrainSupport` (tracks the flips, scans the box),
 `PartIndex` (releases the air flips, from any source), `DetachmentScout`
 (seeds from the box; for its own `SCOUT` thaw only from the flips outside
-the component it thawed; ignores `MPM`: `docs/bugs/scout-ignores-freeze-flips.md`), and the
+the component it thawed; ignores `MPM`: [#20](https://github.com/rdeforest/voxel-mvp/issues/20) (`scout-ignores-freeze-flips`)), and the
 DC render and collision (the box). A chunked freeze gives each chunk's event
 the flips inside its box, announced frames after the write
-(`docs/bugs/mpm-chunked-freeze-flips-arrive-late.md`).
+([#14](https://github.com/rdeforest/voxel-mvp/issues/14) (`mpm-chunked-freeze-flips-arrive-late`)).
 
 ## Bus API
 
@@ -140,7 +140,7 @@ held WeakRefs since `ee80b63`. Git has the old text.*
   object and method name, so a lambda's method can't be found and a
   `.bind()`ed callable loses its bound arguments: either fails at its
   first delivery with a script error. That behaviour is not designed; it
-  is an open bug (`docs/bugs/event-bus-lambda-and-bound-callables.md`).
+  is an open bug ([#12](https://github.com/rdeforest/voxel-mvp/issues/12) (`event-bus-lambda-and-bound-callables`)).
 
 Pinned by `test/test_voxel_event_bus.gd` (freed subscribers skipped and
 pruned, RefCounted auto-clean, unsubscribe silences, and the freed and

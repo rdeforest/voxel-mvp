@@ -14,33 +14,33 @@ isn't foreclosed, but nothing here depends on it.
 
 ## Survival loop
 
-- **FEAT065**: Survival loop — health, stamina, hunger, food buffs,
+- **FEAT065** ([#115](https://github.com/rdeforest/voxel-mvp/issues/115)): Survival loop — health, stamina, hunger, food buffs,
   comfort.
-- **FEAT069**: Death / respawn / bed placement.
+- **FEAT069** ([#116](https://github.com/rdeforest/voxel-mvp/issues/116)): Death / respawn / bed placement.
 
 ## Combat
 
-- **FEAT066**: Enemy AI + combat — raycast steering for outdoor
+- **FEAT066** ([#117](https://github.com/rdeforest/voxel-mvp/issues/117)): Enemy AI + combat — raycast steering for outdoor
   enemies; 3D nav grid or HPA* for dungeon enemies (see
   [pathfinding in known hard problems](../../design/07-known-hard-problems.md)).
-- **FEAT067**: Boss encounters as progression gates.
-- **FEAT068**: Procedural dungeons — generated cave complexes; no
+- **FEAT067** ([#118](https://github.com/rdeforest/voxel-mvp/issues/118)): Boss encounters as progression gates.
+- **FEAT068** ([#119](https://github.com/rdeforest/voxel-mvp/issues/119)): Procedural dungeons — generated cave complexes; no
   loading screens.
-- **FEAT071**: Material fatigue — cumulative strain history. Only
+- **FEAT071** ([#120](https://github.com/rdeforest/voxel-mvp/issues/120)): Material fatigue — cumulative strain history. Only
   meaningful with mobs hammering on structures.
 
 ## Locomotives
 
-- **FEAT070**: Locomotive-class vehicles — boiler / firebox / pressure-
+- **FEAT070** ([#121](https://github.com/rdeforest/voxel-mvp/issues/121)): Locomotive-class vehicles — boiler / firebox / pressure-
   driven pistons. Cellular automata for heat + pressure. The "wow,
   *that's* what this engine does" demo; depends on multi-grid +
   fracture + per-channel data all being mature.
 
 ## Polish
 
-- **FEAT072**: Settings menu, keybinding, accessibility.
-- **FEAT073**: Snap-point authoring UI — the v0.0 data exists; UI
+- **FEAT072** ([#122](https://github.com/rdeforest/voxel-mvp/issues/122)): Settings menu, keybinding, accessibility.
+- **FEAT073** ([#123](https://github.com/rdeforest/voxel-mvp/issues/123)): Snap-point authoring UI — the v0.0 data exists; UI
   ships here.
-- **FEAT074**: In-game Schematic editor — make new Parts at runtime.
-- **FEAT075**: Workbench radius (Valheim mechanic — build only near
+- **FEAT074** ([#124](https://github.com/rdeforest/voxel-mvp/issues/124)): In-game Schematic editor — make new Parts at runtime.
+- **FEAT075** ([#125](https://github.com/rdeforest/voxel-mvp/issues/125)): Workbench radius (Valheim mechanic — build only near
   workbench). Tentative; may not survive scrutiny.

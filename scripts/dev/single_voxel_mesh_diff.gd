@@ -5,7 +5,7 @@ extends RefCounted
 # volume. Occupancy is ray parity along +y per column: every column crosses the mesh an odd number
 # of times above a point iff the point is under the surface. Column positions carry an irrational
 # jitter so no ray runs exactly through a shared triangle edge. Used by probe_single_voxel.gd
-# (docs/bugs/single-voxel-edits-unexpected.md, Characterization).
+# (https://github.com/rdeforest/voxel-mvp/issues/22, Characterization).
 
 const DEPTH     := 13          # DcWorldPreview.DEPTH
 const ROOT_SNAP := 64          # DcWorldPreview.ROOT_SNAP
