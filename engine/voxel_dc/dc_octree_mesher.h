@@ -180,7 +180,7 @@ public:
 			const PackedColorArray &palette = PackedColorArray(),
 			Vector3i win_min = Vector3i(), // resident window (WORLD lattice); win_min == win_max ⇒ whole root
 			Vector3i win_max = Vector3i(), // graded data floor (eps_px/proj) is derived internally — one knob
-			int64_t max_cells = 0);        // memory budget: build stops descending past this (0 = arena cap only)
+			int64_t max_cells = 0);        // cell budget below the arena capacity, kept by later grows (0 = capacity)
 
 	// Incremental window growth (doc 16 Stage B): re-window the RETAINED world octree (from a prior
 	// mesh_world) — graft cells newly in [win_min, win_max), sampling only them; evict cells that left;
@@ -220,9 +220,17 @@ public:
 
 	// Total slots in the retained octree's cell array (live + free-list). Bounded across a traverse (B1b).
 	int get_octree_cell_count() const;
-	int64_t get_cell_arena_bytes() const;    // M2: total cell-arena size (disk)
-	int64_t get_cell_resident_bytes() const; // M2: cells currently in RAM (mincore)
-	bool is_arena_disk_backed() const;       // M2: false = fell back to anon RAM (OOM risk) → game warns
+	int64_t get_cell_arena_bytes() const;    // RAM held by the cell arenas (whole blocks)
+
+	// The cell limit (Q4): refinement stops gracefully at min(max_cells, get_cell_capacity()).
+	static int64_t get_cell_capacity();      // cells the RAM budget holds (DC_CELL_RAM_BUDGET)
+	bool get_cell_limit_hit() const;         // the last build/grow/edit left some refinement undone for lack of room
+	bool is_at_cell_limit() const;           // no room left for another subdivision (8 cells)
+	void set_cell_budget(int64_t max_cells); // a mid-session max_cells for the retained octree (0 = capacity)
+
+	// Test hook: grow a CellArena of `capacity` int64 slots to `count` across block boundaries and report
+	// whether values and element addresses survived the growth.
+	static Dictionary check_cell_arena(int64_t count, int64_t capacity);
 
 	// Debug: enable a post-emit self-check that flags dangling-slot triangles (the "unrelated vertices" bug).
 	void    set_verify_emit(bool on);

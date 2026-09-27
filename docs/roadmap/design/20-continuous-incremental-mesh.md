@@ -254,6 +254,21 @@ window (and by M below, by RAM / the page cache).
 
 ## M — Retain everything; spill to a memory-mapped file
 
+> **2026-09-27 (Q4), drafted by Claude:** the mmap-backed arena (M2) has been removed. A full disk
+> killed it with SIGBUS, it needed Linux-specific handling to fail cleanly, and Robert chose a fixed
+> development budget over disk paging: 32 GB RAM in total. Giving the cells 16 GiB of that
+> (`DC_CELL_RAM_BUDGET` in `dc_octree.h`) was Claude's call, pending Robert's review. At 252 B per cell (124 B hot `Cell` plus a 128 B `Qef`)
+> that is about 68 M cells. The cells live in `CellArena` (`dc_cell_arena.h`): 64 K-element RAM
+> blocks behind a block table sized for the full capacity. Growth never copies or moves a cell. The
+> cell limit is min(`max_cells`, capacity). The level-sync build, moves, drains and edits all stop
+> there, and cells that were refused refinement stay coarse and are sampled so the window has no
+> holes. The octree owns the limit: a mid-session `dcmaxcells` reaches it through `set_cell_budget`,
+> and its room counts freed slots, so an eviction reopens refinement. Known debt: the level-sync
+> build refines a whole level or none of it, so a build whose next level doesn't fit leaves up to
+> ~7/8 of the budget for the drains to fill (worst error first, over frames) instead of refining the
+> nearest descenders at once. The rest of this section is the original plan; spilling to disk is not
+> scheduled.
+
 The thesis (`docs/MANIFESTO.md`, [[no-half-measures]]): hardware is effectively
 free, so **don't throw out anything reusable.** Today a re-root or a window
 eviction discards built cells; a far edit rebuilds from scratch. The endgame is
@@ -480,7 +495,8 @@ to allocate child blocks contiguously too (the free-list path isn't). c4 first, 
 5. **M — retain-everything / mmap spill.** A memory-management swap under the
    rest; build on the in-RAM arena, page to disk only when the resident set
    exceeds RAM. Keep the cell arena pointer-free so the swap stays an allocator
-   change.
+   change. *(2026-09-27: the mmap arena was built (M2) and then removed in favour of a capped RAM
+   arena; see the note under "M".)*
 6. **Re-root incremental — deferred.** The root snap shifts the whole lattice
    frame, so every cell "moves" — the doc-13-B3 problem, now in the world-octree.
    Rare (only on leaving the root box). M largely dissolves it (the cells already
