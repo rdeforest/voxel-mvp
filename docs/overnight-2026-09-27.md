@@ -10,14 +10,14 @@
 - [ ] E3 — frontier lazy invalidation on edit (Q10)
 - [ ] E4 — RAM cell arena with a budget cap; mmap removed (Q4)
 - [ ] E5 — C++ solver for the exact thaw carve (Q2, Q3) (stretch)
-- [ ] G1 — fold the 2026-09-26 answers into the bug files and docs
+- [x] G1 — fold the 2026-09-26 answers into the bug files and docs
 - [ ] G2 — edit events carry their source; raise/lower/flatten emit measured flips (Q1)
 - [ ] G3 — save-pair integrity; single save format (Q5)
 - [ ] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments
 - [ ] R1 — research: what the refine frontier spends its effort on + perceptual LOD survey
 - [ ] Integration review of the merged result; morning brief at the bottom of this doc
 
-"Q" numbers refer to [`overnight-2026-09-26-questions.md`](overnight-2026-09-26-questions.md);
+"Q" numbers refer to [`overnight-2026-09-26-questions.md`](roadmap/implementation/done/overnight-2026-09-26-questions.md);
 Robert's answers are inline there.
 
 ## The constraint that shapes everything

@@ -2,10 +2,10 @@
 
 *Filed by Claude (agent) on 2026-09-25, from the agent review loop that fixed sdf-sample-corner-vs-center and actions-untyped-work-tuple.*
 
-**Status:** Open, characterized 2026-09-26 (section below). Waiting on Robert's answers to the
-questions at the end. Robert tried single-voxel edits in-game after `f11d284` and
-`c9430a4` and "didn't get what I expected." What the edits produce is now measured; what Robert
-expected is still the open part.
+**Status:** Open, **re-scoped 2026-09-27**: superseded by doc 22's instrument layer, and closes when
+that layer ships (overnight 2026-09-27 chunk G4.4). Robert answered the questions; see *Robert's
+answers* at the end. Characterized 2026-09-26 (section below). Robert tried single-voxel edits
+in-game after `f11d284` and `c9430a4` and "didn't get what I expected."
 
 ## What the code does now
 A "cell" is a 1 m voxel. Its solidity is the trilinear value at its centre, which is the mean of its 8
@@ -328,3 +328,36 @@ generator returns Bedrock only ~50 m down, so every painted vertex here is the f
    It refuses 48 % of first clicks, and 36 of 39 second clicks on a spot it just emptied.
 4. Should Empty right after Fill undo the Fill? Today it removes ~0.1 m³ of a ~2.5 m³ mound.
 5. Should the paint cover the whole visible change, or only the target cell?
+
+## Robert's answers (2026-09-27)
+*Recorded by Claude from Robert's answer to the 2026-09-26 brief's question 1
+([`overnight-2026-09-26.md`](../roadmap/implementation/done/overnight-2026-09-26.md), "Needs you
+first"). Paraphrased; his words are in the brief.*
+
+- **Expected:** crisp cube edits, while prepared for some curves, since the representation trades
+  sharp corners for smooth landscapes.
+- **Single-cell edits are not a game feature.** The player should be unaware of the grid: a board
+  placed 10° off north should look about the same as one at 0° or 20°. Getting there will take
+  tricks.
+- **Their purpose is exact control of the SDF for testing**, which he suggested is better served by
+  console commands: find a location with the probe, then set the values there. He asked what tools
+  testing needs to expose and control the underlying data. That question is answered by
+  [doc 22](../roadmap/design/22-scenario-languages.md)'s instrument layer: the probe reports the leaf,
+  its field state, all 8 corners and the mesher's sign test, and console writes set a cell's 8
+  corners, set a cell's material, or stamp a typed CSG shape by numbers. Doc 22 says these replace
+  FillVoxel and EmptyVoxel as instruments.
+- **What he expected a single-cell edit to do**, while unsure it's reasonable: the selected cell's
+  corners end at SDF 0, its material changes to the current one if it differed, and its neighbours
+  change little or not at all.
+
+**Re-scope.** The question this file asked (what should a player's single-voxel edit look like) is
+withdrawn: there will be no such player verb. What remains is making sure the instruments can
+express Robert's expectation exactly, which "set a cell's 8 corners" + "set a cell's material" do.
+Close this file when G4.4 lands. Whether FillVoxel and EmptyVoxel are then removed from the tool
+belt or kept alongside is not decided here.
+
+**One thing to know when trying it** (from the code, not measured): a cell whose 8 corners are all
+0 has a sample value of exactly 0, and gameplay counts a cell solid only below
+`SDF_SOLID_THRESHOLD` (0.0, `flip` in `engine/voxel_dc/edit_store_lattice.h`). So "corners at zero"
+reads as **air** to gameplay. Which side of the surface the render puts such a cell on is what the
+probe's sign test will show; I have not checked it.

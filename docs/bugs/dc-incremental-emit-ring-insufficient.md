@@ -1,8 +1,8 @@
 # DC incremental emit: neighbour-ring expansion is a heuristic, not provably sufficient
 
-**Status:** Deferred (2026-06-22). Diagnosed by code review. This is the **live edge** of the recent
-dropped-triangle fixes (commits `c448d8d`, `3c434ff`, `4bbdd5f`) — flagged so it's not forgotten if drops
-recur.
+**Status:** Deferred (2026-06-22), **deprioritised 2026-09-27** by Robert (see *Priority* below).
+Diagnosed by code review. This is the **live edge** of the recent dropped-triangle fixes (commits
+`c448d8d`, `3c434ff`, `4bbdd5f`) — flagged so it's not forgotten if drops recur.
 
 ## Symptom
 Dropped / dangling triangles at the boundary of an incrementally re-meshed band. Mitigated by the recent
@@ -27,6 +27,15 @@ the rendered set is 596 non-degenerate triangles against 684 from a full re-emit
 tree. A finite budget of 1e9 µs gives the same numbers, so this is the incremental emit, not the unbudgeted
 drain. Metered 100 µs drains (~118 grows) also drop (~200 cumulative, timing-dependent) but end on the full surface, which is
 why `test_grow_world_persistent_frontier_drains_with_reuse` passes. Probe: `scripts/dev/probe_dc_reuse_drain.gd`.
+
+## Priority (2026-09-27)
+*Recorded by Claude from Robert's answer to Q11 in
+[`overnight-2026-09-26-questions.md`](../roadmap/implementation/done/overnight-2026-09-26-questions.md).*
+
+Asked whether the headless repro matches what `dcdrop` showed in play, and whether it changes the
+priority: Robert has no recollection of what he saw in play, and wants this **deprioritised**, in the
+hope that the bigger mesher work makes it moot. So the repro did not raise it. Keep the pending gate
+test; if the bigger work lands and the gate still drops triangles, this comes back.
 
 ## Proposed fix
 If drops recur: either widen the expansion to cover the full ring reach of any coarse leaf touching the band

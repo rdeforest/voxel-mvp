@@ -1,6 +1,8 @@
 class_name DigAction
 extends Action
 
+# Not a PlayerSafeAction on purpose: players expect to dig under themselves, and directives will
+# replace this verb (docs/bugs/closed/dig-action-no-validate-no-safety.md).
 
 enum Shape { SPHERE }
 

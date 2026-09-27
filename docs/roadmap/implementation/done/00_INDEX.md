@@ -77,3 +77,14 @@ contains. Three kinds of doc live here:
 - [`implementation-05-phase-5_5b-construction-mode.md`](implementation-05-phase-5_5b-construction-mode.md)
   — records construction-mode-aware edit verbs that fail honestly instead
   of faking surfaces.
+
+## Overnight session records
+
+- [`overnight-2026-09-26.md`](overnight-2026-09-26.md) — the plan, per-chunk
+  results and morning brief of the 2026-09-26 unattended session (lattices to
+  C++, save and blob hardening, bug backlog), with Robert's answers inline.
+- [`overnight-2026-09-26-questions.md`](overnight-2026-09-26-questions.md) —
+  the open questions that session raised, one per section, with Robert's
+  answers; the decisions behind the 2026-09-27 session's plan.
+
+*Section drafted by Claude, 2026-09-27.*

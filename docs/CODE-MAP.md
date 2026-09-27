@@ -417,7 +417,8 @@ names.
   field (`EditStore::FieldState`, inherited leaves of a field source), so every sample outside the
   rewritten leaves is bit-identical before and after a write or stamp
   (`test_edit_store_subdivide_exact`). Inside, the field is the lattice's trilerp, even where it
-  matches the old corners (`docs/bugs/edit-store-noop-write-reports-changed.md`).
+  matches the old corners, so a write's `changed` can be true where `writes` is false
+  (`docs/bugs/closed/edit-store-noop-write-reports-changed.md`).
 - **Lattice writes are typed.** `StoreWrite` takes `Array[LatticeEdit]` (lattice point, new
   SDF, leaf material or -1 to keep) — FillVoxel, EmptyVoxel and the MPM carve all hand it that;
   `StoreWrite.lattice(store, work).flips(store)` is what the work does to cells. Bell and Flatten
@@ -437,8 +438,9 @@ names.
 be met. Construction, CSG, Fill, FillVoxel, EmptyVoxel, Flatten and the bell
 sculpts (Raise, Lower) ask `PlayerSafeAction.endangered_by` of the field they
 write: each refuses to turn any point of the player's capsule solid or of the
-support box under their feet air. Dig does not yet
-(`docs/bugs/dig-action-no-validate-no-safety.md`).
+support box under their feet air. Dig deliberately does not: players expect to
+dig under themselves, and directives will replace it
+(`docs/bugs/closed/dig-action-no-validate-no-safety.md`).
 `ConstructionAction.validate` requires a part cell to overlap existing solid OR
 rest directly on solid below — a part floating in air is refused, and one that
 would bury the player is refused. Where an edit can't refuse but might overlap a

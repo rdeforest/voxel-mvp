@@ -11,6 +11,11 @@ extends RefCounted
 # previews, before anything is written); SdfLattice.write() MEASURES it across the real write (for
 # events — the ground truth the structural sim tracks), and only a measured one fills
 # `air_materials` and `changed`.
+#
+# `changed` means some rewritten cell's sample moved, by any amount. It is not "the corners
+# differ": re-representing a coarse or inherited leaf moves samples by ~1e-8, so `changed` can be
+# true for a lattice whose SdfLattice.writes is false
+# (docs/bugs/closed/edit-store-noop-write-reports-changed.md).
 
 var solid:         Array[Vector3i] = []                  # was air, now solid
 var air:           Array[Vector3i] = []                  # was solid, now air

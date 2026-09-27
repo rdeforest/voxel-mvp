@@ -21,11 +21,12 @@ payload carries a `grid_id`) even though only one grid exists.
 ## Design locks
 
 - **Location:** Autoload singleton `VoxelEventBusSingleton`.
-- **Subscription:** Per-cell only for MVP. Method named
-  `subscribe_cell(...)`, leaving `subscribe(...)` reserved for future
-  region/AABB/global modes.
-- **Lifetime:** `Callable.is_valid()` + lazy sweep. No WeakRef wrapping.
-  Manual `unsubscribe_cell(...)` available as escape hatch.
+- **Subscription:** per-cell (`subscribe_cell(...)`) and channel-wide
+  (`subscribe(...)`). Region/AABB modes are still deferred.
+- **Lifetime:** the bus holds each subscriber weakly (a WeakRef plus the
+  method name) and sweeps dead entries lazily on emit. Manual
+  `unsubscribe_cell(...)` / `unsubscribe(...)` for early cleanup. See
+  *Lifetime & cleanup*.
 - **Payload:** Typed event classes (RefCounted), one per channel.
 - **Tiers:** Primitive events (emitted by actions) + derived events
   (emitted by integrity into the same bus).
@@ -57,40 +58,58 @@ Subscribers compute their own staleness from the box.
 ## Bus API
 
 ```gdscript
-# Autoload, accessible as VoxelEventBus.
+# Autoload VoxelEventBusSingleton (class VoxelEventBusType,
+# scripts/events/voxel_event_bus.gd).
 
 func subscribe_cell(channel: StringName, cell: Vector3i, callback: Callable) -> void
 func unsubscribe_cell(channel: StringName, cell: Vector3i, callback: Callable) -> void
-func emit(channel: StringName, event: RefCounted) -> void
+func subscribe(channel: StringName, callback: Callable) -> void
+func unsubscribe(channel: StringName, callback: Callable) -> void
+func emit(channel: StringName, event: VoxelEvent) -> void
 ```
 
 Internal:
 ```
-_subs: Dictionary[StringName, Dictionary[Vector3i, Array[Callable]]]
+_subs_cell:    Dictionary[StringName, Dictionary[Vector3i, Array[Subscription]]]
+_subs_channel: Dictionary[StringName, Array[Subscription]]
 ```
 
-`emit` looks up `_subs[channel]`, for each cell in the event's footprint
-iterates its callable list, drops invalid ones, invokes valid ones.
-Footprint extraction is per-channel — a `terrain_sdf_changed` event
-walks every cell in its box; a `voxel_added` walks one cell.
+`emit` dispatches to the channel-wide list, then to the per-cell lists
+of every cell in `event.cells`. A subscriber (object + method) hears an
+event once, however many of its lists the event reaches.
 
 ## Lifetime & cleanup
 
-- Subscribers call `subscribe_cell(channel, cell, my_method)` once per
-  cell.
-- On `emit`, bus walks the per-cell callable list, skips
-  `!callable.is_valid()` entries, and queues them for removal.
-- A lazy sweep at end of emit prunes dead entries. No periodic timer
-  needed; subs only die when their owner died, and we discover that
-  the next time we visit their cell.
-- Manual `unsubscribe_cell` is available for early cleanup (e.g., a
-  part hovering visualisation that wants to stop updating before its
-  Node is freed).
-- Reference cycle audit: `StructuralIntegrity._exit_tree` unsubscribes
-  its bus connections in addition to breaking the
-  TerrainSupport ↔ PartSupport cycle. Without explicit unsubscribe,
-  the autoload bus holds Callables that reference RefCounted
-  components, preventing them from freeing.
+*Rewritten 2026-09-27 to match the shipped bus, drafted by Claude. The
+original design (`Callable.is_valid()` and an explicit unsubscribe in
+`StructuralIntegrity._exit_tree`) was never what shipped: the bus has
+held WeakRefs since `ee80b63`. Git has the old text.*
+
+- Each subscription stores a WeakRef to the callback's object and the
+  method's name, never the `Callable`. The autoload bus therefore holds
+  no strong reference to any subscriber and can't keep one alive or
+  close a reference cycle. Subscribers don't unsubscribe to avoid
+  leaks, and nothing in the game does (`StructuralIntegrity` has no
+  `_exit_tree`).
+- A subscriber dies when its object does: a Node freed, or a
+  RefCounted's last strong reference dropped. The WeakRef then returns
+  null, the next emit that reaches the subscription skips it, and
+  prunes it from the live list after dispatch. No timer; a dead
+  subscription on a cell or channel that never emits again just stays
+  in its list.
+- `unsubscribe_cell` / `unsubscribe` remove the first matching
+  subscription (same object and method) and cancel it, so an emit
+  already in flight doesn't deliver to it either (see *Re-entrancy*).
+  Use them for "stop listening" while the subscriber lives on.
+- Subscribe with a plain method of an object. The bus keeps only the
+  object and method name, so a lambda's method can't be found and a
+  `.bind()`ed callable loses its bound arguments: either fails at its
+  first delivery with a script error. That behaviour is not designed; it
+  is an open bug (`docs/bugs/event-bus-lambda-and-bound-callables.md`).
+
+Pinned by `test/test_voxel_event_bus.gd` (freed subscribers skipped and
+pruned, RefCounted auto-clean, unsubscribe silences, and the freed and
+removed mid-dispatch cases).
 
 ## Re-entrancy
 

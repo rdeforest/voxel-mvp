@@ -1,9 +1,11 @@
 # A corner-identical write still moves the leaves it re-represents
 
 *Filed by Claude (agent), overnight 2026-09-26, while fixing `edit-store-subdivide-float32-neighbours`
-(Track I1). Needs a call.*
+(Track I1).*
 
-**Status:** Open. Severity low (latent). No flip seen.
+**Status:** **CLOSED — accepted behaviour** (2026-09-27). `changed` means "some rewritten cell's sample
+moved", which is exact; it is not "the corners differ". See *Verdict* at the end. Severity was low
+(latent); no flip seen.
 
 ## Symptom
 A lattice that is the store's own field (`lattice_writes` false: every corner it would write equals
@@ -60,3 +62,19 @@ change, so the scout does not loop.
   a cell within ~1e-8 of zero. Unedited leaves raise a material question: a write that leaves the SDF
   unchanged can still paint.
 - Accept it as it is and document `changed` as "some sample moved", which is exact.
+
+## Verdict (2026-09-27)
+*Recorded by Claude from Robert's answer to Q12 in
+[`overnight-2026-09-26-questions.md`](../../roadmap/implementation/done/overnight-2026-09-26-questions.md).*
+
+The second option: accept it and document `changed` as "some sample moved". Robert agreed, and
+expects bigger work to moot it. Keeping a leaf's field when its corners match would complicate
+every prediction path and the oracle for a ~1e-8 effect.
+
+Documented where `changed` is read: `CellFlips.changed` (`scripts/actions/cell_flips.gd`) now says
+it is true when any rewritten cell's sample moved, even by ~1e-8, and so can be true when
+`SdfLattice.writes` / `EditStore.lattice_writes` is false. The C++ comment on `write_region_flips`
+(`engine/voxel_dc/edit_store.h`) already says "whether any of those cells' sample value moved at
+all", which is exact. The one consumer that acts on it, the MPM thaw's re-mesh gate
+(`scripts/structural/mpm_structure.gd`), costs at most one extra re-mesh on the first thaw over
+such a leaf, as *Consequence today* says.
