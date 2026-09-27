@@ -278,3 +278,18 @@ mean "the surface passes through the corners" or "the cell ends up solid"? This 
 question 2.
 
 **Robert:**
+
+## Test housekeeping (from F5)
+
+### 25. Three small ones
+
+- **Console history:** every GUT run loads and rewrites `user://limbo_console_history.log` through
+  the LimboConsole autoload, so playing while tests run can lose your console history. Stop tests
+  from persisting it? **My take:** yes, with a pre-run hook rather than a patch to the vendored
+  addon.
+- **Leftover directory:** an empty, unreferenced `user://dc_arena_refused/` (from the removed mmap
+  arena's test) is in your user data. Delete it? **My take:** yes.
+- **Long test files:** `test_instruments.gd` and `test_saved_world.gd` are over the 350-line budget
+  (both got shorter tonight). **My take:** leave them under the relaxed GDScript rule.
+
+**Robert:**

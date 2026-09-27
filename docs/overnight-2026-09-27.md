@@ -330,12 +330,18 @@ All 5 tracks and 18 chunks, in 20 commits:
   - `leaf_info` for the probe.
   - The integration review's fixes.
   - A GUT test that fails if any `scripts/dev/` harness stops compiling.
+  - F5: every GUT process writes under its own `user://test_runs/<pid>/`, so parallel runs are safe
+    without `XDG_DATA_HOME`. Before the fix, 6 of 6 concurrent runs failed; after it, 8 of 8 pass.
+    **Found on the way:** one test had been creating and deleting a named-save slot inside your
+    real `user://saves`, and reading your 60 MB `world.editstore` every run. Your save files were
+    never modified (their mtimes and md5 sums were checked). Tests can no longer reach the real
+    saves.
 - **Research:** reference note 09. The stones you saw badly drawn weren't waiting for refinement.
   They sit at the 1 m floor, and the damage is surface reconstruction. Exact surface (Hermite) data
   at 1 m would fix them at no extra cell cost. Seven options, none chosen, for your "compelling,
   not accurate" session.
 
-GUT went from 318 tests / 314 passing / 4 pending to **484 / 479 / 5**, with 0 failing throughout.
+GUT went from 318 tests / 314 passing / 4 pending to **490 / 485 / 5**, with 0 failing throughout.
 The new pending test is the gate for `scout-ignores-freeze-flips`.
 
 ### Decided without you, overrule freely
@@ -356,9 +362,8 @@ The new pending test is the gate for `scout-ignores-freeze-flips`.
 - **Engine:** no zeroing `Mat3` constructor (1.5 % cost; the defect is fixed at its cause).
   `max_cells 0` now means "capacity". `sizeof(Cell)` is pinned by an assert, because a larger
   layout measured 15–25 % slower.
-- **Tests and parallel runs:** tests write fixed `user://` file names, so parallel GUT runs
-  collided. Every track ran with its own `XDG_DATA_HOME`. **Not fixed at the source:** tests should
-  use unique temp names.
+- **Tests and parallel runs:** tests wrote fixed `user://` file names, so parallel GUT runs
+  collided. The tracks ran with their own `XDG_DATA_HOME`, and F5 then fixed it at the source.
 - **Bug records:** two "not a bug" verdicts (`edit-store-noop-write-reports-changed`,
   `dig-action-no-validate-no-safety`) went to `closed/`. Everything fixed was deleted.
 

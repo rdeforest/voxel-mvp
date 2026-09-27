@@ -38,7 +38,7 @@ What the last two nights built:
 **Run `tools/build` after pulling** (engine changes), then the class-cache pass
 (`bin/godot --path . --headless --editor --quit`).
 
-GUT: **484 tests, 479 passing, 5 pending**, 0 failing. The pending tests are gates for filed bugs.
+GUT: **490 tests, 485 passing, 5 pending**, 0 failing. The pending tests are gates for filed bugs.
 Parallel GUT runs no longer need their own `XDG_DATA_HOME`: each run keeps its test files under
 its own `user://test_runs/<pid>/` (docs/BUILD.md, Tests).
 
