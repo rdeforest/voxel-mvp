@@ -7,13 +7,13 @@ extends GutTest
 # (Drafted by Claude, overnight 2026-09-27.)
 
 const Scenario := preload("res://test/support/scenario.gd")
-
-const ROOT := "user://test_scenario_recorder"
-const DIR  := ROOT + "/take"
+const RunPaths := preload("res://test/support/run_paths.gd")
 
 const FOOT   := Vector3(100.5, -45.0, 100.5)
 const PLAYER := Vector3(106.5, -40.0, 100.5)
 
+var _root: String      = RunPaths.path("test_scenario_recorder")
+var _dir:  String      = _root + "/take"
 var _live: Array[Node] = []
 
 
@@ -22,16 +22,7 @@ func after_each() -> void:
         if is_instance_valid(s):
             s.free()
     _live.clear()
-    _remove_tree(ROOT)
-
-func _remove_tree(path: String) -> void:
-    if not DirAccess.dir_exists_absolute(path):
-        return
-    for sub in DirAccess.get_directories_at(path):
-        _remove_tree("%s/%s" % [path, sub])
-    for file in DirAccess.get_files_at(path):
-        DirAccess.remove_absolute("%s/%s" % [path, file])
-    DirAccess.remove_absolute(path)
+    RunPaths.remove_tree(_root)
 
 
 # In the tree and not yet started; the previous one is freed first, since the bus is global.
@@ -102,12 +93,12 @@ func _play(s: Scenario, r: ScenarioRecorder) -> void:
 func _recorded_fresh() -> Dictionary:
     var s := _fresh()
     var r := ScenarioRecorder.new()
-    assert_true(r.start_fresh(DIR, s.frame), "the recording starts: %s" % r.error)
+    assert_true(r.start_fresh(_dir, s.frame), "the recording starts: %s" % r.error)
     _play(s, r)
     return {"capture": s.capture(), "frame": s.frame, "steps": r.steps.duplicate(true)}
 
 func _steps_file() -> String:
-    return FileAccess.get_file_as_string("%s/%s" % [DIR, ScenarioRecorder.STEPS_FILE])
+    return FileAccess.get_file_as_string("%s/%s" % [_dir, ScenarioRecorder.STEPS_FILE])
 
 func _doc(text: String) -> StepDocument:
     var doc := StepDocument.new()
@@ -122,11 +113,11 @@ func _ops(steps: Array) -> Array:
 
 func test_a_fresh_recording_replays_to_the_same_world() -> void:
     var live := _recorded_fresh()
-    assert_false(FileAccess.file_exists("%s/%s" % [DIR, ScenarioRecorder.SNAPSHOT_FILE]),
+    assert_false(FileAccess.file_exists("%s/%s" % [_dir, ScenarioRecorder.SNAPSHOT_FILE]),
         "a fresh recording has no save pair, so a replay starts from the generator")
 
     var s := _scenario()
-    assert_true(s.run_recording(DIR), "the directory replays: %s" % s.error)
+    assert_true(s.run_recording(_dir), "the directory replays: %s" % s.error)
     assert_eq(s.capture(), live["capture"], "field, parts, tracked voxels and player are byte-identical")
     assert_eq(s.frame, live["frame"], "in the same number of frames")
     assert_eq(s.marks.size(), 1, "with the mark")
@@ -191,16 +182,16 @@ func test_a_recording_from_a_settled_world_replays_from_its_save_pair() -> void:
     s.settle()
 
     var r := ScenarioRecorder.new()
-    assert_true(r.start_save(DIR, s.frame, s, s.manager), "the recording starts: %s" % r.error)
-    assert_true(FileAccess.file_exists("%s/%s" % [DIR, ScenarioRecorder.SNAPSHOT_FILE]), "with the snapshot")
-    assert_true(FileAccess.file_exists("%s/%s" % [DIR, ScenarioRecorder.EDITSTORE_FILE]), "and the blob")
+    assert_true(r.start_save(_dir, s.frame, s, s.manager), "the recording starts: %s" % r.error)
+    assert_true(FileAccess.file_exists("%s/%s" % [_dir, ScenarioRecorder.SNAPSHOT_FILE]), "with the snapshot")
+    assert_true(FileAccess.file_exists("%s/%s" % [_dir, ScenarioRecorder.EDITSTORE_FILE]), "and the blob")
     assert_true(_click(s, r, LowerAction.new(FOOT + Vector3.UP * 5.0, 3.0, s.context())), "the lower cuts the pillar")
     s.advance(25)
     assert_true(r.stop(s.frame), "the recording stops: %s" % r.error)
     var live := s.capture()
 
     var replayed := _scenario()
-    assert_true(replayed.run_recording(DIR), "the directory replays: %s" % replayed.error)
+    assert_true(replayed.run_recording(_dir), "the directory replays: %s" % replayed.error)
     assert_eq(replayed.capture(), live, "to the same world")
 
 
@@ -212,9 +203,9 @@ func test_a_recording_waits_for_a_settled_world() -> void:
     assert_false(s.integrity.is_quiescent(), "precondition: the floating block is still in flight")
 
     var r := ScenarioRecorder.new()
-    assert_false(r.start_save(DIR, s.frame, s, s.manager), "refused")
+    assert_false(r.start_save(_dir, s.frame, s, s.manager), "refused")
     assert_string_contains(r.error, "still settling")
-    assert_false(DirAccess.dir_exists_absolute(DIR), "and nothing written")
+    assert_false(DirAccess.dir_exists_absolute(_dir), "and nothing written")
 
 
 # Every action the player's tools can make has a step op: an action without one ends the recording.
@@ -239,7 +230,7 @@ func test_every_action_a_tool_makes_is_recordable() -> void:
 func test_a_recording_that_never_stops_still_replays() -> void:
     var s := _fresh()
     var r := ScenarioRecorder.new()
-    r.start_fresh(DIR, s.frame)
+    r.start_fresh(_dir, s.frame)
     s.player.global_position = PLAYER
     s.advance(4)
     _click(s, r, DigAction.new(FOOT + Vector3.DOWN, 2.0, s.context()))
@@ -247,7 +238,7 @@ func test_a_recording_that_never_stops_still_replays() -> void:
     s.advance(30)
 
     var replayed := _scenario()
-    assert_true(replayed.run_recording(DIR), "the directory replays: %s" % replayed.error)
+    assert_true(replayed.run_recording(_dir), "the directory replays: %s" % replayed.error)
     assert_eq(replayed.capture(), at_click, "to the world as of the last step")
     assert_eq(replayed.frame, 4, "the frames after it weren't written")
 
@@ -255,7 +246,7 @@ func test_a_recording_that_never_stops_still_replays() -> void:
 func test_a_mark_writes_its_capture_and_screenshot() -> void:
     var s := _fresh()
     var r := ScenarioRecorder.new()
-    r.start_fresh(DIR, s.frame)
+    r.start_fresh(_dir, s.frame)
     var capture := {"camera": {"fov": 75.0, "transform": StepFields.encode_xform(Transform3D.IDENTITY)}, "aim": null}
     var shot    := Image.create(8, 4, false, Image.FORMAT_RGB8)
     shot.fill(Color.RED)
@@ -267,17 +258,17 @@ func test_a_mark_writes_its_capture_and_screenshot() -> void:
     assert_true(r.save_capture(second, capture, null), "the second saves without a picture: %s" % r.error)
 
     var sj := StepJson.new()
-    assert_true(sj.parse(FileAccess.get_file_as_string(DIR + "/mark-001.json")), "the capture reads: %s" % sj.error)
+    assert_true(sj.parse(FileAccess.get_file_as_string(_dir + "/mark-001.json")), "the capture reads: %s" % sj.error)
     var expected := capture.duplicate()
     expected.merge({"format": "voxel-mvp/mark", "version": 1.0, "screenshot": "mark-001.png"})
     assert_eq(sj.data, expected, "the capture as given, with its header and picture")
-    var png := Image.load_from_file(DIR + "/mark-001.png")
+    var png := Image.load_from_file(_dir + "/mark-001.png")
     assert_eq(png.get_size(), Vector2i(8, 4), "the picture is the screenshot")
     assert_eq(png.get_pixel(0, 0), Color.RED)
 
-    sj.parse(FileAccess.get_file_as_string(DIR + "/mark-002.json"))
+    sj.parse(FileAccess.get_file_as_string(_dir + "/mark-002.json"))
     assert_eq(sj.data["screenshot"], null, "a headless mark says it has no picture")
-    assert_false(FileAccess.file_exists(DIR + "/mark-002.png"))
+    assert_false(FileAccess.file_exists(_dir + "/mark-002.png"))
 
 
 # --- Refusals ---
@@ -290,10 +281,10 @@ class _UnwritableStore extends EditStoreManager:
 func test_a_start_that_cannot_save_leaves_nothing() -> void:
     var s := _fresh()
     var r := ScenarioRecorder.new()
-    assert_false(r.start_save(DIR, s.frame, s, _UnwritableStore.new()), "refused")
+    assert_false(r.start_save(_dir, s.frame, s, _UnwritableStore.new()), "refused")
     assert_string_contains(r.error, "didn't save")
-    assert_false(DirAccess.dir_exists_absolute(DIR), "the directory it made is gone")
-    assert_true(ScenarioRecorder.new().start_save(DIR, s.frame, s, s.manager), "and the name is free again")
+    assert_false(DirAccess.dir_exists_absolute(_dir), "the directory it made is gone")
+    assert_true(ScenarioRecorder.new().start_save(_dir, s.frame, s, s.manager), "and the name is free again")
 
 
 func test_a_recording_never_writes_over_another() -> void:
@@ -301,7 +292,7 @@ func test_a_recording_never_writes_over_another() -> void:
     var before := _steps_file()
 
     var r := ScenarioRecorder.new()
-    assert_false(r.start_fresh(DIR, 0), "refused")
+    assert_false(r.start_fresh(_dir, 0), "refused")
     assert_string_contains(r.error, "already exists")
     assert_false(r.thaw(FOOT, 1.0, 0), "and it records nothing")
     assert_eq(_steps_file(), before, "the old recording is untouched")
@@ -313,21 +304,21 @@ func test_steps_out_of_time_or_after_the_stop_are_refused() -> void:
     assert_eq(r.error, "not recording")
 
     r = ScenarioRecorder.new()
-    r.start_fresh(DIR, 10)
+    r.start_fresh(_dir, 10)
     assert_false(r.thaw(FOOT, 1.0, 9), "a frame before the start")
     assert_string_contains(r.error, "frame 9 is before the last step's, 10")
     assert_false(r.is_recording(), "ends the recording")
 
-    _remove_tree(ROOT)
+    RunPaths.remove_tree(_root)
     r = ScenarioRecorder.new()
-    r.start_fresh(DIR, 10)
+    r.start_fresh(_dir, 10)
     r.stop(12)
     assert_false(r.drain_support(12), "a step after the stop")
     assert_eq(_ops(_doc(_steps_file()).steps), ["advance"], "the file ends at the stop")
 
 
 func test_a_recording_name_is_a_plain_file_name() -> void:
-    assert_eq(ScenarioRecorder.dir_for("wall-collapse"), "user://scenarios/wall-collapse")
+    assert_eq(ScenarioRecorder.dir_for("wall-collapse"), RunPaths.path("scenarios/wall-collapse"))
     for name in ["", "a/b", "../up", "x:y"]:
         assert_eq(ScenarioRecorder.dir_for(name), "", "\"%s\" is refused" % name)
 

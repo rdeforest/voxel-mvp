@@ -39,8 +39,8 @@ What the last two nights built:
 (`bin/godot --path . --headless --editor --quit`).
 
 GUT: **484 tests, 479 passing, 5 pending**, 0 failing. The pending tests are gates for filed bugs.
-When running GUT in parallel checkouts, give each its own `XDG_DATA_HOME`, because the tests use
-fixed `user://` file names.
+Parallel GUT runs no longer need their own `XDG_DATA_HOME`: each run keeps its test files under
+its own `user://test_runs/<pid>/` (docs/BUILD.md, Tests).
 
 The per-change loop: an Opus author, an Opus correctness reviewer and a Sonnet completeness reviewer,
 a Fable tiebreak on disputes, and an Opus fixer who commits only on green GUT. After merges, an

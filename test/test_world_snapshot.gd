@@ -3,36 +3,40 @@ extends GutTest
 # WorldSnapshot.refusal() accepts only the current schema: one save format until there are play
 # testers. Tests at the file-IO + parse level — the apply() leg needs a real terrain so we don't go
 # that far.
+
+const RunPaths := preload("res://test/support/run_paths.gd")
+
+
 class TestSnapshotVersionCompat:
     extends GutTest
 
-    const TMP_PATH := "user://test_version_compat.tmp"
+    var _tmp_path := RunPaths.path("test_version_compat.tmp")
 
     func after_each():
-        DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
+        DirAccess.remove_absolute(ProjectSettings.globalize_path(_tmp_path))
 
     func _write(snap: Dictionary) -> void:
-        var file := FileAccess.open(TMP_PATH, FileAccess.WRITE)
+        var file := FileAccess.open(_tmp_path, FileAccess.WRITE)
         file.store_string(var_to_str(snap))
 
     func test_current_version_is_accepted():
         _write({"version": WorldSnapshot.VERSION, "save_id": 1, "player": var_to_bytes({}),
             "voxels": var_to_bytes([]), "parts": var_to_bytes({"next_id": 1, "records": []})})
-        assert_eq(WorldSnapshot.refusal(WorldSnapshot.read(TMP_PATH)), "")
+        assert_eq(WorldSnapshot.refusal(WorldSnapshot.read(_tmp_path)), "")
 
     func test_older_version_rejected():
         for version in [2, WorldSnapshot.VERSION - 1]:
             _write({"version": version, "player": {}, "voxels": [], "parts": []})
-            assert_eq(WorldSnapshot.refusal(WorldSnapshot.read(TMP_PATH)),
+            assert_eq(WorldSnapshot.refusal(WorldSnapshot.read(_tmp_path)),
                 "world snapshot is format v%d; this build reads only v%d" % [version, WorldSnapshot.VERSION])
 
     func test_newer_version_rejected():
         _write({"version": WorldSnapshot.VERSION + 1, "player": {}, "voxels": [], "parts": []})
-        assert_string_contains(WorldSnapshot.refusal(WorldSnapshot.read(TMP_PATH)),
+        assert_string_contains(WorldSnapshot.refusal(WorldSnapshot.read(_tmp_path)),
             "format v%d" % (WorldSnapshot.VERSION + 1), "newer-than-known version is refused")
 
     func test_nonexistent_file_returns_false():
-        var fake := "user://does_not_exist_%d.tmp" % Time.get_ticks_msec()
+        var fake := RunPaths.path("does_not_exist_%d.tmp" % Time.get_ticks_msec())
         assert_eq(WorldSnapshot.refusal(WorldSnapshot.read(fake)), "world snapshot is unreadable")
 
     func test_v3_tunables_section_serializes_through_var_to_str():

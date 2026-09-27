@@ -1,16 +1,18 @@
 class_name SavePaths
 extends RefCounted
 
-const SAVE_DIR       := "user://saves"
-const SNAPSHOT_FILE  := SAVE_DIR + "/world.snapshot"
-const EDITSTORE_FILE := SAVE_DIR + "/world.editstore" # the EditStore blob (terrain SDF persistence)
+# Where F5 / F9's save pair lives. `root` moves only in GUT, which points it into each run's own
+# directory (test/support/run_paths.gd) so no test touches the player's saves.
+
+const DEFAULT_ROOT   := "user://saves"
+const SNAPSHOT_NAME  := "world.snapshot"
+const EDITSTORE_NAME := "world.editstore" # the EditStore blob (terrain SDF persistence)
+
+static var root := DEFAULT_ROOT
 
 
 static func ensure_dir() -> void:
-    var d := DirAccess.open("user://")
-    var leaf := SAVE_DIR.trim_prefix("user://")
-    if d != null and not d.dir_exists(leaf):
-        d.make_dir_recursive(leaf)
+    DirAccess.make_dir_recursive_absolute(root)
 
 static func snapshot_exists() -> bool:
-    return FileAccess.file_exists(SNAPSHOT_FILE)
+    return FileAccess.file_exists("%s/%s" % [root, SNAPSHOT_NAME])
