@@ -132,18 +132,76 @@ pushed (see "Environment").*
    about half full. 0 of 982 edits read as a cube. Empty refuses "already air" on 48 % of first
    clicks and can't dig down (a second click refuses 36 of 39 times). Did you expect a crisp 1 m
    cube? Which cell should Fill fill? Should paint cover the whole visible change?
+
+I did expect crisp cube edits, but was prepared to see some curves because the
+algorithm trades the ability to have sharp corners for the ability to have
+smooth landscapes. I don't intend to use single cube editing in the actual
+game since I want the player to be unaware of the grid. To the degree that
+it's possible, and it will undoubtedly require tricks, I'd like a board placed
+aligned 10 degrees off of 'North' to look about the same as one placed at 0 or
+20 degrees.
+
+The point of single voxel edits is to have exact control of the SDF field for
+testing purposes. Perhaps that would be better served by console commands? Use
+the probe to identify a location, then use the console to manipulate the
+relevant values?
+
+So my question for _you_ is, for the purposes of testing, what tools do we
+need to expose and control the underlying data?
+
+This is a different problem from how users will interact with the world.
+
+To answer your other two questions, I expected the corners of the selected
+voxel to have SDF values of zero, for the edited voxel's material to be
+changed to the current material if it differed and little to no change made to
+the neighbors, but I don't know if those are reasonable or useful
+expectations. :)
+
 2. **Should terraforming count as cell edits?** Raise, Lower and Flatten emit no
    `voxel_added`/`voxel_removed`, so PartIndex never releases a part they carve, and support and
    detachment never react to them. This predates tonight. The fix is ready (writes now return
    measured flips); the intent isn't:
    [`actions-reshape-no-voxel-events`](bugs/actions-reshape-no-voxel-events.md).
+
+I suppose it wouldn't make sense to emit events that aren't true, so maybe
+"voxel modified" needs to be a new event? But that's not exactly the question.
+Parts should react to changes in the environment. If I build a fence on a
+hill, then flatten the hill, and the ground other the fence moves down in the
+process, the fence should sag based on the physics. Let's make sure the event
+system handles this sort of thing?
+
 3. **Player safety misses sub-cell burials** (found tonight, med). A raise or carve that moves the
    surface less than half a cell inside your capsule goes unrefused; a probe reproduces it. An exact
    fix needs your call on how an unedited leaf's generator field is judged:
    [`player-safety-misses-sub-cell-burial`](bugs/player-safety-misses-sub-cell-burial.md).
+
+I believe you're asking if such edits should be refused, or something else
+should happen. In the interest of consistency, I'd like such changes to be
+refused, but if that creates complexity I would accept displacement of the
+player to accommodate the change.
+
+I hadn't heard of Lipschitz continuity before this morning, so I'd like to talk
+about the options in chat until I understand the question better. :)
+
 4. **Dig under your own feet:** guard it the way Lower is guarded, or keep Dig as "dig anywhere"?
    The guard would refuse digs aimed within ~4.5 m of your feet:
    [`dig-action-no-validate-no-safety`](bugs/dig-action-no-validate-no-safety.md).
+
+I think users will reasonably expect to be able to dig under themselves. When
+we do this in real life, we're actually digging around ourselves and moving to
+expose the ground we're standing on so we can dig that too. In the game we're
+currently giving the user a HUGE digging area because it's for testing. In the
+actual game digging will be a little less dramatic. If the user wants to dig a
+tunnel, they'll set up a directive to do so and watch it go. If that directive
+includes digging below themselves, their avatar will move around as needed to
+achieve those goals.
+
+So I guess I'm saying problems like these won't exist in the actual game
+because users will express the intent of "make this space empty" and their
+avatar will do whatever it needs to to accomplish that. None of this
+decoupling of user input from action has been built yet, so maybe this issue
+needs to be marked as pending bigger changes? Or noted as "won't fix, will be
+moot later"? Or something like that?
 
 ### Decided without you — overrule freely
 
@@ -153,61 +211,94 @@ pushed (see "Environment").*
   corrupt or truncated terrain blob used to crash the load (SIGSEGV or a FATAL index error, shown on
   the old build); it's now refused with the store untouched, and the save pair isn't applied or
   overwritten.
+
+We don't need to maintain support for more than one format until we have play
+testers. If there's code we can remove now, let's do it.
+
 - **Fixed-bug convention:** I followed `00_INDEX.md`'s preamble. A fixed bug's file is deleted, and
   `closed/` is only for not-a-bug and obsolete verdicts. Track A had archived three fixed bugs; the
   merge deleted them and repointed their links at the fixing commits. The preview before/after
   table is kept below.
+
+I'd like to move our bug tracking into GitHub. If it's easy, I'd like to move
+deleted bug information into the GH issues system as closed bugs. This makes
+closed bugs searchable by me, avoids collisions in bug information between
+branches and makes it easier for outsiders to track the story of our
+development process.
+
 - **Scope grew past the plan.** Once A and B landed early, I ran follow-ups: every per-frame and
   per-click GDScript lattice loop moved to C++ (A4, C1, C2, G1, G2), plus backlog bugs with clear
   fixes (D1, E1, F1–F3, H1, I1). A last whole-night review of the EditStore changes found the
   load crash that J1 fixed. Each got the same author → two reviewers → fixer loop.
+
+This is awesome and I want to encourage this. As long as unattended work is
+real progress, I support it because it makes better use of my time.
+
 - **Asked-then-answered overnight:** agents asked whether to port the construction attach scan, the
   per-click material paint and the thaw's measurement to C++. The manifesto answers that, so I did
   (C1, G1, G2). Flatten's work generation and the safety scan went too (A1b), because the plan's
   gate couldn't be met otherwise.
 - **Event bus re-entrancy (F1):** nested emits dispatch synchronously in full. A subscriber added
   mid-dispatch hears only later emits; one removed mid-dispatch hears nothing more.
+
+This sounds right, but I'd like to hear an analysis of what could possibly go
+wrong with this approach.
+
 - **Saves (F2):** an unreadable save (version bump, bad pair) is refused loudly and kept on disk,
   never overwritten. F5 stays blocked until `reset`.
+
+This is good, and it gave me the thought that we're going to want named saves
+for testing purposes. Let's also raise the priority of the features of
+construction which will help with testing: the assembly library and
+load/save (or import/export) for assemblies. I want to be able to build a
+"cabin" and then stamp it into new worlds.
+
 - **Mesher (H1):** a splice now has its own entry point, `mesh_clipmap_splice`, with required boxes,
   and a box without extent is refused. `grow_world(reuse, -1)` drains the whole frontier. No
   live-caller behaviour changed. I did not apply the same design to `mesh_world`/`grow_world`,
   because that would change the live preview's signatures; it's filed as `dc-mesher-box-value-sentinels`.
+
+I didn't understand this, probably because I put the project on the back burner
+so long. What does 'splice' refer to in this context?
+
 - **Behaviour changes to know about:** a sub-cell part (e.g. a 0.5 m log between cell-centre planes)
   now gets no PartIndex record (B3). An MPM thaw seeds particles only from cells it actually
   emptied, and can drop debris a few metres outside the aim when the box rewrite flips extra cells (B4).
 
+I don't remember what MPM stands for. Maybe I need a glossary to catch me back
+up?
+
 ### Open questions (evidence in each file)
 
-| Question | Where |
-|---|---|
-| Re-stamping the same CSG shape in a new material: repaint, or refuse as a no-op (today)? | `csg-restamp-material-only-refused` |
-| Sub-cell part identity in PartIndex | `part-index-sub-cell-parts-untracked` |
-| A thaw plan the corner carve can't realize: refuse, reshape, or solve exactly? | `mpm-thaw-carve-leaves-planned-cells` |
-| StoreWrite's box re-encode flips cells nobody edited (17 air, 1 solid over 190 thaws): repair like `one_cell`? | `mpm-thaw-carve-leaves-planned-cells` |
-| Disk-full policy for the DC arena: migrate to RAM, or stop refining? macOS matters? | `mmap-arena-disk-full-sigbus` |
-| Save pairs: refuse or warn on a lone or mismatched half; per-version readers once real saves exist; move unreadable saves aside? | `save-pair-consistency` |
-| `stamp_sphere`/`stamp_box` UNION repaints terrain it didn't make: test-only, or match `materials()`? | `edit-store-stamp-union-repaints-terrain` |
-| Dry run reads the generator twice (~0.045 ms of a refused preview): couple it to the builders, or leave it? | `actions-lattice-dry-run-double-generator` |
-| SVD ill-conditioning: interim fix now, or wait for the McAdams rewrite? Does the sim ever get there? | `mpm-svd-ill-conditioned-u` |
-| `edit_world` and a stale refine frontier: clear it, or refuse reuse after an edit? | `dc-edit-world-stale-refine-frontier` |
-| One-shot frontier drain drops 89 triangles in `emit_incremental` (pending gate test added). Does that match `dcdrop` in play, and change the priority? | `dc-incremental-emit-ring-insufficient` |
-| A write whose corners equal what a leaf holds still moves in-region samples by ~1e-8 and reports `changed`. Keep the leaf's field when the corners match? | `edit-store-noop-write-reports-changed` |
-| Should `TerrainSdfChanged` carry its source, so DetachmentScout can ignore MPM edits explicitly? | (B4 commit `7e6c225`) |
-| Close misc item 6 (player.gd input if-chains) as won't-fix? | `misc-low-severity` |
-| 04-event-bus.md "Lifetime & cleanup" predates WeakRef subscriptions: update, or keep as history? | `docs/roadmap/design/04-event-bus.md` |
+| Question                                                                                                                                                  | Where                                      |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------|
+| Re-stamping the same CSG shape in a new material: repaint, or refuse as a no-op (today)?                                                                  | `csg-restamp-material-only-refused`        |
+| Sub-cell part identity in PartIndex                                                                                                                       | `part-index-sub-cell-parts-untracked`      |
+| A thaw plan the corner carve can't realize: refuse, reshape, or solve exactly?                                                                            | `mpm-thaw-carve-leaves-planned-cells`      |
+| StoreWrite's box re-encode flips cells nobody edited (17 air, 1 solid over 190 thaws): repair like `one_cell`?                                            | `mpm-thaw-carve-leaves-planned-cells`      |
+| Disk-full policy for the DC arena: migrate to RAM, or stop refining? macOS matters?                                                                       | `mmap-arena-disk-full-sigbus`              |
+| Save pairs: refuse or warn on a lone or mismatched half; per-version readers once real saves exist; move unreadable saves aside?                          | `save-pair-consistency`                    |
+| `stamp_sphere`/`stamp_box` UNION repaints terrain it didn't make: test-only, or match `materials()`?                                                      | `edit-store-stamp-union-repaints-terrain`  |
+| Dry run reads the generator twice (~0.045 ms of a refused preview): couple it to the builders, or leave it?                                               | `actions-lattice-dry-run-double-generator` |
+| SVD ill-conditioning: interim fix now, or wait for the McAdams rewrite? Does the sim ever get there?                                                      | `mpm-svd-ill-conditioned-u`                |
+| `edit_world` and a stale refine frontier: clear it, or refuse reuse after an edit?                                                                        | `dc-edit-world-stale-refine-frontier`      |
+| One-shot frontier drain drops 89 triangles in `emit_incremental` (pending gate test added). Does that match `dcdrop` in play, and change the priority?    | `dc-incremental-emit-ring-insufficient`    |
+| A write whose corners equal what a leaf holds still moves in-region samples by ~1e-8 and reports `changed`. Keep the leaf's field when the corners match? | `edit-store-noop-write-reports-changed`    |
+| Should `TerrainSdfChanged` carry its source, so DetachmentScout can ignore MPM edits explicitly?                                                          | (B4 commit `7e6c225`)                      |
+| Close misc item 6 (player.gd input if-chains) as won't-fix?                                                                                               | `misc-low-severity`                        |
+| 04-event-bus.md "Lifetime & cleanup" predates WeakRef subscriptions: update, or keep as history?                                                          | `docs/roadmap/design/04-event-bus.md`      |
 
 ### Numbers
 
 Preview per call, radius 3, real terrain (A1b; "Before" is pre-`f11d284`):
 
-| Action | Before | After `f11d284` | Now |
-|---|---|---|---|
-| dig / fill | 0.07 ms | 0.76 ms | 0.055 ms |
-| raise | 0.11 ms | 0.65 ms | 0.047 ms |
-| flatten | 0.23 ms | 0.73 ms | 0.045 ms |
-| CSG sphere | 0.63 ms | 2.5 ms | 0.156 ms |
-| beam 6×2×2, resting / +3 m (C1) | — | 0.33 / 0.89 ms | 0.14 / 0.15 ms |
+| Action                          | Before  | After `f11d284` | Now            |
+|---------------------------------|---------|-----------------|----------------|
+| dig / fill                      | 0.07 ms | 0.76 ms         | 0.055 ms       |
+| raise                           | 0.11 ms | 0.65 ms         | 0.047 ms       |
+| flatten                         | 0.23 ms | 0.73 ms         | 0.045 ms       |
+| CSG sphere                      | 0.63 ms | 2.5 ms          | 0.156 ms       |
+| beam 6×2×2, resting / +3 m (C1) | —       | 0.33 / 0.89 ms  | 0.14 / 0.15 ms |
 
 Per click, `execute()`: beam placement 6.3 → 0.70 ms, CSG ~6.5 → 0.70 ms, fill r2 1.33 → 0.16 ms
 (G1, G2). 729-cell MPM thaw 9.4 → 6.0 ms (D1, G2). Buried refused CSG preview 0.68 → 0.34 ms (A4).
