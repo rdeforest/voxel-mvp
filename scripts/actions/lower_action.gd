@@ -7,3 +7,6 @@ extends BellSculptAction
 
 func _init(p_position: Vector3, p_radius: float, p_ctx: ActionContext) -> void:
     super(p_position, p_radius, p_ctx, 1.0)
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    return LowerAction.new(f.vec3("position"), f.number("radius"), ctx)

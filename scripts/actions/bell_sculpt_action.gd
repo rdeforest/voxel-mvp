@@ -24,7 +24,13 @@ func _init(p_position: Vector3, p_radius: float, p_ctx: ActionContext, p_sign: f
     radius   = p_radius
     store    = p_ctx.store
     player   = p_ctx.player
+    source   = p_ctx.source
     _sign    = p_sign
+
+
+# Which of raise and lower this is lives in the step's op, not a field (StepRegistry).
+func to_step() -> Dictionary:
+    return {"position": StepFields.encode_vec3(position), "radius": radius}
 
 
 func validate() -> bool:
@@ -38,10 +44,11 @@ func execute() -> void:
     _ensure_lattice()
     if _lattice == null:
         return
-    var box := StoreWrite.reshape(store, _lattice)
-    VoxelEventBusSingleton.emit(
-        TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box.position, box.size))
+
+    # A refused write (off-grid lattice) or one that moved no sample changed no matter to announce.
+    var flips := StoreWrite.reshape(store, _lattice)
+    if flips.changed:
+        TerrainSdfChangedEvent.announce(source, _lattice.region(), flips)
 
 func preview() -> ActionPreview:
     _ensure_lattice()

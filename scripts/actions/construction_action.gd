@@ -43,6 +43,37 @@ func _init(
     material_name = p_material
     store         = p_ctx.store
     player        = p_ctx.player
+    source        = p_ctx.source
+
+
+# The part by file and by size: a replay rebuilds it from the file, and the size shows whether the
+# file still describes the part that was placed. A part with no file is whole in its size.
+func to_step() -> Dictionary:
+    return {
+        "part":       part.resource_path,
+        "dimensions": StepFields.encode_vec3(part.dimensions),
+        "position":   StepFields.encode_vec3(placement_pos),
+        "rotation":   StepFields.encode_vec3(rotation),
+        "material":   material_name,
+    }
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    var path  := f.text("part")
+    var dims  := f.vec3("dimensions")
+    var built := _part_for_step(f, path, dims)
+    return ConstructionAction.new(built, f.vec3("position"), f.vec3("rotation"), f.material("material"), ctx)
+
+static func _part_for_step(f: StepFields, path: String, dims: Vector3) -> Part:
+    if path.is_empty():
+        var inline := Part.new()
+        inline.dimensions = dims
+        return inline
+    var loaded := load(path) as Part if ResourceLoader.exists(path) else null
+    if loaded == null:
+        f.fail("part: %s is not a Part" % path)
+    elif loaded.dimensions != dims:
+        f.fail("part: %s is now %s; the step was recorded with %s" % [path, loaded.dimensions, dims])
+    return loaded
 
 
 func validate() -> bool:
@@ -72,9 +103,9 @@ func execute() -> void:
         push_error("ConstructionAction.execute(): no store")
         return
     var xform := _xform()
-    var flips := VoxelImprint.apply(store, material_name, _shape(), xform, CsgState.Op.ADD)
-    # PartIndex releases a cell only when a carve flips it back to air, so the part is registered
-    # under exactly the cells the write made solid (the voxel_added set apply just emitted).
+    var flips := VoxelImprint.apply(store, source, material_name, _shape(), xform, CsgState.Op.ADD)
+    # PartIndex releases a cell only when a write flips it back to air, so the part is registered
+    # under exactly the cells this write made solid (the flips apply's event just carried).
     VoxelEventBusSingleton.emit(
         PartPlacedEvent.CHANNEL,
         PartPlacedEvent.new(VoxelConstants.GRID_ID, flips.solid, material_name, part.dimensions, xform))

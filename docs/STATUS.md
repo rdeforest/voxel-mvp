@@ -15,10 +15,10 @@
 
 ## Where things stand right now
 
-`master` holds everything, **local only**: the overnight pushes failed on SSH auth, so push first.
+`master` holds everything and was pushed on 2026-09-26.
 The overnight run (plan, results, open questions and play-test list) is
-[`overnight-2026-09-26.md`](overnight-2026-09-26.md). Read its **Morning brief** before anything else.
-It moves to `roadmap/implementation/done/` once you've been through it.
+[`overnight-2026-09-26.md`](roadmap/implementation/done/overnight-2026-09-26.md). Its **Morning brief** has been
+answered and folded into the bug files (2026-09-27, Track G1).
 
 What changed, in one breath:
 - Every action lattice runs in C++, for preview and write alike, with the GDScript originals kept as
@@ -45,7 +45,7 @@ researcher.
 
 1. **Overnight 2026-09-27** ([plan](overnight-2026-09-27.md)): doc 22 phase 1 (instrument layer,
    step language, recorder, replay runner), plus the fixes decided in the
-   [2026-09-26 questions](overnight-2026-09-26-questions.md) and research on perceptual LOD.
+   [2026-09-26 questions](roadmap/implementation/done/overnight-2026-09-26-questions.md) and research on perceptual LOD.
 2. **Design session to come:** "compelling, not accurate" rendering. Refinement should follow the
    eye (edits, sharp features, foreground) rather than uniform screen error.
 3. **FEAT089, parts look like parts**, which blocks the rest of 5.5g. Volumetric worldgen tier 1
@@ -140,7 +140,7 @@ recolours the overlap — use `PartIndex`.
 ## Immediate next actions
 
 1. Push `master` (and the merged branches, if you want them on origin).
-2. Morning brief in `docs/overnight-2026-09-26.md`: questions, then the play-test list on a GPU.
+2. Morning brief in `docs/roadmap/implementation/done/overnight-2026-09-26.md`: questions, then the play-test list on a GPU.
 3. FEAT089, with worldgen tier 1 alongside.
 
 

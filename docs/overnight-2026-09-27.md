@@ -10,10 +10,81 @@
 - [ ] E3 — frontier lazy invalidation on edit (Q10)
 - [ ] E4 — RAM cell arena with a budget cap; mmap removed (Q4)
 - [ ] E5 — C++ solver for the exact thaw carve (Q2, Q3) (stretch)
-- [ ] G1 — fold the 2026-09-26 answers into the bug files and docs
-- [ ] G2 — edit events carry their source; raise/lower/flatten emit measured flips (Q1)
-- [ ] G3 — save-pair integrity; single save format (Q5)
-- [ ] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments
+- [x] G1 — fold the 2026-09-26 answers into the bug files and docs
+- [x] G2 — edit events carry their source; raise/lower/flatten emit measured flips (Q1). One
+  matter-changed event per write (`terrain_sdf_changed` + `EditSource` + measured `CellFlips`);
+  `voxel_added`/`voxel_removed` folded into it. **Behaviour change:** terraforming now releases
+  parts from PartIndex and registers its cells in TerrainSupport with their real material; the scout
+  now keeps edits made while MPM is in flight (it used to drop them), floods after a console
+  `mpmthaw` (INSTRUMENT), seeds from its own thaw's collateral flips (cells the box rewrite
+  flipped outside the thawed component; it used to ignore them), and ignores MPM freezes by source,
+  including the chunked freeze path (regions over 24 m) it used to react to. The scout already
+  flooded after terraforming while MPM was idle; that isn't new. New bug:
+  `mpm-freeze-flips-unmeasured` (C++; also blocks the scout hearing freezes).
+- [x] G3 — save-pair integrity; single save format (Q5). Shared save id in both halves (snapshot
+  v8, blob header v3); temporaries are renamed in only after both read back whole (FileAccess drops
+  a failure flushing a file's tail at close); a committed save a crash or failed rename interrupted
+  is finished by the next load or F5. Lone, mismatched or older halves are refused and kept.
+  **Unilateral:** a refused save still blocks F5 until console `reset` (not moved aside); named
+  saves (G4.4) soften that. Q5 left the choice open.
+- [ ] G4 — doc 22 phase 1 (headline): gaps, steps, runner, recorder, instruments (G4.0–G4.4 done; G4.4 partial, see below)
+  - [x] G4.0 — gaps: PartIndex saved (snapshot v9, bit-exact bytes; a snapshot whose parts break
+    one-owner/unique-id is refused); scout pending work and MPM's unannounced freeze chunks gate
+    `is_quiescent()`; MPM freeze chunks announced bottom-up by position, appended (a second freeze
+    no longer drops the first's). **Unilateral:** camera-nearest re-meshing of big freezes dropped
+    (only separable inside DcWorldPreview, Track E's); dead `MpmStructure.reset()` removed.
+    **Found:** `var_to_str` and JSON `full_precision` don't round-trip ~31%/~24% of doubles on this
+    engine; G4.1's step format needs an exact number encoding.
+  - [x] G4.1 — serializable steps: `to_step()`/`from_step()` on every action, `StepRegistry`,
+    `StepDocument` (format/version/units header, a step per line), exact JSON numbers
+    (`StepJson`/`ExactDecimal`: the engine's writer is exact, its reader isn't, so numbers are
+    re-read from their text with correct rounding; `-0.0` keeps its sign; any duplicate key is
+    refused, after review found one that silently swapped numbers). **Unilateral:** a part
+    with no file is recorded whole by its dimensions; flatten records the normal as given (a third
+    of unit normals move an ulp on renormalizing); unit strings deferred to the phase-3 evaluator.
+  - [x] G4.2 — replay runner + builder (`test/support/scenario.gd`): a headless world (store,
+    support, PartIndex, MPM, scout, player stub) whose sims tick only through `advance(n)`/`settle()`
+    at 1/60 s, in the live frame order; `tick()` seams on DetachmentScout and StructuralIntegrity.
+    Builder calls write a step, read it back from its JSON and run that, so builder and replay are
+    one path; a replay stops at the first step whose `validate()` differs (or that won't decode or
+    settle) and names its index. World steps (`player_at`, `advance`, `settle`, `mark`, `thaw`) are
+    encoded in `StepRegistry`. **Found and fixed:** the snapshot stored tracked support and the
+    player as `var_to_str` text, so a world loaded from a save was an ulp off (a replay from the pair
+    diverged in `capture()`); they are bytes now, snapshot v10. **Unilateral:** a scenario starts
+    from a save *pair* (`start_save`), not a lone blob: a blob alone drops part identity and
+    tracked support, the gaps G4.0 closed. One scenario is live at a time, because the event bus
+    is global and its events carry no world.
+  - [x] G4.3 — recorder: `Player.action_validated` (emitted between `validate()` and `execute()`
+    in `_try_edit_terrain`) feeds `ScenarioRecorder`; `RecordingCommands` (a World child) adds
+    console `rec start|fresh|stop [name]` and `mark [note]`; `mpmthaw` and console `settle` are
+    steps too (`thaw`, new `drain_support`). A directory under `user://scenarios/<name>/` holds
+    `steps.json` (rewritten per step, so a crash keeps what came before), the start's save pair
+    (`rec start`, gated on `is_quiescent()`), and `mark-NNN.json`/`.png`. The runner's
+    `run_recording(dir)` replays one; `capture()` now includes MPM's in-flight particles.
+    Verified live (headless World scene, `scripts/dev/probe_recorder_live.gd`): `rec fresh` and
+    `rec start` recordings with digs, a refused fill and a mark replay byte-identical in field,
+    parts, support and MPM; but MPM was empty and support drained at both stops, so the live
+    check proves the edits and step round-trip, not frame alignment. Frame alignment is covered by
+    GUT (one frame fewer, or one frame moved from after the cut to before it, replays to a
+    different world). **Debt:** `steps.json` is re-serialized whole per step (O(n) per step, O(n²)
+    per recording); fine at play-session sizes, revisit (append-only) if recordings get long.
+    **Found:** the console pauses the tree (`pause_when_open`), so the
+    engine's physics frame count keeps running while the simulations don't; the recorder counts
+    its own unpaused physics frames (measured: 10 paused frames, clock +0, engine +10).
+    **Unilateral:** frame and player position are encoded as `advance`/`player_at` steps (the
+    runner's strict decoding refuses extra fields on an action step); `rec fresh` resets the live
+    world (like `reset`) and starts on the reloaded world's first frame; `mark` needs a live
+    recording; a name defaults to the date-time; an existing directory is refused. **Not verified
+    live:** `mpmthaw`'s step (the console aims with the physics raycast, which never hit terrain
+    in the headless World; covered in GUT) and the screenshot (headless has no rendered viewport).
+  - [x] G4.4 — instrument layer, **partial**: the probe adds edited/generator leaf, the 8 corners
+    the mesher samples, its sign test and seams; console `setcorners`/`setmaterial`/`stamp` write
+    exactly (ExactDecimal) through StoreWrite/VoxelImprint as INSTRUMENT, recorded as steps
+    (`set_corners`/`set_material`/`stamp`); a write that buries the player or drops their ground
+    puts them in fly (noclip when buried); `save <name>`/`load <name>` slots under
+    `user://saves/<name>/`. Tested through LimboConsole's own dispatcher. **Not built:** the
+    owning leaf's origin/size/field state (needs C++ `EditStore.leaf_info`, question for Robert),
+    the leaf/sign overlay, assembly export/import (phase 3).
 - [x] R1 — research: what the refine frontier spends its effort on + perceptual LOD survey.
   Headline: the stones never enter the frontier. Their error comes from the 1 m scalar
   reconstruction (linear crossings, h = 1 m normals); exact Hermite data fixes it at 1 m cost. The
@@ -21,7 +92,7 @@
   Doc `reference/09`.
 - [ ] Integration review of the merged result; morning brief at the bottom of this doc
 
-"Q" numbers refer to [`overnight-2026-09-26-questions.md`](overnight-2026-09-26-questions.md);
+"Q" numbers refer to [`overnight-2026-09-26-questions.md`](roadmap/implementation/done/overnight-2026-09-26-questions.md);
 Robert's answers are inline there.
 
 ## The constraint that shapes everything

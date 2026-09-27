@@ -23,7 +23,22 @@ func _init(
     shape         = p_shape
     store         = p_ctx.store
     player        = p_ctx.player
+    source        = p_ctx.source
     material_name = p_material
+
+
+func to_step() -> Dictionary:
+    return {
+        "position": StepFields.encode_vec3(position),
+        "radius":   radius,
+        "material": material_name,
+        "shape":    StepFields.enum_name(Shape, shape),
+    }
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    return FillAction.new(f.vec3("position"), f.number("radius"), ctx, f.material("material"),
+        f.enum_value("shape", Shape))
+
 
 func validate() -> bool:
     if store == null:
@@ -48,14 +63,11 @@ func execute() -> void:
     # classifier integrates them into the SDF the moment they're fully covered.
     _freeze_bodies_in_volume()
 
-    # Write the very field the preview read; events are the cells whose sample point the write
-    # actually flipped, measured across it. What the sphere makes solid takes the fill material.
+    # Write the very field the preview read; the event carries the cells whose sample point the
+    # write actually flipped, measured across it. What the sphere makes solid takes the fill material.
     var lattice := _stamp()
-    lattice.write(store, lattice.materials(store, MaterialPalette.index_of(material_name), true)).emit(store)
-
-    VoxelEventBusSingleton.emit(
-        TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, lattice.region_lo, lattice.region_hi - lattice.region_lo))
+    var flips   := lattice.write(store, lattice.materials(store, MaterialPalette.index_of(material_name), true))
+    TerrainSdfChangedEvent.announce(source, lattice.region(), flips)
 
 
 # The field execute() writes — validate, preview and events all read this brush. Stamped once, so

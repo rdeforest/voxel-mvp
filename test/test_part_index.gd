@@ -1,15 +1,18 @@
 extends GutTest
 
 # PartIndex identity sidecar: records placements (PartPlacedEvent), tracks cell ownership,
-# drops carved cells (VoxelRemovedEvent), and answers count / part_at / record.
+# drops cells a write empties (the air flips of a matter-changed event, whoever wrote), and answers
+# count / part_at / record.
 
 func _place(cells: Array[Vector3i], material: StringName) -> void:
     VoxelEventBusSingleton.emit(
         PartPlacedEvent.CHANNEL,
         PartPlacedEvent.new(0, cells, material, Vector3(6, 2, 2), Transform3D.IDENTITY))
 
-func _carve(cell: Vector3i) -> void:
-    VoxelEventBusSingleton.emit(VoxelRemovedEvent.CHANNEL, VoxelRemovedEvent.new(0, cell))
+func _carve(cell: Vector3i, source := EditSource.Kind.PLAYER) -> void:
+    var flips := CellFlips.new()
+    flips.air = [cell]
+    TerrainSdfChangedEvent.announce(source, AABB(Vector3(cell), Vector3.ONE), flips)
 
 
 func test_records_a_placement() -> void:
@@ -45,3 +48,23 @@ func test_newest_part_claims_an_overlapped_cell() -> void:
     var second := index.part_at(Vector3i(9, 9, 9))
     assert_ne(first, second, "the overlapped cell now belongs to the newer part")
     assert_null(index.record(first), "the first part lost its only cell and was dropped")
+
+
+# A cell emptied by anyone leaves its part: a terraform, an MPM thaw or a replayed step is as real
+# a carve as a dig. Solid flips release nothing.
+func test_any_source_releases_and_solid_flips_do_not() -> void:
+    var index := PartIndex.new()
+    var cells: Array[Vector3i] = [Vector3i(1, 1, 1), Vector3i(2, 1, 1), Vector3i(3, 1, 1)]
+    _place(cells, &"Wood")
+    var id := index.part_at(Vector3i(1, 1, 1))
+
+    var grown := CellFlips.new()
+    grown.solid = [Vector3i(1, 1, 1)]
+    TerrainSdfChangedEvent.announce(EditSource.Kind.PLAYER, AABB(Vector3(1, 1, 1), Vector3.ONE), grown)
+    assert_eq(index.part_at(Vector3i(1, 1, 1)), id, "a solid flip leaves the cell with its part")
+
+    _carve(Vector3i(1, 1, 1), EditSource.Kind.SCOUT)
+    _carve(Vector3i(2, 1, 1), EditSource.Kind.REPLAY)
+    assert_eq(index.record(id).cells, [Vector3i(3, 1, 1)] as Array[Vector3i], "each source's carve released its cell")
+    _carve(Vector3i(3, 1, 1), EditSource.Kind.MPM)
+    assert_eq(index.count(), 0, "and the emptied part is gone")

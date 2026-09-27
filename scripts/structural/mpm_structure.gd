@@ -18,7 +18,7 @@ const SETTLE_FRAMES    := 30     # consecutive settled frames before freezing ba
 const FREEZE_RADIUS    := 0.6    # particle-skinning radius for the freeze rasterisation
 const MAX_PARTICLES    := 6000   # hard cap — beyond this a step costs too much (a runaway-thaw guard)
 const CHUNK            := 12     # freeze region is re-meshed in CHUNK³ boxes (keeps each edit small)
-const CHUNKS_PER_FRAME := 2      # bounded work/frame — the closest chunks re-mesh first
+const CHUNKS_PER_FRAME := 2      # bounded work/frame
 const SINGLE_EMIT_MAX  := 24     # a settled clump this small re-meshes in ONE watertight box (no chunk seams)
 
 const _UNIT_CUBE: Array[Vector3i] = [
@@ -32,7 +32,7 @@ var _mm:    MultiMesh
 
 var _settled_frames := 0
 var _material_index := 1        # Stone — the material the frozen-back terrain takes
-var _pending_chunks: Array = [] # freeze re-mesh boxes still to emit (closest-to-camera first)
+var _pending_chunks: Array = [] # freeze re-mesh boxes still to emit, bottom layer first
 
 
 func setup(store: EditStore) -> void:
@@ -62,20 +62,21 @@ func setup(store: EditStore) -> void:
 
 
 # Thaw the solid terrain cells within `radius` of `center` (the `mpmthaw` console path).
-func thaw_sphere(center: Vector3, radius: float, material_index := 1) -> int:
-    return thaw_cells(VoxelUtils.cells_in_sphere(center, radius), material_index)
+func thaw_sphere(center: Vector3, radius: float, source: EditSource.Kind, material_index := 1) -> int:
+    return thaw_cells(VoxelUtils.cells_in_sphere(center, radius), source, material_index)
 
 
 # Thaw a set of (presumed solid) terrain cells into MPM particles: carve them from the store (a
 # hole opens, DC re-meshes) and seed 8 particles per cell the carve actually turned to air. Air
-# cells are skipped. Returns the count thawed. This is what the loss-of-support auto-trigger feeds.
+# cells are skipped. Returns the count thawed. This is what the loss-of-support auto-trigger feeds;
+# the carve's event is credited to `source` (SCOUT for a detachment, INSTRUMENT for `mpmthaw`).
 #
 # The planned cells are only the carve's input. A planned cell can survive it (every corner it has
 # is shared with kept solid, so none may clear), and rewriting the box re-encodes the field there,
-# which can flip cells the plan never named. So the events and the particles both follow the flips
+# which can flip cells the plan never named. So the event and the particles both follow the flips
 # measured across the write, as VoxelImprint.apply does: matter leaves the store exactly where it
 # enters the sim.
-func thaw_cells(cells: Array, material_index := 1) -> int:
+func thaw_cells(cells: Array, source: EditSource.Kind, material_index := 1) -> int:
     _material_index = material_index   # freeze fallback only; each particle carries its own material
 
     var work := _carve_corners(_plan_thaw(cells))
@@ -86,19 +87,13 @@ func thaw_cells(cells: Array, material_index := 1) -> int:
     var lat   := StoreWrite.lattice(_store, work)
     var flips := StoreWrite.write(_store, lat, work)
 
-    # Particles go in before any event: DetachmentScout ignores edits made while MPM is active,
-    # and that is how it tells this carve from a player's.
     _seed_particles(flips)
     _settled_frames = 0
     _mm.instance_count = _sim.particle_count()
 
-    flips.emit(_store)
-
-    # A rewrite that changed nothing needs no re-mesh. Skipping it also stops a thaw that empties
-    # no cell (so MPM stays idle) from re-seeding the scout onto the same piece forever.
+    # A rewrite that changed nothing needs no re-mesh and has no flips to report.
     if flips.changed:
-        VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL,
-            TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, lat.region_lo, lat.region_hi - lat.region_lo))
+        TerrainSdfChangedEvent.announce(source, lat.region(), flips)
 
     return flips.air.size()
 
@@ -179,16 +174,17 @@ func _corner_clears(corner: Vector3i, planned: Dictionary, kept: Dictionary) -> 
 func active_count() -> int:
     return _sim.particle_count() if _sim != null else 0
 
+# Where the material in flight is, for comparing a replay with its recording mid-fall.
+func particle_positions() -> PackedVector3Array:
+    var out := PackedVector3Array()
+    for i in active_count():
+        out.append(_sim.get_position(i))
+    return out
 
-# Drop all active material (no freeze-back). Called when leaving MPM mode so a large in-flight
-# set stops being stepped.
-func reset() -> void:
-    if _sim != null:
-        _sim.clear()
-    _settled_frames = 0
-    _pending_chunks.clear()
-    if _mm != null:
-        _mm.instance_count = 0
+
+# No material in flight and no frozen region still waiting to be announced.
+func is_idle() -> bool:
+    return active_count() == 0 and _pending_chunks.is_empty()
 
 
 func _physics_process(delta: float) -> void:
@@ -212,22 +208,21 @@ func tick(delta: float) -> void:
             _settled_frames = 0
 
 
-# Re-mesh the frozen region a few bounded boxes per frame, closest to the camera first, so each
-# terrain_sdf_changed stays small (no main-thread freeze) and the nearby change shows promptly.
+# Announce the frozen region a few bounded boxes per frame, so each terrain_sdf_changed (a re-mesh
+# and a structural re-scan) stays small: no main-thread freeze.
 func _emit_pending_chunks() -> void:
     var n := 0
 
     while not _pending_chunks.is_empty() and n < CHUNKS_PER_FRAME:
         var box: Vector3 = _pending_chunks.pop_front()
 
-        VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL,
-            TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box, Vector3.ONE * float(CHUNK)))
+        _announce_freeze(AABB(box, Vector3.ONE * float(CHUNK)))
 
         n += 1
 
 
 # Rasterise the settled particles back into the store as terrain (fast, bin-hashed), then queue
-# the region for chunked re-meshing (closest first), and drop the particles.
+# the region for chunked announcement, and drop the particles.
 func _freeze() -> void:
     var region: Dictionary = _sim.rasterize_to_store(_store, 1.0, FREEZE_RADIUS, _material_index)
 
@@ -237,8 +232,7 @@ func _freeze() -> void:
 
         if dim <= SINGLE_EMIT_MAX:
             # Small settled clump → one box, meshed in a single splice (watertight, no chunk seams).
-            VoxelEventBusSingleton.emit(TerrainSdfChangedEvent.CHANNEL,
-                TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, origin, Vector3.ONE * float(dim)))
+            _announce_freeze(AABB(origin, Vector3.ONE * float(dim)))
         else:
             _queue_freeze_chunks(origin, dim)
 
@@ -249,31 +243,23 @@ func _freeze() -> void:
         _mm.instance_count = 0
 
 
-# Split the rasterised region into CHUNK³ boxes and sort them nearest-camera-first.
+# MpmSim.rasterize_to_store writes without measuring, so a freeze reports its box with no flips:
+# subscribers learn of its cells only by re-scanning the box
+# (docs/bugs/mpm-freeze-flips-unmeasured.md).
+func _announce_freeze(box: AABB) -> void:
+    TerrainSdfChangedEvent.announce(EditSource.Kind.MPM, box, CellFlips.new())
+
+
+# Split the rasterised region into CHUNK³ boxes, in an order fixed by position: bottom layer first,
+# then z, then x. Structural subscribers hear the freeze in this order, so it must be part of the
+# world, not of where the camera happens to be; any fixed order would do, and bottom-up puts a pile's
+# footing before what rests on it. Appended, so a freeze landing while an earlier one is still being
+# announced doesn't drop the rest of the earlier one.
 func _queue_freeze_chunks(origin: Vector3, dim: int) -> void:
-    var boxes: Array = []
-
-    var vp  := get_viewport()
-    var cam := vp.get_camera_3d()  if vp  != null else null
-    var eye := cam.global_position if cam != null else origin
-    var cx  := 0
-
-    while cx < dim:
-        var cy := 0
-
-        while cy < dim:
-            var cz := 0
-
-            while cz < dim:
-                boxes.append(origin + Vector3(cx, cy, cz))
-                cz += CHUNK
-            cy += CHUNK
-        cx += CHUNK
-
-    boxes.sort_custom(func(a, b):
-        return eye.distance_squared_to(a + Vector3.ONE * (CHUNK * 0.5)) < eye.distance_squared_to(b + Vector3.ONE * (CHUNK * 0.5)))
-
-    _pending_chunks = boxes
+    for cy in range(0, dim, CHUNK):
+        for cz in range(0, dim, CHUNK):
+            for cx in range(0, dim, CHUNK):
+                _pending_chunks.append(origin + Vector3(cx, cy, cz))
 
 
 func _process(_dt: float) -> void:

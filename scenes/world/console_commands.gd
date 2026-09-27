@@ -13,6 +13,11 @@ extends RefCounted
 # demos (this is RefCounted, so it can't add_child itself). The other collaborators
 # are the subsystems World owns; assign them before register_all().
 
+# World writes made from here, announced before they happen so a recording steps them at the
+# frame they ran (RecordingCommands).
+signal thawing(center: Vector3, radius: float)
+signal draining_support
+
 var host:          Node
 var inval_overlay: Node3D
 var world_preview: DcWorldPreview
@@ -334,7 +339,9 @@ func mpmthaw(radius := 3.0) -> void:
         return
     # Thaw into the world's wired MpmStructure (the same one save-gating + DetachmentScout see), not a
     # private console instance — otherwise the in-flight material is invisible to is_quiescent.
-    var n := integrity.mpm.thaw_sphere(rc.get_collision_point(), radius)
+    var center := rc.get_collision_point()
+    thawing.emit(center, radius)
+    var n := integrity.mpm.thaw_sphere(center, radius, EditSource.Kind.INSTRUMENT)
     LimboConsole.info("mpmthaw: thawed %d cells (r=%.1f) into MPM" % [n, radius])
 
 # Debug-flood connected solid terrain from the cell behind the player's aim, biased downward,
@@ -382,6 +389,7 @@ func quiescent() -> void:
     LimboConsole.info("quiescent: %s" % integrity.is_quiescent())
 
 func settle() -> void:
+    draining_support.emit()
     if not integrity.force_quiescent():
         LimboConsole.error("support did not settle (%d cells still dirty) — saving stays blocked"
             % integrity.terrain_support.dirty_queue.size())

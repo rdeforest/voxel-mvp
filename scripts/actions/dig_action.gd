@@ -1,6 +1,8 @@
 class_name DigAction
 extends Action
 
+# Not a PlayerSafeAction on purpose: players expect to dig under themselves, and directives will
+# replace this verb (docs/bugs/closed/dig-action-no-validate-no-safety.md).
 
 enum Shape { SPHERE }
 
@@ -23,6 +25,19 @@ func _init(
     radius   = p_radius
     shape    = p_shape
     store    = p_ctx.store
+    source   = p_ctx.source
+
+
+func to_step() -> Dictionary:
+    return {
+        "position": StepFields.encode_vec3(position),
+        "radius":   radius,
+        "shape":    StepFields.enum_name(Shape, shape),
+    }
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    return DigAction.new(f.vec3("position"), f.number("radius"), ctx, f.enum_value("shape", Shape))
+
 
 func validate() -> bool:
     if store == null:
@@ -43,18 +58,15 @@ func execute() -> void:
         push_error("DigAction.execute(): no store")
         return
 
-    # Write the very field the preview read; events are the cells whose sample point the write
-    # actually flipped, measured across it. A carve repaints nothing.
+    # Write the very field the preview read; the event carries the cells whose sample point the
+    # write actually flipped, measured across it. A carve repaints nothing.
     var lattice := _stamp()
-    lattice.write(store, lattice.materials(store, -1, true)).emit(store)
+    var flips   := lattice.write(store, lattice.materials(store, -1, true))
 
     # Box one cell wider than the dig sphere so the boundary-cell scan in
     # TerrainSupport sees newly-exposed neighbours just outside the sphere.
-    var scan_origin := position - Vector3.ONE * (radius + 1.0)
-    var scan_size   :=            Vector3.ONE * ((radius + 1.0) * 2.0)
-    VoxelEventBusSingleton.emit(
-        TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, scan_origin, scan_size))
+    var scan := AABB(position - Vector3.ONE * (radius + 1.0), Vector3.ONE * ((radius + 1.0) * 2.0))
+    TerrainSdfChangedEvent.announce(source, scan, flips)
 
 
 # The field execute() writes — validate, preview and events all read this brush. Stamped once, so

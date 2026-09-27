@@ -3,6 +3,10 @@
 *Drafted by Claude, approved by Robert before sleeping. Operational doc: delete
 or move to `docs/completed/` when the session is closed out.*
 
+*Closed out 2026-09-27 (Claude): Robert's answers are inline below and in
+[`overnight-2026-09-26-questions.md`](overnight-2026-09-26-questions.md), and are folded into the
+bug files they name.*
+
 ## Progress
 
 - [x] Track A1 — preview lattice in C++ (`actions-preview-gdscript-slow`) — A1a (C++ prediction + byte-identical gate) and A1b (callers switched, `_compute_work` + `_turns_in` ported, re-measured under "before"); bug closed
@@ -121,13 +125,13 @@ available to unblock anything. Work the whole window; do not stop and wait.
 
 ## Morning brief
 
-*Drafted by Claude at the end of the session. Everything is merged to local `master`; nothing is
-pushed (see "Environment").*
+*Drafted by Claude at the end of the session. Everything is merged to `master` and was pushed on
+2026-09-26 (see "Environment").*
 
 ### Needs you first
 
 1. **Single-voxel edits** — the characterization is done. Answer its questions and the fix can be
-   designed: [`single-voxel-edits-unexpected`](bugs/single-voxel-edits-unexpected.md).
+   designed: [`single-voxel-edits-unexpected`](../../../bugs/single-voxel-edits-unexpected.md).
    In short: Fill makes a ~2.5 m³ smooth mound, 83 % of it outside the target, and the target ends
    about half full. 0 of 982 edits read as a cube. Empty refuses "already air" on 48 % of first
    clicks and can't dig down (a second click refuses 36 of 39 times). Did you expect a crisp 1 m
@@ -161,7 +165,7 @@ expectations. :)
    `voxel_added`/`voxel_removed`, so PartIndex never releases a part they carve, and support and
    detachment never react to them. This predates tonight. The fix is ready (writes now return
    measured flips); the intent isn't:
-   [`actions-reshape-no-voxel-events`](bugs/actions-reshape-no-voxel-events.md).
+   [`actions-reshape-no-voxel-events`](../../../bugs/actions-reshape-no-voxel-events.md).
 
 I suppose it wouldn't make sense to emit events that aren't true, so maybe
 "voxel modified" needs to be a new event? But that's not exactly the question.
@@ -173,7 +177,7 @@ system handles this sort of thing?
 3. **Player safety misses sub-cell burials** (found tonight, med). A raise or carve that moves the
    surface less than half a cell inside your capsule goes unrefused; a probe reproduces it. An exact
    fix needs your call on how an unedited leaf's generator field is judged:
-   [`player-safety-misses-sub-cell-burial`](bugs/player-safety-misses-sub-cell-burial.md).
+   [`player-safety-misses-sub-cell-burial`](../../../bugs/player-safety-misses-sub-cell-burial.md).
 
 I believe you're asking if such edits should be refused, or something else
 should happen. In the interest of consistency, I'd like such changes to be
@@ -185,7 +189,7 @@ about the options in chat until I understand the question better. :)
 
 4. **Dig under your own feet:** guard it the way Lower is guarded, or keep Dig as "dig anywhere"?
    The guard would refuse digs aimed within ~4.5 m of your feet:
-   [`dig-action-no-validate-no-safety`](bugs/dig-action-no-validate-no-safety.md).
+   [`dig-action-no-validate-no-safety`](../../../bugs/closed/dig-action-no-validate-no-safety.md).
 
 I think users will reasonably expect to be able to dig under themselves. When
 we do this in real life, we're actually digging around ourselves and moving to
@@ -318,9 +322,11 @@ throughout. New pending tests are gates for filed bugs (`mpm-svd-ill-conditioned
 
 ### Environment
 
-- **Nothing pushed.** Every `git push` failed: `Permission denied (publickey)` from this session's
-  ssh-agent. `master` is local only; push it when you're up. Every overnight branch is merged into
-  it, so pushing the branches is optional.
+- **Pushed 2026-09-26.** During the session every `git push` failed with `Permission denied
+  (publickey)` from the session's ssh-agent, so `master` stayed local overnight. It was pushed on
+  2026-09-26 with the overnight branches merged into it (`origin/master` contains `08111ec`).
+  Later sessions push with an explicit key; see `overnight-2026-09-27.md`, "Session facts".
+  *(Corrected by Claude, 2026-09-27.)*
 - **`claude` on PATH reverted to 2.1.274.** `~/.local/bin/claude` was repointed at 22:28, most likely
   by the stable-channel auto-updater, so "Session facts" above is wrong about the pin. A plain
   `claude` relaunch can't run Opus 5.5 until you `claude install 2.1.283` (or later) again, and the

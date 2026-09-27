@@ -56,6 +56,10 @@ func index(i: Vector3i) -> int:
 func point(i: Vector3i) -> Vector3:
     return origin + Vector3(i) * cell
 
+# The box whose overlapping leaves the write rewrites: a matter-changed event's box.
+func region() -> AABB:
+    return AABB(region_lo, region_hi - region_lo)
+
 
 # The centre of the rewritten leaf a point's "before" value is read from (store.sample_toward): the
 # one above it on each axis, as store.sample reads, except on a max face, where the leaf above is

@@ -4,8 +4,8 @@
 `sdf-lattice-writes-false-change-at-max-faces` (fixed in `af19749`)
 (its "Follow-up" section has the measurements).*
 
-**Status:** Open. Severity low (perf; ~0.05 ms per no-op-looking preview against a 20 ms frame). Needs a
-call on which fix, or whether to leave it.
+**Status:** Open, **left as is until the volumetric generator lands** (decided 2026-09-27; see
+*Decision*). Severity low (perf; ~0.05 ms per no-op-looking preview against a 20 ms frame).
 
 ## Symptom
 A CSG union buried in unedited ground previews in ~0.34 ms (`scripts/dev/bench_lattice_writes.gd`,
@@ -26,3 +26,13 @@ re-measured).
 - Cache the generator per column (it is `y - surface(x, z)` today). Breaks when the planned volumetric
   generator lands, since that is not a heightfield.
 - Leave it: at this size it is well under budget.
+
+## Decision (2026-09-27)
+*Recorded by Claude from Robert's answer to Q13 in
+[`overnight-2026-09-26-questions.md`](../roadmap/implementation/done/overnight-2026-09-26-questions.md).*
+
+Leave it. Robert agreed with revisiting when the volumetric generator
+([doc 19](../roadmap/design/19-volumetric-worldgen.md)) replaces the heightfield, since the
+generator's per-call cost, and so this whole cost profile, changes then. (Claude's expectation, not
+his: the bigger work may moot it.) Re-measure `bench_lattice_writes.gd` "union buried in ground" on the new generator
+before choosing a fix.

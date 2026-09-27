@@ -1,7 +1,8 @@
 extends GutTest
 
-# misc-low-severity item 7: where EditStore.lattice_turns_in's point tests disagree with the
-# truth. Cases in the air far above the terrain, on 1 m leaves the probe writes itself.
+# player-safety-misses-sub-cell-burial (was misc-low-severity item 7): where
+# EditStore.lattice_turns_in's point tests disagree with the truth. Cases in the air far above the
+# terrain, on 1 m leaves the probe writes itself.
 # Run: bin/godot --path . --headless -s addons/gut/gut_cmdln.gd -gtest=res://scripts/dev/probe_turns_in_exactness.gd
 # (Drafted by Claude, overnight 2026-09-26.)
 

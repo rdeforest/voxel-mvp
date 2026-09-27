@@ -113,8 +113,63 @@ calls `current_activity().make_action.call(hit_pos, hit_normal)`, then
 placement) lives inside `ActionFactories`, not inside the Action.
 
 **Adding an Action:** extend `Action`, implement `validate()` / `execute()` /
-`preview()`, add a `make_*` factory to `ActionFactories`, and a new `EditMode`
-entry under the appropriate tool in `ToolCatalog._build_catalog()`.
+`preview()` / `to_step()` and a static `from_step()`, give it an op name in
+`StepRegistry.ops()`, add a `make_*` factory to `ActionFactories`, and a new
+`EditMode` entry under the appropriate tool in `ToolCatalog._build_catalog()`.
+`test_step_registry.gd` round-trips every op; add yours there.
+
+### Steps (`scripts/scenario/`)
+
+An action as data, for recordings and hand-written scenarios (doc 22, Format 2).
+*(Section drafted by Claude, 2026-09-27.)*
+
+- `to_step()` returns the resolved constructor arguments; `StepRegistry.step_of()`
+  adds the op name, and `StepRegistry.action_of(StepFields.new(step), ctx)`
+  rebuilds the action in a context (a replay's store, player stand-in, source).
+  The player's position is not in a step; the step stream carries it.
+- `StepFields` owns the JSON shapes (vectors, cells, transforms, enum names,
+  materials) and reads strictly: a missing, mistyped or extra field refuses.
+- `StepDocument` is the file: a `format` / `version` / `units` header and one
+  step per line.
+- `StepJson` + `ExactDecimal` + `BigNat`: JSON whose doubles read back bit for
+  bit. The engine's JSON reader is off by an ulp for about a quarter of doubles
+  and drops `-0.0`'s sign, so numbers are read from their own text with correct
+  rounding.
+- `StepRegistry` also encodes the steps that aren't actions (`WORLD_OPS`):
+  `player_at`, `advance`, `settle`, `mark`, `thaw` (the console's `mpmthaw`),
+  `drain_support` (the console's `settle`).
+- The replay runner and builder is `test/support/scenario.gd`: a headless world
+  whose simulations tick only when it says (`advance`/`settle`, through the
+  `tick()` seams on StructuralIntegrity, MpmStructure and DetachmentScout). A
+  builder call (`s.dig(...)`) runs the step read back from its own JSON, the path
+  `s.replay(text)` takes; replay stops at the first step whose `validate()`
+  differs from its `expect_valid`. `s.capture()` is the world as bytes for
+  comparing runs. The event bus is global, so one scenario is live at a time.
+- `ScenarioRecorder` (`scripts/scenario/`) writes a directory the runner replays
+  (`s.run_recording(dir)`): `steps.json`, the start's save pair unless it started
+  fresh, and each mark's `mark-NNN.json` (+ `.png`). It takes the frame from its
+  caller; the live caller is `RecordingCommands` (`scenes/world/`, console `rec`
+  and `mark`), which counts its own unpaused physics frames and hears
+  `Player.action_validated` plus the console's `thawing`/`draining_support`.
+  A new store-writing console command must announce itself the same way, or a
+  recording made across it won't replay.
+
+### Instruments (`scripts/instruments/`, `scenes/world/instrument_commands.gd`)
+
+Doc 22's instrument layer: exact, grid-aware console writes for testing, kept
+apart from the player's verbs. *(Section drafted by Claude, 2026-09-27.)*
+
+- `SetCornersAction` (`set_corners`), `SetMaterialAction` (`set_material`) and
+  `StampAction` (`stamp`, a `CsgAction` without the safety refusal) are Actions
+  with step ops, so recordings and the runner's builder hold them like any step.
+  Each has `refusal()` (why `validate()` is false) and `written_field()` (the
+  lattice `execute()` writes).
+- `InstrumentCommands` is the console side (`setcorners`, `setmaterial`,
+  `stamp`, `save`, `load`). Numbers go through `ExactDecimal`, not the console's
+  parse. Every write takes `write()`: `validate()`, the `validated` signal
+  (`RecordingCommands` records it as it does a click), then the write, then the
+  rescue: `PlayerSafeAction.danger_of()` on the written field, read before the
+  write, puts the player in fly mode (`Player.enter_fly`), with noclip when buried.
 
 ---
 
@@ -143,10 +198,14 @@ VoxelEventBusSingleton.emit(channel, event)
 
 **Channel taxonomy** (`scripts/events/*_event.gd`):
 
-- **Primitive**, emitted by actions: `terrain_sdf_changed`, `voxel_added`,
-  `voxel_removed`. (`part_added`/`part_removed` were deleted with
-  `PartSupport` in parts-as-voxels S4; a placement now emits `part_placed` for
-  the `PartIndex` sidecar.)
+- **Matter changed**: `terrain_sdf_changed` (`TerrainSdfChangedEvent`), emitted
+  once by every write to the store: actions, the MPM thaw and freeze. It
+  carries the rewritten box, the cells the write flipped (`CellFlips`, measured
+  across it) and its `EditSource` (player, instrument, MPM, scout, replay).
+  The per-cell `voxel_added`/`voxel_removed` events were folded into it
+  (2026-09-27). A placement also emits `part_placed` for the `PartIndex`
+  sidecar. (`part_added`/`part_removed` were deleted with `PartSupport` in
+  parts-as-voxels S4.)
 - **Derived**, emitted by integrity components: `region_collapsing`.
   (`voxel_support_changed` was removed in Phase 6 with its only consumer,
   `CollapseDetector`.)
@@ -217,8 +276,9 @@ facade.
 
 **`TerrainSupport`** (`scripts/structural/terrain_support.gd`) owns
 `voxel_data: Dictionary[Vector3i, VoxelRecord]`, `dirty_queue` and
-`_lowest_registered_y`. Subscribes channel-wide in `_init` to `voxel_added`,
-`voxel_removed` and `terrain_sdf_changed`. A worklist fixpoint drains
+`_lowest_registered_y`. Subscribes channel-wide in `_init` to
+`terrain_sdf_changed`: it tracks the event's solid flips (with the material the
+store holds there), drops its air flips, then scans the box. A worklist fixpoint drains
 `dirty_queue` (FIFO, BFS-order) at `PROPAGATION_BUDGET` (200) cells per physics
 frame via `process_dirty_queue()`. `is_natural_terrain(pos)` requires both
 untracked-solid AND bedrock — the combination grants `FULL_SUPPORT` to
@@ -237,17 +297,21 @@ the fall. Fully retiring the scalar means replacing that expansion with a
 detachment-native criterion — a deliberate future task.
 
 **Terrain collapse (PB-MPM).** The trigger is **`DetachmentScout`**
-(`scripts/structural/detachment_scout.gd`): on a terrain edit made while MPM is
-idle, it gathers freshly-exposed solid cells as seeds and floods each connected
+(`scripts/structural/detachment_scout.gd`): on a matter change, it gathers freshly-exposed solid cells as seeds and floods each connected
 component **downward toward bedrock** via **`GroundFlood`** (`ground_flood.gd`
 — non-blocking, a budget of cells per frame, capped at `MAX_DETACH` 700). A
 component that drains without reaching bedrock under the cap is **DETACHED**
 and handed to `MpmStructure.thaw_cells(...)`.
 
-The scout only considers edits made while MPM is idle and pauses while material
-is in flight, so detachment proceeds in settled waves. MPM's own thaw/freeze
-edits, which fire with particles active, are ignored. That's what breaks the
-runaway cascade the old scalar trigger risked.
+The scout tells edits apart by source: for its own detachment thaw (`SCOUT`)
+it seeds only from the cells the thaw flipped outside the component it thawed
+(the box rewrite can flip unplanned cells), and it ignores `MPM` freezes, whose
+flips aren't measured yet (`docs/bugs/mpm-freeze-flips-unmeasured.md`). It
+pauses resolving while material is in flight, so
+detachment proceeds in settled waves; edits made during flight are queued, not
+dropped. That's what breaks the runaway cascade the old scalar trigger risked.
+Terraforming (raise, lower, flatten) is a matter change like any other, so it
+releases parts from `PartIndex` and can detach what it undercuts.
 
 **MPM thaw/freeze lifecycle.** `MpmStructure`
 (`scripts/structural/mpm_structure.gd`) wraps the C++ `MpmSim`. `thaw_cells`
@@ -417,7 +481,8 @@ names.
   field (`EditStore::FieldState`, inherited leaves of a field source), so every sample outside the
   rewritten leaves is bit-identical before and after a write or stamp
   (`test_edit_store_subdivide_exact`). Inside, the field is the lattice's trilerp, even where it
-  matches the old corners (`docs/bugs/edit-store-noop-write-reports-changed.md`).
+  matches the old corners, so a write's `changed` can be true where `writes` is false
+  (`docs/bugs/closed/edit-store-noop-write-reports-changed.md`).
 - **Lattice writes are typed.** `StoreWrite` takes `Array[LatticeEdit]` (lattice point, new
   SDF, leaf material or -1 to keep) — FillVoxel, EmptyVoxel and the MPM carve all hand it that;
   `StoreWrite.lattice(store, work).flips(store)` is what the work does to cells. Bell and Flatten
@@ -437,8 +502,9 @@ names.
 be met. Construction, CSG, Fill, FillVoxel, EmptyVoxel, Flatten and the bell
 sculpts (Raise, Lower) ask `PlayerSafeAction.endangered_by` of the field they
 write: each refuses to turn any point of the player's capsule solid or of the
-support box under their feet air. Dig does not yet
-(`docs/bugs/dig-action-no-validate-no-safety.md`).
+support box under their feet air. Dig deliberately does not: players expect to
+dig under themselves, and directives will replace it
+(`docs/bugs/closed/dig-action-no-validate-no-safety.md`).
 `ConstructionAction.validate` requires a part cell to overlap existing solid OR
 rest directly on solid below — a part floating in air is refused, and one that
 would bury the player is refused. Where an edit can't refuse but might overlap a
@@ -485,6 +551,11 @@ encodes parts separately.
 **Restore path.** `world.gd:_ready` loads the snapshot if present, then the
 EditStore blob. Tracked voxels skip the propagation queue — saved values were
 captured while quiescent.
+
+**Slots.** `SaveSlot` names where a pair lives: the default slot (F5/F9) is
+`user://saves/` itself; console `save <name>` / `load <name>` use
+`user://saves/<name>/`. A load marks the slot (`SaveSlot.request_load`) and
+reloads the scene; `world._restore_save` takes it. F5 always saves the default.
 
 **Version check is asymmetric:** newer-than-known schemas are rejected; older
 ones load with missing fields defaulted. Pre-V6 saves still load, just without

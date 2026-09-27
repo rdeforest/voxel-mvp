@@ -18,9 +18,11 @@ extends Node
 # not need to unsubscribe to avoid leaks. Manual unsubscribe is available
 # for the "context changed, stop listening" case.
 #
-# Caveat: subscribe with a bound method (`self.my_method`), not an anonymous
-# lambda. Lambdas have no Object to weakref and would persist until
-# explicitly removed.
+# Caveat: subscribe with a plain method of an object (`self.my_method`), not a
+# lambda or a `.bind()`ed callable. A subscription keeps only the object and
+# the method name, so a lambda's method can't be found and bound arguments are
+# lost: either fails at its first delivery
+# (docs/bugs/event-bus-lambda-and-bound-callables.md).
 #
 # Re-entrancy: handlers may emit, subscribe and unsubscribe mid-dispatch, on
 # any channel. Semantics in docs/roadmap/design/04-event-bus.md.

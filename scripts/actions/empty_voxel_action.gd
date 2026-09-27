@@ -13,6 +13,15 @@ func _init(p_cell: Vector3i, p_ctx: ActionContext) -> void:
     cell   = p_cell
     store  = p_ctx.store
     player = p_ctx.player
+    source = p_ctx.source
+
+
+func to_step() -> Dictionary:
+    return {"cell": StepFields.encode_cell(cell)}
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    return EmptyVoxelAction.new(f.cell("cell"), ctx)
+
 
 func validate() -> bool:
     if store == null:
@@ -29,10 +38,7 @@ func execute() -> void:
     if _work().is_empty():
         return
     var lat := StoreWrite.lattice(store, _work())
-    StoreWrite.write(store, lat, _work()).emit(store)
-    VoxelEventBusSingleton.emit(
-        TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, lat.region_lo, lat.region_hi - lat.region_lo))
+    TerrainSdfChangedEvent.announce(source, lat.region(), StoreWrite.write(store, lat, _work()))
 
 func preview() -> ActionPreview:
     var p := ActionPreview.new()

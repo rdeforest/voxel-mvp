@@ -23,13 +23,29 @@ static func support_box(player_pos: Vector3) -> AABB:
     return AABB(player_pos + _SUPPORT_MIN, _SUPPORT_SIZE)
 
 
+# What a write does to the player. BURIES wins over DROPS: a buried player can't be caught by
+# flying alone, since flight still collides.
+enum Danger { NONE, DROPS, BURIES }
+
+
 # The one refusal test, asked of the field an edit writes (its SdfLattice, the array handed to
 # EditStore.write_region): does it turn any point of the capsule solid (bury the player) or any
 # point of the support box air (drop them)? Read from the written field, not from which cell
 # centres flip, so a part or brush thinner than a cell cannot slip past it. A null lattice (an
 # edit that writes nothing) endangers no one.
 func endangered_by(lattice: SdfLattice, store: EditStore) -> bool:
+    return danger_of(lattice, store) != Danger.NONE
+
+
+# endangered_by's test, saying which danger: what an instrument write, which bypasses the refusal,
+# must rescue the player from.
+func danger_of(lattice: SdfLattice, store: EditStore) -> Danger:
     if player == null or lattice == null or store == null:
-        return false
+        return Danger.NONE
+
     var at := player.global_position
-    return lattice.solidifies_in(store, capsule_box(at)) or lattice.empties_in(store, support_box(at))
+    if lattice.solidifies_in(store, capsule_box(at)):
+        return Danger.BURIES
+    if lattice.empties_in(store, support_box(at)):
+        return Danger.DROPS
+    return Danger.NONE

@@ -39,14 +39,14 @@ static func write(store: EditStore, lat: SdfLattice, work: Array[LatticeEdit]) -
 
 
 # Write a work lattice (a work set's field, as lattice() or EditStore.predict_bell / predict_flatten
-# build it) keeping every leaf's current material. Returns the rewritten box.
-static func reshape(store: EditStore, lat: SdfLattice) -> AABB:
+# build it) keeping every leaf's current material. Returns the cells the write flipped, measured
+# across it; the rewritten box is lat.region().
+static func reshape(store: EditStore, lat: SdfLattice) -> CellFlips:
     var indices := _current_materials(store, lat)
     if indices.is_empty():
-        return AABB()
+        return CellFlips.new()
 
-    lat.write(store, indices)
-    return AABB(lat.region_lo, lat.region_hi - lat.region_lo)
+    return lat.write(store, indices)
 
 
 # Every lattice point's current material, or empty (with an error) for a lattice whose origin is

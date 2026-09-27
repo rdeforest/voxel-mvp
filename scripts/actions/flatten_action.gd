@@ -5,6 +5,8 @@ var plane_point: Vector3   # a point the flatten plane passes through
 var normal:      Vector3   # normal of the flatten plane (unit length)
 var radius:      float
 
+var _normal_arg: Vector3   # the normal as given; normalizing a unit vector again can move an ulp
+
 var store:       EditStore
 
 var _lattice:  SdfLattice = null              # the field the cut writes; null = it writes no point
@@ -23,6 +25,19 @@ func _init(
     radius      = p_radius
     store       = p_ctx.store
     player      = p_ctx.player
+    source      = p_ctx.source
+    _normal_arg = p_normal
+
+
+func to_step() -> Dictionary:
+    return {
+        "plane_point": StepFields.encode_vec3(plane_point),
+        "normal":      StepFields.encode_vec3(_normal_arg),
+        "radius":      radius,
+    }
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    return FlattenAction.new(f.vec3("plane_point"), f.vec3("normal"), f.number("radius"), ctx)
 
 
 func validate() -> bool:
@@ -44,10 +59,11 @@ func execute() -> void:
     _ensure_lattice()
     if _lattice == null:
         return
-    var box := StoreWrite.reshape(store, _lattice)
-    VoxelEventBusSingleton.emit(
-        TerrainSdfChangedEvent.CHANNEL,
-        TerrainSdfChangedEvent.new(VoxelConstants.GRID_ID, box.position, box.size))
+
+    # A refused write (off-grid lattice) or one that moved no sample changed no matter to announce.
+    var flips := StoreWrite.reshape(store, _lattice)
+    if flips.changed:
+        TerrainSdfChangedEvent.announce(source, _lattice.region(), flips)
 
 
 # --- Internals ---

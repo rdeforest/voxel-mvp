@@ -8,6 +8,7 @@ var store:              EditStore   # SDF source (generator + edits); set by wor
 
 var terrain_support:    TerrainSupport
 var mpm:                MpmStructure       # set by world.gd; the PB-MPM substrate (the structural sim)
+var scout:              DetachmentScout    # registers itself in its setup; the loss-of-support trigger
 
 # Inactive until the world finishes loading (WorldReadyEvent) — don't classify
 # support against a half-streamed SDF.
@@ -28,14 +29,20 @@ func set_store(p_store: EditStore) -> void:
 
 
 func _physics_process(_delta: float) -> void:
+    var t0 := Time.get_ticks_usec()
+    tick()
+    Perf.report("Structural", (Time.get_ticks_usec() - t0) / 1000.0)
+
+
+# One physics frame of work. Support propagation + cell registration maintain the tracked voxel set
+# the probe read-out and suspended-mass discovery rely on, drained at
+# TerrainSupport.PROPAGATION_BUDGET per frame; the frame is that budget's unit, so a replay steps it
+# on its own clock by calling this (test/support/scenario.gd), never on wall-clock time.
+func tick() -> void:
     if not _active:
         return
-    var t0 := Time.get_ticks_usec()
-    # Support propagation + cell registration: maintains the tracked voxel set the probe read-out
-    # and suspended-mass discovery rely on, drained at TerrainSupport.PROPAGATION_BUDGET per frame.
     if not terrain_support.dirty_queue.is_empty():
         terrain_support.process_dirty_queue()
-    Perf.report("Structural", (Time.get_ticks_usec() - t0) / 1000.0)
 
 
 # --- Bus handlers ---
@@ -52,8 +59,9 @@ func get_support(pos: Vector3i) -> float:
 
 # --- Helpers ---
 
-# Drain the support fixpoint now instead of at PROPAGATION_BUDGET per frame (console `settle`),
-# so the save gate's is_quiescent() can pass. A queue still dirty after QUIESCE_PASS_LIMIT passes
+# Drain the support fixpoint now instead of at PROPAGATION_BUDGET per frame (console `settle`).
+# Only support is fast-forwarded: the scout and MPM, which is_quiescent() also waits for, reach
+# idle on their own over later physics frames. A queue still dirty after QUIESCE_PASS_LIMIT passes
 # means propagation isn't converging — a defect to surface, not load to wait out — so it reports
 # and returns false; the save gate then keeps refusing rather than capturing an unsettled world.
 func force_quiescent() -> bool:
@@ -70,10 +78,12 @@ func force_quiescent() -> bool:
     return false
 
 
+# Nothing structural is mid-flight, so the save (or a recording's start) captures all of it: none of
+# the work below is serialised. MPM particles live in the C++ sim; a save mid-thaw would persist the
+# carved hole without the in-flight material, and one mid-freeze would miss the announcements that
+# register the frozen pile. A detachment the scout hasn't resolved yet would be dropped outright.
 func is_quiescent() -> bool:
     if not terrain_support.dirty_queue.is_empty():     return false
-    # MPM particles live in the C++ sim, not as RigidBody nodes. A save mid-thaw would persist the
-    # carved hole without the in-flight material (particles aren't serialised) — gate until the
-    # material has frozen back into the store.
-    if mpm != null and mpm.active_count() > 0:         return false
+    if mpm != null and not mpm.is_idle():              return false
+    if scout != null and not scout.is_idle():          return false
     return true

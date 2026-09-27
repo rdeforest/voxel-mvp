@@ -48,7 +48,8 @@ Methods, assemblies and generators share **one expression language and one regis
 and predicates.** A battlement repeat in an assembly and a "place each merlon" step call the same
 generator. This is the design's central commitment.
 
-- **Values:** number, length, angle, point, frame, material, part type, enum, bool, cell.
+- **Values:** number, length, angle, point, frame, material, part type, enum, bool, cell, count
+  (a whole number of at least zero, e.g. `advance`'s frames; added by Claude, G4.2).
 - **Units are kept as authored.** A quantity is a string, `"#{number} #{unit}"`, with the number
   kept as the decimal text the author typed (never passed through a binary float) and only the
   unit's spelling canonicalized: `"5.5 foot"`, `"9.8 meter / second ** 2"`. No normalization to a
@@ -123,10 +124,37 @@ Lisp syntax.
   found works), and a recording that built the walls in any order still validates against the method.
 - **Repetition:** parameters come from generators (`each seg in wall_segments(...)`), or from
   recursion when the count depends on world state ("keep clearing until `area_clear`").
+- **Step shape** (phase 1, 2026-09-27): `{"op": <name>, ...the action's resolved constructor
+  arguments}`, one step per line of a file headed `{"format": "voxel-mvp/steps", "version": 1,
+  "units": {"length": "meter", "angle": "degree"}}`. Vectors are `[x, y, z]`, transforms
+  `{"basis": [x, y, z], "origin": [...]}` (Godot's basis vectors), enums and materials by name.
+  A CSG step holds the shape by value (`shape` + `dims`); a build step holds the part's file *and*
+  its dimensions, and a file whose part changed size is refused rather than replayed. Recorded
+  numbers are the engine's own metres and degrees; the unit strings above are for quantities a
+  person writes and arrive with the phase-3 evaluator.
 - **Recordings store bound values**, so replays are exact. The same generator can be re-run to check
   it still produces those bindings, a separate regression gate.
 - **JSON numbers:** `JSON.stringify` defaults to about 14 significant digits (lossy for doubles) and
   writes -0.0 as "0.0". Recordings use `full_precision = true`, and a round-trip test must pass first.
+  *Measured 2026-09-27 (Claude, G4.0), on this engine (4.6, double build): that test fails.
+  `full_precision` still reads 24% of random doubles back an ulp off, and `var_to_str` 31%;
+  `var_to_bytes` is exact (100,000 samples each, `scripts/dev/probe_var_to_str_precision.gd`). The
+  step format needs an exact number encoding before G4.1 can gate on the round trip.*
+  *Resolved 2026-09-27 (Claude, G4.1): the loss is all on the reading side. The `full_precision`
+  text is the engine's Grisu2 output, which a correctly rounding parser reads back exactly (Python,
+  200,000 doubles over every exponent including subnormals, `scripts/dev/probe_grisu_vs_python.gd`);
+  the engine's `String::to_float`, shared by JSON and GDScript literals, is off by an ulp on about
+  a quarter of them and reads `2.2250738585072014e-308` as zero. So step files stay plain JSON with
+  shortest-round-trip numbers, which any correct reader (Python, Node) takes exactly, and
+  `StepJson` reads each number from its own text: the engine's value when its own Grisu2 text
+  matches, otherwise correct rounding by exact big-integer comparison (`ExactDecimal`). `-0.0` is
+  written with its sign. Reading costs about 10–20 µs per number at game magnitudes
+  (`scripts/dev/probe_exact_decimal_cost.gd`). The alternatives were worse for a file people trim
+  by hand: `var_to_bytes` is exact but not text, and hex floats are text nobody reads.
+  A duplicate key anywhere is refused: the engine keeps a duplicate at its first position with its
+  last value, so numbers re-read in document order would land on the wrong keys. GDScript folds a
+  literal `-0.0` to `+0.0` in some expressions (`[-0.0][0]`, a function argument), so tests build
+  it from bits.*
 - **Four uses of one format:**
   1. Hand-written test scenarios.
   2. Recordings of play.
@@ -218,18 +246,41 @@ assembly 'gatehouse',
    blob. **`rec fresh`** starts from the generator alone, which reproduces most reliably.
 3. **`mark [note]`** saves the camera, FOV, dcworld settings, the aimed cell with its probe report, and
    a screenshot. That turns "this looks wrong" into something an assertion can be written from.
+   *Built 2026-09-27 (Claude, G4.3): `ScenarioRecorder` + console `rec start|fresh|stop [name]` and
+   `mark [note]` (`scenes/world/recording_commands.gd`), hooked on `Player.action_validated`, which
+   fires between `validate()` and `execute()`. A recording is a directory, `user://scenarios/<name>/`:
+   `steps.json`, the save pair `rec start` wrote, and `mark-NNN.json` (+ `.png`) per mark, which the
+   mark step names as `"capture"`. The frame and the player's position are steps of their own
+   (`advance`, `player_at`), emitted only when they changed, so the action steps keep their strict
+   shape. Time is the frames the simulations ticked, not the engine's physics frame count: the open
+   console pauses the tree. The console `settle`, which drains support at once, is recorded as
+   `{"op": "drain_support"}`.*
 4. **Replay runner** (GUT, headless, no World scene): the simulations tick explicitly at 1/60 s,
    never on wall-clock time, and replay **stops at the first step whose result differs from the
    recording**, the lesson from Riot's determinism work. This needs tick functions on DetachmentScout
    and StructuralIntegrity.
+   *Built 2026-09-27 (Claude, G4.2): `test/support/scenario.gd`. Its builder (`s.dig(...)`,
+   `s.player_at(...)`, `s.advance(n)`, `s.settle()`, `s.mark(note)`, ...) writes each step, reads it
+   back from its JSON and runs what it read, so a built scenario and its replay take one path. An
+   action step carries `expect_valid`; the other steps are `{"op": "player_at", "position"}`,
+   `{"op": "advance", "frames"}`, `{"op": "settle"}` (frame by frame until `is_quiescent()`),
+   `{"op": "mark", "note"}` and `{"op": "thaw", "center", "radius"}`. A scenario starts from the
+   generator or from a save pair, not a lone blob, which would drop part identity and tracked
+   support. Building it found the snapshot storing support and the player as lossy text; both are
+   exact bytes now (snapshot v10). The event bus is global and events carry no world, so two live
+   scenarios would hear each other: the runner allows one at a time.*
 5. **Trim** by deleting steps; once an assertion exists, an automatic delta-debugging (ddmin) pass can
    shrink it. A new scenario test starts `pending` and must fail on the buggy code before the fix goes
    in. Recordings are never used as approval snapshots, because that would lock in the bug.
 
 **Gaps to close first:**
-- Saves don't keep PartIndex.
-- DetachmentScout's pending work is missing from `is_quiescent()`.
-- MPM orders its freeze by camera distance, which makes structural event order depend on the camera.
+- ~~Saves don't keep PartIndex.~~ Closed 2026-09-27 (G4.0): the snapshot carries the index
+  (records, ancestry, next id), bit-exact.
+- ~~DetachmentScout's pending work is missing from `is_quiescent()`.~~ Closed 2026-09-27 (G4.0),
+  along with MPM's not-yet-announced freeze chunks.
+- ~~MPM orders its freeze by camera distance, which makes structural event order depend on the
+  camera.~~ Closed 2026-09-27 (G4.0): bottom layer first, by position. Camera-first meshing, if
+  it's wanted back, belongs in the render's own scheduling, not in the event order.
 - A fresh `mesh_world` doesn't exercise the live incremental mesher, so render bugs in that path need a
   camera-path replay.
 
@@ -245,6 +296,35 @@ instruments.
   shape by numbers. They bypass player safety, switching the player to fly mode when needed (see
   Decisions).
 - **Named saves** (`save <name>` / `load <name>`), and commands to export and import assemblies.
+
+*Built 2026-09-27 (Claude, G4.4), except the probe's leaf read-out, the overlay, and assembly
+export/import (assemblies are phase 3, so that command waits for them):*
+- *The probe (`ProbeAction.report()`, which the HUD, the click and `mark` share) adds whether the
+  cell's leaf is edited or the generator's, the 8 corner values the mesher samples, its sign test
+  (solid corners, and how many of the 12 edges cross zero, as `dc_octree.h` tests an edge), and
+  any corner where the cell's own leaf holds a different value than the mesher reads (a seam).
+  **Not built: the owning leaf's origin, size and field state.** No EditStore binding exposes a
+  leaf, and this chunk can't touch C++; it needs `Dictionary EditStore::leaf_info(Vector3 p)`
+  (origin, size, `FieldState`, material, its 8 held corners, its field source). The overlay of
+  leaf boundaries and corner signs isn't built either.*
+- *Exact writes: console `setcorners <x y z> <c0..c7>` (corner k at cell + (k&1, k>>1&1,
+  k>>2&1); the store rounds each to float32), `setmaterial <x y z> <material>`, and
+  `stamp <shape> <add|subtract> <material> <x y z> <dims> [<rx ry rz>]` (the CSG tool's dims and
+  rotation). Typed numbers are read with `ExactDecimal`, since the console's own parse can land an
+  ulp off. Each is an Action with a step op (`set_corners`, `set_material`, `stamp`), written
+  through `StoreWrite` / `VoxelImprint` with one matter-changed event credited to `INSTRUMENT`,
+  and recorded at its `validate()` like a click. A setmaterial on a cell the generator held stores
+  it (only an edited leaf has a material), so between lattice points its field becomes a trilerp
+  and a cell's centre can flip; the event carries it.*
+- *The rescue: `PlayerSafeAction.danger_of()` (the test `endangered_by()` refuses a player edit
+  with) runs on the written field before the write. Burying the player turns on fly with noclip,
+  so they can get out; removing their ground turns on fly. X lands, and also drops the noclip the
+  rescue turned on (not examine mode's).
+  A stamp is refused past 256 m on an axis (its lattice alone would be ~0.3 GB).*
+- *Named saves: `SaveSlot`; `user://saves/<name>/` holds a pair like the default slot's, with
+  the same refusals. F5 and F9 stay on the default slot. A slot can't be named after the default
+  slot's own files (`world.snapshot`, `world.editstore`, or their `.tmp`), which share the
+  directory.*
 
 ## Build order
 

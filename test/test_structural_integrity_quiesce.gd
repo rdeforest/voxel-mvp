@@ -32,3 +32,24 @@ func test_undrainable_queue_reports_failure() -> void:
     assert_eq(integrity.force_quiescent(), false, "a queue still dirty at the pass limit is not settled")
     assert_push_error("did not settle", "the give-up is logged, not silent")
     assert_false(integrity.is_quiescent(), "the save gate still refuses")
+
+
+# (Drafted by Claude, overnight 2026-09-27.) A freeze writes the store at once but announces a large
+# region a few chunks per frame; the announcements are what register the frozen pile with support.
+# A save between the freeze and its last announcement would keep the pile but lose its registration,
+# so the gate waits for them as it waits for material in flight.
+func test_the_save_gate_waits_for_freeze_announcements() -> void:
+    var manager := EditStoreManager.new()
+    manager.setup()
+    var ms: MpmStructure = autofree(MpmStructure.new())
+    ms.setup(manager.store)
+    var integrity := _integrity_with(TerrainSupport.new())
+    integrity.mpm = ms
+
+    ms._queue_freeze_chunks(Vector3(0, 40, 0), 3 * MpmStructure.CHUNK)
+    assert_eq(ms.active_count(), 0, "precondition: nothing in flight")
+    assert_false(integrity.is_quiescent(), "not quiescent while the freeze is still being announced")
+
+    while not ms._pending_chunks.is_empty():
+        ms.tick(1.0 / 60.0)
+    assert_true(integrity.is_quiescent(), "quiescent once every chunk is announced")

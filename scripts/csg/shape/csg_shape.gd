@@ -22,3 +22,14 @@ func axis_label(_axis: int) -> String:    return ""
 func axis_dir(_axis: int) -> Vector3:     return Vector3.ZERO # local arrow direction; ZERO hides it
 func resize_label() -> String:            return ""
 func grow(_axis: int, _amount: float) -> void: pass           # resize the given axis
+
+
+# The shape sdf_kind() and sdf_dims() describe, the inverse of those two; null for an unknown kind
+# or a dims count that isn't that shape's. Each shape's from_dims() reads its own dims.
+static func from_sdf(kind: int, dims: PackedFloat64Array) -> CsgShape:
+    var shapes := {
+        CsgSdf.Shape.BOX:      CsgBoxShape,
+        CsgSdf.Shape.CYLINDER: CsgCylinderShape,
+        CsgSdf.Shape.SPHERE:   CsgSphereShape,
+    }
+    return shapes[kind].from_dims(dims) if shapes.has(kind) else null

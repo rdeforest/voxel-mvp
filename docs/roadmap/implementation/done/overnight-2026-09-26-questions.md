@@ -6,6 +6,13 @@ question. Each one has the context, the options, my take, and a **Robert:** line
 The bug files have the full evidence. Once you've answered, I'll fold the answers into the bug
 files and close or re-scope each one.*
 
+*Folded in 2026-09-27 (Claude, overnight Track G1): each answer is recorded in its bug file. Closed:
+Q8 (file deleted), Q12 (to `bugs/closed/`), Q14 (file deleted). Re-scoped and kept open: Q7, Q11,
+Q13. Q15 done in `04-event-bus.md`. Q1 and Q5 are that night's Tracks G2 and G3. The engine
+questions (Q2–Q4, Q6, Q9, Q10) are recorded by that night's Track E in their own bug files. The
+brief's questions 1 and 4 are recorded in `single-voxel-edits-unexpected` and
+`closed/dig-action-no-validate-no-safety`.*
+
 Ordered roughly by how much the answer unblocks.
 
 ---
@@ -38,7 +45,7 @@ the measured cell flips and the source, so raise, lower and flatten stop being t
 
 ## 2. A thaw plan the corner carve can't carve
 
-**Where:** [`mpm-thaw-carve-leaves-planned-cells`](bugs/mpm-thaw-carve-leaves-planned-cells.md)
+**Where:** [`mpm-thaw-carve-leaves-planned-cells`](../../../bugs/mpm-thaw-carve-leaves-planned-cells.md)
 
 **Context.** Thawing a sphere of buried terrain leaves part of it in the ground: radius 5 plans 176
 cells and empties 143, and a single buried cell empties none. The carve can only clear lattice
@@ -62,7 +69,7 @@ Agreed, for the same reason.
 
 ## 3. StoreWrite's box rewrite flips cells nobody edited
 
-**Where:** [`mpm-thaw-carve-leaves-planned-cells`](bugs/mpm-thaw-carve-leaves-planned-cells.md),
+**Where:** [`mpm-thaw-carve-leaves-planned-cells`](../../../bugs/mpm-thaw-carve-leaves-planned-cells.md),
 "Separate effect".
 
 **Context.** `StoreWrite.cells` rewrites its whole box, which flips some cells nobody asked to change:
@@ -83,7 +90,7 @@ Agreed, per #2 above.
 
 ## 4. Disk-full policy for the DC cell arena
 
-**Where:** [`mmap-arena-disk-full-sigbus`](bugs/mmap-arena-disk-full-sigbus.md)
+**Where:** [`mmap-arena-disk-full-sigbus`](../../../bugs/mmap-arena-disk-full-sigbus.md)
 
 **Context.** When the disk under the arena's temp file fills, the next write to a fresh page kills the
 process with SIGBUS. Your `./tmp` is on btrfs, whose copy-on-write means a full disk can fault even on
@@ -126,7 +133,7 @@ things just because I think they're cool, like using mmap for anything.
 
 ## 5. Save pairs: lone or mismatched halves
 
-**Where:** [`save-pair-consistency`](bugs/save-pair-consistency.md)
+**Where:** [`save-pair-consistency`](../../../bugs/save-pair-consistency.md)
 
 **Context.** A save is two files, the snapshot and the terrain blob. Nothing checks that they belong
 together. A lone half loads with a cheerful "Loaded save.", and a failed blob write can leave a new
@@ -152,7 +159,7 @@ Your take sounds right to me. Make it so.
 
 ## 6. `stamp_sphere` / `stamp_box` repaint terrain the brush didn't make
 
-**Where:** [`edit-store-stamp-union-repaints-terrain`](bugs/edit-store-stamp-union-repaints-terrain.md)
+**Where:** [`edit-store-stamp-union-repaints-terrain`](../../../bugs/edit-store-stamp-union-repaints-terrain.md)
 
 **Context.** These C++ stamps paint every leaf that ends up solid, including existing terrain the brush
 never reached. The action write path paints only where the edit made something solid. Only tests and dev
@@ -173,7 +180,7 @@ Yes, make them match. Good call.
 
 ## 7. Sub-cell part identity in PartIndex
 
-**Where:** [`part-index-sub-cell-parts-untracked`](bugs/part-index-sub-cell-parts-untracked.md)
+**Where:** [`part-index-sub-cell-parts-untracked`](../../../bugs/part-index-sub-cell-parts-untracked.md)
 
 **Context.** A part thinner than a cell (a 0.5 m log between cell centres) makes no cell solid, so
 PartIndex has nothing to key it by and keeps no record.
@@ -193,7 +200,7 @@ this until assemblies exist and solve it there.
 
 ## 8. Re-stamping a CSG shape in a new material
 
-**Where:** [`csg-restamp-material-only-refused`](bugs/csg-restamp-material-only-refused.md)
+**Where:** `csg-restamp-material-only-refused` (closed 2026-09-27, file deleted)
 
 **You already said** (in the bug file): this only arises in testing. In the game it'd be "stack wood
 here", and replacing wood with stone means moving the wood out first.
@@ -209,7 +216,7 @@ Agreed, close it.
 
 ## 9. SVD ill-conditioning: fix now or wait for the rewrite?
 
-**Where:** [`mpm-svd-ill-conditioned-u`](bugs/mpm-svd-ill-conditioned-u.md)
+**Where:** [`mpm-svd-ill-conditioned-u`](../../../bugs/mpm-svd-ill-conditioned-u.md)
 
 **Context.** MPM's 3×3 SVD degrades as a deformation nears singular: U stops being a rotation at
 σ₂/σ₀ ≈ 1e-8, and at rank ≤ 1 it reads memory that was never written (undefined behaviour). Whether the
@@ -232,7 +239,7 @@ Agreed.
 
 ## 10. `edit_world` and a stale refine frontier
 
-**Where:** [`dc-edit-world-stale-refine-frontier`](bugs/dc-edit-world-stale-refine-frontier.md)
+**Where:** [`dc-edit-world-stale-refine-frontier`](../../../bugs/dc-edit-world-stale-refine-frontier.md)
 
 **Context.** After an edit, the mesher's saved list of cells waiting to refine can name cells the edit
 freed. A later "reuse the frontier" grow would refine stale entries. Nothing does that today; only
@@ -254,7 +261,7 @@ which has been made obsolete? Clearing the whole frontier seems .. dramatic.
 
 ## 11. One-shot frontier drain drops 89 triangles
 
-**Where:** [`dc-incremental-emit-ring-insufficient`](bugs/dc-incremental-emit-ring-insufficient.md)
+**Where:** [`dc-incremental-emit-ring-insufficient`](../../../bugs/dc-incremental-emit-ring-insufficient.md)
 
 **Context.** H1 reproduced the incremental-emit drop headlessly. Draining the whole frontier in one
 grow drops 89 triangles (596 rendered against 684 from a full re-emit). A pending GUT test is ready as
@@ -273,7 +280,7 @@ improvements.
 
 ## 12. A no-op-looking write still reports `changed`
 
-**Where:** [`edit-store-noop-write-reports-changed`](bugs/edit-store-noop-write-reports-changed.md)
+**Where:** [`edit-store-noop-write-reports-changed`](../../../bugs/closed/edit-store-noop-write-reports-changed.md)
 
 **Context.** Writing the store's own values back over a coarse or inherited leaf moves its samples by
 about 1e-8, and the write truthfully reports `changed = true`. Consequence today: at most one extra
@@ -295,7 +302,7 @@ Agreed, I suspect this is another item that will be mooted by bigger work.
 
 ## 13. Dry run reads the generator twice
 
-**Where:** [`actions-lattice-dry-run-double-generator`](bugs/actions-lattice-dry-run-double-generator.md)
+**Where:** [`actions-lattice-dry-run-double-generator`](../../../bugs/actions-lattice-dry-run-double-generator.md)
 
 **Context.** A refused CSG preview reads the terrain generator at the same 2,744 points twice, about
 0.045 ms of 0.34 ms.
@@ -314,7 +321,7 @@ Agreed.
 
 ## 14. Close misc item 6 (player.gd input if-chains)?
 
-**Where:** [`misc-low-severity`](bugs/misc-low-severity.md), item 6.
+**Where:** `misc-low-severity` (closed 2026-09-27, file deleted), item 6.
 
 **Context.** The input handling in `player.gd` uses if-chains, against the house rule. A reviewer
 judged them forced by live input state and not worth rewriting.
@@ -330,7 +337,7 @@ Good catch, but I also agree with your take.
 
 ## 15. Event bus spec: update, or keep as history?
 
-**Where:** [`docs/roadmap/design/04-event-bus.md`](roadmap/design/04-event-bus.md), "Lifetime & cleanup".
+**Where:** [`docs/roadmap/design/04-event-bus.md`](../../design/04-event-bus.md), "Lifetime & cleanup".
 
 **Context.** The section describes `Callable.is_valid()` cleanup, but the bus has used WeakRef
 subscriptions for a while.
@@ -348,7 +355,9 @@ Agreed.
 
 - Player safety and Lipschitz continuity (brief question 3).
 - What could go wrong with the event bus's re-entrancy rules (brief, F1).
-- Integrating a local LLM for operations like "act on the voxels touching this triangle" (bug file,
-  question 8).
+- Integrating a local LLM for operations like "act on the voxels touching this triangle" (question 8).
+  Robert's words, from the bug file deleted when Q8 closed: "I wonder if we want to integrate a local
+  LLM to offer things like picking three locations and then asking the LLM to perform an operation on
+  the voxels touching the triangle defined by those points, for example? Let's chat about this."
 - Moving bug tracking to GitHub issues, with closed bugs migrated.
 - A glossary doc (MPM, splice, etc.).

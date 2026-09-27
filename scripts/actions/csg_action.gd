@@ -39,6 +39,26 @@ func _init(
     material_name = p_material
     store         = p_ctx.store
     player        = p_ctx.player
+    source        = p_ctx.source
+
+
+# The shape by value: the live one belongs to CsgState and keeps changing after this click.
+func to_step() -> Dictionary:
+    return {
+        "shape":    StepFields.enum_name(CsgSdf.Shape, shape.sdf_kind()),
+        "dims":     StepFields.encode_floats(shape.sdf_dims()),
+        "xform":    StepFields.encode_xform(xform),
+        "mode":     StepFields.enum_name(CsgState.Op, op),
+        "material": material_name,
+    }
+
+static func from_step(f: StepFields, ctx: ActionContext) -> Action:
+    var kind  := f.enum_value("shape", CsgSdf.Shape)
+    var dims  := f.floats("dims")
+    var built := CsgShape.from_sdf(kind, dims)
+    if built == null and f.error == "":
+        f.fail("dims: %s don't describe a %s" % [dims, StepFields.enum_name(CsgSdf.Shape, kind)])
+    return CsgAction.new(built, f.xform("xform"), f.enum_value("mode", CsgState.Op), f.material("material"), ctx)
 
 
 func validate() -> bool:
@@ -63,7 +83,7 @@ func execute() -> void:
     _ensure_work()
     if op == CsgState.Op.ADD:
         _freeze_bodies_in_volume()
-    VoxelImprint.apply(store, material_name, shape, xform, op)
+    VoxelImprint.apply(store, source, material_name, shape, xform, op)
 
 
 # --- Internals ---

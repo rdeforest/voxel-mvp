@@ -1,11 +1,16 @@
 class_name WorldSnapshot
 extends RefCounted
 
-# V6: parts dissolved into the EditStore (imprinted voxels) — the snapshot no longer
-# encodes Node3D parts or snap points. Parts now persist via the EditStore blob (their
-# SDF) + the tracked-voxel array (their support). Older saves load with `parts` ignored.
-# V7: HUD tool-window layout (id -> viewport fraction). Older saves load with windows at default.
-const VERSION := 7
+# One save format until there are play testers: a snapshot of any other version is refused, not
+# migrated. V8 added the save id shared with the EditStore blob (SavedWorld pairs the two); V9 the
+# PartIndex, so part identity survives a reload; V10 stores the player and the tracked voxels exactly.
+#
+# The file is var_to_str text, which doesn't round-trip doubles (about a third come back an ulp off;
+# scripts/dev/probe_var_to_str_precision.gd). So the world's state (player, tracked voxels, parts)
+# is stored as var_to_bytes inside it: a replay started from a save (test/support/scenario.gd) must
+# start from exactly the world that was saved. Tunables and window fractions stay text: the GPU reads
+# the tunables as float32 and the fractions place HUD windows; neither is world state.
+const VERSION := 10
 
 # Survives scene reloads (static var on a loaded script). Set by the `reset`
 # console command and consumed by world.gd on the next _ready. When true: the saved
@@ -16,12 +21,16 @@ static var reset_pending: bool = false
 
 # --- public API ---
 
-static func save(path: String, world: Node) -> Error:
+# `world` is the World scene root: what's saved is read from its StructuralIntegrity and Player
+# children and its part_index().
+
+# `save_id` ties this snapshot to the EditStore blob written beside it.
+static func save(path: String, world: Node, save_id: int) -> Error:
     var file := FileAccess.open(path, FileAccess.WRITE)
     if file == null:
         return FileAccess.get_open_error()
-    file.store_string(var_to_str(encode(world)))
-    return OK
+
+    return OK if file.store_string(var_to_str(encode(world, save_id))) else ERR_FILE_CANT_WRITE
 
 # The parsed snapshot at `path`; empty when it can't be opened or isn't a snapshot.
 static func read(path: String) -> Dictionary:
@@ -31,27 +40,36 @@ static func read(path: String) -> Dictionary:
     var snap = str_to_var(file.get_as_text())
     return snap if snap is Dictionary else {}
 
-# Why this build won't apply `snap`, or "" when it will. Older versions apply (missing keys
-# default, e.g. V2 saves lack tunables); newer ones are refused.
+# Why this build won't apply `snap`, or "" when it will.
 static func refusal(snap: Dictionary) -> String:
     if snap.is_empty():
         return "world snapshot is unreadable"
 
     var v: int = snap.get("version", 0)
-    if v > VERSION:
-        return "world snapshot is format v%d; this build reads up to v%d" % [v, VERSION]
-    return ""
+    if v != VERSION:
+        return "world snapshot is format v%d; this build reads only v%d" % [v, VERSION]
+    if not (snap.get("save_id") is int):
+        return "world snapshot has no save id"
+    if not (snap.get("player") is PackedByteArray and bytes_to_var(snap["player"]) is Dictionary):
+        return "world snapshot has no player"
+    if not (snap.get("voxels") is PackedByteArray and bytes_to_var(snap["voxels"]) is Array):
+        return "world snapshot has no tracked voxels"
+    if not (snap.get("parts") is PackedByteArray):
+        return "world snapshot has no part index"
+    return PartIndex.refusal(bytes_to_var(snap["parts"]))
 
 
 # --- encode ---
 
-static func encode(world: Node) -> Dictionary:
+static func encode(world: Node, save_id: int) -> Dictionary:
     var integrity := world.get_node("StructuralIntegrity") as StructuralIntegrity
     var player    := world.get_node("Player") as CharacterBody3D
     return {
         "version":  VERSION,
-        "player":   _encode_player(player),
-        "voxels":   _encode_voxels(integrity.terrain_support),
+        "save_id":  save_id,
+        "player":   var_to_bytes(_encode_player(player)),
+        "voxels":   var_to_bytes(_encode_voxels(integrity.terrain_support)),
+        "parts":    _encode_parts(world.part_index()),
         "tunables": _encode_tunables(),
         "windows":  _encode_windows(world),
     }
@@ -95,6 +113,11 @@ static func _encode_player(player: CharacterBody3D) -> Dictionary:
         "build_rotation":   bs.rotation,
     }
 
+# A part's transform is identity, not a display value, so it is stored as bytes like the rest of the
+# world's state (see VERSION).
+static func _encode_parts(index: PartIndex) -> PackedByteArray:
+    return var_to_bytes(index.encode())
+
 static func _encode_voxels(ts: TerrainSupport) -> Array:
     var out: Array = []
     for pos in ts.voxel_data:
@@ -112,8 +135,9 @@ static func _encode_voxels(ts: TerrainSupport) -> Array:
 static func apply(snap: Dictionary, world: Node) -> void:
     var integrity := world.get_node("StructuralIntegrity") as StructuralIntegrity
     var player    := world.get_node("Player") as CharacterBody3D
-    _apply_voxels(integrity, snap.get("voxels", []))
-    _apply_player(player, snap.get("player", {}))
+    _apply_voxels(integrity, bytes_to_var(snap["voxels"]))
+    _apply_parts(world.part_index(), snap["parts"])
+    _apply_player(player, bytes_to_var(snap["player"]))
     _apply_tunables(snap.get("tunables", {}))
     _apply_windows(world, snap.get("windows", {}))
 
@@ -138,6 +162,9 @@ static func _apply_voxels(integrity: StructuralIntegrity, voxels: Array) -> void
         var mat := Materials.from_name(StringName(entry["material"]))
         integrity.terrain_support.restore_voxel(entry["pos"], mat, entry["support"])
 
+static func _apply_parts(index: PartIndex, parts: PackedByteArray) -> void:
+    index.restore(bytes_to_var(parts))
+
 static func _apply_player(player: CharacterBody3D, data: Dictionary) -> void:
     if data.is_empty():
         return
@@ -145,14 +172,12 @@ static func _apply_player(player: CharacterBody3D, data: Dictionary) -> void:
     player.rotation.y      = data["body_rotation_y"]
     var head: Node3D = player.get_node("Head")
     head.rotation.x  = data["head_rotation_x"]
-    # tool_index + activity_indices replace the old V3 edit_mode_index.
-    # Old saves without these keys: default to the None tool, activity 0.
-    if data.has("tool_index"):
-        player.tool_index = data["tool_index"]
-    if data.has("activity_indices"):
-        var raw: Array = data["activity_indices"]
-        for i in mini(raw.size(), player._activity_indices.size()):
-            player._activity_indices[i] = raw[i]
+    player.tool_index = data["tool_index"]
+
+    var raw: Array = data["activity_indices"]
+    for i in mini(raw.size(), player._activity_indices.size()):
+        player._activity_indices[i] = raw[i]
+
     player.build_state.restore(
         data["build_part_path"],
         StringName(data["build_material"]),

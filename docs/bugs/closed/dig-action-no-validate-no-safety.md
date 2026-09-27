@@ -1,7 +1,8 @@
 # DigAction: validate() always true, preview disagrees, no player-safety guard
 
-**Status:** Half fixed 2026-09-26: ghost and action now agree on the empty carve; the player-safety guard
-is still open (see *State* below).
+**Status:** **CLOSED — moot under directives** (2026-09-27). The validate/preview half was fixed
+2026-09-26; the player-safety guard will not be added, by Robert's decision (see *Verdict* at the
+end).
 Diagnosed by code review on 2026-06-22.
 
 ## Symptom
@@ -49,3 +50,21 @@ deliberate affordance, document that instead). Either way, ghost and action must
   4.4 m, 4.4 m and 4.7 m from the feet at three columns. At column (100,100) the run is not contiguous:
   endangered to 3.3 m, then again at 4.4 m. Measured headlessly, not tried in play. Whether a ~4.5 m
   no-dig ring feels right is Robert's call.
+
+## Verdict (2026-09-27)
+*Recorded by Claude from Robert's answer to the 2026-09-26 brief's question 4
+([`overnight-2026-09-26.md`](../../roadmap/implementation/done/overnight-2026-09-26.md), "Needs you
+first").*
+
+Keep Dig as "dig anywhere"; no player-safety guard. Robert's reasons:
+
+- Players will reasonably expect to dig under themselves. In real life you dig around yourself and
+  move to expose the ground you're standing on.
+- Today's Dig is a testing verb with a deliberately huge reach and radius. In the game, digging is
+  less dramatic and is expressed as a directive ("make this space empty"); the avatar moves itself as
+  needed to carry it out, so the question of digging out from under your own feet goes away.
+
+So this is closed as moot under directives rather than fixed. Doc 22's instrument layer takes over
+the exact-control role, bypassing player safety by design. The *State* section's guard spec and the
+~4.5 m no-dig ring measurement are kept for the record. `DigAction`'s header says why it isn't a
+`PlayerSafeAction`, and `docs/CODE-MAP.md` ("Refuse-don't-deform") points here.

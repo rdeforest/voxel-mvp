@@ -4,40 +4,19 @@ extends GutTest
 # Headless: thaw a sphere of solid terrain into MPM (carve + seed particles), simulate until it
 # settles, and freeze it back into the store as terrain. This is the loop `mpmthaw` drives in-game.
 
-var _added:   Array[Vector3i] = []
-var _removed: Array[Vector3i] = []
-var _edits:   Array[int]      = []   # the watched MPM's active_count as each TerrainSdfChanged arrives
+const MatterLog := preload("res://test/support/matter_log.gd")
 
-var _watched: MpmStructure
+const THAWER := EditSource.Kind.INSTRUMENT   # these thaws stand in for `mpmthaw`
+
+var _log: MatterLog
 
 
 func before_each() -> void:
-    _added.clear()
-    _removed.clear()
-    _edits.clear()
-    _watched = null
-    VoxelEventBusSingleton.subscribe(VoxelAddedEvent.CHANNEL,        _on_added)
-    VoxelEventBusSingleton.subscribe(VoxelRemovedEvent.CHANNEL,      _on_removed)
-    VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_edit)
+    _log = MatterLog.new()
 
 
 func after_each() -> void:
-    VoxelEventBusSingleton.unsubscribe(VoxelAddedEvent.CHANNEL,        _on_added)
-    VoxelEventBusSingleton.unsubscribe(VoxelRemovedEvent.CHANNEL,      _on_removed)
-    VoxelEventBusSingleton.unsubscribe(TerrainSdfChangedEvent.CHANNEL, _on_edit)
-
-
-func _on_added(e: VoxelAddedEvent) -> void:
-    _added.append(e.pos)
-
-
-func _on_removed(e: VoxelRemovedEvent) -> void:
-    _removed.append(e.pos)
-
-
-func _on_edit(_e: TerrainSdfChangedEvent) -> void:
-    if _watched != null:
-        _edits.append(_watched.active_count())
+    _log = null
 
 
 func _surface() -> int:
@@ -57,12 +36,13 @@ func test_thaw_simulate_freeze_loop_on_real_terrain() -> void:
 
     # --- thaw: real terrain carves out + becomes particles ---
     assert_lt(store.store.sample(center), 0.0, "the thaw centre is solid terrain to begin with")
-    var n := ms.thaw_sphere(center, 3.0)
+    var n := ms.thaw_sphere(center, 3.0, THAWER)
     assert_gt(n, 0, "thawed solid terrain cells into MPM")
     assert_gt(ms.active_count(), 0, "seeded particles (8 per thawed cell)")
     assert_gt(store.store.sample(center), 0.0, "the thawed centre carved to air in the store")
 
     # --- simulate until it settles and freezes back ---
+    _log.clear()
     var froze := false
     for _i in 1500:
         ms.tick(1.0 / 60.0)
@@ -70,6 +50,11 @@ func test_thaw_simulate_freeze_loop_on_real_terrain() -> void:
             froze = true
             break
     assert_true(froze, "the material settled and froze back (particles cleared)")
+    while not ms._pending_chunks.is_empty():
+        ms.tick(1.0 / 60.0)
+    assert_false(_log.events.is_empty(), "the freeze announced its write")
+    assert_true(_log.sources().all(func(s: EditSource.Kind) -> bool: return s == EditSource.Kind.MPM),
+        "credited to MPM, which the scout ignores")
 
     # --- freeze: re-solidified into terrain near the rest location (at/below the thaw) ---
     var solid_found := false
@@ -102,7 +87,7 @@ func test_thaw_leaves_no_solid_shell() -> void:
                 if store.store.sample(Vector3(x + 0.5, y + 0.5, z + 0.5)) < VoxelConstants.SDF_SOLID_THRESHOLD:
                     cells.append(Vector3i(x, y, z))
     assert_gt(cells.size(), 0, "the block has solid cells to thaw")
-    ms.thaw_cells(cells)
+    ms.thaw_cells(cells, THAWER)
 
     # Every grid corner in/around the block must now be air — nothing left behind.
     var solid_corners := 0
@@ -161,7 +146,7 @@ func _sorted(cells: Array[Vector3i]) -> Array[Vector3i]:
 # deleted mpm-thaw-events-unmeasured). On the game's field at this spot, a radius-1.4 thaw
 # plans cells that the carve can't empty (their corners are shared with kept terrain), and
 # rewriting the box re-encodes the generated field so a cell the plan never named reads air
-# afterwards. voxel_removed (and the particles) must name exactly the cells that went air.
+# afterwards. The event's flips (and the particles) must name exactly the cells that went air.
 func test_thaw_events_are_the_measured_flips() -> void:
     var store := EditStoreManager.new()
     store.setup()
@@ -179,7 +164,7 @@ func test_thaw_events_are_the_measured_flips() -> void:
     ms.setup(store.store)
 
     var was := _solidity(store.store, around, 10)
-    var n   := ms.thaw_sphere(center, 1.4)
+    var n   := ms.thaw_sphere(center, 1.4, THAWER)
     var now := _solidity(store.store, around, 10)
 
     var went_air:   Array[Vector3i] = []
@@ -195,8 +180,8 @@ func test_thaw_events_are_the_measured_flips() -> void:
     assert_true(planned.keys().any(func(c: Vector3i) -> bool: return not went_air.has(c)),
         "precondition: a planned cell survives the carve")
 
-    assert_eq(_sorted(_removed), _sorted(went_air), "voxel_removed names exactly the cells that went air")
-    assert_eq(_sorted(_added), _sorted(went_solid), "voxel_added names exactly the cells that went solid")
+    assert_eq(_sorted(_log.air), _sorted(went_air), "the event's air flips are exactly the cells that went air")
+    assert_eq(_sorted(_log.solid), _sorted(went_solid), "its solid flips are exactly the cells that went solid")
     assert_eq(n, went_air.size(), "the thaw count is the cells emptied")
     assert_eq(ms.active_count(), 8 * went_air.size(), "particles are seeded only for the cells emptied")
 
@@ -213,26 +198,30 @@ func test_thaw_of_an_enclosed_cell_moves_nothing() -> void:
     var ms: MpmStructure = autofree(MpmStructure.new())
     ms.setup(store.store)
 
-    assert_eq(ms.thaw_cells([cell]), 0, "no cell thawed")
+    assert_eq(ms.thaw_cells([cell], THAWER), 0, "no cell thawed")
     assert_true(TerrainProbe.is_solid(store.store, cell), "the cell is still solid terrain")
-    assert_eq(_removed.size(), 0, "no voxel_removed for a cell that did not go air")
+    assert_eq(_log.air.size(), 0, "no air flip for a cell that did not go air")
     assert_eq(ms.active_count(), 0, "no particles duplicate matter still in the store")
 
 
-# DetachmentScout tells MPM's own carve from a player's edit by MPM being active when the edit's
-# TerrainSdfChanged arrives, so the particles must already be in the sim by then.
-func test_thaw_is_active_when_its_edit_is_announced() -> void:
+# DetachmentScout tells its own carve from anyone else's by the source the event carries, so a thaw
+# is announced once, credited to whoever asked for it.
+func test_thaw_is_announced_once_with_its_source() -> void:
     var store := EditStoreManager.new()
     store.setup()
 
     var ms: MpmStructure = autofree(MpmStructure.new())
     ms.setup(store.store)
 
-    _watched = ms
-    var n := ms.thaw_sphere(Vector3(0.5, _surface() - 3.0, 0.5), 3.0)
-
-    assert_gt(n, 0, "precondition: the thaw empties cells")
-    assert_eq(_edits, [8 * n] as Array[int], "one TerrainSdfChanged, with every particle already in the sim")
+    var spots := {EditSource.Kind.SCOUT: Vector2(0.5, 0.5), EditSource.Kind.INSTRUMENT: Vector2(20.5, 0.5)}
+    for source: EditSource.Kind in spots:
+        var at: Vector2 = spots[source]
+        var top := EditStore.terrain_surface(at.x, at.y, EditStoreManager.BASE, EditStoreManager.AMP,
+            EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
+        _log.clear()
+        var n := ms.thaw_sphere(Vector3(at.x, top - 3.0, at.y), 3.0, source)
+        assert_gt(n, 0, "precondition: the thaw empties cells")
+        assert_eq(_log.sources(), [source] as Array[EditSource.Kind], "one event, credited to its source")
 
 
 # A second thaw of the same sphere plans the cells the first couldn't empty, but its rewrite
@@ -245,7 +234,7 @@ func test_thaw_that_changes_nothing_announces_no_edit() -> void:
 
     var first: MpmStructure = autofree(MpmStructure.new())
     first.setup(store.store)
-    first.thaw_sphere(center, 3.0)
+    first.thaw_sphere(center, 3.0, THAWER)
 
     var ms: MpmStructure = autofree(MpmStructure.new())
     ms.setup(store.store)
@@ -253,8 +242,60 @@ func test_thaw_that_changes_nothing_announces_no_edit() -> void:
     var replan := ms._carve_corners(ms._plan_thaw(VoxelUtils.cells_in_sphere(center, 3.0)))
     assert_false(replan.is_empty(), "precondition: the repeat still rewrites corners")
 
-    _watched = ms
-    var n := ms.thaw_sphere(center, 3.0)
+    _log.clear()
+    var n := ms.thaw_sphere(center, 3.0, THAWER)
 
     assert_eq(n, 0, "precondition: the repeat empties nothing")
-    assert_eq(_edits.size(), 0, "a rewrite that changed nothing announces no edit")
+    assert_eq(_log.events.size(), 0, "a rewrite that changed nothing announces no edit")
+
+
+# (Drafted by Claude, overnight 2026-09-27.) A large freeze is announced chunk by chunk, and the
+# order is the order structural subscribers hear it in, so it can't depend on where the camera is:
+# a replayed recording has a different camera (or none) and must see the same events.
+func test_freeze_announcement_order_ignores_the_camera() -> void:
+    var manager := EditStoreManager.new()
+    manager.setup()
+    var ms: MpmStructure = autofree(MpmStructure.new())
+    add_child(ms)
+    ms.setup(manager.store)
+    var cam: Camera3D = autofree(Camera3D.new())
+    add_child(cam)
+    cam.make_current()
+
+    var origin := Vector3(0, 40, 0)
+    var dim    := 3 * MpmStructure.CHUNK
+    var orders: Array = []
+    for eye in [origin, origin + Vector3.ONE * float(dim)]:
+        cam.global_position = eye
+        assert_eq(get_viewport().get_camera_3d(), cam, "precondition: the camera MpmStructure would see")
+        _log.clear()
+        ms._queue_freeze_chunks(origin, dim)
+        while not ms._pending_chunks.is_empty():
+            ms.tick(1.0 / 60.0)
+        orders.append(_log.events.map(func(e: TerrainSdfChangedEvent) -> Vector3: return e.box_origin))
+
+    assert_eq(orders[0].size(), 27, "precondition: a 3x3x3-chunk region")
+    assert_eq(orders[1], orders[0], "the same announcements in the same order from either corner")
+    var heights: Array = orders[0].map(func(o: Vector3) -> float: return o.y)
+    var sorted := heights.duplicate()
+    sorted.sort()
+    assert_eq(heights, sorted, "bottom layer first")
+
+
+# (Drafted by Claude, overnight 2026-09-27.) A second freeze landing while the first is still being
+# announced must not drop the first one's remaining chunks: those announcements are what register
+# the frozen pile with support.
+func test_a_freeze_during_announcement_keeps_the_earlier_chunks() -> void:
+    var manager := EditStoreManager.new()
+    manager.setup()
+    var ms: MpmStructure = autofree(MpmStructure.new())
+    ms.setup(manager.store)
+    var dim := 3 * MpmStructure.CHUNK
+
+    ms._queue_freeze_chunks(Vector3(0, 40, 0), dim)
+    ms.tick(1.0 / 60.0)
+    ms._queue_freeze_chunks(Vector3(100, 40, 0), dim)
+    while not ms._pending_chunks.is_empty():
+        ms.tick(1.0 / 60.0)
+
+    assert_eq(_log.events.size(), 54, "all 27 chunks of each freeze were announced")

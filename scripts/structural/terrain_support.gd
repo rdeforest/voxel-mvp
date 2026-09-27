@@ -10,35 +10,30 @@ var store:                EditStore   # SDF source (generator + edits); injected
 
 
 func _init() -> void:
-    VoxelEventBusSingleton.subscribe(VoxelAddedEvent.CHANNEL,        _on_voxel_added)
-    VoxelEventBusSingleton.subscribe(VoxelRemovedEvent.CHANNEL,      _on_voxel_removed)
-    VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_terrain_sdf_changed)
+    VoxelEventBusSingleton.subscribe(TerrainSdfChangedEvent.CHANNEL, _on_matter_changed)
 
 
 # --- Bus handlers ---
 
-func _on_voxel_added(event: VoxelAddedEvent) -> void:
-    _register_voxel(event.pos, event.material)
-
-func _on_voxel_removed(event: VoxelRemovedEvent) -> void:
-    _remove_voxel(event.pos)
-
-func _on_terrain_sdf_changed(event: TerrainSdfChangedEvent) -> void:
+# The write's measured flips first (a new solid cell is tracked with the material the store now
+# holds there), then a scan of its box for what flips don't report.
+func _on_matter_changed(event: TerrainSdfChangedEvent) -> void:
     if store == null:
         return
+    for cell in event.flips.air:
+        _remove_voxel(cell)
+    for cell in event.flips.solid:
+        _register_voxel(cell, Materials.from_name(MaterialPalette.name_of(TerrainProbe.material(store, cell))))
+    _scan_box(event)
+
+func _scan_box(event: TerrainSdfChangedEvent) -> void:
     for cell in event.cells:
         var is_solid := TerrainProbe.is_solid(store, cell)
         if voxel_data.has(cell):
-            # Tracked record exists. If the SDF has become air (e.g. via
-            # LowerAction or any other path that didn't explicitly emit
-            # voxel_removed for this cell), drop the record now so we
-            # don't end up with phantoms — tracked cells whose surface
-            # no longer exists.
+            # A tracked cell gone air that no flip named: an unmeasured write left it (the MPM
+            # freeze, docs/bugs/mpm-freeze-flips-unmeasured.md).
             if not is_solid:
                 _remove_voxel(cell)
-                VoxelEventBusSingleton.emit(
-                    VoxelRemovedEvent.CHANNEL,
-                    VoxelRemovedEvent.new(VoxelConstants.GRID_ID, cell))
                 continue
             if not voxel_data[cell].dirty:
                 voxel_data[cell].dirty = true
