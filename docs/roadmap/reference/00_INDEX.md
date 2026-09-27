@@ -22,3 +22,6 @@ exists*, not what it contains.
   survey (2009–2024) on volumetric/stratified terrain and erosion simulation;
   the citations behind design doc 19, including the unsolved tileable-erosion
   crux.
+- [`08-scenario-languages-research/`](08-scenario-languages-research/00_INDEX.md) — the
+  prior-art research behind design doc 22: HTN languages, parametric assembly formats, field
+  captures and Blender/VDB, and command-level record/replay.
