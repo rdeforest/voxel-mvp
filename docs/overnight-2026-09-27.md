@@ -90,7 +90,12 @@
   reconstruction (linear crossings, h = 1 m normals); exact Hermite data fixes it at 1 m cost. The
   drain refines already-under-eps cells to the floor (0.47 M → 3.46 M cells for +13% triangles).
   Doc `reference/09`.
-- [ ] Integration review of the merged result; morning brief at the bottom of this doc
+- [x] Integration review of the merged result (7 real findings, all small; fixed in F4)
+- [ ] F4 — integration-review fixes + dev-harness parse check (follow-up, after the merge)
+- [ ] F1 — wire the exact carve (`predict_carve`) into the MPM thaw (follow-up)
+- [ ] F2 — `EditStore.leaf_info` binding; probe shows the owning leaf (completes G4.4) (follow-up)
+- [ ] F3 — the MPM freeze reports its measured flips (follow-up)
+- [ ] Morning brief at the bottom of this doc
 
 "Q" numbers refer to [`overnight-2026-09-26-questions.md`](roadmap/implementation/done/overnight-2026-09-26-questions.md);
 Robert's answers are inline there.
