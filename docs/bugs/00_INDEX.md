@@ -13,6 +13,8 @@ When you defer a bug: add a file here (`<area>-<slug>.md`), a line below, and a 
 
 | Bug | Area | Severity | Notes |
 |-----|------|----------|-------|
+| [mpm-contact-friction-and-damping](mpm-contact-friction-and-damping.md) | MPM contact | med (needs a call) | Friction is viscous (creeps on any slope), damping acts in free flight (5.3 m/s terminal fall), the non-unit SDF is used as a distance (2.46× overshoot), and the settle rule hides creep. |
+| [dc-drain-collapse-emit-unbudgeted](dc-drain-collapse-emit-unbudgeted.md) | DC world-octree drain | med | Refine stops at its budget, but collapse/emit after it doesn't: a "20 ms" drain takes 32–76 ms. |
 | [godot-float-parse-inexact](godot-float-parse-inexact.md) | engine (Godot core) | low-med (upstream) | Godot's text→double reader is off by an ulp on ~24 % of 17-digit doubles and reads values below ~1e-308 as 0. Worked around in steps and saves; upstream issue #123700. |
 | [store-write-reencode-flips-unplanned-cells](store-write-reencode-flips-unplanned-cells.md) | actions (StoreWrite box writers) | low (needs a call) | A box rewrite re-encodes the field and can flip cells the edit never named. Fixed for the thaw (predict_carve) and one_cell; Bell/Flatten/Fill/Dig/CSG/VoxelImprint/instruments/freeze still do it. |
 | [scout-ignores-freeze-flips](scout-ignores-freeze-flips.md) | structural (DetachmentScout) | low (needs a call) | The scout drops MPM freeze events, so a cell a freeze empties never re-checks its neighbours. Seeding from the freeze's measured flips loops (probe: a voxel on a 1 m grid post, 8 freeze/thaw cycles): the flood reads SDF-0 geometry as air, the collider holds particles on it. |
