@@ -449,6 +449,17 @@ func _edit_region(a: Vector3, b: Vector3, c: Vector3) -> String:
     return "EDIT stone" if ctr.y - _ground_y(ctr.x, ctr.z) >= STONE_LIFT else "EDIT apron"
 
 
+# Every table row a triangle counts toward.
+func _tri_regions(a: Vector3, b: Vector3, c: Vector3, edit: bool, d: float, spread: float) -> Array:
+    var region := _edit_region(a, b, c) if edit else ("gen %s %s" % [_band(d), "feat" if spread >= FEATURE_DEG else "smth"])
+    var keys := [region, "ALL"]
+    if edit:
+        keys.append("EDIT all")
+    elif d >= 60.0 and _near_crest((a + b + c) / 3.0):
+        keys.append("RIDGE(crest disk)")
+    return keys
+
+
 # Walk an emitted mesh: bucket each live triangle by region and accumulate owner size, screen key,
 # the dcinval flag (split by whether the owner is at its graded floor or above it), projected screen
 # area (in view only), and (strided outside the edits) measured field error.
@@ -475,12 +486,7 @@ func _tri_table(arrays: Array, m: DCOctreeMesher, eps: float) -> Dictionary:
         var d := maxf((ctr_owner - eye).length(), 1e-3)
         var edit := _owner_is_edit(owners[t] * bc, size)
         var spread := _normal_spread_deg(norms, ia, ib, ic)
-        var region := _edit_region(a, b, c) if edit else ("gen %s %s" % [_band(d), "feat" if spread >= FEATURE_DEG else "smth"])
-        var keys := [region, "ALL"]
-        if edit:
-            keys.append("EDIT all")
-        elif d >= 60.0 and _near_crest((a + b + c) / 3.0):
-            keys.append("RIDGE(crest disk)")
+        var keys := _tri_regions(a, b, c, edit, d, spread)
         var key := errs[t] * bc * proj / d
         var flagged := key > eps * 2.0
         var above_floor := size > _floor_at(ctr_owner, eps) + 1e-6
@@ -847,64 +853,82 @@ const CUBE_EDGES := [
 # mesher's own floor-mesh vertices, so the port is validated. Error = |intent signed distance| at the
 # vertex, for cells whose exact vertex lies on a stone (box nearer than ground).
 func _hermite_oracle(floor_arrays: Array) -> void:
-    var mesh_v := {}
-    var ro := Vector3(root_o)
-    for v in floor_arrays[Mesh.ARRAY_VERTEX]:
-        var w: Vector3 = (v + ro) * bc
-        mesh_v.get_or_add(Vector3i((w / bc).floor()), []).append(w)
+    var mesh_v := _mesh_vertices_by_cell(floor_arrays)
     var region := _stones_region().grow(1.0)
     var lo := Vector3i((region.position / bc).floor())
     var hi := Vector3i((region.end / bc).ceil())
-    var err_s := PackedFloat32Array()
-    var err_h := PackedFloat32Array()
-    var cross_d := PackedFloat32Array()
-    var port_d := PackedFloat32Array()
+    var r := OracleAcc.new()
     for x in range(lo.x, hi.x):
         for y in range(lo.y, hi.y):
             for z in range(lo.z, hi.z):
-                var o := Vector3i(x, y, z)
-                var qs := MiniQef.new()
-                var qh := MiniQef.new()
-                for e in CUBE_EDGES:
-                    var pa := Vector3(o + e[0]) * bc
-                    var pb := Vector3(o + e[1]) * bc
-                    var fa := store.sample(pa)
-                    var fb := store.sample(pb)
-                    if (fa < 0.0) == (fb < 0.0) or fa == fb:
-                        continue
-                    var q_lin := pa.lerp(pb, fa / (fa - fb))
-                    qs.add(q_lin, _grad(q_lin, bc))
-                    var q_ex := _exact_crossing(pa, pb, fa < 0.0)
-                    cross_d.append((q_ex - q_lin).length())
-                    var on_box := _box_union(q_ex) < _gen_sdist(q_ex)
-                    qh.add(q_ex, _box_union_grad(q_ex) if on_box else _grad_raw(gen, q_ex, 0.05).normalized())
-                if qs.count == 0:
-                    continue
-                var cmin := Vector3(o) * bc
-                var cmax := cmin + Vector3.ONE * bc
-                var vs := qs.solve(cmin, cmax)
-                var vh := qh.solve(cmin, cmax)
-                var best := 1e9
-                for w in mesh_v.get(o, []):
-                    best = minf(best, (w - vs).length())
-                port_d.append(best)
-                if _box_union(vh) > _gen_sdist(vh):
-                    continue
-                err_s.append(absf(_intent_sdist(vs)))
-                err_h.append(absf(_intent_sdist(vh)))
+                _oracle_cell(Vector3i(x, y, z), mesh_v, r)
+    _print_oracle(r)
+
+
+class OracleAcc:
+    var err_s := PackedFloat32Array()   # stone-cell vertex error, scalar recipe
+    var err_h := PackedFloat32Array()   # stone-cell vertex error, exact Hermite
+    var cross := PackedFloat32Array()   # linear vs exact crossing shift, per edge
+    var port := PackedFloat32Array()    # ported scalar vertex vs the mesher's own (1e9: none)
+
+
+func _mesh_vertices_by_cell(arrays: Array) -> Dictionary:
+    var out := {}
+    var ro := Vector3(root_o)
+    for v in arrays[Mesh.ARRAY_VERTEX]:
+        var w: Vector3 = (v + ro) * bc
+        out.get_or_add(Vector3i((w / bc).floor()), []).append(w)
+    return out
+
+
+# One leaf: both QEFs from its sign-changing edges, the port check against the mesher's vertex, and
+# (for a stone cell) both vertices' distance to the intent surface. Appends into `r`.
+func _oracle_cell(o: Vector3i, mesh_v: Dictionary, r: OracleAcc) -> void:
+    var qs := MiniQef.new()
+    var qh := MiniQef.new()
+    for e in CUBE_EDGES:
+        var pa := Vector3(o + e[0]) * bc
+        var pb := Vector3(o + e[1]) * bc
+        var fa := store.sample(pa)
+        var fb := store.sample(pb)
+        if (fa < 0.0) == (fb < 0.0) or fa == fb:
+            continue
+        var q_lin := pa.lerp(pb, fa / (fa - fb))
+        qs.add(q_lin, _grad(q_lin, bc))
+        var q_ex := _exact_crossing(pa, pb, fa < 0.0)
+        r.cross.append((q_ex - q_lin).length())
+        var on_box := _box_union(q_ex) < _gen_sdist(q_ex)
+        qh.add(q_ex, _box_union_grad(q_ex) if on_box else _grad_raw(gen, q_ex, 0.05).normalized())
+    if qs.count == 0:
+        return
+    var cmin := Vector3(o) * bc
+    var cmax := cmin + Vector3.ONE * bc
+    var vs := qs.solve(cmin, cmax)
+    var vh := qh.solve(cmin, cmax)
+    var best := 1e9
+    for w in mesh_v.get(o, []):
+        best = minf(best, (w - vs).length())
+    r.port.append(best)
+    if _box_union(vh) > _gen_sdist(vh):
+        return
+    r.err_s.append(absf(_intent_sdist(vs)))
+    r.err_h.append(absf(_intent_sdist(vh)))
+
+
+func _print_oracle(r: OracleAcc) -> void:
     var a := Agg.new()
     var matched := 0
     var with_v := 0
-    for d in port_d:
+    for d in r.port:
         with_v += 1 if d < 1e8 else 0
         matched += 1 if d < 1e-3 else 0
     gut.p("  HERMITE ORACLE (1 m leaves near the stones). Port check: of %d cells with crossings, %d hold a mesher vertex, and %d of those match the ported scalar solve within 1 mm" % [
-            port_d.size(), with_v, matched])
+            r.port.size(), with_v, matched])
     gut.p("    crossing shift, linear vs exact: p50 %.3f p95 %.3f max %.3f m (%d edges)" % [
-            a.pctl(cross_d, 0.5), a.pctl(cross_d, 0.95), a.pctl(cross_d, 1.0), cross_d.size()])
+            a.pctl(r.cross, 0.5), a.pctl(r.cross, 0.95), a.pctl(r.cross, 1.0), r.cross.size()])
     gut.p("    stone-cell vertex error to intent: scalar p50 %.3f p95 %.3f max %.3f m | exact Hermite p50 %.3f p95 %.3f max %.3f m (%d cells)" % [
-            a.pctl(err_s, 0.5), a.pctl(err_s, 0.95), a.pctl(err_s, 1.0),
-            a.pctl(err_h, 0.5), a.pctl(err_h, 0.95), a.pctl(err_h, 1.0), err_s.size()])
+            a.pctl(r.err_s, 0.5), a.pctl(r.err_s, 0.95), a.pctl(r.err_s, 1.0),
+            a.pctl(r.err_h, 0.5), a.pctl(r.err_h, 0.95), a.pctl(r.err_h, 1.0), r.err_s.size()])
 
 
 # Bisect the intent field on the edge pa -> pb; `a_inside` is the stored sign at pa.
