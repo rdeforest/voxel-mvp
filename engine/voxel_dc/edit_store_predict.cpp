@@ -15,7 +15,6 @@ using namespace edit_store_lattice;
 namespace {
 
 constexpr double IMPRINT_MARGIN = 2.0; // VoxelImprint.MARGIN
-constexpr double SDF_BAND = 5.0;       // VoxelConstants.SDF_AIR == -SDF_SOLID
 
 enum CsgShapeKind { // CsgSdf.Shape
 	CSG_BOX,

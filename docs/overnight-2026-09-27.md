@@ -9,7 +9,7 @@
 - [x] E2 — stamp paint rule matches `materials()` (Q6)
 - [x] E3 — frontier lazy invalidation on edit (Q10)
 - [x] E4 — RAM cell arena with a budget cap; mmap removed (Q4)
-- [ ] E5 — C++ solver for the exact thaw carve (Q2, Q3) (stretch)
+- [x] E5 — C++ solver for the exact thaw carve (Q2, Q3) (stretch)
 - [ ] G1 — fold the 2026-09-26 answers into the bug files and docs
 - [ ] G2 — edit events carry their source; raise/lower/flatten emit measured flips (Q1)
 - [ ] G3 — save-pair integrity; single save format (Q5)

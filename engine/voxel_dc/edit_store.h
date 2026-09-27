@@ -74,6 +74,22 @@ public:
 	// against ConstructionAction's GDScript original (the oracle) by test_construction_attach_predict.
 	bool imprint_near_solid(int shape, const PackedFloat64Array &dims, Transform3D xform, double cell,
 			double reach, Vector3 below) const;
+	// The field that empties exactly `cells` (a thaw's plan): every one reads air by CELL_EDIT_SDF at
+	// its sample point and every other cell the write rewrites stays on the side it reads now by
+	// CELL_KEEP_SDF, which also undoes the flips re-encoding the generator's field would cause. It is
+	// a feasible field near MpmStructure's corner carve (a planned cell's corners cleared to SDF_AIR
+	// unless a kept-solid cell touches them), and that carve itself wherever it already meets every
+	// cell; each corner stays within [SDF_SOLID, SDF_AIR] or its current value. The rewritten cube is
+	// the plan's box plus `margin` cells, its faces held as they are; the margin grows (to
+	// `max_margin`) while the faces are what refuses it. Returns predict_work's lattice plus
+	// { conflict: [], proven: false, pinned: false, margin, sweeps }, or a refusal { conflict, proven,
+	// pinned, margin, sweeps }: `proven` means the conflict cells' requirements provably cannot all
+	// hold in that cube (a Farkas certificate over them); `pinned` too means the proof leans on the
+	// held faces, so it shows only that no field exists within a `max_margin` box, not that none
+	// exists. Otherwise the solver's sweep budget ran out and `conflict` is the cells it had not yet
+	// met. See edit_store_carve.cpp and carve_solver.cpp.
+	static constexpr int CARVE_MAX_MARGIN = 4;
+	Dictionary predict_carve(const TypedArray<Vector3i> &cells, int max_margin = CARVE_MAX_MARGIN) const;
 
 	// Questions asked of a predicted lattice (the write_region arguments: dim^3 values, x fastest)
 	// against the store as it is now. lattice_flips = SdfLattice.flips: { solid, air }, the cells

@@ -32,6 +32,7 @@ inline bool is_write_leaf(double s, double cell) {
 constexpr double CELL_SAMPLE_OFFSET = 0.5; // VoxelConstants.VOXEL_CENTER_OFFSET (VoxelUtils.sample_point)
 constexpr double SOLID_THRESHOLD = 0.0;    // VoxelConstants.SDF_SOLID_THRESHOLD
 constexpr int OP_UNION = 0;                // STORE_OP_UNION == CsgState.Op.ADD
+constexpr double SDF_BAND = 5.0;           // VoxelConstants.SDF_AIR == -SDF_SOLID
 
 // SdfLattice.materials's paint rule, shared by every brush write (the lattice builder's `made` and
 // EditStore's stamps) so the same brush paints the same leaves whichever path writes it. A point is
