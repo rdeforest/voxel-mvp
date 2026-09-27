@@ -17,7 +17,7 @@ extends RefCounted
 # docs/roadmap/design/22-scenario-languages.md.
 # (Drafted by Claude, overnight 2026-09-27.)
 
-const ROOT           := "user://scenarios"
+const DEFAULT_ROOT   := "user://scenarios"
 const STEPS_FILE     := "steps.json"
 const SNAPSHOT_FILE  := "world.snapshot"
 const EDITSTORE_FILE := "world.editstore"
@@ -26,6 +26,9 @@ const MARK_VERSION   := 1
 
 const _INDENT          := "  "
 const _MARK_WRAP_DEPTH := 2   # a capture's sections wrap; the vectors and lists inside them don't
+
+# Moves only in GUT, which points it into each run's own directory (test/support/run_paths.gd).
+static var root := DEFAULT_ROOT
 
 var dir:   String = ""
 var steps: Array[Dictionary] = []
@@ -41,7 +44,7 @@ var _stopped:   bool    = false
 static func dir_for(name: String) -> String:
     if name.is_empty() or name != name.validate_filename():
         return ""
-    return "%s/%s" % [ROOT, name]
+    return "%s/%s" % [root, name]
 
 
 func is_recording() -> bool:

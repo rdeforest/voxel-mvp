@@ -6,14 +6,15 @@ extends GutTest
 # not a display value.
 # (Drafted by Claude, overnight 2026-09-27.)
 
+const RunPaths  := preload("res://test/support/run_paths.gd")
 const WorldStub := preload("res://test/support/world_stub.gd")
 
-const SNAPSHOT  := "user://test_part_index_save.snapshot"
-const EDITSTORE := "user://test_part_index_save.editstore"
+var _snapshot  := RunPaths.path("test_part_index_save.snapshot")
+var _editstore := RunPaths.path("test_part_index_save.editstore")
 
 
 func after_each() -> void:
-    for path in [SNAPSHOT, EDITSTORE]:
+    for path in [_snapshot, _editstore]:
         if FileAccess.file_exists(path):
             DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
@@ -63,10 +64,10 @@ func test_part_index_survives_a_save_and_load() -> void:
     _place(brace, &"Stone", Transform3D.IDENTITY, beam_id, Vector3(1.1, 0.2, 0.7))
     var brace_id := source.index.part_at(brace[0])
     _carve(beam[0])
-    assert_eq(SavedWorld.read(SNAPSHOT, EDITSTORE).save(source, _store()), "", "the save succeeds")
+    assert_eq(SavedWorld.read(_snapshot, _editstore).save(source, _store()), "", "the save succeeds")
 
     var world := _world()
-    assert_true(SavedWorld.read(SNAPSHOT, EDITSTORE).load_into(world, _store()), "and loads")
+    assert_true(SavedWorld.read(_snapshot, _editstore).load_into(world, _store()), "and loads")
 
     assert_eq(world.index.count(), 2, "both parts came back")
     assert_eq(world.index.part_at(beam[0]), -1, "the carved cell is still no one's")
@@ -90,14 +91,14 @@ func test_a_snapshot_whose_parts_share_a_cell_is_refused() -> void:
     var brace: Array[Vector3i] = [Vector3i(3, 3, 3)]
     _place(beam, &"Wood", Transform3D.IDENTITY)
     _place(brace, &"Stone", Transform3D.IDENTITY)
-    assert_eq(SavedWorld.read(SNAPSHOT, EDITSTORE).save(source, _store()), "", "the save succeeds")
+    assert_eq(SavedWorld.read(_snapshot, _editstore).save(source, _store()), "", "the save succeeds")
 
-    var snap  := WorldSnapshot.read(SNAPSHOT)
+    var snap  := WorldSnapshot.read(_snapshot)
     var parts: Dictionary = bytes_to_var(snap["parts"])
     parts["records"][1]["cells"].append(beam[0])
     snap["parts"] = var_to_bytes(parts)
-    FileAccess.open(SNAPSHOT, FileAccess.WRITE).store_string(var_to_str(snap))
+    FileAccess.open(_snapshot, FileAccess.WRITE).store_string(var_to_str(snap))
 
-    var saved := SavedWorld.read(SNAPSHOT, EDITSTORE)
+    var saved := SavedWorld.read(_snapshot, _editstore)
     assert_string_contains(saved.refusal, "both claim cell", "the shared cell is named")
     assert_false(saved.load_into(_world(), _store()), "and nothing is applied")

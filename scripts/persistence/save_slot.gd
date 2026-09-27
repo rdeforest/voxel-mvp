@@ -23,19 +23,19 @@ static func is_valid(name: String) -> bool:
 
 static func _default_files() -> PackedStringArray:
     var out := PackedStringArray()
-    for path in [SavePaths.SNAPSHOT_FILE, SavePaths.EDITSTORE_FILE]:
-        out.append(path.get_file())
-        out.append((path + SavedWorld.TMP_SUFFIX).get_file())
+    for file in [SavePaths.SNAPSHOT_NAME, SavePaths.EDITSTORE_NAME]:
+        out.append(file)
+        out.append(file + SavedWorld.TMP_SUFFIX)
     return out
 
 static func dir_of(name: String) -> String:
-    return SavePaths.SAVE_DIR if name == DEFAULT else "%s/%s" % [SavePaths.SAVE_DIR, name]
+    return SavePaths.root if name == DEFAULT else "%s/%s" % [SavePaths.root, name]
 
 static func snapshot_path(name: String) -> String:
-    return "%s/%s" % [dir_of(name), SavePaths.SNAPSHOT_FILE.get_file()]
+    return "%s/%s" % [dir_of(name), SavePaths.SNAPSHOT_NAME]
 
 static func editstore_path(name: String) -> String:
-    return "%s/%s" % [dir_of(name), SavePaths.EDITSTORE_FILE.get_file()]
+    return "%s/%s" % [dir_of(name), SavePaths.EDITSTORE_NAME]
 
 
 # The slot's pair, read and vetted, nothing applied.

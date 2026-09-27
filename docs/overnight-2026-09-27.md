@@ -113,6 +113,7 @@
   voxel on a 1 m grid post froze and was thawed 8 times), so per the brief the scout still ignores
   freezes; re-scoped to scout-ignores-freeze-flips. Also filed mpm-chunked-freeze-flips-arrive-late
   (a stale chunk flip releases a live part, pending test). Design in doc 12 "The freeze (as built)"
+- [x] F5 — tests use per-process user:// paths (no more XDG_DATA_HOME needed for parallel GUT)
 - [x] Morning brief at the bottom of this doc
 
 "Q" numbers refer to [`overnight-2026-09-26-questions.md`](roadmap/implementation/done/overnight-2026-09-26-questions.md);

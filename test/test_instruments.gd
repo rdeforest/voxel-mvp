@@ -10,12 +10,13 @@ extends GutTest
 
 const Scenario  := preload("res://test/support/scenario.gd")
 const MatterLog := preload("res://test/support/matter_log.gd")
-
-const ROOT := "user://test_instruments"
-const DIR  := ROOT + "/take"
+const RunPaths  := preload("res://test/support/run_paths.gd")
 
 # A decimal the engine's own parser (the console's) reads an ulp off, as the precondition checks.
 const MISREAD := "100.32314166426659"
+
+var _root := RunPaths.path("test_instruments")
+var _dir  := _root + "/take"
 
 var _live: Array[Node] = []
 var _s:    Scenario
@@ -48,16 +49,7 @@ func after_each() -> void:
             s.free()
     _live.clear()
     _ic.unregister_all()
-    _remove_tree(ROOT)
-
-func _remove_tree(path: String) -> void:
-    if not DirAccess.dir_exists_absolute(path):
-        return
-    for sub in DirAccess.get_directories_at(path):
-        _remove_tree("%s/%s" % [path, sub])
-    for file in DirAccess.get_files_at(path):
-        DirAccess.remove_absolute("%s/%s" % [path, file])
-    DirAccess.remove_absolute(path)
+    RunPaths.remove_tree(_root)
 
 
 func _store() -> EditStore:
@@ -280,7 +272,7 @@ func test_burying_the_player_makes_them_fly_through_it() -> void:
 # replay to the same store.
 func test_recorded_instrument_writes_replay_to_the_same_world() -> void:
     var r := ScenarioRecorder.new()
-    assert_true(r.start_fresh(DIR, _s.frame), "the recording starts: %s" % r.error)
+    assert_true(r.start_fresh(_dir, _s.frame), "the recording starts: %s" % r.error)
     _ic.validated.connect(func(action: Action, valid: bool) -> void:
         assert_true(r.action(action, valid, _s.player.global_position, _s.frame), "recorded: %s" % r.error))
 
@@ -300,7 +292,7 @@ func test_recorded_instrument_writes_replay_to_the_same_world() -> void:
     _s = Scenario.new()
     add_child(_s)
     _live = [_s]
-    assert_true(_s.run_recording(DIR), "the recording replays: %s" % _s.error)
+    assert_true(_s.run_recording(_dir), "the recording replays: %s" % _s.error)
     assert_eq(_s.capture(), live, "to the same world")
 
 
@@ -415,7 +407,7 @@ func test_a_named_save_round_trips_and_leaves_the_default_slot_alone() -> void:
     _live = [_s]
     assert_true(_s.start_save(SaveSlot.snapshot_path(SLOT), SaveSlot.editstore_path(SLOT)), "loads: %s" % _s.error)
     assert_eq(_s.capture(), live, "to the same world")
-    _remove_tree(SaveSlot.dir_of(SLOT))
+    RunPaths.remove_tree(SaveSlot.dir_of(SLOT))
 
 func test_slot_names_and_missing_slots_are_refused() -> void:
     for name in ["..", ".hidden", "a/b", "c:d", "world.snapshot", "world.editstore", "world.snapshot.tmp", "world.editstore.tmp"]:

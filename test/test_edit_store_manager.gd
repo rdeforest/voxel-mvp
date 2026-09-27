@@ -5,9 +5,12 @@ extends GutTest
 # serialize round-trip is pinned in test_edit_store.gd; this pins the GDScript file layer
 # (header guard, in-place deserialize into the existing store).
 
-const TMP      := "user://test_editstore.tmp"
+const RunPaths := preload("res://test/support/run_paths.gd")
+
 const SUBTRACT := 1
 const SAVE_ID  := -9001   # negative: the header stores it as an unsigned 64-bit field
+
+var _tmp := RunPaths.path("test_editstore.tmp")
 
 
 func _manager() -> EditStoreManager:
@@ -16,8 +19,8 @@ func _manager() -> EditStoreManager:
     return manager
 
 func after_each() -> void:
-    if FileAccess.file_exists(TMP):
-        DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP))
+    if FileAccess.file_exists(_tmp):
+        DirAccess.remove_absolute(ProjectSettings.globalize_path(_tmp))
 
 
 func test_round_trips_edits_through_disk() -> void:
@@ -26,33 +29,33 @@ func test_round_trips_edits_through_disk() -> void:
         EditStoreManager.AMP, EditStoreManager.PERIOD, EditStoreManager.OCTAVES, EditStoreManager.SEED)
     var center := Vector3(0.0, surface - 5.0, 0.0)
     manager.store.stamp_sphere(center, 4.0, SUBTRACT, 0, 1.0)
-    assert_eq(manager.save_to(TMP, SAVE_ID), OK, "save writes the blob")
+    assert_eq(manager.save_to(_tmp, SAVE_ID), OK, "save writes the blob")
 
     var reloaded := _manager()
-    assert_true(reloaded.load_from(TMP), "load accepts the matching-version blob")
+    assert_true(reloaded.load_from(_tmp), "load accepts the matching-version blob")
     assert_eq(reloaded.store.leaf_count(), manager.store.leaf_count(), "leaf count survives disk round trip")
     assert_almost_eq(reloaded.store.sample(center), manager.store.sample(center), 0.01, "edited cell preserved")
     assert_true(reloaded.store.has_edit(center), "edit flag preserved")
 
 
 func test_rejects_foreign_blob() -> void:
-    var file := FileAccess.open(TMP, FileAccess.WRITE)
+    var file := FileAccess.open(_tmp, FileAccess.WRITE)
     file.store_32(0xDEADBEEF)   # wrong magic
     file.store_32(EditStoreManager.SAVE_VERSION)
     file.store_64(SAVE_ID)
     file.store_buffer(PackedByteArray([1, 2, 3]))
     file.close()
     var manager := _manager()
-    assert_false(manager.load_from(TMP), "a blob with the wrong magic is skipped, not loaded")
+    assert_false(manager.load_from(_tmp), "a blob with the wrong magic is skipped, not loaded")
 
 
 func test_missing_file_returns_false() -> void:
     var manager := _manager()
-    assert_false(manager.load_from("user://does_not_exist.tmp"), "missing file loads nothing")
+    assert_false(manager.load_from(RunPaths.path("does_not_exist.tmp")), "missing file loads nothing")
 
 
 func test_rejects_other_version_with_a_reason() -> void:
-    var file := FileAccess.open(TMP, FileAccess.WRITE)
+    var file := FileAccess.open(_tmp, FileAccess.WRITE)
     file.store_32(EditStoreManager.SAVE_MAGIC)
     file.store_32(EditStoreManager.SAVE_VERSION + 1)
     file.store_64(SAVE_ID)
@@ -60,8 +63,8 @@ func test_rejects_other_version_with_a_reason() -> void:
     file.close()
     var manager := _manager()
 
-    assert_false(manager.load_from(TMP), "a blob from another format version is skipped")
-    assert_eq(EditStoreManager.refusal(TMP), "terrain save is format v%d; this build reads only v%d"
+    assert_false(manager.load_from(_tmp), "a blob from another format version is skipped")
+    assert_eq(EditStoreManager.refusal(_tmp), "terrain save is format v%d; this build reads only v%d"
         % [EditStoreManager.SAVE_VERSION + 1, EditStoreManager.SAVE_VERSION])
 
 
@@ -75,7 +78,7 @@ const STATE_OFFSET := 96
 
 
 func _write(version: int, blob: PackedByteArray) -> void:
-    var file := FileAccess.open(TMP, FileAccess.WRITE)
+    var file := FileAccess.open(_tmp, FileAccess.WRITE)
     file.store_32(EditStoreManager.SAVE_MAGIC)
     file.store_32(version)
     file.store_64(SAVE_ID)
@@ -126,14 +129,14 @@ func _samples(manager: EditStoreManager) -> PackedFloat64Array:
 func test_blob_with_inherited_leaves_round_trips() -> void:
     var manager := _subdivided_manager()
     assert_true(_states(manager.store.serialize()).has(2), "the store holds inherited leaves")
-    assert_eq(manager.save_to(TMP, SAVE_ID), OK)
-    assert_eq(FileAccess.get_file_as_bytes(TMP).decode_u32(4), EditStoreManager.SAVE_VERSION,
+    assert_eq(manager.save_to(_tmp, SAVE_ID), OK)
+    assert_eq(FileAccess.get_file_as_bytes(_tmp).decode_u32(4), EditStoreManager.SAVE_VERSION,
         "it is saved as the current version")
 
     var reloaded := _manager()
-    assert_eq(EditStoreManager.refusal(TMP), "", "this build reads its own save")
-    assert_eq(EditStoreManager.save_id(TMP), SAVE_ID, "the save id survives, sign and all")
-    assert_true(reloaded.load_from(TMP), "and loads it")
+    assert_eq(EditStoreManager.refusal(_tmp), "", "this build reads its own save")
+    assert_eq(EditStoreManager.save_id(_tmp), SAVE_ID, "the save id survives, sign and all")
+    assert_true(reloaded.load_from(_tmp), "and loads it")
     assert_eq(_samples(reloaded), _samples(manager), "bit for bit")
     assert_eq(reloaded.store.serialize(), manager.store.serialize(), "the tree itself survives")
 
@@ -141,9 +144,9 @@ func test_blob_with_inherited_leaves_round_trips() -> void:
 func test_refuses_every_version_but_the_current_one() -> void:
     for version in [0, 1, 2, EditStoreManager.SAVE_VERSION + 1, 99]:
         _write(version, _manager().store.serialize())
-        assert_eq(EditStoreManager.refusal(TMP), "terrain save is format v%d; this build reads only v%d"
+        assert_eq(EditStoreManager.refusal(_tmp), "terrain save is format v%d; this build reads only v%d"
             % [version, EditStoreManager.SAVE_VERSION])
-        assert_false(_manager().load_from(TMP), "v%d doesn't load" % version)
+        assert_false(_manager().load_from(_tmp), "v%d doesn't load" % version)
 
 
 func test_damaged_blob_is_refused_with_its_reason() -> void:
@@ -151,8 +154,8 @@ func test_damaged_blob_is_refused_with_its_reason() -> void:
     var blob    := manager.store.serialize()
     _write(EditStoreManager.SAVE_VERSION, blob.slice(0, blob.size() - 40))
 
-    assert_string_contains(EditStoreManager.refusal(TMP), "terrain save is damaged (EditStore blob is")
+    assert_string_contains(EditStoreManager.refusal(_tmp), "terrain save is damaged (EditStore blob is")
     var held := _samples(manager)
-    assert_false(manager.load_from(TMP), "a truncated save doesn't load")
+    assert_false(manager.load_from(_tmp), "a truncated save doesn't load")
     assert_engine_error("truncated or corrupt", "load_from's deserialize refuses it loudly")
     assert_eq(_samples(manager), held, "and keeps the store as it was")

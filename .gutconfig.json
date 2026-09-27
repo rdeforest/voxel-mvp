@@ -1,0 +1,4 @@
+{
+  "pre_run_script": "res://test/support/gut_pre_run.gd",
+  "post_run_script": "res://test/support/gut_post_run.gd"
+}

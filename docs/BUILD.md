@@ -70,6 +70,13 @@ bin/godot --path . --headless -s addons/gut/gut_cmdln.gd -gdir=res://test/ \
 
 Tests can also be run interactively from the GUT panel inside the editor.
 
+Concurrent runs on one machine, in one checkout or several, are safe: every test file lives under
+the run's own `user://test_runs/<pid>/`, and the game's save and recording roots are pointed there
+too, so no run touches another's files or the player's saves (`test/support/run_paths.gd`, wired
+in by the hooks in `.gutconfig.json`; drafted by Claude). A run's start sweeps out the directories
+of runs whose pid is gone, so runs sharing `user://` from another host or pid namespace would be
+swept.
+
 ## The editor ↔ external-edit clobber
 
 The Godot **editor GUI** and external edits (VS Code, an agent, the CLI) both

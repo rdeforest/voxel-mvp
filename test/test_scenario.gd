@@ -8,9 +8,7 @@ extends GutTest
 # (Drafted by Claude, overnight 2026-09-27.)
 
 const Scenario := preload("res://test/support/scenario.gd")
-
-const SNAPSHOT  := "user://test_scenario.snapshot"
-const EDITSTORE := "user://test_scenario.editstore"
+const RunPaths := preload("res://test/support/run_paths.gd")
 
 # A column of the game's field: ground at y = -45.9 (the scout test's fence-on-a-hill spot).
 const FOOT   := Vector3(100.5, -45.0, 100.5)
@@ -33,7 +31,9 @@ const HAND_WRITTEN := """{
 }
 """
 
-var _live: Array[Node] = []
+var _snapshot:  String      = RunPaths.path("test_scenario.snapshot")
+var _editstore: String      = RunPaths.path("test_scenario.editstore")
+var _live:      Array[Node] = []
 
 
 func after_each() -> void:
@@ -41,7 +41,7 @@ func after_each() -> void:
         if is_instance_valid(s):
             s.free()
     _live.clear()
-    for path in [SNAPSHOT, EDITSTORE]:
+    for path in [_snapshot, _editstore]:
         if FileAccess.file_exists(path):
             DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
@@ -273,7 +273,7 @@ func test_a_scenario_starts_from_a_save_pair() -> void:
         CsgState.Op.ADD, &"Stone")
     s.build(preload("res://assets/parts/beam/beam.tres"), FOOT + Vector3.UP * 10.0, Vector3.ZERO, &"Wood")
     s.settle()
-    assert_eq(SavedWorld.new(SNAPSHOT, EDITSTORE).save(s, s.manager), "", "the pair saves")
+    assert_eq(SavedWorld.new(_snapshot, _editstore).save(s, s.manager), "", "the pair saves")
     var at_save := s.capture()
     assert_gt(bytes_to_var(at_save["voxels"]).size(), 0, "precondition: support is tracked, so the pair must carry it")
     var saved_steps := s.steps.size()
@@ -284,7 +284,7 @@ func test_a_scenario_starts_from_a_save_pair() -> void:
     var at_end := s.capture()
 
     var r := _scenario()
-    assert_true(r.start_save(SNAPSHOT, EDITSTORE), "the scenario starts from the pair: %s" % r.error)
+    assert_true(r.start_save(_snapshot, _editstore), "the scenario starts from the pair: %s" % r.error)
     assert_eq(r.index.count(), 1, "the beam's record came with it")
     assert_eq(r.capture(), at_save, "the world the pair holds, byte for byte")
     assert_true(r.replay(tail), "the continuation replays: %s" % r.error)
