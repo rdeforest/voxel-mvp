@@ -1,6 +1,6 @@
 # Overnight session plan — 2026-09-27
 
-*Drafted by Claude. **Awaiting Robert's approval.** It's an operational doc: move it to
+*Drafted by Claude. **Approved by Robert 2026-09-26 evening.** It's an operational doc: move it to
 `roadmap/implementation/done/` when the session is closed out.*
 
 ## Progress
