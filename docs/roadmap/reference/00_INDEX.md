@@ -38,3 +38,6 @@ exists*, not what it contains.
   Cepero) handled features near two voxel sizes: he stated the Nyquist limit outright and worked
   around it (finer voxels, content aligned to the grid, textures at distance) rather than solving it.
   Background for reference note 09 and the "compelling, not accurate" session.
+- [`12-known-contradictions.md`](12-known-contradictions.md) — where docs disagree with each
+  other or with newer decisions, so a session asks instead of silently picking a side. Also
+  lists open questions that must not be mistaken for decisions.

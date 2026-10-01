@@ -28,6 +28,10 @@ contains.
   them, and the legibility precondition that makes a comprehension-driven
   game playable at all. Where 01 pitches the engine and 05 states refusals,
   this states the offer.
+- [`handoff/`](handoff/00_INDEX.md) — the project's north-star measure
+  ("could Claude finish the project without Robert?"), the current
+  priority, and the methods for getting the game out of Robert's head:
+  story cards, demo role-play, charla sessions.
 
 
 ---

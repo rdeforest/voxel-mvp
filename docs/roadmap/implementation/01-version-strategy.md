@@ -1,5 +1,9 @@
 # Version Strategy
 
+> **Contradictions open:** the v1.0 row (matchmaking) and the DC-QEF section
+> are stale. See [`../reference/12-known-contradictions.md`](../reference/12-known-contradictions.md)
+> (C1, C3, C7).
+
 Each version answers one question. Versions are nominal labels —
 v0.5 falls chronologically between v0.1 and v0.2 because it's
 "halfway to 1.0", not "between 0.2 and 0.9."

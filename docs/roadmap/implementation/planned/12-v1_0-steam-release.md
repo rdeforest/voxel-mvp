@@ -1,5 +1,9 @@
 # v1.0: Will People Pay For It On Steam?
 
+> **Contradictions open:** "not a commercial endeavor" and Steam matchmaking
+> conflict with current decisions. See
+> [`../../reference/12-known-contradictions.md`](../../reference/12-known-contradictions.md) (C1, C3).
+
 **Goal:** Open-source release with Steam value-added features.
 **Status:** Pending; after v0.9.
 

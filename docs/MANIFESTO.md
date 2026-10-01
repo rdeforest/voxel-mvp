@@ -17,13 +17,17 @@ moment, before another phase quietly gets "tightened up to ship faster."
 The voxel-versus-heightmap argument has been won at the level of *demos* —
 VoxelFarm, Teardown, Deep Rock Galactic, Enshrouded have all shipped
 proof points. What hasn't been built is a **persistent open-world survival
-game on voxel-first principles** where terrain and construction are the
-same kind of data, structural integrity governs both, caves are first-class
-spaces, and nothing resets. The project's bet is that **a field-based
+game on voxel-first principles** where terrain and construction follow the
+same rules, structural integrity governs both, caves are first-class
+spaces, and nothing resets. The project's original bet was **a field-based
 representation meshed with Dual Contouring + QEF** (Miguel Cepero's
-approach, demonstrated over a decade ago and still not in shipping games)
-is the right substrate, and that a solo developer with modern AI tooling
-can deliver the proof faster than a team can.
+approach, demonstrated over a decade ago and still not in shipping games).
+That bet built the engine and still draws the terrain, but since September
+2026 the record of the world is the generator functions plus the ordered op
+log; the voxel field is a cache, and parts ship as meshes where that looks
+better up close. The representation is an implementation choice (see
+non-negotiable #1). The other half of the bet stands: a solo developer with
+modern AI tooling can deliver the proof faster than a team can.
 
 ---
 
@@ -70,16 +74,22 @@ corrected by Robert. Catch them before he has to.)
 These are the anti-goals. When in doubt, the project is *more* unlike each
 of these than you think.
 
-- **Not a commercial endeavor.** There is no revenue target, no runway, no
-  investor expectation. v1.0 may eventually ship on Steam as open-source
-  with cloud-save extras, but that is a distribution decision, not a
-  business plan. "Will this scale" and "is this monetizable" are not
-  inputs to any architectural decision.
+- **Commercial or not: an open question (as of 2026-09-30).** This is one
+  of several projects Robert is weighing as a possible first commercial
+  product. It is the one he is most passionate about, and also the hardest
+  to describe and the most ambitious. The decision waits on three steps, in
+  order: (1) define what the game actually is
+  ([`roadmap/vision/handoff/`](roadmap/vision/handoff/00_INDEX.md)),
+  (2) gather feasibility estimates for that definition, (3) decide whether
+  it is the first commercial project. Until then, don't let "is this
+  monetizable" or "will this make the Fest" drive architecture, and don't
+  treat this project as free of those questions either.
 
-- **Not on a schedule.** There are no deadlines. Time estimates only
-  matter if they run into decades. Phases are work descriptions, not
-  delivery commitments. "This should ship by X" is not a sentence that
-  applies here. Pace is set by attention and energy, not by a calendar.
+- **Schedule: open with the question above.** If the project goes
+  commercial, it gets a deadline (the next relevant Steam Fest has been
+  discussed). If not, the original stance holds: no deadlines, phases are
+  work descriptions rather than delivery commitments, and pace is set by
+  attention and energy, not by a calendar.
 
 - **Not Minecraft, not Valheim with better graphics, not an MMO.** It
   borrows verbs from Valheim because they're good verbs, and inspiration
@@ -140,8 +150,12 @@ override it.
 Stated as assertions, not paragraphs. If a proposed change violates one
 of these, the change is wrong.
 
-1. **Terrain and construction are the same kind of data.** Anything that
-   reintroduces a part/terrain dichotomy is regression.
+1. **No artificial distinctions.** Terrain, rock, lumber and anything a player
+   builds follow the same rules: they can be dug, cut and broken, and they hold or
+   fail under load the same way. How a thing looks follows from its history (what
+   shaped it), never from how it's stored. Voxel, mesh or anything else is an
+   implementation choice we're free to change. If a player can tell which one made
+   something, that's a bug.
 2. **No loading screens.** Caves, underground spaces, dungeons — same
    continuous volume as the surface.
 3. **Modifications persist everywhere, forever.** No "outside your base
@@ -197,11 +211,10 @@ Specific failure modes, named so they can be caught in the moment:
   reasoning starts with "one voxel is..." or "the voxel at position
   (x,y,z) is solid," check whether cube thinking has crept in.
 
-- **Part/terrain dichotomy.** Treating placed objects and natural terrain
-  as fundamentally different things requiring different systems. The
-  current shipped code has a remnant of this (separate part-support and
-  terrain-support algorithms) for good engineering reasons, but the
-  *long-term* direction is one field, one representation, one mesher.
+- **Part/terrain dichotomy.** Letting placed objects and natural terrain
+  *behave* differently. Storage may differ (part meshes ship); rules may
+  not. Digging, cutting, breaking and holding under load work the same way
+  whatever made the thing, and appearance follows history, not storage.
   Anytime a new feature is being designed as "parts do this, terrain
   does that," ask if the unified answer is being skipped because it's
   harder.
@@ -241,7 +254,7 @@ Specific failure modes, named so they can be caught in the moment:
 
 **Ship the working thing.**
 
-The full case study lives in `roadmap/vision/hytale-case-study.md`. The
+The full case study lives in `roadmap/vision/03-hytale-case-study.md`. The
 one-line version is enough for most decisions: if there is a working
 implementation and someone proposes rewriting it, the burden of proof is
 on the proposal, not on the existing code.

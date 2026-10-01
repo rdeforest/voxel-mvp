@@ -1,5 +1,9 @@
 # World Setting
 
+> **Superseded:** the setting is the volcano island in
+> [`../vision/04-volcano-story.md`](../vision/04-volcano-story.md). See
+> [`../reference/12-known-contradictions.md`](../reference/12-known-contradictions.md) (C6).
+
 Needs to be iron-age-and-then-some but distinctly NOT Norse mythology
 or any single existing mythology.
 

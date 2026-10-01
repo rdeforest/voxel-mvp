@@ -1,5 +1,10 @@
 # v0.9: Can I Make It Into A Real Product?
 
+> **Contradictions open:** the combat, boss, dungeon, workbench-radius and
+> survival-stat items conflict with the pillars and the 2026-09-28 creature
+> decisions. See [`../../reference/12-known-contradictions.md`](../../reference/12-known-contradictions.md)
+> (C2, C4, C5) before building any of them.
+
 **Goal:** Survival subsystems. Combat. Locomotives. **Single-player.**
 **Status:** Pending; after v0.2.
 
