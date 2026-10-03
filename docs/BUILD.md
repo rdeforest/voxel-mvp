@@ -35,22 +35,24 @@ symlink is the only supported path.
 
 ```
 git pull
-tools/build                                    # engine sources may have changed
-bin/godot --path . --headless --editor --quit   # if the pull added a class_name
+tools/build
 ```
 
-The class-cache pass is not optional when new `class_name` declarations arrive.
-Godot's global-class registry lives in `.godot/global_script_class_cache.cfg`,
-which is untracked local state, so a `class_name` someone else added is
-invisible here until an editor pass rewrites it. Until then GUT reports
-`Invalid call. Nonexistent function 'new' in base 'GDScript'` at every use of
-the new class and silently drops test files it can't resolve — a stale cache
-that reads as a couple of dozen code failures.
+That is the whole ritual, including after switching between machines. Besides
+the engine, `tools/build` refreshes Godot's global-class registry every run
+(a few seconds) and checks that every `class_name` in the project ended up in it.
 
-`git diff --name-only <before>..HEAD | xargs grep -l '^class_name'` tells you
-whether a given pull needs it. Running it unconditionally costs a few seconds,
-so the cheap habit is to run it. Read the clobber section below first: it writes
-`.godot/`, so the editor GUI must be closed.
+The registry lives in `.godot/global_script_class_cache.cfg`, which is
+untracked local state, so a `class_name` added on the other machine is invisible
+here until an editor pass rewrites it. A stale cache looks like broken code: the
+game starts with no world and a wall of `Could not find type "…"` parse errors,
+and GUT reports `Invalid call. Nonexistent function 'new' in base 'GDScript'`
+and silently drops test files it can't resolve.
+
+The pass writes `.godot/`, so `tools/build` refuses to run it while an editor
+GUI is open on this engine binary (see the clobber section below). Close the
+editor and re-run. By hand, the same pass is
+`bin/godot --path . --headless --editor --quit`.
 
 *Section drafted by Claude.*
 
@@ -101,5 +103,6 @@ Protocol:
   `generate_collisions` is set in `world._enter_tree`, not in the scene. `.gd`
   files are edited outside the editor's save path, so they don't collide.
 
-- **Class-cache regen** (`bin/godot --headless --editor --quit`, needed after
-  adding a `class_name`) writes `.godot/` — run it only with the GUI closed.
+- **Class-cache regen** (`bin/godot --headless --editor --quit`, which `tools/build`
+  runs every time) writes `.godot/`. Run it only with the GUI closed; `tools/build`
+  refuses to run it while an editor is open.

@@ -392,5 +392,48 @@ else
 	die "expected binary missing: ${BINARY_PATH}"
 fi
 
+# --- 7. global class cache --------------------------------------------------
+# Godot's class_name registry lives in .godot/global_script_class_cache.cfg,
+# which is untracked local state. A class_name added on the other machine is
+# invisible here until an editor pass rewrites it, and every script that
+# names it then fails to parse — the game runs with no world. Refreshing it
+# every run costs seconds, so it isn't conditional on what the pull touched.
+#
+# The pass writes .godot/, so it must not race an open editor GUI (BUILD.md's
+# clobber section). Any non-headless editor on this engine binary counts,
+# since `bin/godot --path . -e` leaves no absolute project path to match on;
+# the project manager launches its editor with `--editor` too.
+
+step "Refreshing the global class cache"
+
+editor_pids="$(pgrep -f -- "${BINARY_PATH}" || true)"
+for pid in ${editor_pids}; do
+	args="$(ps -o args= -p "${pid}" 2>/dev/null || true)"
+	if [[ "${args}" == *"--headless"* ]]; then continue; fi
+	if [[ " ${args} " == *" -e "* || "${args}" == *"--editor"* ]]; then
+		die "the Godot editor GUI is open (pid ${pid}); close it and re-run tools/build.
+       The class-cache pass writes .godot/, which the open editor would clobber."
+	fi
+done
+
+"${VOXMVP_ROOT}/bin/godot" --path "${VOXMVP_ROOT}" --headless --editor --quit >/dev/null 2>&1 \
+	|| die "headless editor pass failed; run it by hand to see why:
+       bin/godot --path . --headless --editor --quit"
+
+# Every class_name in the project must now be registered, or this machine
+# still isn't coherent.
+CLASS_CACHE="${VOXMVP_ROOT}/.godot/global_script_class_cache.cfg"
+missing=()
+while IFS= read -r name; do
+	grep -qF "\"class\": &\"${name}\"" "${CLASS_CACHE}" || missing+=("${name}")
+done < <(
+	cd "${VOXMVP_ROOT}" &&
+	grep -rh --include='*.gd' --exclude-dir=.godot '^class_name ' . | awk '{print $2}' | sort -u
+)
+if [[ ${#missing[@]} -gt 0 ]]; then
+	die "class cache is missing after the editor pass: ${missing[*]}"
+fi
+info "all class_name declarations registered"
+
 step "Done — this machine is in sync with the pinned refs"
 printf '\n'
