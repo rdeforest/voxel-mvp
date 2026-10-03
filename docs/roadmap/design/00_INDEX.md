@@ -92,3 +92,7 @@ or condensed.
   Thin features versus the ~2-voxel Nyquist limit, and the goal that a player can't tell how a
   part sits against the grid. History of parts-as-objects → parts-as-voxels, measurements, the
   limits separated, principles in play, eight options with their costs, questions for the chat.
+- [`24-l-system-trees.md`](24-l-system-trees.md) — **idea, parked 2026-10-02; nothing decided.**
+  Trees grown by L-system as branching segments that have the same shape as parts, so living wood
+  goes through structural integrity and felling is the removal of support. Parametric, stochastic and
+  per-species variants. Open question: parts, voxels, or parts that become voxels when felled.
