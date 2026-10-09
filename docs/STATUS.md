@@ -10,146 +10,70 @@
 
 # Resumption Brief
 
-*Last rewritten: 2026-09-27, by Claude, at the end of the second overnight session.*
+*Last rewritten: 2026-10-09, by Claude, recording the on-hold status.*
 
 
-## Where things stand right now
+## ON HOLD (2026-10-07)
 
-`master` holds everything and is pushed. Start with the **morning brief** at the bottom of
-[`overnight-2026-09-27.md`](overnight-2026-09-27.md), then answer
-[`overnight-2026-09-27-questions.md`](overnight-2026-09-27-questions.md) inline. Both move to
-`roadmap/implementation/done/` once they've been reviewed. The 2026-09-26 session's docs are
-already there.
+Robert's working energy went to a new venture on 2026-10-07 (ClodForest: `venture-cordial`).
+Before that, from 2026-10-04, his focus had moved to CoffeeBEANS. No resume date. Nothing below
+is in flight; this is where things stood when they stopped.
 
-What the last two nights built:
-- **Every action lattice runs in C++,** gated bit-exact against the GDScript oracle. Previews are
-  back under their pre-regression times, and a placement click costs about 0.7 ms.
+
+## Where things stand
+
+`master` holds everything and is pushed. The last code work was the two overnight sessions of
+2026-09-26 and 2026-09-27; since then only docs and the build script changed.
+
+- **Every action lattice runs in C++,** gated bit-exact against the GDScript oracle. A placement
+  click costs about 0.7 ms.
 - **One matter-changed event per write, carrying its source** (`EditSource`), with measured cell
-  flips from every writer, including terraforming, the MPM thaw (now an exact carve) and the freeze.
+  flips from every writer.
 - **Saves are a consistent pair in a single format,** with PartIndex saved; corrupt saves are
-  refused, not crashed on.
-- **Doc 22 phase 1 (test instruments):** exact serializable steps, a headless replay runner
-  (`test/support/scenario.gd`), the in-game recorder (`rec` / `mark`), exact console writes,
-  `leaf_info` in the probe, and named saves.
-- **The DC cell arena is plain RAM,** capped by `DC_CELL_RAM_BUDGET` (16 GiB); mmap is gone.
-- **Research:** reference note 09 (what the refine budget buys, and options) and note 10 (Godot's
-  inexact float parser).
+  refused.
+- **Doc 22 phase 1 (test instruments) is done:** the headless replay runner
+  (`test/support/scenario.gd`), the in-game recorder (`rec` / `mark`), `leaf_info`, named saves.
+- **Bugs and features are tracked in GitHub issues** (#1–#23 open, all bugs; the worst are sev:med:
+  #4 refine-drain budget, #5 incremental-emit neighbour ring, #15 MPM contact, #19 player burial).
+- **Docs since then:** design 23 (thin features, discussion brief), design 24 (L-system trees,
+  parked), the known-contradictions register (reference 12), the handoff routine
+  (`roadmap/vision/handoff/`). Manifesto #1 and commercial status are marked open.
 
-**Run `tools/build` after pulling** (engine changes), then the class-cache pass
-(`bin/godot --path . --headless --editor --quit`).
+GUT at last run (2026-09-27): **490 tests, 485 passing, 5 pending, 0 failing.** The pending tests
+are gates for filed bugs. Not re-run for this rewrite; no code has changed since.
 
-GUT: **490 tests, 485 passing, 5 pending**, 0 failing. The pending tests are gates for filed bugs.
-Parallel GUT runs no longer need their own `XDG_DATA_HOME`: each run keeps its test files under
-its own `user://test_runs/<pid>/` (docs/BUILD.md, Tests).
-
-The per-change loop: an Opus author, an Opus correctness reviewer and a Sonnet completeness reviewer,
-a Fable tiebreak on disputes, and an Opus fixer who commits only on green GUT. After merges, an
-integration review of the combined result. It has caught real cross-track bugs both nights.
+**Run `tools/build` after pulling.** It now does the class-cache pass itself and refuses while an
+editor GUI is open (docs/BUILD.md).
 
 
-## The active thread
+## Next step, on resuming
 
-1. **Answer the questions.** The top ones: the cell-centre solidity rule (a grid-aligned post is
-   invisible to the structural code), stray-flip protection for every writer, and whether to post on
-   Godot issue #123700.
-2. **Design session: "compelling, not accurate" rendering.** Reference note 09 found that the badly
-   drawn stones are a reconstruction problem (exact Hermite data fixes them at 1 m), not a
-   refinement-priority one.
-3. **Doc 22 phase 2 (field captures) and phase 3 (the C++ evaluator and assemblies),** then
-   **FEAT089, parts look like parts.**
+1. Run `tools/build`, then GUT, and confirm the counts above.
+2. Read the morning brief at the bottom of [`overnight-2026-09-27.md`](overnight-2026-09-27.md)
+   and answer [`overnight-2026-09-27-questions.md`](overnight-2026-09-27-questions.md) inline.
+   Still unreviewed. Top questions: the cell-centre solidity rule, stray-flip protection for every
+   writer, whether to post on Godot issue #123700. Then move both to `roadmap/implementation/done/`.
+3. Play-test on a GPU using the list in that morning brief.
+4. Pick the work from the answers: stray-flip protection, the solidity rule, doc 22 phase 2 (field
+   captures), the "compelling, not accurate" rendering design session (reference note 09: the
+   badly drawn stones need exact Hermite data, not more refinement).
+
+
+## Paused threads, one line each
+
+- **Code review pass 2** (Robert reads, `RdF:` comments, Claude applies). Resume with a small leaf
+  file (`voxel_constants.gd`, an `actions/*.gd`), then `engine/voxel_dc/` (`dc_octree.h` unread).
+  Queued: the `Brush` bundle, internal `TerrainParams` in C++, the name-and-comment sweep,
+  `mesh_world` `ViewParams`. Guidance so far: group related params; comments say *why*; no pimpl.
+- **Perf:** incremental accel bake (impl doc 17); multithread the mesher (instrument phases first,
+  then a `dcthreads` knob, then parallelize the bake and leaf sampling).
+- **MPM substrate** (doc 12, verdict GO): fast 3×3 SVD → multithread → GPU → thaw/freeze coupling.
+  The SVD rewrite must fix #17.
+- **Parts-as-voxels stage 6** (merge-back): parked; it becomes the MPM freeze.
+- **Vocabulary sweep** "terrain" → "matter": fold into the name-and-comment sweep.
+- **Doc 22 phases 2–3,** then **FEAT089, parts look like parts.**
 
 *Section drafted by Claude.*
-
-
-## Paused: full-project code review, pass 2
-
-**Pass 1** (Claude reviews and applies) is done and merged: `4e57cad`,
-`624e204`, `23403e4`. GUT green throughout.
-
-**Pass 2** — Robert reads every file, leaves `RdF:` comments, Claude applies
-fixes and extracts going-forward guidance. The point is the mental model as
-much as the code.
-
-Guidance so far: group related params; comments say *why* not *what*, design
-goes to docs; no pimpl pattern.
-
-Pass-2 commits: `3b8c3a5` (`ActionContext`), `3464f9c` (drop `box` from
-`VoxelImprint.apply`), `d58e8ce` (delete clipmap render, splice path,
-`DcMeshAudit`; ~1700 lines). `mesh_clipmap`/`remesh` stay — collision,
-falling chunks and ~10 test oracles use them.
-
-Deferred `RdF:` items: un-pimpl (`DCOctreePersist` holds the `Clipmap` that
-`mesh_clipmap` needs) and `mesh_clipmap`'s 20 params (~17 positional call
-sites, GDScript-binding-constrained).
-
-**Queued:** the `Brush` bundle, internal `TerrainParams` in C++, the name-and-comment
-sweep, `mesh_world` `ViewParams`.
-
-### Read progress
-
-- `engine/voxel_dc/` — paused. `dc_octree_mesher.h` fully read. The reviewed
-  `Level::build_mip` / `append_reduced_level` code now lives in
-  `dc_clipmap_source.h`. Everything else unread, including the big one,
-  `dc_octree.h` (~75 KB, the irreducible `Octree` struct).
-- `scripts/` — done: `voxel_utils.gd`, `tools/ncls`. Deferred:
-  `voxel_constants.gd`. `structural/mpm_structure.gd` started (renamed
-  `PARTICLE_SIZE`→`DEBUG_CUBE_SIZE`, one `VOXEL_CENTER_OFFSET`), unfinished.
-- `scenes/`, `test/` — unread.
-
-**Scale:** ~5k lines / 147 files under `scripts/`, ~5k / 25 under `engine/`.
-Plan: sort by line count descending, real sessions for the top ~20,
-batch-skim the long tail, keep a review ledger.
-
-**Resume with** a small leaf file (`voxel_constants.gd`, an `actions/*.gd`),
-then back to `engine/voxel_dc/`.
-
-
-## Perf threads (queued)
-
-**Incremental accel bake** (impl doc 17, P1 nit). `grow_world` re-bakes the
-whole min/max prune accel every move — a fixed mesh-lag floor. Fix:
-scrolling-buffer reuse mirroring `EditStore::fill_region` (res-snap each
-level, copy the overlap, sample only the entered shell). Rejected:
-heightfield-derived accel — assumes the generator is forever a heightfield.
-
-**Multithread the mesher.** The DC remesh is one `WorkerThreadPool` task on
-one of 24 cores. In order: (1) instrument phases (accel-bake / build-sample /
-collapse-emit ms) before fixing anything; (2) `dcthreads` console knob, also
-the SMT probe; (3) parallelize the accel bake; (4) parallelize leaf sampling
-via a structure-pass-then-sample-pass split. Byte-identical build tests gate
-correctness. (`g_mesh_threads` now lives with `Octree` in `dc_octree.h`.)
-
-
-## Standing TODO: vocabulary sweep, "terrain" → "matter"
-
-**Matter** = any solid the voxels describe, natural or built. **Terrain** =
-naturally generated ground only. **Material** = per-cell type. Judgment per
-site; fold into the name-and-comment sweep. (Cell centres are done: every
-cell→point read goes through `VoxelUtils.sample_point`.)
-
-
-## Paused threads
-
-**MPM continuum substrate — spike done, verdict GO.** Spec:
-`docs/roadmap/design/12-mpm-structural-substrate.md`. Next per doc 12: fast
-3×3 SVD (McAdams 2011) → multi-thread → GPU compute → EditStore thaw/freeze
-coupling (the remaining research risk). PBD is already removed on master.
-The SVD reflection handling was re-verified correct and is now pinned by
-`test/test_mpm_svd.gd` (all four reflection rows). The rewrite must also fix
-[#17](https://github.com/rdeforest/voxel-mvp/issues/17) (`mpm-svd-ill-conditioned-u`) (U degrades below σ₂/σ₀ ≈ 1e-4;
-pending test waiting for it).
-
-**Parts-as-voxels, stages 1–5 — done.** Stage 6 (merge-back) is parked; it
-becomes the MPM freeze transition. Known issue: placing a part over another
-recolours the overlap — use `PartIndex`.
-
-
-## Immediate next actions
-
-1. Play-test on a GPU, using the list in the 2026-09-27 morning brief.
-2. Answer `overnight-2026-09-27-questions.md` inline.
-3. Pick the next night's work from the answers: stray-flip protection, the solidity rule, doc 22
-   phase 2.
 
 
 ---

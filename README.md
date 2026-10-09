@@ -1,5 +1,8 @@
 # Voxel MVP
 
+> **ON HOLD (2026-10-07).** Where things stood and how to resume:
+> [`docs/STATUS.md`](docs/STATUS.md), Resumption Brief.
+
 A voxel-first survival sandbox prototype. Proof of concept that a voxel engine,
 built today with modern tools, delivers Valheim-style gameplay without the
 compromises a heightmap engine forces — no loading screens for caves, no
